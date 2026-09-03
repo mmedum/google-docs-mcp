@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-03
+
 ### Added
 - Resources: `gdocs://<id>` (every tab's body as markdown under one
   budget), `gdocs://<id>/outline` and `gdocs://<id>/tabs/<tab>`, for

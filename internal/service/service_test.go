@@ -411,6 +411,12 @@ func TestRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A raw read is a JSON array, so it carries no header comment; a cut
+	// one says so after the array, where a parser has already stopped.
+	cut, err := svc.Read(ctx, ReadRequest{Document: fixtureID, Format: "raw", Options: render.Options{MaxChars: 700}})
+	if err != nil || !cut.Truncated || !strings.Contains(cut.Text, "\n// truncated at 3 block(s); pass continue_from p3 to read on") {
+		t.Fatalf("cut raw read: %+v %v", cut, err)
+	}
 	var elems []gdocs.StructuralElement
 	if err := json.Unmarshal([]byte(res.Text), &elems); err != nil || len(elems) != 2 || elems[0].Paragraph.ParagraphStyle.HeadingID != "h.bg" {
 		t.Fatalf("raw: %v %d", err, len(elems))

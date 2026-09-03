@@ -50,6 +50,14 @@ and new required fields are breaking; the schema diff in CI flags them.
   quoted text from 384 ms to 38 ms.
 
 ### Fixed
+- An insertion never deletes what it lands next to: a paragraph is
+  treated as blank, and so filled, only when every run in it is text.
+  One holding an image, a footnote reference, a chip or a break is left
+  alone, as hard rule 4 requires.
+- `search_documents` prints the `page_token` to paginate with; it used
+  to say more results existed and name the token only in the JSON.
+- A `format: raw` read that hits the budget says so, after the JSON
+  array, and names the handle to continue from.
 - A footnote inserted with content no longer starts with a blank line:
   Google creates the footnote with a paragraph holding one space, and the
   content now replaces it.

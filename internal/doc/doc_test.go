@@ -325,3 +325,35 @@ func TestCountMatchesText(t *testing.T) {
 		}
 	}
 }
+
+func TestBlankParagraphIgnoresParagraphsHoldingObjects(t *testing.T) {
+	para := func(els ...*gdocs.ParagraphElement) *gdocs.StructuralElement {
+		return &gdocs.StructuralElement{Paragraph: &gdocs.Paragraph{Elements: els}}
+	}
+	text := func(s string) *gdocs.ParagraphElement {
+		return &gdocs.ParagraphElement{TextRun: &gdocs.TextRun{Content: s}}
+	}
+	cases := []struct {
+		name  string
+		el    *gdocs.StructuralElement
+		blank bool
+	}{
+		{"empty", para(text("\n")), true},
+		{"no runs at all", para(), true},
+		{"one space, as a new footnote has", para(text(" \n")), true},
+		{"text", para(text("Hello\n")), false},
+		{"an image alone", para(&gdocs.ParagraphElement{InlineObjectElement: &gdocs.InlineObjectElement{InlineObjectID: "kix.img1"}}, text("\n")), false},
+		{"a footnote reference alone", para(&gdocs.ParagraphElement{FootnoteReference: &gdocs.FootnoteReference{FootnoteID: "kix.fn1"}}, text("\n")), false},
+		{"a page number field alone", para(&gdocs.ParagraphElement{AutoText: &gdocs.AutoText{Type: "PAGE_NUMBER"}}, text("\n")), false},
+		{"a page break alone", para(&gdocs.ParagraphElement{PageBreak: &gdocs.Break{}}, text("\n")), false},
+	}
+	for _, c := range cases {
+		d, err := doc.Parse(&gdocs.Document{Body: &gdocs.Body{Content: []*gdocs.StructuralElement{c.el}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := d.Tabs[0].Body.Blocks[0].IsBlankParagraph(); got != c.blank {
+			t.Errorf("%s: IsBlankParagraph = %t, want %t", c.name, got, c.blank)
+		}
+	}
+}

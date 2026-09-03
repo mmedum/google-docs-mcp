@@ -222,17 +222,22 @@ func (s *Segment) ContentBlocks() []*Block {
 	return out
 }
 
-// IsEmptyParagraph reports whether the block is a paragraph holding only
-// its newline.
-func (b *Block) IsEmptyParagraph() bool {
-	return b.Paragraph != nil && b.End-b.Start == 1
-}
-
-// IsBlankParagraph reports whether the block is a paragraph with nothing
-// but whitespace in it: empty, or holding only spaces (as a footnote
-// Google has just created does). Content written there fills it.
+// IsBlankParagraph reports whether the block is a paragraph holding
+// nothing but whitespace: empty, or holding only spaces, as a footnote
+// Google has just created does. Content written there fills it, which
+// removes that whitespace, so a paragraph holding an image, a footnote
+// reference, a chip, an equation or a break is never blank however
+// little text it shows.
 func (b *Block) IsBlankParagraph() bool {
-	return b.Paragraph != nil && strings.TrimSpace(b.Paragraph.Text(ViewInline)) == ""
+	if b.Paragraph == nil {
+		return false
+	}
+	for _, r := range b.Paragraph.Runs {
+		if r.Kind != RunText {
+			return false
+		}
+	}
+	return strings.TrimSpace(b.Paragraph.Text(ViewInline)) == ""
 }
 
 // BlockKind is the structural element type.

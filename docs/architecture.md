@@ -738,6 +738,7 @@ checked rather than assumed.
 | Server-side read-only mode and destructive gating (inherited) | Confirmed (github-mcp-server; spec: annotations untrusted) | Kept; `requiresUserInteraction` on gated tools. |
 | snake_case verb_noun names (inherited) | Mixed: spec allows more; GitHub mixes styles; Anthropic says measure. Measured in the Phase 3 evals: 13 tasks, 15 tool lookups by name, no call to a tool that does not exist | Kept. |
 | Per-block handle prefix opt-in (§7.2) | Evals: the model asked for `with_handles` on three of four reads and targeted by handle as often as by text | Kept opt-in (the cost is per read, the ask is one flag); revisit with a second client. |
+| A blank paragraph is one whose text is empty (my first fill rule) | Refuted in review: a paragraph holding only an image, a footnote reference or a page-number field also renders as no text, and filling it would delete that content with no guard (an insertion never populates anchors) | Blank means every run is text and the text is whitespace. |
 | A new footnote starts empty (my assumption) | Refuted live: `createFootnote` yields a paragraph holding one space, so an append after it left a blank line the model then deleted | The follow-up replaces a blank first paragraph. |
 | `[class] message` errors (inherited) | Project choice; spec requires only `isError` | Kept as convention. |
 | Parallel tool registry for `--dump-schemas` (inherited) | Refuted as necessary: in-memory client session lists wire schemas | Dropped. |

@@ -76,7 +76,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%d document(s)", len(res.Hits))
 	if res.NextPageToken != "" {
-		sb.WriteString(" (more available; pass page_token)")
+		fmt.Fprintf(&sb, " (more available; pass page_token %s)", res.NextPageToken)
 	}
 	sb.WriteString("\n")
 	for _, h := range res.Hits {

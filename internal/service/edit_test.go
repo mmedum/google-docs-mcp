@@ -571,6 +571,11 @@ func TestFindSearchCreateExportSuggestions(t *testing.T) {
 	if api.searchQ != "mimeType = 'application/vnd.google-apps.document' and trashed = false and name contains 'Report' and fullText contains 'revenue' and modifiedTime > '2026-01-01T00:00:00Z' and 'o@example.test' in owners" {
 		t.Fatalf("drive query: %s", api.searchQ)
 	}
+	// The token to paginate with is in the text, the only form the model
+	// is sure to see.
+	if !strings.Contains(sr.Text, "(more available; pass page_token next)") {
+		t.Fatalf("search text: %s", sr.Text)
+	}
 	if _, err := svc.Search(ctx, SearchRequest{ModifiedAfter: "yesterday"}); !errors.As(err, &se) || se.Class != "invalid" {
 		t.Fatalf("bad date: %v", err)
 	}

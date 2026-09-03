@@ -231,6 +231,10 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error
 	}
 	if format != FormatRaw {
 		res.Text = res.header() + res.Text
+	} else if res.Truncated {
+		// The raw format is a JSON array the caller may parse, so the
+		// note goes after it, as a comment, and only when it is needed.
+		res.Text += fmt.Sprintf("\n// truncated at %d block(s); pass continue_from %s to read on", res.Blocks, res.ContinueFrom)
 	}
 	return res, nil
 }

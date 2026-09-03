@@ -82,7 +82,7 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 		batch := ops[:min(len(ops), 50)]
 		ops = ops[len(batch):]
 		var ready []pending
-		var ops []EditOp
+		var edits []EditOp
 		for _, p := range batch {
 			if p.fu.Kind == plan.OpInsertTable {
 				handle := p.op.Table.Table
@@ -92,12 +92,12 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 				}
 			}
 			ready = append(ready, p)
-			ops = append(ops, p.op)
+			edits = append(edits, p.op)
 		}
 		if len(ready) == 0 {
 			continue
 		}
-		res, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: ops})
+		res, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: edits})
 		if err != nil {
 			result.Warnings = append(result.Warnings, "the edit was applied but writing the follow-up content failed: "+messageOf(err))
 			continue

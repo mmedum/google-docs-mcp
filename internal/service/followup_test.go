@@ -117,4 +117,23 @@ func TestAppendIntoABlankParagraphFillsIt(t *testing.T) {
 	if got := strings.Join(res.RequestKinds, " "); got != "deleteContentRange insertText updateTextStyle updateParagraphStyle" {
 		t.Fatalf("requests = %s", got)
 	}
+
+	// A header whose only content is a logo is not blank: filling it
+	// would delete the image, which no insertion may do.
+	w.Tabs[0].DocumentTab.Headers["kix.h1"] = gdocs.Header{HeaderID: "kix.h1", Content: []*gdocs.StructuralElement{{StartIndex: 0, EndIndex: 2,
+		Paragraph: &gdocs.Paragraph{Elements: []*gdocs.ParagraphElement{
+			{StartIndex: 0, EndIndex: 1, InlineObjectElement: &gdocs.InlineObjectElement{InlineObjectID: "kix.img1"}},
+			{StartIndex: 1, EndIndex: 2, TextRun: &gdocs.TextRun{Content: "\n"}}}}}}}
+	api.raw, _ = json.Marshal(&w)
+	svc.Invalidate(fixtureID)
+	res, err = svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", DryRun: true,
+		Ops: []EditOp{{Kind: plan.OpAppend, Content: "# Draft", Location: &Location{At: "end", Of: &Target{Segment: "header1"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range res.RequestKinds {
+		if k == "deleteContentRange" {
+			t.Fatalf("appending into a header holding an image deletes it: %v", res.RequestKinds)
+		}
+	}
 }

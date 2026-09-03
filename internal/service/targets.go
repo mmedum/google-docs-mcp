@@ -22,17 +22,21 @@ type Target struct {
 	HeadingLevel   int
 	IncludeHeading *bool
 
-	Handle  string
-	From    string
-	To      string
-	Cell    string
-	Tab     string
-	Segment string
+	Handle string
+	From   string
+	To     string
+	Cell   string
+	// NamedRange targets a range the document remembers by name. Unlike
+	// a handle it survives edits, so it is the way to come back to a
+	// passage in a later call.
+	NamedRange string
+	Tab        string
+	Segment    string
 }
 
 func (t Target) selectorCount() int {
 	n := 0
-	for _, set := range []bool{t.Text != "", t.HeadingID != "", t.Heading != "", t.Handle != "", t.From != "" || t.To != "", t.Cell != ""} {
+	for _, set := range []bool{t.Text != "", t.HeadingID != "", t.Heading != "", t.Handle != "", t.From != "" || t.To != "", t.Cell != "", t.NamedRange != ""} {
 		if set {
 			n++
 		}
@@ -69,13 +73,15 @@ func SegmentBounds(tab *doc.Tab, seg *doc.Segment) plan.Segment {
 func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
 	d := f.Doc
 	if t.selectorCount() != 1 {
-		return nil, Errorf("invalid", "a target needs exactly one of text, heading_id, heading, handle, from/to, or cell")
+		return nil, Errorf("invalid", "a target needs exactly one of text, heading_id, heading, handle, from/to, cell, or named_range")
 	}
 	tab, seg, err := tabSegment(d, t.Tab, t.Segment)
 	if err != nil {
 		return nil, err
 	}
 	switch {
+	case t.NamedRange != "":
+		return namedRangeTarget(tab, t.NamedRange)
 	case t.Cell != "":
 		c, ok := d.FindCell(t.Cell)
 		if !ok {
@@ -341,4 +347,44 @@ func alignedSlice(p *doc.Paragraph, start, end int64) string {
 		}
 	}
 	return b.String()
+}
+
+// namedRangeTarget resolves a named range to the span it covers now. A
+// name can cover several ranges; a target must mean one, so a name that
+// is not unique in the tab is refused rather than guessed at.
+func namedRangeTarget(tab *doc.Tab, ref string) (*TargetRange, error) {
+	var found []*doc.NamedRange
+	for _, nr := range tab.NamedRanges {
+		if nr.Name == ref || nr.ID == ref {
+			found = append(found, nr)
+		}
+	}
+	switch {
+	case len(found) == 0:
+		return nil, Errorf("not_found", "no named range %q in tab %d", ref, tab.Number)
+	case len(found) > 1:
+		return nil, Errorf("invalid", "named range %q covers %d ranges in tab %d; target it by the id a read reports", ref, len(found), tab.Number)
+	}
+	nr := found[0]
+	seg := segmentByID(tab, nr.Segment)
+	if seg == nil {
+		return nil, Errorf("not_found", "named range %q points at a segment that is no longer there", ref)
+	}
+	if nr.Start >= nr.End {
+		return nil, Errorf("invalid", "named range %q is empty; the text it covered has been deleted", ref)
+	}
+	r := &TargetRange{Tab: tab, Segment: seg, Start: nr.Start, End: nr.End,
+		Description: fmt.Sprintf("named range %q", nr.Name)}
+	// A named range that sits inside one paragraph can be replaced by
+	// minimal diff like any other text target; one that spans paragraphs
+	// carries no exact text, so a replace of it rewrites the whole span.
+	for _, b := range doc.Flatten(seg.Blocks) {
+		if b.Paragraph != nil && b.Start <= r.Start && r.End <= b.End {
+			r.Block = b
+			r.Text = sliceUTF16(b.Paragraph, r.Start, r.End)
+			r.Aligned = alignedSlice(b.Paragraph, r.Start, r.End)
+			break
+		}
+	}
+	return r, nil
 }

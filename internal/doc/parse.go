@@ -31,6 +31,7 @@ func Parse(d *gdocs.Document) (*Document, error) {
 			DocumentTab: &gdocs.DocumentTab{
 				Body: d.Body, Headers: d.Headers, Footers: d.Footers, Footnotes: d.Footnotes,
 				Lists: d.Lists, InlineObjects: d.InlineObjects,
+				PositionedObjects: d.PositionedObjects, NamedRanges: d.NamedRanges, DocumentStyle: d.DocumentStyle,
 			},
 		}
 		out.Tabs = append(out.Tabs, parseTab(legacy, 1))
@@ -66,7 +67,8 @@ func (d *Document) index() {
 }
 
 func parseTab(t *gdocs.Tab, number int) *Tab {
-	tab := &Tab{Number: number, Lists: map[string]*ListInfo{}, InlineObjects: map[string]*InlineObjectInfo{}}
+	tab := &Tab{Number: number, Lists: map[string]*ListInfo{},
+		InlineObjects: map[string]*InlineObjectInfo{}, PositionedObjects: map[string]*InlineObjectInfo{}}
 	if p := t.TabProperties; p != nil {
 		tab.ID, tab.Title, tab.Index, tab.ParentID, tab.Nesting = p.TabID, p.Title, p.Index, p.ParentTabID, int(p.NestingLevel)
 	}
@@ -87,8 +89,13 @@ func parseTab(t *gdocs.Tab, number int) *Tab {
 		tab.Lists[id] = info
 	}
 	for id, obj := range dt.InlineObjects {
-		tab.InlineObjects[id] = parseInlineObject(id, &obj)
+		tab.InlineObjects[id] = parseInlineObject(id, obj.InlineObjectProperties.Embedded())
 	}
+	for id, obj := range dt.PositionedObjects {
+		tab.PositionedObjects[id] = parseInlineObject(id, obj.PositionedObjectProperties.Embedded())
+	}
+	tab.NamedRanges = parseNamedRanges(dt.NamedRanges)
+	tab.Page = parsePageSetup(dt.DocumentStyle)
 
 	prefix := tab.Prefix()
 	var body []*gdocs.StructuralElement
@@ -421,12 +428,12 @@ func parseTextStyle(ts *gdocs.TextStyle) TextStyle {
 	return s
 }
 
-func parseInlineObject(id string, obj *gdocs.InlineObject) *InlineObjectInfo {
+// parseInlineObject describes one embedded object, inline or floating.
+func parseInlineObject(id string, eo *gdocs.EmbeddedObject) *InlineObjectInfo {
 	info := &InlineObjectInfo{ID: id, Kind: "object"}
-	if obj.InlineObjectProperties == nil || obj.InlineObjectProperties.EmbeddedObject == nil {
+	if eo == nil {
 		return info
 	}
-	eo := obj.InlineObjectProperties.EmbeddedObject
 	info.Title, info.Description = eo.Title, eo.Description
 	switch {
 	case eo.ImageProperties != nil:
@@ -498,4 +505,49 @@ func parseTabNumber(ref string) (int, bool) {
 	ref = strings.TrimPrefix(ref, "tab")
 	n, err := strconv.Atoi(ref)
 	return n, err == nil
+}
+
+// parseNamedRanges flattens the by-name map into one list per range, in
+// name order so a read is stable.
+func parseNamedRanges(byName map[string]gdocs.NamedRanges) []*NamedRange {
+	var out []*NamedRange
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		for _, nr := range byName[name].NamedRanges {
+			for _, r := range nr.Ranges {
+				if r == nil {
+					continue
+				}
+				out = append(out, &NamedRange{ID: nr.NamedRangeID, Name: name, Segment: r.SegmentID, Start: r.StartIndex, End: r.EndIndex})
+			}
+		}
+	}
+	return out
+}
+
+// parsePageSetup reads a tab's page size, margins and header choices.
+// A field Google leaves out keeps its zero, which reads as "the default".
+func parsePageSetup(ds *gdocs.DocumentStyle) *PageSetup {
+	if ds == nil {
+		return nil
+	}
+	pt := func(d *gdocs.Dimension) float64 {
+		if d == nil {
+			return 0
+		}
+		return d.Magnitude
+	}
+	p := &PageSetup{
+		MarginTopPt: pt(ds.MarginTop), MarginBottomPt: pt(ds.MarginBottom),
+		MarginLeftPt: pt(ds.MarginLeft), MarginRightPt: pt(ds.MarginRight),
+		MarginHeaderPt: pt(ds.MarginHeader), MarginFooterPt: pt(ds.MarginFooter),
+		PageNumberStart: ds.PageNumberStart, Landscape: ds.FlipPageOrientation,
+		FirstPageHF: ds.UseFirstPageHeaderFooter, EvenPageHF: ds.UseEvenPageHeaderFooter,
+	}
+	if ds.PageSize != nil {
+		p.WidthPt, p.HeightPt = pt(ds.PageSize.Width), pt(ds.PageSize.Height)
+	}
+	if ds.Background != nil && ds.Background.Color != nil {
+		p.Background = hexColor(ds.Background.Color)
+	}
+	return p
 }

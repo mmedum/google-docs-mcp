@@ -361,6 +361,20 @@ func TestRepliesRevisionsAndDeletes(t *testing.T) {
 				t.Errorf("get comment query: %s", r.URL.RawQuery)
 			}
 			_, _ = w.Write([]byte(`{"id":"c1","content":"x","replies":[{"id":"r1"}]}`))
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/comments/c1/replies/r1"):
+			var in map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in["content"] != "fixed reply" {
+				t.Errorf("reply patch body: %v", in)
+			}
+			_, _ = w.Write([]byte(`{"id":"r1","content":"fixed reply"}`))
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/comments/c1"):
+			var in map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in["content"] != "fixed" || !strings.Contains(r.URL.RawQuery, "fields=") {
+				t.Errorf("comment patch body: %v %s", in, r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"id":"c1","content":"fixed"}`))
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(r.URL.Path, "/revisions"):
@@ -382,6 +396,14 @@ func TestRepliesRevisionsAndDeletes(t *testing.T) {
 	if err != nil || cm.ID != "c1" || len(cm.Replies) != 1 {
 		t.Fatalf("get comment: %+v %v", cm, err)
 	}
+	up, err := c.UpdateComment(ctx, "abc", "c1", "fixed")
+	if err != nil || up.Content != "fixed" {
+		t.Fatalf("update comment: %+v %v", up, err)
+	}
+	upr, err := c.UpdateReply(ctx, "abc", "c1", "r1", "fixed reply")
+	if err != nil || upr.Content != "fixed reply" {
+		t.Fatalf("update reply: %+v %v", upr, err)
+	}
 	if err := c.DeleteComment(ctx, "abc", "c1"); err != nil {
 		t.Fatalf("delete comment: %v", err)
 	}
@@ -392,7 +414,8 @@ func TestRepliesRevisionsAndDeletes(t *testing.T) {
 	if err != nil || len(revs) != 2 || revs[0].ID != "1" || !revs[1].KeepForever || revs[1].LastModifyingUser.DisplayName != "Ann" {
 		t.Fatalf("revisions: %+v %v", revs, err)
 	}
-	want := []string{"POST /drive/v3/files/abc/comments/c1/replies", "GET /drive/v3/files/abc/comments/c1", "DELETE /drive/v3/files/abc/comments/c1", "DELETE /drive/v3/files/abc/comments/c1/replies/r1", "GET /drive/v3/files/abc/revisions", "GET /drive/v3/files/abc/revisions"}
+	want := []string{"POST /drive/v3/files/abc/comments/c1/replies", "GET /drive/v3/files/abc/comments/c1",
+		"PATCH /drive/v3/files/abc/comments/c1", "PATCH /drive/v3/files/abc/comments/c1/replies/r1", "DELETE /drive/v3/files/abc/comments/c1", "DELETE /drive/v3/files/abc/comments/c1/replies/r1", "GET /drive/v3/files/abc/revisions", "GET /drive/v3/files/abc/revisions"}
 	if strings.Join(seen, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls %v", seen)
 	}

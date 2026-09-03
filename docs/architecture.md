@@ -230,11 +230,18 @@ Target {
   handle:      "p12"
   handles:     { from: "p12", to: "p15" }
   cell:        "tbl3:r2c3"
+  named_range: "key finding"          (a name, or the id a read reports)
   tab?:        <tab id or title>      (default: first tab)
   segment?:    "body" | "header" | "footer" | "footnote:<n>"   (default: body)
 }
 Location { at: "start" | "end" | "before" | "after", of?: Target }
 ```
+
+A named range is the one target that outlives an edit: Google moves it
+with the text it covers, so `create_named_range` now and `named_range` in
+a later call reach the same passage, where a handle is only valid for the
+revision it came from. A name several ranges share is refused as a target
+(the id names one), and `get_document` lists both.
 
 Text matching normalises curly quotes, NBSP and whitespace runs on both
 sides. Errors carry the fix: `[ambiguous] "Q3" matches 4 times in the
@@ -393,19 +400,19 @@ registers only readOnly rows and requests readonly scopes.
 | Tool | Purpose | Annotations | Phase |
 |---|---|---|---|
 | `search_documents` | Locate a Doc by title or content (Drive search restricted to Docs); returns id, title, modified, owner | readOnly | 1 |
-| `get_document` | Title, tabs, revision, owner, counts, capabilities (preview on/off, available write modes, configured default) | readOnly, idempotent | 0 |
+| `get_document` | Title, tabs, revision, owner, counts, capabilities (preview on/off, available write modes, configured default); per tab the page setup, floating objects and named ranges | readOnly, idempotent | 0, 4 |
 | `get_outline` | Heading tree with `heading_id`, handles, sizes | readOnly | 0 |
 | `read_document` | Scoped, budgeted markdown/text/raw view; `with_styles`; `revision_id` | readOnly | 0 |
 | `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
 | `export_document` | pdf/docx/md/html/txt | readOnly | 1 |
 | `create_document` | Title, optional markdown body | — | 1 |
-| `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2 |
+| `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2, 4 |
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
 | `list_suggestions` | Pending suggestions with handles and authors | readOnly | 1 |
-| `review_suggestion` | accept / reject (preview) | — | 1 |
+| `review_suggestion` | accept / reject / discard (preview; discard is author-only) | — | 1, 4 |
 | `list_comments` | Full threads: replies, resolved, deleted, quoted text, handles | readOnly | 2 |
 | `add_comment` | Anchored to a Target (preview) or quoted (Drive); no target = document-level | — | 2 |
-| `reply_comment` | `action: reply \| resolve \| reopen` | — | 2 |
+| `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only) | — | 2, 4 |
 | `delete_comment` | Gated; a thread or one reply | destructive | 2 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
 | `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | — | 2, 4 |
@@ -690,6 +697,53 @@ named); the tab that `add` creates gets its content the same way.
 **Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Done 2026-09-03:
 resources (`gdocs://<id>`), performance on large documents, the §17a
 cleanups, and the agent evals with the two fixes they forced (§14).
+
+**Phase 4 — the rest of the API surface (v0.4.0).** Done 2026-09-03. The
+`Request` union was diffed against what the planner emits (the union
+taken from the discovery document, `docs.googleapis.com/$discovery/rest?version=v1`,
+not from the reference page's prose), and everything missing was added.
+All 40 GA members are now emitted. Of the eight Developer Preview members
+beside them the server emits four — `insertComment`, `acceptSuggestion`,
+`rejectSuggestion`, `deleteSuggestion` — and deliberately not the other
+four (`addCommentReply`, `updateCommentPost`, `deleteComment`,
+`deleteCommentReply`), because every thread operation goes through the
+Drive API, which is GA and serves deployments without preview enrolment.
+What was added:
+
+- **Page and section layout.** A new `layout_document` tool: `page`
+  (`updateDocumentStyle`), `section` (`updateSectionStyle`),
+  `section_break` (`insertSectionBreak`) and `named_style`
+  (`updateNamedStyle`). Layout is its own tool rather than more ops on
+  `format_document`, which styles one passage: the two have almost no
+  arguments in common, and a flat op struct holding both would double
+  that schema. Lengths are points everywhere, and `get_document` names
+  the standard page sizes on the way back so the model need not
+  recognise 612×792.
+- **Column and row sizing.** `edit_table` gains `style_columns`
+  (`updateTableColumnProperties`, fixed or evenly distributed) and
+  `style_rows` (`updateTableRowStyle`: least height and page-break
+  behaviour, but not `tableHeader`, which the API refuses — see §18).
+  `pin_header_rows` remains the way to repeat a header row.
+- **Images.** `insert_object` gains `action: replace` (`replaceImage`)
+  and `action: delete`. Delete is where the model of an object matters:
+  an inline object lives in a run, so it goes with a range delete the
+  overwrite guard can inspect (minus its own image anchor, which the op
+  names); a floating one has no range at all and goes by id
+  (`deletePositionedObject`). Before this a floating image could not be
+  removed through the server.
+- **Named ranges.** `create_named_range`, `delete_named_range` and
+  `replace_named_range` on `edit_document`, plus `named_range` as a
+  Target (§7.1). This is the one durable anchor the API offers, and it
+  answers what handles cannot: coming back to a passage in a later call.
+  `replace_named_range` overwrites every range the name covers, so the
+  guard is shown what all of them hold; `delete_named_range` forgets the
+  name and leaves the text, so it is not guarded.
+- **Comments and suggestions.** `reply_comment` gains `action: edit`
+  (Drive `comments.update` / `replies.update`), and `review_suggestion`
+  gains `discard` (`deleteSuggestion`, preview). The Docs preview
+  equivalents of the comment edits were refused in favour of the Drive
+  path, per the existing rule that thread operations use one backend.
+
 v1.0.0 waits for use in anger and a second eval round with another
 client.
 
@@ -770,6 +824,14 @@ checked rather than assumed.
 | `revisions.list` is complete for Docs (my assumption) | Refuted: "might be incomplete for files with a large revision history, including frequently edited Google Docs" | `list_revisions` says so in its output and description. |
 | `deleteTab` fails when the tab has children (my assumption) | Refuted: child tabs are deleted with it | `delete_tab` warns; a document keeps at least one tab. |
 | `comments.*` need the `fields` parameter (Drive guide) | Confirmed for comments (an omitted `fields` is an error); the replies pages list no parameters | Sent on every call. |
+| `TableRowStyle.tableHeader` can be set, since it is in the schema | Refuted live (2026-09-03): `updateTableRowStyle` answers `400 INVALID_ARGUMENT: Unallowed field: tableHeader`, though `minRowHeight` and `preventOverflow` in the same request are accepted | `style_rows` carries neither the field nor a flag for it; `pin_header_rows` is how a header row is set, and the op's "changes nothing" message says so. A schema field is not proof the field mask accepts it. |
+| `DocumentStyle.background` takes the colour object `colorJSON` builds, as `TextStyle.foregroundColor` does (my assumption) | Refuted (discovery document): `foregroundColor` is an `OptionalColor` — `{color: {rgbColor}}` — but `background` is a `Background`, whose own `color` field is that `OptionalColor`, so the payload nests one level deeper | `background` is built as `{"color": <OptionalColor>}`; caught in review before any live call, since a wrong shape fails the whole atomic batch. |
+| A section's type can be changed on an existing section | Refuted (discovery document): `SectionStyle.sectionType` is **"Output only"**; only `insertSectionBreak` sets it | `section` neither sends nor accepts `section_type`; passing it is refused with the reason, and the type is chosen by the `section_break` that made the section. |
+| A field mask names only the leaves it changes (as `updateTextStyle` does) | Refined for `updateNamedStyle`: the reference says "to update the text style to bold, set `fields` to include `text_style` **and** `text_style.bold`" — the mask is rooted at the named style, so the parent counts too. **Confirmed live** (2026-09-03) through the HTML export: after redefining `HEADING_2`, both headings render as `<h2 style="…color:#1a73e8;font-size:18pt;padding-top:20pt…">` without either being styled individually | The mask carries `textStyle` and `paragraphStyle` beside each leaf. A redefined named style is invisible to `with_styles` (it moves the paragraph default too), so `export_document format: html` is how it is checked — see docs/development.md. |
+| `TableRowStyle.minHeight` and `SectionType: ONE_COLUMN \| TWO_COLUMN \| THREE_COLUMN` (a summary of the reference page) | Refuted against the discovery document (`docs.googleapis.com/$discovery/rest?version=v1`, 2026-09-03): the field is `minRowHeight` (with `preventOverflow` and `tableHeader` beside it), and `insertSectionBreak` takes only `CONTINUOUS` or `NEXT_PAGE` — columns are `SectionStyle.columnProperties` | Wire names taken from the discovery document, not from a prose summary; columns are set on the section, not by its type. |
+| `updateCommentPost`, `deleteComment`, `deleteCommentReply`, `deleteSuggestion` in the Docs API | Confirmed present but **Developer Preview only** (Request reference); Drive `comments.update` and `replies.update` are GA | Editing a comment goes through Drive like every other thread operation; only `deleteSuggestion`, which has no Drive equivalent, is preview-gated. |
+| `deleteSuggestion` is the same as `rejectSuggestion` (my assumption) | Refuted: reject declines a suggestion and any editor may; delete removes it and returns 403 to anyone but its author | Exposed as a third action, `discard`, with the author rule in its description. |
+| A named range can serve as a durable target where a handle cannot | Confirmed (NamedRange reference: Google keeps the range with its content across edits) | `named_range` is a Target (§7.1); a name several ranges share is refused as a target, since a target must mean one range. |
 | A fragment inserted into an empty paragraph keeps that paragraph's style (Phase 1 `Inline` rule) | Refuted by the follow-up path: a new header, footer, footnote or tab starts as one empty paragraph, so `# Title` content came out as normal text; an inline insertion into a non-empty paragraph must still keep its style | `FragmentOptions.Fill`: an empty paragraph takes the fragment's style. |
 | Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalised units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalised string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
 | Resource templates with a shared prefix shadow each other (my worry) | Refuted in go-sdk v1.7.0: a template matches through an anchored RFC 6570 regexp in which `{var}` excludes `/`, so `gdocs://{document}` does not match `gdocs://id/outline`; an unmatched URI is resource-not-found (code -32602 since SEP-2164) | Three templates registered side by side; handlers parse the URI themselves. |

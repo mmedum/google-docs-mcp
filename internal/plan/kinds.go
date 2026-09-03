@@ -11,6 +11,7 @@ const (
 	ToolFormat Tool = "format_document"
 	ToolTable  Tool = "edit_table"
 	ToolObject Tool = "insert_object"
+	ToolLayout Tool = "layout_document"
 )
 
 // Shape says what an op must carry to be planned.
@@ -23,6 +24,7 @@ const (
 	ShapeInsert               // Insert: insert, append, breaks, footnotes, objects, insert_table
 	ShapeTable                // TableAt: grid and cell ops
 	ShapeSegment              // SegmentRef: delete_header, delete_footer
+	ShapeTab                  // nothing but the tab: page setup, named styles, objects by id
 )
 
 // Group is an op's place in the compile order.
@@ -101,7 +103,24 @@ var kindTable = []kindEntry{
 	{OpStyleCells, KindInfo{Tool: ToolTable, Shape: ShapeTable}},
 	{OpPinHeaderRows, KindInfo{Tool: ToolTable, Shape: ShapeTable}},
 
+	{OpStyleColumns, KindInfo{Tool: ToolTable, Shape: ShapeTable, SuggestRefused: "updateTableColumnProperties"}},
+	{OpStyleRows, KindInfo{Tool: ToolTable, Shape: ShapeTable}},
+
 	{OpInsertObject, KindInfo{Tool: ToolObject, Shape: ShapeInsert}},
+	{OpReplaceImage, KindInfo{Tool: ToolObject, Shape: ShapeTab, Noun: "image"}},
+	// A floating object is deleted by id and an inline one with its
+	// range, which is why the shape is the tab and the service fills in
+	// the range when it finds the object in the text.
+	{OpDeleteObject, KindInfo{Tool: ToolObject, Shape: ShapeTab, Deletes: true, Noun: "object"}},
+
+	{OpPageSetup, KindInfo{Tool: ToolLayout, Shape: ShapeTab}},
+	{OpSectionStyle, KindInfo{Tool: ToolLayout, Shape: ShapeTarget, Group: GroupFormat}},
+	{OpSectionBreak, KindInfo{Tool: ToolLayout, Shape: ShapeInsert}},
+	{OpNamedStyle, KindInfo{Tool: ToolLayout, Shape: ShapeTab}},
+
+	{OpCreateNamedRange, KindInfo{Tool: ToolEdit, Shape: ShapeTarget, SuggestRefused: "createNamedRange", Noun: "named range"}},
+	{OpDeleteNamedRange, KindInfo{Tool: ToolEdit, Shape: ShapeTab, SuggestRefused: "deleteNamedRange", Noun: "named range"}},
+	{OpReplaceNamedRange, KindInfo{Tool: ToolEdit, Shape: ShapeTab, Deletes: true, Noun: "named range"}},
 }
 
 var kindInfos = func() map[OpKind]KindInfo {

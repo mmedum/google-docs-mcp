@@ -110,24 +110,25 @@ for the defaults.
 
 | Tool | What it does |
 |---|---|
-| `get_document` | Title, tabs, revision id, owner, last change, counts, and this server's capabilities (available write modes, default). Cheap; call it first. |
+| `get_document` | Title, tabs, revision id, owner, last change, counts, and this server's capabilities (available write modes, default). Per tab it also reports the page setup, the floating objects and the named ranges — everything a read of the text cannot show. Cheap; call it first. |
 | `get_outline` | Heading tree per tab with stable `heading_id`s, block handles, and section sizes. |
 | `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Block handles come with the text unless `with_handles` is false; options add styles, pending suggestions as `{++inserted++}` / `{--deleted--}`, and comment markers `{>>c:id<<}`. |
 | `find_in_document` | Text or regex search returning handles, offsets and context. |
 | `search_documents` | Locate documents by title or content, owner, or modification date. |
 | `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
 | `create_document` | New document, optionally with markdown content. |
-| `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`. Targets are exact text, `heading_id`, handles or cells. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
+| `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. |
 | `list_suggestions` | Pending suggested edits with ids, text and handles. |
-| `review_suggestion` | Accept or reject suggestions by id or all (Developer Preview). |
+| `review_suggestion` | Accept, reject or discard suggestions by id or all (Developer Preview). |
 | `list_comments` | Comment threads with every reply, resolved and deleted state, quoted text and the block they sit on. |
 | `add_comment` | Comment on a passage (pinned with Developer Preview, quoted otherwise) or on the document. |
-| `reply_comment` | Reply to, resolve or reopen a thread. |
+| `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. |
 | `list_revisions` | Version history: revision ids, times, authors. |
 | `diff_revisions` | Unified diff of Google's markdown or text export between two revisions. `read_document` reads an old `revision` whole. |
-| `edit_table` | `insert_table` (with a data grid), `set_cells` (minimal diff per cell), `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `pin_header_rows`. Same modes and guard as text edits. |
-| `insert_object` | Inline image from a public URL, person chip, rich-link chip, or date chip at a location. |
+| `edit_table` | `insert_table` (with a data grid), `set_cells` (minimal diff per cell), `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns` (fixed or even widths), `style_rows` (least height, page-break behaviour), `pin_header_rows`. Same modes and guard as text edits. |
+| `insert_object` | Insert an inline image from a public URL, a person chip, a rich-link chip or a date chip at a location; replace an image's source in place; or delete an object, including a floating image no text range covers. |
+| `layout_document` | `page` (size, margins, background, landscape, page numbering, first/even-page headers), `section` (the same for one section, plus 1–3 columns), `section_break`, and `named_style` to redefine `NORMAL_TEXT`, `TITLE`, `SUBTITLE` or `HEADING_1` … `HEADING_6` for a whole tab. |
 | `manage_tabs` | Add (with content), rename, move or nest tabs. Always direct: the API cannot suggest tab changes. |
 
 Two more tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:
@@ -155,7 +156,10 @@ The model never sees index numbers. A target is exact text quoted from a
 read (curly quotes, dashes and spacing are normalised; it must occur
 once, or `occurrence` / `within` disambiguates), a whole section by its
 stable `heading_id`, a block by handle (`p12`, valid for the revision it
-came from and re-checked on use), or a table cell. New content is written
+came from and re-checked on use), a table cell, or a named range, which
+is the one anchor that outlives an edit: Google moves it with the text it
+covers, so `create_named_range` now and `target: {named_range: …}` in a
+later call reach the same passage. New content is written
 as markdown. A `replace` is applied as the smallest diff between the old
 and new text, so untouched words keep their formatting and anchored
 comments.

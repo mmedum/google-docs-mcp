@@ -347,6 +347,13 @@ func RejectSuggestion(id string) json.RawMessage {
 	return raw(map[string]any{"rejectSuggestion": map[string]any{"suggestionId": id}})
 }
 
+// DeleteSuggestion removes a suggestion without applying or declining
+// it. Google allows only its author to; an editor rejects instead
+// (Developer Preview).
+func DeleteSuggestion(id string) json.RawMessage {
+	return raw(map[string]any{"deleteSuggestion": map[string]any{"suggestionId": id}})
+}
+
 // Kind returns the request type name of a marshalled request.
 func Kind(r json.RawMessage) string {
 	var m map[string]json.RawMessage

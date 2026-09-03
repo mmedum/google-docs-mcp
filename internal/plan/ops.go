@@ -129,6 +129,15 @@ type Op struct {
 	Object  ObjectParams
 	// SegmentRef names the header or footer a delete_header/delete_footer removes.
 	SegmentRef string
+
+	// Page, Section and NamedStyle carry the layout ops' specs.
+	Page       PageSpec
+	Section    SectionSpec
+	NamedStyle NamedStyleSpec
+	// SectionType is what a section_break starts.
+	SectionType string
+	// NamedRange names the range a named-range op works on.
+	NamedRange NamedRangeParams
 }
 
 // Options control planning.
@@ -372,9 +381,52 @@ func validateParams(op *Op, info KindInfo) error {
 		}
 	case OpInsertObject:
 		return validateObjectOp(op)
+	case OpReplaceImage, OpDeleteObject:
+		if op.Object.ID == "" {
+			return fmt.Errorf("op %d: name the object to change (its id from a read, like kix.img1)", op.Seq)
+		}
+		if op.Kind == OpReplaceImage && op.Object.URL == "" {
+			return fmt.Errorf("op %d: replace_image needs the url of the new image", op.Seq)
+		}
+	case OpPageSetup, OpSectionStyle, OpSectionBreak, OpNamedStyle:
+		return validateLayout(op)
+	case OpCreateNamedRange, OpDeleteNamedRange, OpReplaceNamedRange:
+		return validateNamedRange(op)
 	}
 	if info.Tool == ToolTable {
 		return validateTableOp(op)
+	}
+	return nil
+}
+
+// validateLayout checks a layout op's spec: that it changes something,
+// and that every value it carries is one the API accepts.
+func validateLayout(op *Op) error {
+	var empty bool
+	var err error
+	switch op.Kind {
+	case OpPageSetup:
+		empty, err = op.Page.IsZero(), op.Page.Validate()
+		if empty {
+			return fmt.Errorf("op %d: page changes nothing; set a size, a margin, the background or a header/footer choice", op.Seq)
+		}
+	case OpSectionStyle:
+		empty, err = op.Section.IsZero(), op.Section.Validate()
+		if empty {
+			return fmt.Errorf("op %d: section changes nothing; set columns, a margin, or where its page numbers start", op.Seq)
+		}
+	case OpNamedStyle:
+		empty, err = op.NamedStyle.IsZero(), op.NamedStyle.Validate()
+		if empty && op.NamedStyle.Style != "" {
+			return fmt.Errorf("op %d: named_style changes nothing; set the text or paragraph properties it should carry", op.Seq)
+		}
+	case OpSectionBreak:
+		if op.SectionType != SectionContinuous && op.SectionType != SectionNextPage {
+			return fmt.Errorf("op %d: section_type must be continuous or next_page", op.Seq)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("op %d: %w", op.Seq, err)
 	}
 	return nil
 }
@@ -494,6 +546,8 @@ func formatRequests(op *Op) []json.RawMessage {
 		return []json.RawMessage{UpdateParagraphStyle(r, op.Para)}
 	case OpClearFormatting:
 		return []json.RawMessage{ClearTextStyle(r)}
+	case OpSectionStyle:
+		return []json.RawMessage{UpdateSectionStyle(r, op.Section)}
 	case OpBullets:
 		switch op.Bullets {
 		case "none":
@@ -538,9 +592,21 @@ func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
 		return []json.RawMessage{DeleteHeader(op.SegmentRef, op.Seg.TabID)}, false, nil
 	case OpDeleteFooter:
 		return []json.RawMessage{DeleteFooter(op.SegmentRef, op.Seg.TabID)}, false, nil
-	case OpInsertObject:
+	case OpInsertObject, OpReplaceImage, OpDeleteObject:
 		reqs, err := objectRequests(op)
 		return reqs, false, err
+	case OpPageSetup:
+		return []json.RawMessage{UpdateDocumentStyle(op.Page, op.Seg.TabID)}, false, nil
+	case OpNamedStyle:
+		return []json.RawMessage{UpdateNamedStyle(op.NamedStyle, op.Seg.TabID)}, false, nil
+	case OpSectionBreak:
+		return []json.RawMessage{InsertSectionBreak(*op.Insert, op.SectionType)}, false, nil
+	case OpCreateNamedRange:
+		return []json.RawMessage{CreateNamedRange(op.NamedRange.Name, *op.Target)}, false, nil
+	case OpDeleteNamedRange:
+		return []json.RawMessage{DeleteNamedRange(op.NamedRange, op.Seg.TabID)}, false, nil
+	case OpReplaceNamedRange:
+		return []json.RawMessage{ReplaceNamedRangeContent(op.NamedRange, op.Seg.TabID)}, false, nil
 	}
 	if ToolTable.Has(op.Kind) {
 		reqs, err := tableRequests(op)
@@ -614,6 +680,13 @@ func proposal(op *Op) (Proposal, error) {
 		anchor = op.Target
 	}
 	if anchor == nil {
+		// Comment mode proposes a change to a passage. An op that changes
+		// the whole tab, or an object that floats free of the text, has no
+		// passage to propose it on, so the person is told to choose a mode
+		// that can carry it rather than having one chosen for them.
+		if Info(op.Kind); kindInfos[op.Kind].Shape == ShapeTab {
+			return Proposal{}, fmt.Errorf("op %d (%s) changes the whole tab rather than a passage, so it cannot be posted as a comment on one; use mode direct", op.Seq, op.Kind)
+		}
 		return Proposal{}, fmt.Errorf("op %d (%s): nothing to anchor a comment to", op.Seq, op.Kind)
 	}
 	p := Proposal{Seq: op.Seq, Range: *anchor, Quote: op.TargetText}
@@ -650,7 +723,8 @@ func proposal(op *Op) (Proposal, error) {
 	case OpInsertObject:
 		p.Content = objectProposal(op)
 	default:
-		if ToolTable.Has(op.Kind) {
+		p.Content = layoutProposal(op, quote)
+		if p.Content == "" && ToolTable.Has(op.Kind) {
 			p.Content = tableProposal(op)
 		}
 	}
@@ -691,6 +765,62 @@ func describeText(s TextStyleSpec) string {
 	}
 	if s.Baseline != "" {
 		parts = append(parts, strings.ToLower(s.Baseline))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// layoutProposal words the layout, object and named-range ops for a
+// comment-mode proposal; it returns "" for a kind it does not cover.
+func layoutProposal(op *Op, quote func(string) string) string {
+	switch op.Kind {
+	case OpDeleteObject:
+		return "Proposed deletion of the " + op.Description + "."
+	case OpSectionStyle:
+		return "Proposed layout for this section: " + describeSection(op.Section) + "."
+	case OpSectionBreak:
+		return "Proposed section break at " + op.Description + "."
+	case OpCreateNamedRange:
+		return fmt.Sprintf("Proposed: remember this passage as %s, so a later edit can find it again.", quote(op.NamedRange.Name))
+	case OpDeleteNamedRange:
+		return "Proposed: forget the " + op.Description + ". The text itself would stay."
+	case OpReplaceNamedRange:
+		return "Proposed change to the " + op.Description + ":\n\n" + op.NamedRange.Text
+	}
+	return ""
+}
+
+// describeSection words a section's layout for a comment-mode proposal.
+func describeSection(s SectionSpec) string {
+	var parts []string
+	if s.Columns > 0 {
+		part := fmt.Sprintf("%d columns", s.Columns)
+		if s.Columns == 1 {
+			part = "a single column"
+		}
+		if s.ColumnSeparator == "BETWEEN_EACH_COLUMN" {
+			part += " with a separating line"
+		}
+		parts = append(parts, part)
+	}
+	for _, m := range []struct {
+		name string
+		v    *float64
+	}{{"top", s.TopPt}, {"bottom", s.BottomPt}, {"left", s.LeftPt}, {"right", s.RightPt}} {
+		if m.v != nil {
+			parts = append(parts, fmt.Sprintf("%s margin %gpt", m.name, *m.v))
+		}
+	}
+	if s.PageNumberStart != nil {
+		parts = append(parts, fmt.Sprintf("page numbering from %d", *s.PageNumberStart))
+	}
+	if s.Landscape != nil && *s.Landscape {
+		parts = append(parts, "landscape")
+	}
+	if s.ContentDirection == "RIGHT_TO_LEFT" {
+		parts = append(parts, "right to left")
+	}
+	if len(parts) == 0 {
+		return "no change"
 	}
 	return strings.Join(parts, ", ")
 }

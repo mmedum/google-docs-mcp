@@ -38,6 +38,7 @@ type fakeAPI struct {
 	listErr         error
 	posted          []string // "commentID:content:action"
 	deleted         []string
+	edited          []string
 	revisions       []*gapi.Revision
 	revisionExports map[string]string
 	revisionErr     error
@@ -58,6 +59,16 @@ func (f *fakeAPI) CreateReply(_ context.Context, fileID, commentID, content, act
 	}
 	f.posted = append(f.posted, commentID+":"+content+":"+action)
 	return &gapi.DriveReply{ID: fmt.Sprintf("r%d", len(f.posted)), Content: content, Action: action}, nil
+}
+
+func (f *fakeAPI) UpdateComment(_ context.Context, _, commentID, content string) (*gapi.DriveComment, error) {
+	f.edited = append(f.edited, commentID+"="+content)
+	return &gapi.DriveComment{ID: commentID, Content: content}, nil
+}
+
+func (f *fakeAPI) UpdateReply(_ context.Context, _, commentID, replyID, content string) (*gapi.DriveReply, error) {
+	f.edited = append(f.edited, commentID+"/"+replyID+"="+content)
+	return &gapi.DriveReply{ID: replyID, Content: content}, nil
 }
 
 func (f *fakeAPI) DeleteComment(_ context.Context, fileID, commentID string) error {

@@ -43,6 +43,42 @@ type Tab struct {
 
 	Lists         map[string]*ListInfo
 	InlineObjects map[string]*InlineObjectInfo
+	// PositionedObjects are floating images, keyed by object id. They sit
+	// on a paragraph rather than in its text, so no range covers them and
+	// only delete_object removes one.
+	PositionedObjects map[string]*InlineObjectInfo
+	// NamedRanges are the tab's named ranges by name, in name order. A
+	// name can cover several ranges.
+	NamedRanges []*NamedRange
+	// Page is the tab's page setup.
+	Page *PageSetup
+}
+
+// NamedRange is a span the document remembers by name. Unlike a handle
+// it survives edits, because Google moves it with the text it covers.
+type NamedRange struct {
+	ID      string
+	Name    string
+	Segment string
+	Start   int64
+	End     int64
+}
+
+// PageSetup is a tab's page size, margins and header/footer choices.
+type PageSetup struct {
+	WidthPt         float64
+	HeightPt        float64
+	MarginTopPt     float64
+	MarginBottomPt  float64
+	MarginLeftPt    float64
+	MarginRightPt   float64
+	MarginHeaderPt  float64
+	MarginFooterPt  float64
+	PageNumberStart int64
+	Landscape       bool
+	FirstPageHF     bool
+	EvenPageHF      bool
+	Background      string
 }
 
 // Segments returns body, headers, footers and footnotes in that order.

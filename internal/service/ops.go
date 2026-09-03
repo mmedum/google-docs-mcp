@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/internal/config"
@@ -22,6 +24,28 @@ type TabInfo struct {
 	Headers   int    `json:"headers,omitempty"`
 	Footers   int    `json:"footers,omitempty"`
 	Footnotes int    `json:"footnotes,omitempty"`
+	// Page is the tab's page setup, and NamedRanges and FloatingObjects
+	// are what it holds that no read of the text shows.
+	Page            *doc.PageSetup   `json:"page,omitempty"`
+	NamedRanges     []NamedRangeInfo `json:"named_ranges,omitempty"`
+	FloatingObjects []ObjectInfo     `json:"floating_objects,omitempty"`
+}
+
+// NamedRangeInfo is one named range as get_document reports it.
+type NamedRangeInfo struct {
+	Name    string `json:"name"`
+	ID      string `json:"id"`
+	Segment string `json:"segment,omitempty"`
+	Chars   int64  `json:"chars"`
+}
+
+// ObjectInfo is one floating object as get_document reports it.
+type ObjectInfo struct {
+	ID       string  `json:"id"`
+	Kind     string  `json:"kind"`
+	Title    string  `json:"title,omitempty"`
+	WidthPt  float64 `json:"width_pt,omitempty"`
+	HeightPt float64 `json:"height_pt,omitempty"`
 }
 
 // Capabilities tell the model what this server instance can do.
@@ -84,7 +108,14 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 	info := &Info{ID: d.ID, Title: d.Title, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities()}
 	for _, t := range d.Tabs {
 		ti := TabInfo{Number: t.Number, ID: t.ID, Title: t.Title, Nesting: t.Nesting, Blocks: len(t.Body.Blocks),
-			Headers: len(t.Headers), Footers: len(t.Footers), Footnotes: len(t.Footnotes)}
+			Headers: len(t.Headers), Footers: len(t.Footers), Footnotes: len(t.Footnotes), Page: t.Page}
+		for _, nr := range t.NamedRanges {
+			ti.NamedRanges = append(ti.NamedRanges, NamedRangeInfo{Name: nr.Name, ID: nr.ID, Segment: nr.Segment, Chars: nr.End - nr.Start})
+		}
+		for _, id := range slices.Sorted(maps.Keys(t.PositionedObjects)) {
+			o := t.PositionedObjects[id]
+			ti.FloatingObjects = append(ti.FloatingObjects, ObjectInfo{ID: o.ID, Kind: o.Kind, Title: o.Title, WidthPt: o.WidthPt, HeightPt: o.HeightPt})
+		}
 		for _, b := range t.Body.Blocks {
 			if b.IsHeading() {
 				ti.Headings++
@@ -141,6 +172,12 @@ func (i *Info) text() string {
 	st := i.Stats
 	fmt.Fprintf(&b, "%d tab(s), %d paragraphs, %d headings, %d tables, %d inline objects, %d footnotes, %d words",
 		st.Tabs, st.Paragraphs, st.Headings, st.Tables, st.InlineObjects, st.Footnotes, st.Words)
+	if st.FloatingObjects > 0 {
+		fmt.Fprintf(&b, ", %d floating object(s)", st.FloatingObjects)
+	}
+	if st.NamedRanges > 0 {
+		fmt.Fprintf(&b, ", %d named range(s)", st.NamedRanges)
+	}
 	if st.Suggestions > 0 {
 		fmt.Fprintf(&b, ", %d pending suggestion(s)", st.Suggestions)
 	}
@@ -151,12 +188,61 @@ func (i *Info) text() string {
 			fmt.Fprintf(&b, " (id %s)", t.ID)
 		}
 		fmt.Fprintf(&b, ": %d headings, %d blocks\n", t.Headings, t.Blocks)
+		t.writeExtras(&b)
 	}
 	c := i.Capabilities
 	fmt.Fprintf(&b, "server: write modes %s (default %s), preview %t, read-only %t\n", strings.Join(c.WriteModes, "/"), c.DefaultWriteMode, c.Preview, c.ReadOnly)
 	writeWarnings(&b, i.Warnings)
 	return strings.TrimRight(b.String(), "\n")
 }
+
+// writeExtras lists what a tab holds that a read of its text does not
+// show: its page setup, the objects that float above the text, and the
+// ranges the document remembers by name.
+func (t TabInfo) writeExtras(b *strings.Builder) {
+	if p := t.Page; p != nil && (p.WidthPt > 0 || p.MarginLeftPt > 0) {
+		fmt.Fprintf(b, "  page %s, margins %g/%g/%g/%g pt (top/bottom/left/right)",
+			pageName(p), p.MarginTopPt, p.MarginBottomPt, p.MarginLeftPt, p.MarginRightPt)
+		if p.Landscape {
+			b.WriteString(", landscape")
+		}
+		if p.Background != "" {
+			fmt.Fprintf(b, ", background %s", p.Background)
+		}
+		b.WriteString("\n")
+	}
+	for _, o := range t.FloatingObjects {
+		fmt.Fprintf(b, "  floating %s %s", o.Kind, o.ID)
+		if o.Title != "" {
+			fmt.Fprintf(b, " %q", o.Title)
+		}
+		if o.WidthPt > 0 {
+			fmt.Fprintf(b, " (%g×%g pt)", o.WidthPt, o.HeightPt)
+		}
+		b.WriteString("\n")
+	}
+	for _, nr := range t.NamedRanges {
+		fmt.Fprintf(b, "  named range %q (id %s, %d character(s))\n", nr.Name, nr.ID, nr.Chars)
+	}
+}
+
+// pageName says which standard page a size is, so the model need not
+// recognise 612×792 as US Letter.
+func pageName(p *doc.PageSetup) string {
+	switch {
+	case p.WidthPt == 0:
+		return "default size"
+	case near(p.WidthPt, 612) && near(p.HeightPt, 792):
+		return "US Letter"
+	case near(p.WidthPt, 595) && near(p.HeightPt, 842):
+		return "A4"
+	case near(p.WidthPt, 612) && near(p.HeightPt, 1008):
+		return "US Legal"
+	}
+	return fmt.Sprintf("%g×%g pt", p.WidthPt, p.HeightPt)
+}
+
+func near(a, b float64) bool { return a-b < 1 && b-a < 1 }
 
 // writeWarnings ends a result's text with one line per warning. The
 // list_comments and manage_tabs texts append theirs with a leading

@@ -7,10 +7,14 @@ type Stats struct {
 	Headings      int `json:"headings"`
 	Tables        int `json:"tables"`
 	InlineObjects int `json:"inline_objects"`
-	Footnotes     int `json:"footnotes"`
-	Words         int `json:"words"`
-	Chars         int `json:"chars"`
-	Suggestions   int `json:"pending_suggestions"`
+	// FloatingObjects are images that sit on the page rather than in the
+	// text, so no range covers them.
+	FloatingObjects int `json:"floating_objects"`
+	NamedRanges     int `json:"named_ranges"`
+	Footnotes       int `json:"footnotes"`
+	Words           int `json:"words"`
+	Chars           int `json:"chars"`
+	Suggestions     int `json:"pending_suggestions"`
 }
 
 // Stats counts the document's content in the committed view.
@@ -20,6 +24,8 @@ func (d *Document) Stats() Stats {
 	suggestions := map[string]bool{}
 	for _, t := range d.Tabs {
 		st.Footnotes += len(t.Footnotes)
+		st.FloatingObjects += len(t.PositionedObjects)
+		st.NamedRanges += len(t.NamedRanges)
 		for _, b := range t.Body.AllBlocks() {
 			for _, id := range b.Inserted {
 				suggestions[id] = true

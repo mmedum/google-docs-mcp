@@ -22,7 +22,11 @@ const (
 	OpPinHeaderRows OpKind = "pin_header_rows"
 	OpDeleteHeader  OpKind = "delete_header"
 	OpDeleteFooter  OpKind = "delete_footer"
+	OpStyleColumns  OpKind = "style_columns"
+	OpStyleRows     OpKind = "style_rows"
 	OpInsertObject  OpKind = "insert_object"
+	OpReplaceImage  OpKind = "replace_image"
+	OpDeleteObject  OpKind = "delete_object"
 )
 
 // TableParams are the resolved arguments of a table op. Row and column
@@ -40,9 +44,26 @@ type TableParams struct {
 	HeaderRows int
 	// Data is the grid an insert_table fills after the table exists.
 	Data [][]string
+	// WidthPt and Even size the columns style_columns names; Even
+	// distributes them and takes no width.
+	WidthPt *float64
+	Even    bool
+	// MinHeightPt and PreventOverflow style the rows style_rows names.
+	MinHeightPt     *float64
+	PreventOverflow *bool
 }
 
-// ObjectParams describe an insert_object op.
+// IsZero reports whether a style_columns or style_rows op changes
+// nothing.
+func (t TableParams) styleIsZero(kind OpKind) bool {
+	if kind == OpStyleColumns {
+		return t.WidthPt == nil && !t.Even
+	}
+	return t.MinHeightPt == nil && t.PreventOverflow == nil
+}
+
+// ObjectParams describe an insert_object op, and the object an existing
+// image is replaced or removed by.
 type ObjectParams struct {
 	Kind     string // image, person, rich_link, date
 	URL      string
@@ -52,6 +73,14 @@ type ObjectParams struct {
 	Email    string
 	Title    string
 	Date     DateSpec
+	// ID names the object replace_image and delete_object work on, and
+	// Positioned says it floats: a positioned object has no range, so it
+	// is removed by id rather than by deleting the text it sits in.
+	ID         string
+	Positioned bool
+	// Crop asks Google to centre-crop the new image into the old one's
+	// size instead of resizing the frame.
+	Crop bool
 }
 
 func validateTableOp(op *Op) error {
@@ -64,6 +93,8 @@ func validateTableOp(op *Op) error {
 	switch op.Kind {
 	case OpInsertRows, OpInsertColumns, OpDeleteRows, OpDeleteColumns:
 		return validateGridOp(op)
+	case OpStyleColumns, OpStyleRows:
+		return validateLineStyleOp(op)
 	case OpMergeCells, OpUnmergeCells, OpStyleCells:
 		return validateCellRangeOp(op)
 	case OpPinHeaderRows:
@@ -109,6 +140,40 @@ func validateGridOp(op *Op) error {
 		if err := op.inTable(what, i, n); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateLineStyleOp checks a style_columns or style_rows op: which
+// lines it names, and that it changes something.
+func validateLineStyleOp(op *Op) error {
+	t := op.Table
+	what, n := "row", t.Rows
+	if op.Kind == OpStyleColumns {
+		what, n = "column", t.Cols
+	}
+	if len(t.Indices) == 0 {
+		return fmt.Errorf("op %d: name the %ss to style", op.Seq, what)
+	}
+	for _, i := range t.Indices {
+		if err := op.inTable(what, i, n); err != nil {
+			return err
+		}
+	}
+	if t.styleIsZero(op.Kind) {
+		if op.Kind == OpStyleColumns {
+			return fmt.Errorf("op %d: style_columns changes nothing; set width_pt or width_type even", op.Seq)
+		}
+		return fmt.Errorf("op %d: style_rows changes nothing; set min_height_pt or prevent_overflow (a header row is set with pin_header_rows)", op.Seq)
+	}
+	if t.WidthPt != nil && (*t.WidthPt <= 0 || *t.WidthPt > 4000) {
+		return fmt.Errorf("op %d: width_pt must be between 0 and 4000", op.Seq)
+	}
+	if t.WidthPt != nil && t.Even {
+		return fmt.Errorf("op %d: width_pt and width_type even cannot both be set", op.Seq)
+	}
+	if t.MinHeightPt != nil && (*t.MinHeightPt < 0 || *t.MinHeightPt > 4000) {
+		return fmt.Errorf("op %d: min_height_pt must be between 0 and 4000", op.Seq)
 	}
 	return nil
 }
@@ -167,6 +232,10 @@ func tableRequests(op *Op) ([]json.RawMessage, error) {
 				reqs = append(reqs, DeleteTableColumn(cell(0, i)))
 			}
 		}
+	case OpStyleColumns:
+		reqs = append(reqs, UpdateTableColumnProperties(*op.TableAt, t.Indices, t.WidthPt, t.Even))
+	case OpStyleRows:
+		reqs = append(reqs, UpdateTableRowStyle(*op.TableAt, t.Indices, t.MinHeightPt, t.PreventOverflow))
 	case OpMergeCells:
 		reqs = append(reqs, MergeTableCells(cell(t.Row, t.Col), t.RowSpan, t.ColSpan))
 	case OpUnmergeCells:
@@ -257,6 +326,16 @@ func gridText(data [][]string) string {
 // objectRequests compiles an insert_object op.
 func objectRequests(op *Op) ([]json.RawMessage, error) {
 	o := op.Object
+	switch op.Kind {
+	case OpReplaceImage:
+		return []json.RawMessage{ReplaceImage(o.ID, o.URL, o.Crop, op.Seg.TabID)}, nil
+	case OpDeleteObject:
+		if o.Positioned {
+			return []json.RawMessage{DeletePositionedObject(o.ID, op.Seg.TabID)}, nil
+		}
+		// An inline object lives in the text, so it goes with its range.
+		return []json.RawMessage{DeleteRange(*op.Target)}, nil
+	}
 	at := *op.Insert
 	switch o.Kind {
 	case "image":

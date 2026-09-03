@@ -24,11 +24,17 @@ type TableOp struct {
 	Column    int           // insert_columns: reference column
 	Count     int           // insert_rows, insert_columns, pin_header_rows
 	Before    bool
-	RowList   []int // delete_rows
-	ColList   []int // delete_columns
+	RowList   []int // delete_rows, style_rows
+	ColList   []int // delete_columns, style_columns
 	FromCell  string
 	ToCell    string
 	Style     plan.CellStyleSpec
+	// style_columns
+	WidthPt *float64
+	Even    bool
+	// style_rows
+	MinHeightPt     *float64
+	PreventOverflow *bool
 }
 
 // CellContent is new content for one cell.
@@ -113,6 +119,16 @@ func (s *Service) resolveTableOp(f *Fetched, op EditOp, p *plan.Op, out *resolve
 		tp.Row, tp.Count, tp.Before = max(to.Row, 1)-1, max(to.Count, 1), to.Before
 	case plan.OpInsertColumns:
 		tp.Col, tp.Count, tp.Before = max(to.Column, 1)-1, max(to.Count, 1), to.Before
+	case plan.OpStyleColumns:
+		tp.WidthPt, tp.Even = to.WidthPt, to.Even
+		for _, n := range to.ColList {
+			tp.Indices = append(tp.Indices, n-1)
+		}
+	case plan.OpStyleRows:
+		tp.MinHeightPt, tp.PreventOverflow = to.MinHeightPt, to.PreventOverflow
+		for _, n := range to.RowList {
+			tp.Indices = append(tp.Indices, n-1)
+		}
 	case plan.OpDeleteRows, plan.OpDeleteColumns:
 		list := to.RowList
 		if op.Kind == plan.OpDeleteColumns {

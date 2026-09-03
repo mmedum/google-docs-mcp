@@ -7,6 +7,45 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- `layout_document`: `page` (page size, margins, background, landscape,
+  where page numbering starts, first- and even-page headers and footers),
+  `section` (the same for one section, plus 1–3 columns with an optional
+  separating line and gap; a section's type is fixed by the break that
+  made it, so `section` does not accept one), `section_break`, and
+  `named_style` to
+  redefine `NORMAL_TEXT`, `TITLE`, `SUBTITLE` or `HEADING_1` …
+  `HEADING_6` for a whole tab. Lengths are in points.
+- Named ranges: `create_named_range`, `delete_named_range` and
+  `replace_named_range` on `edit_document`, and `named_range` as a
+  target. Unlike a block handle, which is valid only for the revision it
+  came from, Google keeps a named range on its text across edits, so it
+  is the way to come back to a passage in a later call. A replace
+  overwrites every range the name covers, so the overwrite guard is shown
+  what all of them hold; forgetting a name destroys nothing and is not
+  guarded.
+- `edit_table` ops `style_columns` (a fixed width in points, or an even
+  share of the table) and `style_rows` (least height, keep a row off a
+  page break). Repeating a header row stays with `pin_header_rows`: the
+  API refuses `TableRowStyle.tableHeader` even though its schema lists
+  it.
+- `insert_object` gains `action: replace` to swap an image's source in
+  place, and `action: delete` to remove an object by id — including a
+  floating image, which no text range covers and no `edit_document`
+  delete could reach. Deleting an inline object goes through the
+  overwrite guard like any other deletion of its range, minus the object
+  the op names, so `force` is on this tool too.
+- Comment mode words the new ops as proposals. The ones that change a
+  whole tab — `page`, `named_style`, `replace_image`, and deleting a
+  floating object — say that they cannot be posted as a comment on a
+  passage and name `direct`, instead of anchoring somewhere arbitrary.
+- `reply_comment` gains `action: edit` to rewrite a comment or one of its
+  replies, and `review_suggestion` gains `discard` to remove a suggestion
+  outright. Google allows either only to the author.
+- `get_document` reports, per tab, the page setup (naming US Letter, A4
+  and US Legal), the floating objects with their ids, and the named
+  ranges — everything a read of the text cannot show.
+
 ### Changed
 - `read_document` shows block handles (`[p12]`) and heading ids by
   default; pass `with_handles: false` to drop them. The evals had the

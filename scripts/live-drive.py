@@ -5,8 +5,14 @@ signed-in account.
 Creates ONE scratch document titled "google-docs-mcp live test (safe to
 delete)" and exercises create, read, direct/suggest/comment edits,
 formatting, find, suggestion review, the overwrite guard, export, comment
-threads, revisions and diffs, tables, objects and tabs through the MCP
-stdio protocol. Requires a completed `login` and, for suggest mode and
+threads, revisions and diffs, tables, objects, tabs, page and section
+layout, named styles and named ranges through the MCP stdio protocol.
+
+Coverage check after adding a tool or an op: every tool in --dump-schemas
+should appear in a call(), and every op kind in internal/plan/kinds.go in
+an "op". The three exceptions are insert_object, replace_image and
+delete_object, which are op kinds inside the server but the "action" of
+the insert_object tool. Requires a completed `login` and, for suggest mode and
 anchored comments, Developer Preview (GDOCS_PREVIEW=true, the default
 here). Deletion steps run only with GDOCS_ENABLE_DESTRUCTIVE=true.
 
@@ -291,6 +297,75 @@ err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": 
 show("replace_all across the tab", err, text, 400)
 err, text, _ = call("find_in_document", {"document": doc, "query": "Token BETA"})
 show("find the replaced token", err, text, 300)
+
+# ---- layout, named ranges, object replace and delete ---------------------
+err, text, _ = call("layout_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "page", "page_width_pt": 595, "page_height_pt": 842, "margin_top_pt": 56, "margin_bottom_pt": 56, "page_number_start": 1},
+    {"op": "named_style", "style": "heading_2", "color": "#1a73e8", "space_above_pt": 18},
+]})
+show("page setup (A4) and a redefined HEADING_2", err, text, 700)
+err, text, _ = call("layout_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "section_break", "location": {"at": "before", "of": {"text": "Token BETA marks the replace_all step."}}, "section_type": "next_page"},
+]})
+show("section break", err, text, 500)
+err, text, _ = call("layout_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "section", "target": {"text": "Token BETA marks the replace_all step."}, "columns": 2, "column_gap_pt": 18, "column_separator": "between"},
+]})
+show("two columns in the new section", err, text, 500)
+err, text, _ = call("layout_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "section", "target": {"text": "Token BETA marks the replace_all step."}, "section_type": "continuous"},
+]})
+show("section type on an existing section (expected: refused, it is read-only)", err, text, 300)
+err, text, _ = call("layout_document", {"document": doc, "mode": "comment", "ops": [{"op": "page", "landscape": True}]})
+show("page setup in comment mode (expected: refused, nothing to comment on)", err, text, 300)
+err, text, _ = call("layout_document", {"document": doc, "mode": "suggest", "ops": [{"op": "page", "landscape": True}]})
+show("page setup in suggest mode (the API decides whether it can)", err, text, 400)
+
+err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [
+    {"op": "style_columns", "table": tbl, "column_numbers": [1], "width_pt": 140},
+    {"op": "style_rows", "table": tbl, "row_numbers": [1], "min_height_pt": 28, "prevent_overflow": True},
+]})
+show("column width and row style", err, text, 600)
+
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "create_named_range", "name": "live anchor", "target": {"text": "Closing line"}},
+]})
+show("name a range", err, text, 500)
+err, text, _ = call("get_document", {"document": doc})
+show("get_document lists the named range and the page setup", err, text, 1400)
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "replace", "target": {"named_range": "live anchor"}, "content": "Closing line, edited through its name"},
+]})
+show("edit through the named range (a handle would have gone stale)", err, text, 700)
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "replace_named_range", "name": "live anchor", "text": "Closing line"},
+]})
+show("replace the named range's content", err, text, 500)
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "delete_named_range", "name": "live anchor"},
+]})
+show("forget the name (the text stays)", err, text, 400)
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "delete_named_range", "name": "live anchor"},
+]})
+show("delete it again (expected: not_found, not a silent no-op)", err, text, 300)
+
+err, text, _ = call("read_document", {"document": doc, "with_handles": True})
+img = re.search(r"\((kix\.[A-Za-z0-9_-]+),", text or "")
+if img:
+    err, text, _ = call("insert_object", {"document": doc, "action": "replace", "object": img.group(1),
+                                          "url": "https://www.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png", "crop": True, "mode": "direct"})
+    show("replace the image in place", err, text, 500)
+    err, text, _ = call("insert_object", {"document": doc, "action": "delete", "object": img.group(1), "mode": "direct"})
+    show("delete the image", err, text, 500)
+    err, text, _ = call("insert_object", {"document": doc, "action": "delete", "object": img.group(1), "mode": "direct"})
+    show("delete it again (expected: not_found)", err, text, 300)
+else:
+    print("=== no inline image found to replace or delete ===")
+
+if new_comment:
+    err, text, _ = call("reply_comment", {"document": doc, "comment_id": new_comment, "action": "edit", "content": "Rewritten by the live test."})
+    show("rewrite a comment", err, text, 400)
 
 # ---- resources -----------------------------------------------------------
 m = rpc("resources/templates/list")

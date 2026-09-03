@@ -28,8 +28,9 @@ type AddCommentInput struct {
 type ReplyInput struct {
 	Document  string `json:"document" jsonschema:"document id or any docs.google.com URL"`
 	CommentID string `json:"comment_id" jsonschema:"thread id from list_comments or add_comment"`
-	Content   string `json:"content,omitempty" jsonschema:"reply text; required for a plain reply, optional with resolve or reopen"`
-	Action    string `json:"action,omitempty" jsonschema:"reply (default), resolve, or reopen"`
+	ReplyID   string `json:"reply_id,omitempty" jsonschema:"edit: the reply to rewrite; without it the thread's own comment is rewritten"`
+	Content   string `json:"content,omitempty" jsonschema:"reply text; required for a plain reply and for edit, optional with resolve or reopen"`
+	Action    string `json:"action,omitempty" jsonschema:"reply (default), resolve, reopen, or edit"`
 }
 
 // DeleteCommentInput removes a thread or a reply.
@@ -74,11 +75,13 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "reply_comment",
-		Description: "Reply to a comment thread, resolve it, or reopen it. Resolving and reopening are reversible; both " +
-			"may carry a message. Thread ids come from list_comments.",
+		Description: "Reply to a comment thread, resolve it, reopen it, or rewrite what it says. Resolving and reopening " +
+			"are reversible; both may carry a message. action edit replaces the text of the thread's own comment, or of " +
+			"one reply when reply_id names it; Google allows only the author of a comment to rewrite it. Thread and " +
+			"reply ids come from list_comments.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReplyInput) (*mcp.CallToolResult, *service.ReplyResult, error) {
-		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, Content: in.Content, Action: in.Action})
+		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, ReplyID: in.ReplyID, Content: in.Content, Action: in.Action})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

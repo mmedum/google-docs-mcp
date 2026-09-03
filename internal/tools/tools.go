@@ -34,6 +34,7 @@ func Register(s *mcp.Server, d Deps) {
 		registerWrite(s, d)
 		registerCommentsWrite(s, d)
 		registerTable(s, d)
+		registerLayout(s, d)
 		registerObjects(s, d)
 		registerTabs(s, d)
 	}

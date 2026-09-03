@@ -88,6 +88,14 @@ func (f *fakeAPI) CreateReply(_ context.Context, fileID, commentID, content, act
 	return &gapi.DriveReply{ID: "r1", Content: content, Action: action}, nil
 }
 
+func (f *fakeAPI) UpdateComment(_ context.Context, _, commentID, content string) (*gapi.DriveComment, error) {
+	return &gapi.DriveComment{ID: commentID, Content: content}, nil
+}
+
+func (f *fakeAPI) UpdateReply(_ context.Context, _, _, replyID, content string) (*gapi.DriveReply, error) {
+	return &gapi.DriveReply{ID: replyID, Content: content}, nil
+}
+
 func (f *fakeAPI) DeleteComment(_ context.Context, fileID, commentID string) error {
 	f.deleted = append(f.deleted, commentID)
 	return nil
@@ -180,7 +188,7 @@ func TestListToolsAndSchemas(t *testing.T) {
 			t.Errorf("%s schema uses a union or reference", tool.Name)
 		}
 	}
-	want := "add_comment,create_document,diff_revisions,edit_document,edit_table,export_document,find_in_document,format_document,get_document,get_outline,insert_object,list_comments,list_revisions,list_suggestions,manage_tabs,read_document,reply_comment,review_suggestion,search_documents"
+	want := "add_comment,create_document,diff_revisions,edit_document,edit_table,export_document,find_in_document,format_document,get_document,get_outline,insert_object,layout_document,list_comments,list_revisions,list_suggestions,manage_tabs,read_document,reply_comment,review_suggestion,search_documents"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("tools = %v", names)
 	}
@@ -422,7 +430,7 @@ func TestDumpSchemas(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 19 || out.Tools[0].Name != "add_comment" ||
+	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 20 || out.Tools[0].Name != "add_comment" ||
 		len(out.ResourceTemplates) != 3 || out.ResourceTemplates[0].URITemplate != "gdocs://{document}" {
 		t.Fatalf("dump = %+v", out)
 	}
@@ -477,6 +485,109 @@ func TestCommentAndHistoryTools(t *testing.T) {
 	plain := connect(t, &fakeAPI{raw: doctest.RawFixture(t)})
 	if _, err := plain.CallTool(context.Background(), &mcp.CallToolParams{Name: "delete_comment", Arguments: map[string]any{"document": fixtureID, "comment_id": "c1"}}); err == nil {
 		t.Fatal("delete_comment should not exist without the flag")
+	}
+}
+
+func TestLayoutToolEndToEnd(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t)}
+	cs := connectWith(t, api, config.Config{DefaultWriteMode: config.WriteDirect})
+	res := call(t, cs, "layout_document", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{
+		{"op": "page", "page_width_pt": 595, "page_height_pt": 842, "margin_left_pt": 36, "landscape": true},
+		{"op": "named_style", "style": "heading_1", "color": "#1a73e8", "size_pt": 20},
+		{"op": "section", "target": map[string]any{"handle": "p5"}, "columns": 2, "column_separator": "between"},
+		{"op": "section_break", "location": map[string]any{"at": "after", "of": map[string]any{"handle": "p5"}}, "section_type": "continuous"},
+	}})
+	if res.IsError {
+		t.Fatalf("layout: %s", textOf(res))
+	}
+	for _, want := range []string{"op 0 page: page setup of tab 1", "op 1 named_style: heading_1 in tab 1",
+		"requests: updateSectionStyle, insertSectionBreak, updateNamedStyle, updateDocumentStyle"} {
+		if !strings.Contains(textOf(res), want) {
+			t.Errorf("layout text lacks %q:\n%s", want, textOf(res))
+		}
+	}
+	// A4 in points is recognised on the way back out, in get_document.
+	res = call(t, cs, "layout_document", map[string]any{"document": fixtureID, "ops": []map[string]any{{"op": "page"}}})
+	if !res.IsError || !strings.Contains(textOf(res), "page changes nothing") {
+		t.Fatalf("empty page op: %s", textOf(res))
+	}
+	res = call(t, cs, "layout_document", map[string]any{"document": fixtureID, "ops": []map[string]any{{"op": "nonsense"}}})
+	if !res.IsError || !strings.HasPrefix(textOf(res), "[invalid] op 0: unknown op") {
+		t.Fatalf("unknown layout op: %s", textOf(res))
+	}
+}
+
+func TestObjectAndNamedRangeToolsEndToEnd(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t)}
+	cs := connectWith(t, api, config.Config{DefaultWriteMode: config.WriteDirect})
+	res := call(t, cs, "insert_object", map[string]any{"document": fixtureID, "action": "replace",
+		"object": "kix.img1", "url": "https://example.test/new.png", "crop": true, "dry_run": true})
+	if res.IsError || !strings.Contains(textOf(res), "requests: replaceImage") {
+		t.Fatalf("replace image: %s", textOf(res))
+	}
+	// A floating image is reachable only through delete_object: no range
+	// covers it, so no edit_document delete can name it.
+	res = call(t, cs, "insert_object", map[string]any{"document": fixtureID, "action": "delete", "object": "kix.pos1", "dry_run": true})
+	if res.IsError || !strings.Contains(textOf(res), "requests: deletePositionedObject") {
+		t.Fatalf("delete floating object: %s", textOf(res))
+	}
+	res = call(t, cs, "insert_object", map[string]any{"document": fixtureID, "action": "sideways", "object": "kix.pos1"})
+	if !res.IsError || !strings.Contains(textOf(res), "use insert, replace or delete") {
+		t.Fatalf("unknown action: %s", textOf(res))
+	}
+	res = call(t, cs, "edit_document", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{
+		{"op": "create_named_range", "name": "intro", "target": map[string]any{"handle": "p5"}},
+	}})
+	if res.IsError || !strings.Contains(textOf(res), "requests: createNamedRange") {
+		t.Fatalf("create named range: %s", textOf(res))
+	}
+	// A named range is a target, and unlike a handle it survives edits.
+	res = call(t, cs, "edit_document", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{
+		{"op": "replace", "target": map[string]any{"named_range": "key finding"}, "content": "Second thought"},
+	}})
+	if res.IsError || !strings.Contains(textOf(res), `named range "key finding"`) {
+		t.Fatalf("target a named range: %s", textOf(res))
+	}
+	res = call(t, cs, "edit_table", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{
+		{"op": "style_columns", "table": "tbl1", "column_numbers": []int{1}, "width_pt": 120},
+		{"op": "style_rows", "table": "tbl1", "row_numbers": []int{1}, "min_height_pt": 24, "prevent_overflow": true},
+	}})
+	if res.IsError || !strings.Contains(textOf(res), "requests: updateTableRowStyle, updateTableColumnProperties") {
+		t.Fatalf("table line styles: %s", textOf(res))
+	}
+}
+
+func TestCommentEditAndSuggestionDiscard(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t), comments: []*gapi.DriveComment{
+		{ID: "c1", Content: "Check this", Author: &gapi.User{DisplayName: "Ann"},
+			Replies: []*gapi.DriveReply{{ID: "r1", Content: "ok", Author: &gapi.User{DisplayName: "Bob"}}}},
+	}}
+	cs := connectWith(t, api, config.Config{DefaultWriteMode: config.WriteDirect})
+	res := call(t, cs, "reply_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "action": "edit", "content": "rewritten"})
+	if res.IsError || !strings.Contains(textOf(res), "rewrote comment c1") {
+		t.Fatalf("edit comment: %s", textOf(res))
+	}
+	res = call(t, cs, "reply_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "action": "edit", "reply_id": "r1", "content": "still ok"})
+	if res.IsError || !strings.Contains(textOf(res), "rewrote reply r1 of comment c1") {
+		t.Fatalf("edit reply: %s", textOf(res))
+	}
+	res = call(t, cs, "reply_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "action": "edit", "reply_id": "nope", "content": "x"})
+	if !res.IsError || !strings.Contains(textOf(res), "has no reply nope") {
+		t.Fatalf("edit unknown reply: %s", textOf(res))
+	}
+	// Discarding needs preview, like accepting and rejecting.
+	res = call(t, cs, "review_suggestion", map[string]any{"document": fixtureID, "action": "discard", "all": true})
+	if !res.IsError || !strings.Contains(textOf(res), "Developer Preview") {
+		t.Fatalf("discard without preview: %s", textOf(res))
+	}
+	pv := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{DefaultWriteMode: config.WriteDirect, Preview: true})
+	res = call(t, pv, "review_suggestion", map[string]any{"document": fixtureID, "action": "discard", "all": true})
+	if res.IsError || !strings.Contains(textOf(res), "discarded 1 suggestion(s)") {
+		t.Fatalf("discard: %s", textOf(res))
+	}
+	res = call(t, pv, "review_suggestion", map[string]any{"document": fixtureID, "action": "shred", "all": true})
+	if !res.IsError || !strings.Contains(textOf(res), "accept, reject or discard") {
+		t.Fatalf("unknown review action: %s", textOf(res))
 	}
 }
 

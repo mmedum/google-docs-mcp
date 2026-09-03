@@ -30,6 +30,8 @@ type API interface {
 	ListComments(ctx context.Context, fileID string, includeDeleted bool) ([]*gapi.DriveComment, error)
 	GetComment(ctx context.Context, fileID, commentID string) (*gapi.DriveComment, error)
 	CreateReply(ctx context.Context, fileID, commentID, content, action string) (*gapi.DriveReply, error)
+	UpdateComment(ctx context.Context, fileID, commentID, content string) (*gapi.DriveComment, error)
+	UpdateReply(ctx context.Context, fileID, commentID, replyID, content string) (*gapi.DriveReply, error)
 	DeleteComment(ctx context.Context, fileID, commentID string) error
 	DeleteReply(ctx context.Context, fileID, commentID, replyID string) error
 	ListRevisions(ctx context.Context, fileID string) ([]*gapi.Revision, error)

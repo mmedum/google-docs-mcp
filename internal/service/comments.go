@@ -219,8 +219,9 @@ func (s *Service) postDriveComment(ctx context.Context, f *Fetched, content, ass
 type ReplyRequest struct {
 	Document  string
 	CommentID string
+	ReplyID   string // edit: the reply to rewrite; empty means the comment itself
 	Content   string
-	Action    string // reply (default), resolve, reopen
+	Action    string // reply (default), resolve, reopen, edit
 }
 
 // ReplyResult reports the posted reply.
@@ -253,12 +254,20 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 		if len(content) > 2048 {
 			return nil, Errorf("invalid", "content is %d bytes; replies are limited to 2048", len(content))
 		}
+	case "edit":
+		var err error
+		if content, err = commentText(content, "content"); err != nil {
+			return nil, err
+		}
 	default:
-		return nil, Errorf("invalid", "action %q; use reply, resolve or reopen", req.Action)
+		return nil, Errorf("invalid", "action %q; use reply, resolve, reopen or edit", req.Action)
 	}
 	id, commentID, thread, err := s.commentRef(ctx, req.Document, req.CommentID)
 	if err != nil {
 		return nil, err
+	}
+	if action == "edit" {
+		return s.editComment(ctx, id, commentID, strings.TrimSpace(req.ReplyID), content, thread)
 	}
 	if action == "resolve" && thread.Resolved {
 		return nil, Errorf("invalid", "comment %s is already resolved", commentID)
@@ -284,6 +293,33 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 	default:
 		res.Text = "reopened comment " + commentID
 	}
+	return res, nil
+}
+
+// editComment rewrites a comment or one of its replies. Google allows
+// only the author to, and answers 403 to anyone else.
+func (s *Service) editComment(ctx context.Context, id, commentID, replyID, content string, thread *gapi.DriveComment) (*ReplyResult, error) {
+	res := &ReplyResult{CommentID: commentID, Action: "edit", Resolved: thread.Resolved}
+	if replyID == "" {
+		if _, err := s.api.UpdateComment(ctx, id, commentID, content); err != nil {
+			return nil, wrapWriteError(err)
+		}
+		res.Text = "rewrote comment " + commentID
+	} else {
+		found := false
+		for _, r := range thread.Replies {
+			found = found || r.ID == replyID
+		}
+		if !found {
+			return nil, Errorf("not_found", "comment %s has no reply %s", commentID, replyID)
+		}
+		if _, err := s.api.UpdateReply(ctx, id, commentID, replyID, content); err != nil {
+			return nil, wrapWriteError(err)
+		}
+		res.ReplyID = replyID
+		res.Text = fmt.Sprintf("rewrote reply %s of comment %s", replyID, commentID)
+	}
+	s.Invalidate(id)
 	return res, nil
 }
 

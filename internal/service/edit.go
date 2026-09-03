@@ -38,6 +38,19 @@ type EditOp struct {
 	plan.Params
 	Table  *TableOp
 	Object *plan.ObjectParams
+	// Layout carries the page, section and named-style specs, and the
+	// section type a section_break starts.
+	Layout *LayoutOp
+	// NamedRange names the range a named-range op works on.
+	NamedRange *plan.NamedRangeParams
+}
+
+// LayoutOp is one layout_document operation before resolution.
+type LayoutOp struct {
+	Page        plan.PageSpec
+	Section     plan.SectionSpec
+	NamedStyle  plan.NamedStyleSpec
+	SectionType string
 }
 
 // EditRequest is a write call.
@@ -375,6 +388,15 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 			return nil, Errorf("invalid", "op %d: unknown kind %q", i, op.Kind)
 		}
 		p := plan.Op{Seq: i, Kind: op.Kind, Params: op.Params}
+		if l := op.Layout; l != nil {
+			p.Page, p.Section, p.NamedStyle, p.SectionType = l.Page, l.Section, l.NamedStyle, l.SectionType
+		}
+		if op.NamedRange != nil {
+			p.NamedRange = *op.NamedRange
+		}
+		if op.Object != nil {
+			p.Object = *op.Object
+		}
 		switch {
 		case op.Fragment != nil:
 			p.Fragment = op.Fragment
@@ -399,6 +421,8 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 			err = s.resolveDeleteSegment(f, op, &p, out)
 		case info.Shape == plan.ShapeTable:
 			err = s.resolveTableOp(f, op, &p, out)
+		case info.Shape == plan.ShapeTab:
+			err = s.resolveTabOp(f, op, &p, out)
 		case info.Shape == plan.ShapeNone:
 			err = resolveCreateSegment(f, op, &p)
 		default:

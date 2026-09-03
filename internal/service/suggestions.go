@@ -115,7 +115,7 @@ func (s *Service) ListSuggestions(ctx context.Context, ref string) (*Suggestions
 // ReviewRequest accepts or rejects suggestions.
 type ReviewRequest struct {
 	Document       string
-	Action         string // accept, reject
+	Action         string // accept, reject, discard
 	IDs            []string
 	All            bool
 	ExpectRevision string
@@ -139,8 +139,10 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		return nil, Errorf("unavailable", "accepting or rejecting suggestions needs Developer Preview enrolment (GDOCS_PREVIEW=true)")
 	}
 	action := strings.ToLower(strings.TrimSpace(req.Action))
-	if action != "accept" && action != "reject" {
-		return nil, Errorf("invalid", "action must be accept or reject")
+	switch action {
+	case "accept", "reject", "discard":
+	default:
+		return nil, Errorf("invalid", "action must be accept, reject or discard")
 	}
 	if len(req.IDs) == 0 && !req.All {
 		return nil, Errorf("invalid", "pass ids or all: true")
@@ -177,10 +179,13 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	}
 	reqs := make([]json.RawMessage, 0, len(ids))
 	for _, id := range ids {
-		if action == "accept" {
+		switch action {
+		case "accept":
 			reqs = append(reqs, plan.AcceptSuggestion(id))
-		} else {
+		case "reject":
 			reqs = append(reqs, plan.RejectSuggestion(id))
+		default:
+			reqs = append(reqs, plan.DeleteSuggestion(id))
 		}
 	}
 	f, err := s.Fetch(ctx, req.Document)
@@ -195,6 +200,10 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	}
 	out := &ReviewResult{Action: action, IDs: ids, RevisionID: revision}
 	out.Remaining = len(all) - len(ids)
-	out.Text = fmt.Sprintf("%sed %d suggestion(s); %d remain pending (revision %s)", action, len(ids), out.Remaining, out.RevisionID)
+	verb := action + "ed"
+	if action == "discard" {
+		verb = "discarded"
+	}
+	out.Text = fmt.Sprintf("%s %d suggestion(s); %d remain pending (revision %s)", verb, len(ids), out.Remaining, out.RevisionID)
 	return out, nil
 }

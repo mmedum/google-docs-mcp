@@ -7,17 +7,20 @@ package gdocs
 
 // Document is the documents.get response.
 type Document struct {
-	DocumentID          string                  `json:"documentId,omitempty"`
-	Title               string                  `json:"title,omitempty"`
-	RevisionID          string                  `json:"revisionId,omitempty"`
-	SuggestionsViewMode string                  `json:"suggestionsViewMode,omitempty"`
-	Body                *Body                   `json:"body,omitempty"`
-	Headers             map[string]Header       `json:"headers,omitempty"`
-	Footers             map[string]Footer       `json:"footers,omitempty"`
-	Footnotes           map[string]Footnote     `json:"footnotes,omitempty"`
-	Lists               map[string]List         `json:"lists,omitempty"`
-	InlineObjects       map[string]InlineObject `json:"inlineObjects,omitempty"`
-	Tabs                []*Tab                  `json:"tabs,omitempty"`
+	DocumentID          string                      `json:"documentId,omitempty"`
+	Title               string                      `json:"title,omitempty"`
+	RevisionID          string                      `json:"revisionId,omitempty"`
+	SuggestionsViewMode string                      `json:"suggestionsViewMode,omitempty"`
+	Body                *Body                       `json:"body,omitempty"`
+	Headers             map[string]Header           `json:"headers,omitempty"`
+	Footers             map[string]Footer           `json:"footers,omitempty"`
+	Footnotes           map[string]Footnote         `json:"footnotes,omitempty"`
+	Lists               map[string]List             `json:"lists,omitempty"`
+	InlineObjects       map[string]InlineObject     `json:"inlineObjects,omitempty"`
+	PositionedObjects   map[string]PositionedObject `json:"positionedObjects,omitempty"`
+	NamedRanges         map[string]NamedRanges      `json:"namedRanges,omitempty"`
+	DocumentStyle       *DocumentStyle              `json:"documentStyle,omitempty"`
+	Tabs                []*Tab                      `json:"tabs,omitempty"`
 	// Developer Preview fields, populated when commentsViewMode asks for them.
 	Comments    []CommentThread    `json:"comments,omitempty"`
 	Suggestions []SuggestionThread `json:"suggestions,omitempty"`
@@ -96,6 +99,13 @@ type DocumentTab struct {
 	Footnotes     map[string]Footnote     `json:"footnotes,omitempty"`
 	Lists         map[string]List         `json:"lists,omitempty"`
 	InlineObjects map[string]InlineObject `json:"inlineObjects,omitempty"`
+	// PositionedObjects are floating images, keyed by object id; unlike
+	// an inline object they sit on a paragraph rather than in its text.
+	PositionedObjects map[string]PositionedObject `json:"positionedObjects,omitempty"`
+	// NamedRanges are the tab's named ranges, keyed by name; one name can
+	// cover several ranges.
+	NamedRanges   map[string]NamedRanges `json:"namedRanges,omitempty"`
+	DocumentStyle *DocumentStyle         `json:"documentStyle,omitempty"`
 	// CommentAnchors map anchor ids to ranges (Developer Preview, with
 	// commentsViewMode).
 	CommentAnchors map[string]CommentAnchor `json:"commentAnchors,omitempty"`
@@ -105,6 +115,60 @@ type DocumentTab struct {
 type CommentAnchor struct {
 	AnchorID string   `json:"anchorId,omitempty"`
 	Ranges   []*Range `json:"ranges,omitempty"`
+}
+
+// PositionedObject is a floating image anchored to a paragraph.
+type PositionedObject struct {
+	ObjectID                   string                      `json:"objectId,omitempty"`
+	PositionedObjectProperties *PositionedObjectProperties `json:"positionedObjectProperties,omitempty"`
+}
+
+// PositionedObjectProperties wrap the embedded object and its placement.
+type PositionedObjectProperties struct {
+	EmbeddedObject *EmbeddedObject `json:"embeddedObject,omitempty"`
+}
+
+// Embedded returns the object, or nil when the properties are absent.
+func (p *PositionedObjectProperties) Embedded() *EmbeddedObject {
+	if p == nil {
+		return nil
+	}
+	return p.EmbeddedObject
+}
+
+// NamedRanges is every range sharing one name.
+type NamedRanges struct {
+	Name        string       `json:"name,omitempty"`
+	NamedRanges []NamedRange `json:"namedRanges,omitempty"`
+}
+
+// NamedRange is one named span, which may cover several ranges.
+type NamedRange struct {
+	NamedRangeID string   `json:"namedRangeId,omitempty"`
+	Name         string   `json:"name,omitempty"`
+	Ranges       []*Range `json:"ranges,omitempty"`
+}
+
+// DocumentStyle is a tab's page setup.
+type DocumentStyle struct {
+	Background                *Background `json:"background,omitempty"`
+	PageSize                  *Size       `json:"pageSize,omitempty"`
+	MarginTop                 *Dimension  `json:"marginTop,omitempty"`
+	MarginBottom              *Dimension  `json:"marginBottom,omitempty"`
+	MarginLeft                *Dimension  `json:"marginLeft,omitempty"`
+	MarginRight               *Dimension  `json:"marginRight,omitempty"`
+	MarginHeader              *Dimension  `json:"marginHeader,omitempty"`
+	MarginFooter              *Dimension  `json:"marginFooter,omitempty"`
+	PageNumberStart           int64       `json:"pageNumberStart,omitempty"`
+	FlipPageOrientation       bool        `json:"flipPageOrientation,omitempty"`
+	UseFirstPageHeaderFooter  bool        `json:"useFirstPageHeaderFooter,omitempty"`
+	UseEvenPageHeaderFooter   bool        `json:"useEvenPageHeaderFooter,omitempty"`
+	UseCustomHeaderFooterMgns bool        `json:"useCustomHeaderFooterMargins,omitempty"`
+}
+
+// Background is a solid page colour.
+type Background struct {
+	Color *OptionalColor `json:"color,omitempty"`
 }
 
 // Range is a half-open UTF-16 range in one segment of one tab.
@@ -421,6 +485,14 @@ type InlineObject struct {
 // InlineObjectProperties wrap the embedded object.
 type InlineObjectProperties struct {
 	EmbeddedObject *EmbeddedObject `json:"embeddedObject,omitempty"`
+}
+
+// Embedded returns the object, or nil when the properties are absent.
+func (p *InlineObjectProperties) Embedded() *EmbeddedObject {
+	if p == nil {
+		return nil
+	}
+	return p.EmbeddedObject
 }
 
 // EmbeddedObject describes the object.

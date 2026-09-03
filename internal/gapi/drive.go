@@ -284,6 +284,42 @@ func (c *Client) CreateReply(ctx context.Context, fileID, commentID, content, ac
 	return &out, nil
 }
 
+// UpdateComment rewrites a comment's own text. Only its author may;
+// Drive answers 403 otherwise.
+func (c *Client) UpdateComment(ctx context.Context, fileID, commentID, content string) (*DriveComment, error) {
+	body, err := json.Marshal(map[string]any{"content": content})
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.do(ctx, kindDriveWrite, http.MethodPatch, c.commentURL(fileID, commentID)+"?fields="+url.QueryEscape(CommentFields), body)
+	if err != nil {
+		return nil, wrapAmbiguousWrite(err)
+	}
+	var out DriveComment
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("%w: decode comment: %w", ErrUnexpected, err)
+	}
+	return &out, nil
+}
+
+// UpdateReply rewrites one reply's text, with the same author rule.
+func (c *Client) UpdateReply(ctx context.Context, fileID, commentID, replyID, content string) (*DriveReply, error) {
+	body, err := json.Marshal(map[string]any{"content": content})
+	if err != nil {
+		return nil, err
+	}
+	endpoint := c.commentURL(fileID, commentID) + "/replies/" + url.PathEscape(replyID) + "?fields=" + url.QueryEscape(ReplyFields)
+	data, err := c.do(ctx, kindDriveWrite, http.MethodPatch, endpoint, body)
+	if err != nil {
+		return nil, wrapAmbiguousWrite(err)
+	}
+	var out DriveReply
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("%w: decode reply: %w", ErrUnexpected, err)
+	}
+	return &out, nil
+}
+
 // GetComment returns one comment thread with its replies.
 func (c *Client) GetComment(ctx context.Context, fileID, commentID string) (*DriveComment, error) {
 	v := url.Values{}

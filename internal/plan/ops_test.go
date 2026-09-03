@@ -314,10 +314,11 @@ func TestFollowupsAndFormats(t *testing.T) {
 
 func TestKindRegistryCoversEveryTool(t *testing.T) {
 	want := map[Tool]string{
-		ToolEdit:   "insert, append, replace, delete, replace_all, insert_break, insert_footnote, create_header, create_footer, delete_header or delete_footer",
+		ToolEdit:   "insert, append, replace, delete, replace_all, insert_break, insert_footnote, create_header, create_footer, delete_header, delete_footer, create_named_range, delete_named_range or replace_named_range",
 		ToolFormat: "text_style, paragraph_style, bullets or clear_formatting",
-		ToolTable:  "insert_table, set_cells, insert_rows, delete_rows, insert_columns, delete_columns, merge_cells, unmerge_cells, style_cells or pin_header_rows",
-		ToolObject: "insert_object",
+		ToolTable:  "insert_table, set_cells, insert_rows, delete_rows, insert_columns, delete_columns, merge_cells, unmerge_cells, style_cells, pin_header_rows, style_columns or style_rows",
+		ToolObject: "insert_object, replace_image or delete_object",
+		ToolLayout: "page, section, section_break or named_style",
 	}
 	total := 0
 	for tool, list := range want {

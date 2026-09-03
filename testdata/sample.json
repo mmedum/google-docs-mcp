@@ -66,7 +66,13 @@
           "l1": {"listProperties": {"nestingLevels": [{"glyphSymbol": "●"}, {"glyphSymbol": "○"}, {"glyphSymbol": "■"}]}},
           "l2": {"listProperties": {"nestingLevels": [{"glyphType": "DECIMAL", "glyphFormat": "%0."}, {"glyphType": "ALPHA", "glyphFormat": "%1."}]}}
         },
-        "inlineObjects": {"kix.img1": {"objectId": "kix.img1", "inlineObjectProperties": {"embeddedObject": {"title": "Chart", "imageProperties": {"contentUri": "https://lh3.example/img", "sourceUri": ""}, "size": {"width": {"magnitude": 320, "unit": "PT"}, "height": {"magnitude": 200, "unit": "PT"}}}}}}
+        "inlineObjects": {"kix.img1": {"objectId": "kix.img1", "inlineObjectProperties": {"embeddedObject": {"title": "Chart", "imageProperties": {"contentUri": "https://lh3.example/img", "sourceUri": ""}, "size": {"width": {"magnitude": 320, "unit": "PT"}, "height": {"magnitude": 200, "unit": "PT"}}}}}},
+        "positionedObjects": {"kix.pos1": {"objectId": "kix.pos1", "positionedObjectProperties": {"embeddedObject": {"title": "Logo", "imageProperties": {"contentUri": "https://lh3.example/logo", "sourceUri": ""}, "size": {"width": {"magnitude": 96, "unit": "PT"}, "height": {"magnitude": 48, "unit": "PT"}}}}}},
+        "namedRanges": {"key finding": {"name": "key finding", "namedRanges": [
+          {"namedRangeId": "kix.nr1", "name": "key finding", "ranges": [{"startIndex": 94, "endIndex": 106, "segmentId": ""}]}]},
+          "figure": {"name": "figure", "namedRanges": [
+            {"namedRangeId": "kix.nr2", "name": "figure", "ranges": [{"startIndex": 158, "endIndex": 170, "segmentId": ""}]}]}},
+        "documentStyle": {"background": {"color": {"color": {"rgbColor": {"red": 1, "green": 1, "blue": 1}}}}, "pageSize": {"width": {"magnitude": 612, "unit": "PT"}, "height": {"magnitude": 792, "unit": "PT"}}, "marginTop": {"magnitude": 72, "unit": "PT"}, "marginBottom": {"magnitude": 72, "unit": "PT"}, "marginLeft": {"magnitude": 72, "unit": "PT"}, "marginRight": {"magnitude": 72, "unit": "PT"}}
       }
     },
     {

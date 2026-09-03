@@ -119,6 +119,69 @@ func PinTableHeaderRows(table Loc, n int) json.RawMessage {
 	return raw(map[string]any{"pinTableHeaderRows": map[string]any{"tableStartLocation": table.json(), "pinnedHeaderRowsCount": n}})
 }
 
+// UpdateTableColumnProperties sizes the named columns: a fixed width in
+// points, or an even share of the table when even is set.
+func UpdateTableColumnProperties(table Loc, columns []int, widthPt *float64, even bool) json.RawMessage {
+	props := map[string]any{}
+	fields := []string{"widthType"}
+	if even {
+		props["widthType"] = "EVENLY_DISTRIBUTED"
+	} else {
+		props["widthType"] = "FIXED_WIDTH"
+		props["width"] = pt(*widthPt)
+		fields = append(fields, "width")
+	}
+	return raw(map[string]any{"updateTableColumnProperties": map[string]any{
+		"tableStartLocation": table.json(), "columnIndices": columns,
+		"tableColumnProperties": props, "fields": strings.Join(fields, ",")}})
+}
+
+// UpdateTableRowStyle styles the named rows: a minimum height and
+// whether the row may break across pages. TableRowStyle.tableHeader is
+// in the schema but the API answers "Unallowed field" for it (confirmed
+// live, 2026-09-03); pinTableHeaderRows is how a header row is set.
+func UpdateTableRowStyle(table Loc, rows []int, minHeightPt *float64, preventOverflow *bool) json.RawMessage {
+	style := map[string]any{}
+	var fields []string
+	set := func(name string, v any) {
+		style[name] = v
+		fields = append(fields, name)
+	}
+	if minHeightPt != nil {
+		set("minRowHeight", pt(*minHeightPt))
+	}
+	if preventOverflow != nil {
+		set("preventOverflow", *preventOverflow)
+	}
+	return raw(map[string]any{"updateTableRowStyle": map[string]any{
+		"tableStartLocation": table.json(), "rowIndices": rows,
+		"tableRowStyle": style, "fields": strings.Join(fields, ",")}})
+}
+
+// ReplaceImage swaps an image's source, keeping its place in the text.
+// Crop asks Google to centre-crop the new image into the old one's
+// frame instead of resizing the frame to it.
+func ReplaceImage(objectID, uri string, crop bool, tabID string) json.RawMessage {
+	req := map[string]any{"imageObjectId": objectID, "uri": uri}
+	if crop {
+		req["imageReplaceMethod"] = "CENTER_CROP"
+	}
+	if tabID != "" {
+		req["tabId"] = tabID
+	}
+	return raw(map[string]any{"replaceImage": req})
+}
+
+// DeletePositionedObject removes a floating object, which no range
+// covers and so no text deletion can reach.
+func DeletePositionedObject(objectID, tabID string) json.RawMessage {
+	req := map[string]any{"objectId": objectID}
+	if tabID != "" {
+		req["tabId"] = tabID
+	}
+	return raw(map[string]any{"deletePositionedObject": req})
+}
+
 // InsertInlineImage inserts an image fetched from a public URL. Width
 // and height in points are optional; the API keeps the aspect ratio
 // when only one is given.

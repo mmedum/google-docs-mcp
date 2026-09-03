@@ -24,6 +24,7 @@ type TargetInput struct {
 	FromHandle     string `json:"from_handle,omitempty" jsonschema:"first block of a whole-block range"`
 	ToHandle       string `json:"to_handle,omitempty" jsonschema:"last block of the range, inclusive"`
 	Cell           string `json:"cell,omitempty" jsonschema:"the content of one table cell, e.g. tbl1:r2c3"`
+	NamedRange     string `json:"named_range,omitempty" jsonschema:"a range previously named with create_named_range, by name or by the id a read reports; unlike a handle it survives later edits"`
 	Tab            string `json:"tab,omitempty" jsonschema:"tab id, title or number; default the first tab"`
 	Segment        string `json:"segment,omitempty" jsonschema:"body (default), header, footer or footnote, optionally numbered"`
 }
@@ -34,7 +35,7 @@ func (t *TargetInput) target() *service.Target {
 	}
 	return &service.Target{Text: t.Text, Occurrence: t.Occurrence, Within: t.Within, HeadingID: t.HeadingID, Heading: t.Heading,
 		HeadingLevel: t.HeadingLevel, IncludeHeading: t.IncludeHeading, Handle: t.Handle, From: t.FromHandle, To: t.ToHandle,
-		Cell: t.Cell, Tab: t.Tab, Segment: t.Segment}
+		Cell: t.Cell, NamedRange: t.NamedRange, Tab: t.Tab, Segment: t.Segment}
 }
 
 // LocationInput says where an insertion goes.
@@ -52,7 +53,7 @@ func (l *LocationInput) location() *service.Location {
 
 // EditOpInput is one edit_document operation.
 type EditOpInput struct {
-	Op            string         `json:"op" jsonschema:"insert, append, replace, delete, replace_all, insert_break (page break), insert_footnote, create_header, create_footer, delete_header, delete_footer"`
+	Op            string         `json:"op" jsonschema:"insert, append, replace, delete, replace_all, insert_break (page break), insert_footnote, create_header, create_footer, delete_header, delete_footer, create_named_range, delete_named_range, replace_named_range"`
 	Target        *TargetInput   `json:"target,omitempty" jsonschema:"what replace, delete or replace_all (tab only) act on"`
 	Location      *LocationInput `json:"location,omitempty" jsonschema:"where insert, insert_break and insert_footnote go; append defaults to the end of the body"`
 	Content       string         `json:"content,omitempty" jsonschema:"new content as markdown: paragraphs, # headings, **bold**, *italic*, ~~strike~~, code, [links](url), bullet and numbered lists (nested by indentation). Tables and images are not accepted here."`
@@ -60,6 +61,9 @@ type EditOpInput struct {
 	Find          string         `json:"find,omitempty" jsonschema:"replace_all: the text to find"`
 	Replace       string         `json:"replace,omitempty" jsonschema:"replace_all: the replacement text (may be empty)"`
 	MatchCase     bool           `json:"match_case,omitempty" jsonschema:"replace_all: match case exactly"`
+	Name          string         `json:"name,omitempty" jsonschema:"named ranges: the name to give the target, or the name of the range to delete or fill"`
+	RangeID       string         `json:"range_id,omitempty" jsonschema:"named ranges: one range by the id a read reports, instead of a name several ranges may share"`
+	Text          string         `json:"text,omitempty" jsonschema:"replace_named_range: the plain text to write over the range, with no newline"`
 }
 
 // EditInput is the edit_document call.
@@ -115,7 +119,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"position numbers. Ops: insert (at a location), append (end of body), replace (minimal diff, so untouched " +
 			"words keep their formatting and comments), delete, replace_all (find/replace in one tab), insert_break " +
 			"(page break), insert_footnote, create_header, create_footer, delete_header, delete_footer (target: tab and " +
-			"segment). Content is markdown. mode chooses how the " +
+			"segment), and the named-range ops: create_named_range names a target so later calls can find it again " +
+			"after edits move it, where a handle is only valid for the revision it came from; replace_named_range " +
+			"writes plain text over it; delete_named_range forgets the name and leaves the text. Content is markdown. mode chooses how the " +
 			"change lands: suggest = tracked change for a person to accept, direct = edit the text, comment = post " +
 			"each proposed change as a comment and change nothing. Direct edits refuse to delete ranges holding " +
 			"comments, suggestions, images or footnotes unless force is set. Use dry_run to preview the plan. " +
@@ -131,6 +137,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
 				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}}
 			eo.Location = o.Location.location()
+			if o.Name != "" || o.RangeID != "" || o.Text != "" {
+				eo.NamedRange = &plan.NamedRangeParams{Name: strings.TrimSpace(o.Name), ID: strings.TrimSpace(o.RangeID), Text: o.Text}
+			}
 			ops = append(ops, eo)
 		}
 		res, err := d.Service.Edit(ctx, service.EditRequest{Document: in.Document, Ops: ops, Mode: in.Mode, DryRun: in.DryRun, ExpectRevision: in.ExpectRevision, Force: in.Force})
@@ -198,9 +207,10 @@ func registerWrite(s *mcp.Server, d Deps) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "review_suggestion",
-		Description: "Accept or reject pending suggested edits by id (from list_suggestions) or all of them. Needs " +
-			"Developer Preview. Accepting applies the suggested text; rejecting discards it. Pass expect_revision to " +
-			"refuse if the document changed since the list was read.",
+		Description: "Accept, reject or discard pending suggested edits by id (from list_suggestions) or all of them. " +
+			"Needs Developer Preview. Accepting applies the suggested text; rejecting declines it, which any editor may " +
+			"do; discarding removes the suggestion outright, which Google allows only its author. Pass expect_revision " +
+			"to refuse if the document changed since the list was read.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReviewInput) (*mcp.CallToolResult, *service.ReviewResult, error) {
 		res, err := d.Service.Review(ctx, service.ReviewRequest{Document: in.Document, Action: in.Action, IDs: in.IDs, All: in.All, ExpectRevision: in.ExpectRevision})
@@ -221,7 +231,7 @@ type CreateInput struct {
 // ReviewInput is the review_suggestion call.
 type ReviewInput struct {
 	Document       string   `json:"document" jsonschema:"document id or any docs.google.com URL"`
-	Action         string   `json:"action" jsonschema:"accept or reject"`
+	Action         string   `json:"action" jsonschema:"accept, reject, or discard (author only)"`
 	IDs            []string `json:"ids,omitempty" jsonschema:"suggestion ids from list_suggestions"`
 	All            bool     `json:"all,omitempty" jsonschema:"act on every pending suggestion"`
 	ExpectRevision string   `json:"expect_revision,omitempty"`

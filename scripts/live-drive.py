@@ -98,6 +98,11 @@ open(OUT + "/last-doc-id.txt", "w").write(doc or "")
 err, text, _ = call("read_document", {"document": doc, "with_handles": True})
 show("read after create", err, text, 1500)
 
+err, text, _ = call("get_outline", {"document": doc})
+show("outline", err, text, 800)
+err, text, _ = call("search_documents", {"title": "google-docs-mcp live test", "limit": 3})
+show("search by title", err, text, 600)
+
 err, text, sc = call("edit_document", {"document": doc, "mode": "direct", "ops": [
     {"op": "replace", "target": {"text": "Revenue grew a lot in Q3."}, "content": "Revenue grew substantially in Q3."},
     {"op": "insert", "location": {"at": "after", "of": {"heading": "Background", "include_heading": True}}, "content": "Inserted after the Background section.\n\n- with a bullet"},
@@ -265,6 +270,19 @@ err, text, _ = call("edit_document", {"document": doc, "mode": "suggest", "ops":
 show("delete footer in suggest mode (refused up front)", err, text, 300)
 err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "delete_header"}, {"op": "delete_footer"}]})
 show("delete header and footer", err, text, 400)
+
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "append", "content": "Token ALPHA marks the replace_all step."}]})
+show("append a token", err, text, 300)
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "insert_break", "location": {"at": "before", "of": {"text": "Token ALPHA marks the replace_all step."}}}]})
+show("insert page break", err, text, 300)
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "insert_footnote", "location": {"at": "after", "of": {"text": "Token ALPHA marks the replace_all step."}}, "content": "Footnote written by the live test."}]})
+show("insert footnote with content", err, text, 400)
+err, text, _ = call("read_document", {"document": doc, "segment": "footnote1"})
+show("read the new footnote", err, text, 300)
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "replace_all", "find": "ALPHA", "replace": "BETA"}]})
+show("replace_all across the tab", err, text, 400)
+err, text, _ = call("find_in_document", {"document": doc, "query": "Token BETA"})
+show("find the replaced token", err, text, 300)
 
 # ---- resources -----------------------------------------------------------
 m = rpc("resources/templates/list")

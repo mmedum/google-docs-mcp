@@ -29,9 +29,13 @@ and are preferred by the Makefile; install them with
 - Integration tests are tagged and need a login:
   `GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestPreviewSpike -v`
   creates a scratch document and checks the Developer Preview features.
-- `scripts/live-drive.py` drives the Phase 1 and Phase 2 tools over stdio
-  against a new scratch document; read its header. It needs
-  `GDOCS_ENABLE_DESTRUCTIVE=true` for the deletion steps.
+- `scripts/live-drive.py` drives every tool and every op kind over stdio
+  against a new scratch document, plus the `gdocs://` resources; read its
+  header. It needs `GDOCS_ENABLE_DESTRUCTIVE=true` for the deletion
+  steps, and should be run with `GDOCS_PREVIEW` both on and off before a
+  phase is called done. Every `isError=True` in its output should be an
+  expected refusal (the overwrite guard, suggest mode where the API
+  refuses it, an unknown resource); anything else is a regression.
 - `go vet -tags=integration ./...` (part of `make vet`) keeps the tagged
   tests compiling even though CI never runs them.
 - `scripts/evals/run.py` runs the agent evals: each task seeds a

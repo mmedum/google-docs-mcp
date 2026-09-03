@@ -155,7 +155,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 		Description: "Change formatting in a Google Doc without changing its text: text_style (bold, italic, underline, " +
 			"strikethrough, small caps, font, size, colour, highlight, link, superscript), paragraph_style (named style " +
 			"such as HEADING_2 or NORMAL_TEXT, alignment, line spacing, spacing, indents), bullets (bullet, numbered, " +
-			"checkbox, or none), and clear_formatting. Targets work as in edit_document. Same mode, dry_run and " +
+			"checkbox, or none), and clear_formatting. Targets work as in edit_document. This styles the passages you " +
+			"target: to restyle every paragraph carrying a style at once, and everything written with it later, " +
+			"redefine the style itself with layout_document's named_style op. Same mode, dry_run and " +
 			"expect_revision semantics.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FormatInput) (*mcp.CallToolResult, *service.EditResult, error) {

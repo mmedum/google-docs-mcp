@@ -777,7 +777,24 @@ field in the model, a line in the renderer and a schema field to be worth
 having. A field the server can read but not write is the asymmetry to
 avoid — `pageBreakBefore` was one for a day.
 
-v1.0.0 waits for use in anger and a second eval round with another
+**Second client, first round (Claude Desktop, 2026-09-03).** The server
+connected, served `tools/list` and `resources/list` — a call Claude Code
+never makes — and answered three tasks. It confirmed what Claude Code
+structurally cannot: this client shows the model a result's **text**
+block, since the model reported a tab's named styles back in prose. The
+default write mode was honoured (a suggestion without being asked twice),
+and the one direct edit was announced as such, so nothing was silently
+substituted. What it found: asked to make every `HEADING_2` start on a new
+page, the model set `pageBreakBefore` on each paragraph through
+`format_document` and then told the person "the Docs API doesn't expose
+editing the named style itself" — while `layout_document`'s `named_style`
+op does exactly that. Nothing in `format_document` pointed at it, and the
+client loads tool definitions lazily, so the tool it needed may never have
+been in front of it. Both descriptions now name the other: passages here,
+the definition there. A tool the model never sees is a tool that does not
+exist, and only a second client showed it.
+
+v1.0.0 waits for use in anger and a further eval round with another
 client.
 
 ## 17. Open decisions

@@ -386,7 +386,11 @@ def measures(traces, known):
          "targets by text": 0, "targets by handle": 0, "targets by heading": 0, "targets by cell": 0, "dry runs": 0, "tool errors": 0, "unknown tools": 0,
          "get_document first": 0, "tool searches (deferred tool lookups)": 0}
     for name, tr in traces.items():
-        if tr["calls"] and tool(tr["calls"][0]) == "get_document":
+        # The harness loads deferred tools with its own ToolSearch calls,
+        # which are not the model reaching for this server; skip them or
+        # the metric measures the client and reads 0 for every task.
+        server_calls = [c for c in tr["calls"] if tool(c) != "ToolSearch"]
+        if server_calls and tool(server_calls[0]) == "get_document":
             m["get_document first"] += 1
         for c in tr["calls"]:
             t, inp = tool(c), c["input"] or {}

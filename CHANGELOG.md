@@ -6,7 +6,6 @@ follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
-
 ### Added
 - `get_document` reports each tab's named style definitions — the font,
   size, colour, alignment and spacing that `NORMAL_TEXT`, `TITLE`,
@@ -25,6 +24,20 @@ and new required fields are breaking; the schema diff in CI flags them.
   server reports can also be written. `get_document` reported it from the
   day named styles were read; nothing could set it.
 
+### Changed
+- `format_document` and `get_document` now point at `layout_document`'s
+  `named_style` op: one styles the passages you target, the other
+  redefines the style every paragraph inherits. A second client (Claude
+  Desktop) set a page break on each heading paragraph and reported that
+  "the Docs API doesn't expose editing the named style itself" — it never
+  found the tool that does.
+- `doc.Paragraph` now carries its whole paragraph style (alignment, line
+  spacing, space above and below, both indents, keep-with-next,
+  page-break-before) in a `doc.ParagraphStyle` it shares with the new
+  named style definitions, instead of the two fields the renderers
+  happened to read. No output changes; `read_document with_styles`
+  annotates the same alignment and indent as before.
+
 ### Fixed
 - `manage_tabs action: move` with a `position` later than the tab's
   current one moved it a place short, and moving a tab to the very next
@@ -34,14 +47,6 @@ and new required fields are breaking; the schema diff in CI flags them.
   within the same parent; moving it earlier, or under a different parent,
   was already right. Found by the end-to-end live driver, whose Phase 4
   section had been addressing the wrong tab as a result.
-
-### Changed
-- `doc.Paragraph` now carries its whole paragraph style (alignment, line
-  spacing, space above and below, both indents, keep-with-next,
-  page-break-before) in a `doc.ParagraphStyle` it shares with the new
-  named style definitions, instead of the two fields the renderers
-  happened to read. No output changes; `read_document with_styles`
-  annotates the same alignment and indent as before.
 
 ## [0.4.0] - 2026-09-03
 

@@ -127,7 +127,9 @@ func registerLayout(s *mcp.Server, d Deps) {
 			"header and footer), section (the same for one section, plus 1-3 columns with an optional separating line " +
 			"and the gap between them), section_break (start a new section at a location, continuous or on the next " +
 			"page), and named_style (redefine NORMAL_TEXT, TITLE, SUBTITLE or HEADING_1 … HEADING_6 for the whole tab, " +
-			"which restyles every paragraph carrying that style and everything written with it later). Lengths are in " +
+			"which restyles every paragraph carrying that style and everything written with it later; get_document " +
+			"reports the definition of each style the tab's paragraphs currently carry, so read it first to see what " +
+			"one looks like today). Lengths are in " +
 			"points: 72 to the inch, so US Letter is 612×792 and A4 is 595×842. Use format_document instead to style " +
 			"one passage. Same mode, dry_run and expect_revision semantics as edit_document.",
 		Annotations: writeSafe,

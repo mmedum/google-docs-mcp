@@ -212,3 +212,44 @@ func TestMergedCells(t *testing.T) {
 		t.Fatalf("text skips covered cells: %q", text)
 	}
 }
+
+// TestNamedStyles covers the definitions a tab inherits from: the known
+// ones come back in NamedStyleOrder whatever order Google sent them, one
+// this build does not know is kept after them rather than dropped, and a
+// paragraph naming no style counts as NORMAL_TEXT.
+func TestNamedStyles(t *testing.T) {
+	w := doctest.WireFixture(t)
+	dt := w.Tabs[0].DocumentTab
+	dt.NamedStyles = &gdocs.NamedStyles{Styles: []*gdocs.NamedStyle{
+		{NamedStyleType: "HEADING_1", TextStyle: &gdocs.TextStyle{Bold: true}},
+		{NamedStyleType: "SOMETHING_NEW"},
+		nil,
+		{NamedStyleType: "NORMAL_TEXT", ParagraphStyle: &gdocs.ParagraphStyle{
+			LineSpacing: 150, SpaceAbove: &gdocs.Dimension{Magnitude: 4, Unit: "PT"},
+			IndentStart: &gdocs.Dimension{Magnitude: 18, Unit: "PT"}, PageBreakBefore: true}},
+	}}
+	// The fourth element is a NORMAL_TEXT paragraph; blanking its style
+	// must not change the count, because that is what blank means.
+	dt.Body.Content[3].Paragraph.ParagraphStyle.NamedStyleType = ""
+	parsed, err := doc.Parse(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := parsed.Tabs[0].NamedStyles
+	if len(styles) != 3 || styles[0].Type != "NORMAL_TEXT" || styles[1].Type != "HEADING_1" ||
+		!styles[1].Text.Bold || styles[2].Type != "SOMETHING_NEW" {
+		t.Fatalf("named styles: %+v", styles)
+	}
+	if n := styles[0]; n.LineSpacing != 150 || n.SpaceAbovePt != 4 || n.IndentStartPt != 18 || !n.PageBreakBefore {
+		t.Fatalf("paragraph side of a named style: %+v", n)
+	}
+	// Every segment counts, headers and footnotes included, because a
+	// redefined style changes the whole tab.
+	if use := parsed.Tabs[0].NamedStyleUse(); use["NORMAL_TEXT"] != 16 || use["HEADING_2"] != 1 {
+		t.Fatalf("named style use: %v", use)
+	}
+	// A tab whose response carries no definitions reports none.
+	if parsed.Tabs[1].NamedStyles != nil {
+		t.Fatalf("named styles out of nothing: %+v", parsed.Tabs[1].NamedStyles)
+	}
+}

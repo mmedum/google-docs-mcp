@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/mmedum/google-docs-mcp/internal/doc"
 )
 
 // Layout ops change how a document is laid out rather than what it says:
@@ -23,9 +25,9 @@ const (
 	SectionNextPage   = "NEXT_PAGE"
 )
 
-// NamedStyleTypes are the styles every paragraph inherits from.
-var NamedStyleTypes = []string{"NORMAL_TEXT", "TITLE", "SUBTITLE",
-	"HEADING_1", "HEADING_2", "HEADING_3", "HEADING_4", "HEADING_5", "HEADING_6"}
+// NamedStyleTypes are the styles every paragraph inherits from, in the
+// order a read reports them.
+var NamedStyleTypes = doc.NamedStyleOrder
 
 // PageMargins are the margin fields a page and a section share, in the
 // order the API names them.

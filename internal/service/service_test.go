@@ -280,6 +280,21 @@ func TestInfo(t *testing.T) {
 	if info.CanEdit == nil || !*info.CanEdit || info.Stats.Tables != 1 || info.Capabilities.DefaultWriteMode != "direct" || len(info.Capabilities.WriteModes) != 2 {
 		t.Fatalf("info wrong: %+v", info)
 	}
+	// A tab reports the named styles its paragraphs carry, so the model
+	// can see what layout_document named_style would rewrite. HEADING_3
+	// is defined in the fixture but unused, so it is not reported.
+	styles := info.Tabs[0].NamedStyles
+	if len(styles) != 4 || styles[0].Style.Type != "NORMAL_TEXT" || styles[0].Paragraphs != 16 || styles[3].Style.Type != "HEADING_2" {
+		t.Fatalf("named styles: %+v", styles)
+	}
+	if !strings.Contains(info.Text, "named style HEADING_1 (2 paragraph(s) in this tab): Arial 20pt, bold, space above 18pt, keep with next") ||
+		strings.Contains(info.Text, "HEADING_3") {
+		t.Fatalf("named style text:\n%s", info.Text)
+	}
+	// The second tab defines none, and reports none.
+	if len(info.Tabs[1].NamedStyles) != 0 {
+		t.Fatalf("named styles without definitions: %+v", info.Tabs[1].NamedStyles)
+	}
 	api.fileErr = &gapi.APIError{Status: 403, Reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT", Message: "scope"}
 	info, err = svc.Info(context.Background(), fixtureID)
 	if err != nil || len(info.Warnings) != 1 || !strings.Contains(info.Warnings[0], "Drive metadata unavailable") {

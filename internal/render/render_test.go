@@ -301,3 +301,32 @@ func TestMarkerOffsetsAndMergedHeader(t *testing.T) {
 		t.Fatalf("merged header:\n%s", md)
 	}
 }
+
+// TestNamedStyleDescription covers what get_document says a named style
+// means: the font line, the flags markdown would otherwise carry, the
+// paragraph side, and a definition that says nothing.
+func TestNamedStyleDescription(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		def  doc.NamedStyleDef
+		want string
+	}{
+		{"heading", doc.NamedStyleDef{Type: "HEADING_1", Text: doc.TextStyle{FontFamily: "Arial", FontSizePt: 20, Bold: true, Foreground: "#1a73e8"},
+			SpaceAbovePt: 18, SpaceBelowPt: 6, KeepWithNext: true},
+			"Arial 20pt, bold, color #1a73e8, space above 18pt, space below 6pt, keep with next"},
+		{"font without a size", doc.NamedStyleDef{Text: doc.TextStyle{FontFamily: "Times"}}, "Times"},
+		{"size without a font", doc.NamedStyleDef{Text: doc.TextStyle{FontSizePt: 11}}, "11pt"},
+		{"the rest of the flags", doc.NamedStyleDef{Text: doc.TextStyle{Italic: true, Underline: true, Strikethrough: true,
+			SmallCaps: true, Baseline: "SUPERSCRIPT", Background: "#eeeeee"}, Alignment: "CENTER", LineSpacing: 115,
+			IndentStartPt: 36, IndentFirstLinePt: 18, PageBreakBefore: true},
+			"italic, underline, strikethrough, small caps, superscript, background #eeeeee, align center, line spacing 115%, indent 36pt, first line indent 18pt, page break before"},
+		// Single spacing and START are news when the tab's NORMAL_TEXT is
+		// neither, so only what Google left out is left out.
+		{"explicit defaults are still named", doc.NamedStyleDef{ParagraphStyle: doc.ParagraphStyle{Alignment: "START", LineSpacing: 100}}, "align start, line spacing 100%"},
+		{"nothing at all", doc.NamedStyleDef{ParagraphStyle: doc.ParagraphStyle{Alignment: "ALIGNMENT_UNSPECIFIED"}}, "no formatting of its own"},
+	} {
+		if got := render.NamedStyle(&tc.def); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+}

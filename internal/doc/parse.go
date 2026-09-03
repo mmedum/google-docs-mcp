@@ -32,6 +32,7 @@ func Parse(d *gdocs.Document) (*Document, error) {
 				Body: d.Body, Headers: d.Headers, Footers: d.Footers, Footnotes: d.Footnotes,
 				Lists: d.Lists, InlineObjects: d.InlineObjects,
 				PositionedObjects: d.PositionedObjects, NamedRanges: d.NamedRanges, DocumentStyle: d.DocumentStyle,
+				NamedStyles: d.NamedStyles,
 			},
 		}
 		out.Tabs = append(out.Tabs, parseTab(legacy, 1))
@@ -96,6 +97,7 @@ func parseTab(t *gdocs.Tab, number int) *Tab {
 	}
 	tab.NamedRanges = parseNamedRanges(dt.NamedRanges)
 	tab.Page = parsePageSetup(dt.DocumentStyle)
+	tab.NamedStyles = parseNamedStyles(dt.NamedStyles)
 
 	prefix := tab.Prefix()
 	var body []*gdocs.StructuralElement
@@ -302,10 +304,7 @@ func parseParagraph(tab *Tab, p *gdocs.Paragraph) *Paragraph {
 	if ps := p.ParagraphStyle; ps != nil {
 		para.NamedStyle = ps.NamedStyleType
 		para.HeadingID = ps.HeadingID
-		para.Alignment = ps.Alignment
-		if ps.IndentStart != nil {
-			para.IndentStartPt = ps.IndentStart.Magnitude
-		}
+		para.ParagraphStyle = parseParagraphStyle(ps)
 		para.Level, para.IsTitle, para.IsSubtitle = headingLevel(ps.NamedStyleType)
 	}
 	if b := p.Bullet; b != nil {
@@ -414,9 +413,7 @@ func parseTextStyle(ts *gdocs.TextStyle) TextStyle {
 	if ts.WeightedFontFamily != nil {
 		s.FontFamily = ts.WeightedFontFamily.FontFamily
 	}
-	if ts.FontSize != nil {
-		s.FontSizePt = ts.FontSize.Magnitude
-	}
+	s.FontSizePt = ptOf(ts.FontSize)
 	s.Foreground = hexColor(ts.ForegroundColor)
 	s.Background = hexColor(ts.BackgroundColor)
 	if l := ts.Link; l != nil {
@@ -445,12 +442,7 @@ func parseInlineObject(id string, eo *gdocs.EmbeddedObject) *InlineObjectInfo {
 		info.Kind = "chart"
 	}
 	if eo.Size != nil {
-		if eo.Size.Width != nil {
-			info.WidthPt = eo.Size.Width.Magnitude
-		}
-		if eo.Size.Height != nil {
-			info.HeightPt = eo.Size.Height.Magnitude
-		}
+		info.WidthPt, info.HeightPt = ptOf(eo.Size.Width), ptOf(eo.Size.Height)
 	}
 	return info
 }
@@ -524,27 +516,77 @@ func parseNamedRanges(byName map[string]gdocs.NamedRanges) []*NamedRange {
 	return out
 }
 
+// parseNamedStyles reads the tab's named style definitions in a stable
+// order rather than the one they arrived in. A style the response does
+// not define is left out.
+func parseNamedStyles(ns *gdocs.NamedStyles) []*NamedStyleDef {
+	if ns == nil {
+		return nil
+	}
+	byType := make(map[string]*gdocs.NamedStyle, len(ns.Styles))
+	// The styles this build knows first, in NamedStyleOrder, then any
+	// Google adds later in the order they arrived: the model reports what
+	// the document has, and what to show is the service's decision.
+	names := slices.Clone(NamedStyleOrder)
+	for _, st := range ns.Styles {
+		if st == nil || st.NamedStyleType == "" {
+			continue
+		}
+		byType[st.NamedStyleType] = st
+		if !slices.Contains(names, st.NamedStyleType) {
+			names = append(names, st.NamedStyleType)
+		}
+	}
+	out := make([]*NamedStyleDef, 0, len(names))
+	for _, name := range names {
+		st, ok := byType[name]
+		if !ok {
+			continue
+		}
+		out = append(out, &NamedStyleDef{Type: name, Text: parseTextStyle(st.TextStyle),
+			ParagraphStyle: parseParagraphStyle(st.ParagraphStyle)})
+	}
+	return out
+}
+
+// parseParagraphStyle reads the block-level formatting a paragraph or a
+// named style carries. A field Google leaves out keeps its zero, which
+// reads as "whatever this paragraph inherits".
+func parseParagraphStyle(ps *gdocs.ParagraphStyle) ParagraphStyle {
+	if ps == nil {
+		return ParagraphStyle{}
+	}
+	return ParagraphStyle{
+		Alignment: ps.Alignment, LineSpacing: ps.LineSpacing,
+		SpaceAbovePt: ptOf(ps.SpaceAbove), SpaceBelowPt: ptOf(ps.SpaceBelow),
+		IndentStartPt: ptOf(ps.IndentStart), IndentFirstLinePt: ptOf(ps.IndentFirstLine),
+		KeepWithNext: ps.KeepWithNext, PageBreakBefore: ps.PageBreakBefore,
+	}
+}
+
+// ptOf is a dimension's magnitude, 0 when Google left it out.
+func ptOf(d *gdocs.Dimension) float64 {
+	if d == nil {
+		return 0
+	}
+	return d.Magnitude
+}
+
 // parsePageSetup reads a tab's page size, margins and header choices.
 // A field Google leaves out keeps its zero, which reads as "the default".
 func parsePageSetup(ds *gdocs.DocumentStyle) *PageSetup {
 	if ds == nil {
 		return nil
 	}
-	pt := func(d *gdocs.Dimension) float64 {
-		if d == nil {
-			return 0
-		}
-		return d.Magnitude
-	}
 	p := &PageSetup{
-		MarginTopPt: pt(ds.MarginTop), MarginBottomPt: pt(ds.MarginBottom),
-		MarginLeftPt: pt(ds.MarginLeft), MarginRightPt: pt(ds.MarginRight),
-		MarginHeaderPt: pt(ds.MarginHeader), MarginFooterPt: pt(ds.MarginFooter),
+		MarginTopPt: ptOf(ds.MarginTop), MarginBottomPt: ptOf(ds.MarginBottom),
+		MarginLeftPt: ptOf(ds.MarginLeft), MarginRightPt: ptOf(ds.MarginRight),
+		MarginHeaderPt: ptOf(ds.MarginHeader), MarginFooterPt: ptOf(ds.MarginFooter),
 		PageNumberStart: ds.PageNumberStart, Landscape: ds.FlipPageOrientation,
 		FirstPageHF: ds.UseFirstPageHeaderFooter, EvenPageHF: ds.UseEvenPageHeaderFooter,
 	}
 	if ds.PageSize != nil {
-		p.WidthPt, p.HeightPt = pt(ds.PageSize.Width), pt(ds.PageSize.Height)
+		p.WidthPt, p.HeightPt = ptOf(ds.PageSize.Width), ptOf(ds.PageSize.Height)
 	}
 	if ds.Background != nil && ds.Background.Color != nil {
 		p.Background = hexColor(ds.Background.Color)

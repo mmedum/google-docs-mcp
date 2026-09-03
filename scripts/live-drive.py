@@ -304,6 +304,8 @@ err, text, _ = call("layout_document", {"document": doc, "mode": "direct", "ops"
     {"op": "named_style", "style": "heading_2", "color": "#1a73e8", "space_above_pt": 18},
 ]})
 show("page setup (A4) and a redefined HEADING_2", err, text, 700)
+err, text, _ = call("get_document", {"document": doc})
+show("read the redefined HEADING_2 back (named style lines)", err, text, 1200)
 err, text, _ = call("layout_document", {"document": doc, "mode": "direct", "ops": [
     {"op": "section_break", "location": {"at": "before", "of": {"text": "Token BETA marks the replace_all step."}}, "section_type": "next_page"},
 ]})
@@ -394,3 +396,9 @@ else:
 err, text, _ = call("get_document", {"document": doc})
 show("final get_document", err, text, 1200)
 p.stdin.close(); p.wait(timeout=10)
+
+# The run leaves one document behind on purpose, so the result can be
+# looked at; say where it is and how to be rid of it.
+print("=== scratch document left behind ===")
+print(f"https://docs.google.com/document/d/{doc}/edit")
+print('delete it when you are done; Drive search title:"safe to delete" finds every run\'s')

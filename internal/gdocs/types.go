@@ -20,6 +20,7 @@ type Document struct {
 	PositionedObjects   map[string]PositionedObject `json:"positionedObjects,omitempty"`
 	NamedRanges         map[string]NamedRanges      `json:"namedRanges,omitempty"`
 	DocumentStyle       *DocumentStyle              `json:"documentStyle,omitempty"`
+	NamedStyles         *NamedStyles                `json:"namedStyles,omitempty"`
 	Tabs                []*Tab                      `json:"tabs,omitempty"`
 	// Developer Preview fields, populated when commentsViewMode asks for them.
 	Comments    []CommentThread    `json:"comments,omitempty"`
@@ -106,6 +107,9 @@ type DocumentTab struct {
 	// cover several ranges.
 	NamedRanges   map[string]NamedRanges `json:"namedRanges,omitempty"`
 	DocumentStyle *DocumentStyle         `json:"documentStyle,omitempty"`
+	// NamedStyles are the definitions every paragraph inherits from; a
+	// paragraph's namedStyleType names the one it uses.
+	NamedStyles *NamedStyles `json:"namedStyles,omitempty"`
 	// CommentAnchors map anchor ids to ranges (Developer Preview, with
 	// commentsViewMode).
 	CommentAnchors map[string]CommentAnchor `json:"commentAnchors,omitempty"`
@@ -147,6 +151,19 @@ type NamedRange struct {
 	NamedRangeID string   `json:"namedRangeId,omitempty"`
 	Name         string   `json:"name,omitempty"`
 	Ranges       []*Range `json:"ranges,omitempty"`
+}
+
+// NamedStyles holds a tab's named style definitions.
+type NamedStyles struct {
+	Styles []*NamedStyle `json:"styles,omitempty"`
+}
+
+// NamedStyle is one named style definition: the text and paragraph
+// formatting every paragraph carrying that style inherits.
+type NamedStyle struct {
+	NamedStyleType string          `json:"namedStyleType,omitempty"`
+	TextStyle      *TextStyle      `json:"textStyle,omitempty"`
+	ParagraphStyle *ParagraphStyle `json:"paragraphStyle,omitempty"`
 }
 
 // DocumentStyle is a tab's page setup.

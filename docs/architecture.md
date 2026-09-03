@@ -271,6 +271,21 @@ longer exists; re-read the section`.
   [tbl1] | 3×4 table; cells tbl1:r1c1 … |
   ```
 
+- `get_document` → identity, Drive metadata, counts, capabilities, and
+  per tab what no read of the text shows: page setup, floating objects,
+  named ranges, and the named style definitions (`named style HEADING_2
+  (3 paragraph(s)): Arial 16pt, bold, color #1a73e8, space above 18pt`).
+  Only the styles a paragraph of that tab carries are reported: the
+  others have no appearance in the tab to show, and this is the tool the
+  model calls first. The count covers every segment, headers and
+  footnotes included, because redefining a style changes the whole tab —
+  a wider base than `Stats.Paragraphs`, which counts bodies. Every value
+  the response carries is named, including `START` and 100%: a named
+  style inherits from the tab's `NORMAL_TEXT`, not from the API's
+  defaults, so single spacing is news when the body text is not.
+  Without this read `layout_document`'s `named_style` op was write-only:
+  it redefines a style for a whole tab, and nothing read the definition
+  back.
 - `find_in_document` → plain or regex (RE2) search → handles,
   code-point offsets, ±80 chars of context.
 - `export_document` → pdf / docx / md / html / txt via Drive export; text
@@ -400,7 +415,7 @@ registers only readOnly rows and requests readonly scopes.
 | Tool | Purpose | Annotations | Phase |
 |---|---|---|---|
 | `search_documents` | Locate a Doc by title or content (Drive search restricted to Docs); returns id, title, modified, owner | readOnly | 1 |
-| `get_document` | Title, tabs, revision, owner, counts, capabilities (preview on/off, available write modes, configured default); per tab the page setup, floating objects and named ranges | readOnly, idempotent | 0, 4 |
+| `get_document` | Title, tabs, revision, owner, counts, capabilities (preview on/off, available write modes, configured default); per tab the page setup, floating objects, named ranges and the named style definitions its paragraphs carry | readOnly, idempotent | 0, 4 |
 | `get_outline` | Heading tree with `heading_id`, handles, sizes | readOnly | 0 |
 | `read_document` | Scoped, budgeted markdown/text/raw view; `with_styles`; `revision_id` | readOnly | 0 |
 | `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
@@ -780,6 +795,15 @@ v0.3.0, and nothing is left open:
   and the service adds only the count line above it.
 - **`get_document` text.** `Info.text()` in the service; nothing is
   shaped in the tool layer any more.
+- **One read-side paragraph-style type.** `doc.ParagraphStyle` holds
+  alignment, line spacing, space above and below, both indents,
+  keep-with-next and page-break-before; `doc.Paragraph` and
+  `doc.NamedStyleDef` embed it, and `parseParagraphStyle` fills it for
+  both, so a paragraph now carries everything its style says rather than
+  the two fields the renderer happened to need. This is also what
+  answering "does this run deviate from its named style?" will need —
+  the gap docs/development.md describes. Embedding keeps `p.Alignment`
+  and the rest reading as before at every call site.
 
 ## 18. Evidence log: conventions checked, changed, or rejected
 
@@ -827,7 +851,7 @@ checked rather than assumed.
 | `TableRowStyle.tableHeader` can be set, since it is in the schema | Refuted live (2026-09-03): `updateTableRowStyle` answers `400 INVALID_ARGUMENT: Unallowed field: tableHeader`, though `minRowHeight` and `preventOverflow` in the same request are accepted | `style_rows` carries neither the field nor a flag for it; `pin_header_rows` is how a header row is set, and the op's "changes nothing" message says so. A schema field is not proof the field mask accepts it. |
 | `DocumentStyle.background` takes the colour object `colorJSON` builds, as `TextStyle.foregroundColor` does (my assumption) | Refuted (discovery document): `foregroundColor` is an `OptionalColor` — `{color: {rgbColor}}` — but `background` is a `Background`, whose own `color` field is that `OptionalColor`, so the payload nests one level deeper | `background` is built as `{"color": <OptionalColor>}`; caught in review before any live call, since a wrong shape fails the whole atomic batch. |
 | A section's type can be changed on an existing section | Refuted (discovery document): `SectionStyle.sectionType` is **"Output only"**; only `insertSectionBreak` sets it | `section` neither sends nor accepts `section_type`; passing it is refused with the reason, and the type is chosen by the `section_break` that made the section. |
-| A field mask names only the leaves it changes (as `updateTextStyle` does) | Refined for `updateNamedStyle`: the reference says "to update the text style to bold, set `fields` to include `text_style` **and** `text_style.bold`" — the mask is rooted at the named style, so the parent counts too. **Confirmed live** (2026-09-03) through the HTML export: after redefining `HEADING_2`, both headings render as `<h2 style="…color:#1a73e8;font-size:18pt;padding-top:20pt…">` without either being styled individually | The mask carries `textStyle` and `paragraphStyle` beside each leaf. A redefined named style is invisible to `with_styles` (it moves the paragraph default too), so `export_document format: html` is how it is checked — see docs/development.md. |
+| A field mask names only the leaves it changes (as `updateTextStyle` does) | Refined for `updateNamedStyle`: the reference says "to update the text style to bold, set `fields` to include `text_style` **and** `text_style.bold`" — the mask is rooted at the named style, so the parent counts too. **Confirmed live** (2026-09-03) through the HTML export: after redefining `HEADING_2`, both headings render as `<h2 style="…color:#1a73e8;font-size:18pt;padding-top:20pt…">` without either being styled individually | The mask carries `textStyle` and `paragraphStyle` beside each leaf. A redefined named style is invisible to `with_styles` (it moves the paragraph default too), so `get_document` reports the definitions themselves (§7.2) and `export_document format: html` checks how they resolve — see docs/development.md. |
 | `TableRowStyle.minHeight` and `SectionType: ONE_COLUMN \| TWO_COLUMN \| THREE_COLUMN` (a summary of the reference page) | Refuted against the discovery document (`docs.googleapis.com/$discovery/rest?version=v1`, 2026-09-03): the field is `minRowHeight` (with `preventOverflow` and `tableHeader` beside it), and `insertSectionBreak` takes only `CONTINUOUS` or `NEXT_PAGE` — columns are `SectionStyle.columnProperties` | Wire names taken from the discovery document, not from a prose summary; columns are set on the section, not by its type. |
 | `updateCommentPost`, `deleteComment`, `deleteCommentReply`, `deleteSuggestion` in the Docs API | Confirmed present but **Developer Preview only** (Request reference); Drive `comments.update` and `replies.update` are GA | Editing a comment goes through Drive like every other thread operation; only `deleteSuggestion`, which has no Drive equivalent, is preview-gated. |
 | `deleteSuggestion` is the same as `rejectSuggestion` (my assumption) | Refuted: reject declines a suggestion and any editor may; delete removes it and returns 403 to anyone but its author | Exposed as a third action, `discard`, with the author rule in its description. |

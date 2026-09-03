@@ -7,6 +7,27 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- `get_document` reports each tab's named style definitions — the font,
+  size, colour, alignment and spacing that `NORMAL_TEXT`, `TITLE`,
+  `SUBTITLE` and `HEADING_1` … `HEADING_6` give every paragraph carrying
+  them — with how many paragraphs of that tab carry each, headers and
+  footnotes included, since redefining a style changes the whole tab.
+  Only the styles in use are listed; the others have no appearance in
+  the tab to show, and `get_document` is the tool the model calls first.
+  `layout_document`'s `named_style` op could redefine these but nothing
+  read them back, so the model could neither see what it was about to
+  change nor confirm it afterwards; the `export_document format: html`
+  workaround in docs/development.md is no longer the only way.
+
+### Changed
+- `doc.Paragraph` now carries its whole paragraph style (alignment, line
+  spacing, space above and below, both indents, keep-with-next,
+  page-break-before) in a `doc.ParagraphStyle` it shares with the new
+  named style definitions, instead of the two fields the renderers
+  happened to read. No output changes; `read_document with_styles`
+  annotates the same alignment and indent as before.
+
 ## [0.4.0] - 2026-09-03
 
 ### Added

@@ -345,15 +345,95 @@ func markSuggestion(text, inserted, deleted string, o Options) string {
 	return text
 }
 
+// NamedStyle describes what a named style means, for the reads that
+// report the definitions layout_document can rewrite. Unlike
+// styleAnnotation it names bold and italic too: here there is no
+// markdown around it to show them.
+func NamedStyle(d *doc.NamedStyleDef) string {
+	st := d.Text
+	var parts []string
+	if f := fontLabel(st); f != "" {
+		parts = append(parts, f)
+	}
+	for _, f := range []struct {
+		on   bool
+		name string
+	}{
+		{st.Bold, "bold"}, {st.Italic, "italic"}, {st.Underline, "underline"},
+		{st.Strikethrough, "strikethrough"}, {st.SmallCaps, "small caps"},
+	} {
+		if f.on {
+			parts = append(parts, f.name)
+		}
+	}
+	if st.Baseline != "" {
+		parts = append(parts, strings.ToLower(st.Baseline))
+	}
+	if st.Foreground != "" {
+		parts = append(parts, "color "+st.Foreground)
+	}
+	if st.Background != "" {
+		parts = append(parts, "background "+st.Background)
+	}
+	// Every value the response carries is named, even START and 100%: a
+	// named style inherits from the tab's NORMAL_TEXT, not from the
+	// API's defaults, so "single spaced" is news when the body text is
+	// not. Only what Google left out is left out here.
+	if d.Alignment != "" && d.Alignment != "ALIGNMENT_UNSPECIFIED" {
+		parts = append(parts, "align "+strings.ToLower(d.Alignment))
+	}
+	if d.LineSpacing > 0 {
+		parts = append(parts, fmt.Sprintf("line spacing %g%%", d.LineSpacing))
+	}
+	for _, f := range []struct {
+		pt   float64
+		name string
+	}{
+		{d.SpaceAbovePt, "space above"}, {d.SpaceBelowPt, "space below"},
+		{d.IndentStartPt, "indent"}, {d.IndentFirstLinePt, "first line indent"},
+	} {
+		if f.pt != 0 {
+			parts = append(parts, fmt.Sprintf("%s %gpt", f.name, f.pt))
+		}
+	}
+	if d.KeepWithNext {
+		parts = append(parts, "keep with next")
+	}
+	if d.PageBreakBefore {
+		parts = append(parts, "page break before")
+	}
+	if len(parts) == 0 {
+		return "no formatting of its own"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// fontLabel is a font family and size as both readers of a style write
+// them: "Arial 11pt", or whichever half is set.
+func fontLabel(st doc.TextStyle) string {
+	switch {
+	case st.FontFamily != "" && st.FontSizePt > 0:
+		return fmt.Sprintf("%s %gpt", st.FontFamily, st.FontSizePt)
+	case st.FontFamily != "":
+		return st.FontFamily
+	case st.FontSizePt > 0:
+		return fmt.Sprintf("%gpt", st.FontSizePt)
+	}
+	return ""
+}
+
+// aligned reports whether an alignment is worth naming: unset and START
+// are what a paragraph does anyway.
+func aligned(a string) bool {
+	return a != "" && a != "START" && a != "ALIGNMENT_UNSPECIFIED"
+}
+
 // styleAnnotation names formatting markdown cannot carry.
 func styleAnnotation(st doc.TextStyle) string {
 	var parts []string
+	// A monospace font is already carried by the backticks around the run.
 	if st.FontFamily != "" && !st.Monospace() {
-		f := st.FontFamily
-		if st.FontSizePt > 0 {
-			f += fmt.Sprintf(" %gpt", st.FontSizePt)
-		}
-		parts = append(parts, "font: "+f)
+		parts = append(parts, "font: "+fontLabel(st))
 	} else if st.FontSizePt > 0 {
 		parts = append(parts, fmt.Sprintf("size: %gpt", st.FontSizePt))
 	}
@@ -387,7 +467,7 @@ func paragraphAnnotation(p *doc.Paragraph) string {
 	if p.IsSubtitle {
 		parts = append(parts, "style: SUBTITLE")
 	}
-	if p.Alignment != "" && p.Alignment != "START" && p.Alignment != "ALIGNMENT_UNSPECIFIED" {
+	if aligned(p.Alignment) {
 		parts = append(parts, "align: "+strings.ToLower(p.Alignment))
 	}
 	if p.IndentStartPt > 0 && p.Bullet == nil {

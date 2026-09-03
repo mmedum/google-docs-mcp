@@ -52,6 +52,41 @@ type Tab struct {
 	NamedRanges []*NamedRange
 	// Page is the tab's page setup.
 	Page *PageSetup
+	// NamedStyles are the tab's named style definitions, in
+	// NamedStyleOrder. Every paragraph inherits from the one its
+	// NamedStyle names, and layout_document named_style redefines them.
+	NamedStyles []*NamedStyleDef
+}
+
+// NamedStyleOrder lists the named styles in the order a read reports
+// them: the document's body style first, then its headings top down.
+var NamedStyleOrder = []string{"NORMAL_TEXT", "TITLE", "SUBTITLE",
+	"HEADING_1", "HEADING_2", "HEADING_3", "HEADING_4", "HEADING_5", "HEADING_6"}
+
+// ParagraphStyle is block-level formatting, in the units the API uses:
+// line spacing is a percentage of single (100 = single) and lengths are
+// points. A named style defines one, and a paragraph shows it unless an
+// edit overrode it on the paragraph itself, so both carry this type.
+type ParagraphStyle struct {
+	Alignment         string
+	LineSpacing       float64
+	SpaceAbovePt      float64
+	SpaceBelowPt      float64
+	IndentStartPt     float64
+	IndentFirstLinePt float64
+	KeepWithNext      bool
+	// PageBreakBefore is read only: it is worth knowing that every
+	// HEADING_1 starts a page, but no write op sets it.
+	PageBreakBefore bool
+}
+
+// NamedStyleDef is what one named style means in a tab: the formatting
+// every paragraph carrying it inherits, and so the formatting a
+// paragraph shows unless it overrides it.
+type NamedStyleDef struct {
+	Type string // NORMAL_TEXT, TITLE, SUBTITLE, HEADING_1..6
+	Text TextStyle
+	ParagraphStyle
 }
 
 // NamedRange is a span the document remembers by name. Unlike a handle
@@ -89,6 +124,29 @@ func (t *Tab) Segments() []*Segment {
 	out = append(out, t.Footers...)
 	out = append(out, t.Footnotes...)
 	return out
+}
+
+// NamedStyleUse counts the tab's paragraphs by the named style they
+// carry, so a read can report the definitions actually in use rather
+// than all nine. Every segment counts, not just the body: redefining a
+// style changes the whole tab, headers and footnotes with it. A
+// paragraph that names no style carries NORMAL_TEXT, which is what
+// leaving the field out means.
+func (t *Tab) NamedStyleUse() map[string]int {
+	use := make(map[string]int, len(NamedStyleOrder))
+	for _, seg := range t.Segments() {
+		for _, b := range seg.AllBlocks() {
+			if b.Paragraph == nil {
+				continue
+			}
+			name := b.Paragraph.NamedStyle
+			if name == "" {
+				name = "NORMAL_TEXT"
+			}
+			use[name]++
+		}
+	}
+	return use
 }
 
 // Prefix is the handle prefix for this tab ("" for the first tab).
@@ -316,13 +374,14 @@ func (b *Block) IsHeading() bool {
 
 // Paragraph is a paragraph's style, bullet and runs.
 type Paragraph struct {
-	NamedStyle          string
-	HeadingID           string
-	Level               int // 1..6 for HEADING_n, 0 otherwise
-	IsTitle             bool
-	IsSubtitle          bool
-	Alignment           string
-	IndentStartPt       float64
+	NamedStyle string
+	HeadingID  string
+	Level      int // 1..6 for HEADING_n, 0 otherwise
+	IsTitle    bool
+	IsSubtitle bool
+	// ParagraphStyle is what this paragraph carries itself; where it
+	// says nothing, the tab's definition of NamedStyle applies.
+	ParagraphStyle
 	Bullet              *BulletInfo
 	Runs                []*Run
 	PositionedObjectIDs []string

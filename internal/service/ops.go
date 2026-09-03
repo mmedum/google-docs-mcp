@@ -29,6 +29,20 @@ type TabInfo struct {
 	Page            *doc.PageSetup   `json:"page,omitempty"`
 	NamedRanges     []NamedRangeInfo `json:"named_ranges,omitempty"`
 	FloatingObjects []ObjectInfo     `json:"floating_objects,omitempty"`
+	// NamedStyles are the definitions the tab's paragraphs inherit from,
+	// which layout_document's named_style op redefines.
+	NamedStyles []NamedStyleInfo `json:"named_styles,omitempty"`
+}
+
+// NamedStyleInfo is one named style definition with how many of the
+// tab's paragraphs carry it, counted over every segment because
+// redefining a style changes the whole tab — a wider count than
+// Stats.Paragraphs, which is bodies only. Styles no paragraph carries
+// are left out: they have no appearance in this tab to report, and
+// get_document is the tool the model calls first.
+type NamedStyleInfo struct {
+	Style      *doc.NamedStyleDef `json:"style"`
+	Paragraphs int                `json:"paragraphs"`
 }
 
 // NamedRangeInfo is one named range as get_document reports it.
@@ -111,6 +125,15 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 			Headers: len(t.Headers), Footers: len(t.Footers), Footnotes: len(t.Footnotes), Page: t.Page}
 		for _, nr := range t.NamedRanges {
 			ti.NamedRanges = append(ti.NamedRanges, NamedRangeInfo{Name: nr.Name, ID: nr.ID, Segment: nr.Segment, Chars: nr.End - nr.Start})
+		}
+		if len(t.NamedStyles) > 0 {
+			use := t.NamedStyleUse()
+			ti.NamedStyles = make([]NamedStyleInfo, 0, len(t.NamedStyles))
+			for _, ns := range t.NamedStyles {
+				if n := use[ns.Type]; n > 0 {
+					ti.NamedStyles = append(ti.NamedStyles, NamedStyleInfo{Style: ns, Paragraphs: n})
+				}
+			}
 		}
 		for _, id := range slices.Sorted(maps.Keys(t.PositionedObjects)) {
 			o := t.PositionedObjects[id]
@@ -220,6 +243,9 @@ func (t TabInfo) writeExtras(b *strings.Builder) {
 			fmt.Fprintf(b, " (%g×%g pt)", o.WidthPt, o.HeightPt)
 		}
 		b.WriteString("\n")
+	}
+	for _, ns := range t.NamedStyles {
+		fmt.Fprintf(b, "  named style %s (%d paragraph(s) in this tab): %s\n", ns.Style.Type, ns.Paragraphs, render.NamedStyle(ns.Style))
 	}
 	for _, nr := range t.NamedRanges {
 		fmt.Fprintf(b, "  named range %q (id %s, %d character(s))\n", nr.Name, nr.ID, nr.Chars)

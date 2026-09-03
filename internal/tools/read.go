@@ -56,7 +56,11 @@ func registerRead(s *mcp.Server, d Deps) {
 		Name: "get_document",
 		Description: "Get metadata and structure counts for a Google Doc: title, tabs, the current revision id, owner, " +
 			"last modification, paragraph and word counts, pending suggestion count, and this server's capabilities " +
-			"(whether suggestion mode is available, the default write mode, read-only). Cheap; call it first when handed a " +
+			"(whether suggestion mode is available, the default write mode, read-only). Per tab it also reports what no " +
+			"read of the text shows: page setup, floating images, named ranges, and the named style definitions the " +
+			"tab's paragraphs carry (the font, size, colour and spacing every heading or body paragraph inherits, with " +
+			"how many paragraphs of that tab carry each, headers and footnotes included). " +
+			"Cheap; call it first when handed a " +
 			"document id or URL. Then use get_outline for the heading tree and read_document for content.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DocumentInput) (*mcp.CallToolResult, any, error) {

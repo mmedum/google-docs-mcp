@@ -37,12 +37,15 @@ and are preferred by the Makefile; install them with
   expected refusal (the overwrite guard, suggest mode where the API
   refuses it, an unknown resource); anything else is a regression.
 - **Verifying what the server writes but cannot read back.** Some
-  properties never come back through a read: a redefined named style, for
-  one, since `read_document with_styles` annotates only runs that deviate
-  from the paragraph default, and redefining a style moves that default
-  with it. `export_document format: html` is the check — Google's own
-  export carries the resolved styling, so a redefined `HEADING_2` shows
-  as `<h2 style="…color:#1a73e8;font-size:18pt;padding-top:20pt…">`. The
+  properties never come back through a read of the text: a redefined
+  named style, for one, since `read_document with_styles` annotates only
+  runs that deviate from the paragraph default, and redefining a style
+  moves that default with it. `get_document` now reports the definitions
+  each tab's paragraphs carry, which is the direct check on a
+  `named_style` op; `export_document format: html` remains the check on
+  everything else — Google's own export carries the resolved styling, so
+  a redefined `HEADING_2` shows as
+  `<h2 style="…color:#1a73e8;font-size:18pt;padding-top:20pt…">`. The
   same export shows the page background and margins on `<body>`, column
   widths and row heights on the table, and `<thead>` for pinned header
   rows, which makes it the quickest end-to-end check of a layout change.

@@ -110,7 +110,7 @@ for the defaults.
 
 | Tool | What it does |
 |---|---|
-| `get_document` | Title, tabs, revision id, owner, last change, counts, and this server's capabilities (available write modes, default). Per tab it also reports the page setup, the floating objects and the named ranges — everything a read of the text cannot show. Cheap; call it first. |
+| `get_document` | Title, tabs, revision id, owner, last change, counts, and this server's capabilities (available write modes, default). Per tab it also reports the page setup, the floating objects, the named ranges and the named style definitions its paragraphs carry — everything a read of the text cannot show. Cheap; call it first. |
 | `get_outline` | Heading tree per tab with stable `heading_id`s, block handles, and section sizes. |
 | `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Block handles come with the text unless `with_handles` is false; options add styles, pending suggestions as `{++inserted++}` / `{--deleted--}`, and comment markers `{>>c:id<<}`. |
 | `find_in_document` | Text or regex search returning handles, offsets and context. |

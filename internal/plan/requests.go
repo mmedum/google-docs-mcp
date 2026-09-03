@@ -7,6 +7,7 @@ package plan
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -215,14 +216,11 @@ type ParagraphStyleSpec struct {
 // IsZero reports whether the spec changes nothing.
 func (s ParagraphStyleSpec) IsZero() bool { return s == ParagraphStyleSpec{} }
 
-// NamedStyles the API accepts for paragraphs.
-var NamedStyles = map[string]bool{"NORMAL_TEXT": true, "TITLE": true, "SUBTITLE": true, "HEADING_1": true, "HEADING_2": true, "HEADING_3": true, "HEADING_4": true, "HEADING_5": true, "HEADING_6": true}
-
 var alignments = map[string]bool{"START": true, "CENTER": true, "END": true, "JUSTIFIED": true}
 
 // Validate checks enum values.
 func (s ParagraphStyleSpec) Validate() error {
-	if s.NamedStyle != "" && !NamedStyles[s.NamedStyle] {
+	if s.NamedStyle != "" && !slices.Contains(NamedStyleTypes, s.NamedStyle) {
 		return fmt.Errorf("named_style must be NORMAL_TEXT, TITLE, SUBTITLE or HEADING_1 to HEADING_6")
 	}
 	if s.Alignment != "" && !alignments[s.Alignment] {

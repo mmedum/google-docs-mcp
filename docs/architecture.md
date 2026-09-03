@@ -1,0 +1,648 @@
+# Architecture — google-docs-mcp
+
+**Status:** v0.6 (2026-09-03). All design decisions are resolved (§17).
+Phases 0 and 1 are implemented: auth, raw client, model, renderer, reads,
+search, create, export, editing with minimal diffs in all three modes,
+formatting, and suggestion review; §16 lists what later phases add. Every
+convention here was checked against primary sources; §18 lists what was
+confirmed, refuted, and changed.
+
+## 1. Mission and scope
+
+A production-grade, Go, stdio MCP server that lets Claude work **inside a
+Google Doc** the way a careful colleague does: read it at the right
+granularity, edit it in place without destroying anything around the
+edit, propose changes as suggestions rather than overwrite, comment on
+specific passages, and handle tables, tabs, headers, footnotes and
+formatting. Single binary, per-user OAuth against the user's own Google
+account, Workspace or consumer.
+
+**The repository is self-contained and meant to be distributed.** Every
+deployer creates their own Google Cloud project and OAuth client; nothing
+deployer-specific is baked into the code, the repository, or the release
+artifacts (§13).
+
+**Scope is one document, every capability.** In: locating a document by
+title, creating one, and everything that happens inside it, including its
+history (revisions, suggestions, comment threads). Out (**decided**):
+folder management, moving files, sharing, trashing, copying.
+
+### Why build it (research summary, verified 2026-09-02)
+
+- **Google's official Docs MCP** (`docsmcp.googleapis.com`, Developer
+  Preview) exposes two tools, `read_doc` and `update_doc`, that pass the
+  raw `documents.get` JSON and raw `batchUpdate` requests straight
+  through. It solves the plumbing and none of the hard part.
+- **The best open-source servers** (taylorwilsdon/google_workspace_mcp,
+  a-bonus/google-docs-mcp, piotr-agier/google-drive-mcp) make the model
+  compute UTF-16 indices itself, hand-roll markdown converters that
+  silently corrupt documents (a-bonus #149), anchor comments through the
+  Drive API where they never render inline (a-bonus #134), and none use
+  `writeControl`, suggestion mode, or return the ranges they changed.
+- **The API moved in our favour in July 2026.** The Docs API now has
+  `writeControl.writeMode: SUGGEST` (every request in the batch becomes a
+  suggested edit), `insertComment` anchored to a real `Range`,
+  `acceptSuggestion`/`rejectSuggestion`, and a `commentsViewMode` on
+  `documents.get`. All of it is **Developer Preview** (§10). No
+  open-source server has built on it yet.
+
+### Non-goals
+
+- Not a general Drive client.
+- Not multi-tenant hosted. Stdio only (**decided**); the composition root
+  stays transport-agnostic so this can change later.
+- Not a WYSIWYG fidelity guarantee for markdown import. We convert what
+  we can prove and refuse the rest loudly (§7.4).
+
+## 2. Hard constraints from the platform
+
+| Constraint (verified against official docs) | Consequence |
+|---|---|
+| Indices are **UTF-16 code units**, per segment (body / header / footer / footnote each start at 0), shift after every mutation, and are only valid for the revision you read. | The model never sees or computes indices. Server owns index math; Go strings are UTF-8 so every offset goes through `utf16` conversion. |
+| `batchUpdate` is **atomic** and requests apply in order. | One batch per tool call; requests sorted by descending index. |
+| `writeControl.requiredRevisionId` → 400 if the doc changed; the response returns the new revision id. | Every write is guarded by the revision it was planned against. |
+| Inserted text "will match the text immediately before the insertion index"; a newline copies the paragraph style "including lists and bullets" from the current paragraph. | Minimal-diff edits inherit surrounding formatting for free; the compiler sets explicit styles only where the content asks for them. |
+| Tabs: `includeTabsContent=true` returns `document.tabs[]`. Requests without `tabId` hit the first tab, except `replaceAllText` and named-range requests, which default to **all tabs**. | Always read with tabs; always set `tabId` or explicit `tabsCriteria`. |
+| Only `suggestionsViewMode=SUGGESTIONS_INLINE` yields indices valid for a later `batchUpdate`. | The canonical index space is the inline view. |
+| Every heading paragraph carries a stable, read-only `headingId`. | Sections are addressed by `headingId`. |
+| Deleting a range removes whatever is anchored inside it: comment anchors, suggestions, inline objects. Suggested deletions leave the text in place until accepted. | Overwrite guard (§7.3); suggestion mode is the safe default. |
+| Quotas: 300 reads/min/user, 60 writes/min/user (Docs). | Client-side token buckets below those limits; backoff honouring `Retry-After`. |
+| Scopes: `documents` is *sensitive*, `drive` is *restricted*, `drive.file` cannot reach documents the app didn't create or open. | We need `documents` + `drive`. Fine for a per-user OAuth app that each deployer owns; no central app, no Google verification. |
+| An **External** OAuth app in **Testing** gets 7-day refresh tokens. The rule is defined only for External apps; an **Internal** (Workspace) consent screen is exempt by construction. | The setup guide covers both: Internal for Workspace organisations, Testing with weekly re-login for consumer accounts (§10). |
+| Images: `insertInlineImage` needs a publicly fetchable URL. | URL only; no upload path. |
+| Preview features are absent from the discovery doc and from `google.golang.org/api/docs/v1`, and importing that module pulls in gRPC, OpenTelemetry and the cloud auth stack. | Thin raw REST client with our own wire types in `internal/gdocs`; the generated module is not a dependency (§5). |
+| Claude Code truncates tool results above 25 000 tokens and warns at 10 000. | Reads are scoped and budgeted by default, with continuation handles. |
+
+### What the API cannot do (so we don't promise it)
+
+Equations and drawings (read-only), charts, inserting a table of
+contents, reading the *structure* of an old revision (only exports),
+turning Drive-API comment anchors into ranges (opaque), rendering
+Drive-API comments inline in the UI, suggestion mode and anchored
+comments **without** preview enrolment, images from private URLs.
+
+## 3. Requirements distilled from other servers' failures
+
+1. Semantic targets resolved server-side; the model never touches
+   indices (taylorwilsdon #1030).
+2. Writes return what they touched and the new revision (#1031).
+3. Section-scoped, token-budgeted reads; never drop empty paragraphs
+   from a view that claims to be complete (#638, #1085, #1084).
+4. Markdown conversion tested per construct, failing loudly on what it
+   can't express (a-bonus #149).
+5. Tabs honoured on every write (piotr-agier #114).
+6. Strict, boring JSON Schemas: flat structs with an `op`/`action` enum,
+   no `oneOf`, no vendor keywords, no dots in tool names.
+7. Comments that anchor (preview `insertComment`), Drive API as the
+   documented degraded fallback.
+8. Suggestion mode as a first-class write mode, plus accept/reject.
+9. Optimistic concurrency on every write.
+10. Dry run on every write.
+
+## 4. Core design bets
+
+1. **Edit, never overwrite.** A `replace` is compiled as the minimal
+   diff between the existing text and the new text, so unchanged spans,
+   their formatting, and anything anchored to them (comments,
+   suggestions, inline objects) survive. A planner guard refuses to
+   delete a range that contains comment anchors or pending suggestions
+   unless the call is in suggest mode or explicitly forced. Google's
+   version history records every batch under the OAuth user, so
+   provenance is preserved by construction.
+2. **The user chooses how changes land.** Every write takes
+   `mode: suggest | direct | comment`. `suggest` makes the batch a set of
+   tracked changes for a human to accept (preview). `direct` edits the
+   text. `comment` does not touch the text at all: the proposed change is
+   posted as a comment anchored to the passage, which works without
+   preview. The default is configured per deployment
+   (`GDOCS_DEFAULT_WRITE_MODE`) and overridden per call when the person
+   asks for it; the server never silently substitutes one mode for
+   another.
+3. **Exact text first.** The primary target is an exact substring that
+   must match once, with `occurrence` and a scope to disambiguate. This
+   is the contract Anthropic's editor tool, Claude Code's Edit, Notion's
+   MCP and the Aider/OpenAI edit benchmarks converge on. Prose
+   normalisation (smart quotes, NBSP, whitespace runs) makes it robust.
+4. **Stable IDs where Google gives them, short handles where it doesn't.**
+   Headings by `headingId`; other blocks by ordinal handles (`p12`,
+   `tbl3`) that the server remembers from the last read and re-checks.
+   Handles are shown in the outline and find results, opt-in on full
+   reads (they cost about a quarter more tokens).
+5. **One plan, one batch, one revision guard.** Fetch → resolve → compile
+   → sort → `batchUpdate` with `requiredRevisionId` → re-fetch → report.
+6. **Markdown for new content; in-place ops for existing content.**
+   Markdown is how Claude expresses text it writes. It is never used to
+   round-trip someone else's document: existing content is edited by
+   range, styled by explicit format ops, and read with style annotations
+   on request. `text` and `raw` views exist alongside markdown.
+7. **History is a first-class read.** Revisions, diffs between
+   revisions, suggestion lists, and full comment threads (including
+   resolved and replies) are Phase 2, not polish.
+8. **Raw REST with our own wire types.** Responses decode into
+   `internal/gdocs` structs that mirror the API's JSON; requests are
+   built by us, GA and preview alike, and sent with an `oauth2`
+   transport. The generated `google.golang.org/api` module is not used:
+   it brings gRPC, OpenTelemetry and the cloud auth stack into a binary
+   that only needs JSON.
+
+## 5. Module layout
+
+```
+cmd/google-docs-mcp/      main: login / logout / status / doctor subcommands, server default,
+                          --version, --dump-schemas
+internal/config/          GDOCS_* env with flags bound to the same names; typed enums; validated at start
+internal/credentials/     refresh token: OS keyring → 0600 file under os.UserConfigDir() with a logged
+                          warning (gh pattern) → GDOCS_REFRESH_TOKEN env override
+internal/userconfig/      non-secret pointer file: client_secret path, account email, preview flag
+internal/auth/            loopback OAuth (127.0.0.1:<random>, PKCE), scope sets (full / readonly)
+internal/gdocs/           Docs API wire types (the JSON we read), no dependencies
+internal/gapi/            raw REST client: client.go (retry, limiter, slog), docs.go (get/batchUpdate),
+                          drive.go (about, files; later comments, revisions, export), errors.go
+                          (APIError + sentinel classes). No MCP imports.
+internal/doc/             model: parse docs.Document → Tree; UTF-16 index math; handles; Target → Range
+                          resolution; normalised text search; section derivation; anchored-content index
+internal/render/          Tree → markdown / text / outline; style annotations; CriticMarkup for
+                          suggestions; comment markers; budget + continuation
+internal/markdown/        goldmark AST → Fragment (neutral block/inline IR); unsupported-construct errors
+internal/plan/            ops + Fragment → batchUpdate requests: minimal diff, overwrite guard, compile,
+                          order, tables (multi-batch), format, dry-run diff
+internal/service/         orchestration: fetch → resolve → plan → apply → refetch; comments (two backends);
+                          suggestions; revisions/diff; export; search; per-document handle memory
+internal/server/          SDK wiring; schema dump via an in-memory client session
+internal/tools/           errors.go, then one file per area: read.go, edit.go, format.go, table.go,
+                          objects.go, tabs.go, comments.go, suggestions.go, history.go, export.go, drive.go
+internal/version/
+testdata/                 synthetic fixtures only (§14) + golden outputs
+docs/  scripts/  audit/
+```
+
+Dependencies, all pinned: `modelcontextprotocol/go-sdk` v1.7.0 (with
+`google/jsonschema-go`), `golang.org/x/oauth2`, `zalando/go-keyring`,
+`golang.org/x/time/rate`; Phase 1 adds `yuin/goldmark` and a diff
+library (`sergi/go-diff`). Nothing else.
+
+## 6. Document model (`internal/doc`)
+
+```
+Document
+  Tabs[]              id, title, index, parent, nesting; first tab is the default
+    Segments          body + headers{} + footers{} + footnotes{} (each its own index space)
+      Blocks[]        ordinal, handle, kind, start/end (UTF-16), style
+        Paragraph     namedStyle, headingId, bullet (listId, nesting), alignment,
+                      Runs[] (text, TextStyle, suggestion insert/delete ids), inline objects, footnote refs
+        Table         rows × cols, Cell[r][c] → nested Blocks, merged spans
+        SectionBreak  section style
+        TOC           rendered read-only
+  Anchors             every comment range (preview) / quoted-text match (GA), suggestion range,
+                      inline object and footnote reference, indexed by segment range
+  Revision            revisionId of the fetch this tree came from
+```
+
+- Built from `documents.get?includeTabsContent=true&suggestionsViewMode=
+  SUGGESTIONS_INLINE` (+ `commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`
+  when preview is on). The only index space we compute against.
+- Offsets the model sees are Unicode code points; the server converts to
+  UTF-16 at the boundary.
+- **Handles**: `p<n>` paragraphs, `tbl<n>` tables (cells `tbl3:r2c3`),
+  `sb<n>` section breaks, ordinal within the segment; prefixed outside the
+  first tab's body (`tab2/p12`, `header/p1`, `footnote3/p1`). Headings
+  also carry `heading_id`.
+- **Handle memory**: per document, the service keeps the revision id and
+  `handle → normalised text` of the last read in this process. Unchanged
+  revision → exact; changed revision → re-locate by stored text (unique
+  match required) → else `[stale]`. An unknown handle is `[unknown]` with
+  "read the section first". The stateless fingerprinted alternative
+  (`p12-7f3a`) is uglier and has no evidence behind it (§18).
+- **Sections** are derived: a heading owns everything up to the next
+  heading of the same or higher level in the same segment.
+
+## 7. Addressing, reading, writing
+
+### 7.1 Target (shared by every tool that points at content)
+
+```
+Target {
+  text:        "exact substring"; occurrence?: 1; within?: <heading_id | handle>
+  heading_id:  "h.abc123"; include_heading?: true
+  heading:     "Background"; heading_level?: 2; occurrence?: 1; include_heading?: true
+  handle:      "p12"
+  handles:     { from: "p12", to: "p15" }
+  cell:        "tbl3:r2c3"
+  tab?:        <tab id or title>      (default: first tab)
+  segment?:    "body" | "header" | "footer" | "footnote:<n>"   (default: body)
+}
+Location { at: "start" | "end" | "before" | "after", of?: Target }
+```
+
+Text matching normalises curly quotes, NBSP and whitespace runs on both
+sides. Errors carry the fix: `[ambiguous] "Q3" matches 4 times in the
+body; add occurrence or within`, `[stale] p12 was "…" when read and no
+longer exists; re-read the section`.
+
+### 7.2 Read path
+
+- `get_outline` → tabs, heading tree with `heading_id`, handles, block
+  counts, sizes. Cheap; called first.
+- `read_document` → `scope` (tab / heading_id / heading / handle range /
+  whole), `format` (`markdown` default, `text`, `raw`), `with_handles`
+  (default false), `with_styles` (default false: annotates runs whose
+  style deviates from the paragraph default, e.g. `{Arial 11, #c00}`, so
+  other people's formatting is visible before it is changed),
+  `include_suggestions` (CriticMarkup `{++ins++}` / `{--del--}` with
+  `{>>s:<id> by author<<}`), `include_comments` (`{>>c:<id><<}` markers
+  plus a thread list), `max_chars` (default 20 000), returns
+  `revision_id` and `continue_from` when truncated.
+
+  ```
+  [p3] ## Background {h.k2x9}
+  [p4] Revenue grew {++substantially++}{--a lot--} in Q3. {>>c:AAAAB<<}
+  [p5]
+  [p6] - first bullet
+  [tbl1] | 3×4 table; cells tbl1:r1c1 … |
+  ```
+
+- `find_in_document` → plain or regex (RE2) search → handles,
+  code-point offsets, ±80 chars of context.
+- `export_document` → pdf / docx / md / html / txt via Drive export; text
+  formats inline (budgeted), binary formats only under `GDOCS_EXPORT_DIR`.
+
+### 7.3 Write path (`internal/plan`)
+
+Every write tool takes ordered `ops[]`, `mode` (`suggest` | `direct` |
+`comment`; default from `GDOCS_DEFAULT_WRITE_MODE`), `dry_run`, optional
+`expect_revision`, and `force` (default false).
+
+**Modes.** `direct` applies the compiled requests. `suggest` applies the
+same requests with `writeMode: SUGGEST` (preview); an explicit
+`mode: suggest` without preview is `[unavailable] suggestion mode needs
+Developer Preview enrolment; use comment or direct`. `comment` compiles
+each op into a comment on the resolved range instead of a mutation:
+`replace` → "Proposed change:" plus the new text (with a word-level diff
+summary for long ranges), `delete` → "Proposed deletion", `insert` →
+anchored to the neighbouring block with "Insert after this:", format ops
+→ "Proposed formatting: Heading 2". With preview the comment is anchored
+by `insertComment`; without it, it is a Drive comment carrying the quoted
+text (§8). Nothing in the document changes in `comment` mode, so the
+guard below only reports.
+
+1. Fetch the tree (fresh). If `expect_revision` differs → `[conflict]`.
+2. Resolve every target to `Range{segment, tab, start, end}`. Any failure
+   fails the whole call before any API write.
+3. **Minimal diff.** For `replace`, diff the existing text of the range
+   against the new text at word granularity (character fallback for short
+   ranges) and emit `deleteContentRange` + `insertText` only for changed
+   hunks. Inserted hunks inherit the style of the preceding text
+   (documented API behaviour); explicit markdown emphasis in the new
+   content is applied on top. When the replacement changes paragraph
+   structure (a paragraph becomes three bullets), the planner falls back
+   to whole-range replacement and says so.
+4. **Overwrite guard.** Every range scheduled for deletion is checked
+   against the anchor index. In `direct` mode, a range containing comment
+   anchors, pending suggestions, inline objects or footnote references is
+   refused: `[blocked] range contains 2 comment anchors (c:AAAAB, c:AAAAC)
+   and 1 suggestion; use mode: suggest or comment, narrow the target, or
+   pass force: true`. The person stays in control: Claude passes `force`
+   only when they have chosen direct editing knowing what is inside the
+   range. In `suggest` and `comment` modes nothing is deleted until a
+   human accepts, so the guard only reports.
+5. Compile the rest: markdown → Fragment → `insertText`,
+   `updateParagraphStyle`, `updateTextStyle` per run,
+   `createParagraphBullets` (compiled last; the API strips the nesting
+   tabs), `insertTable`. Order by descending start index per segment;
+   overlapping ops rejected up front.
+6. `batchUpdate` with `writeControl.requiredRevisionId` (and
+   `writeMode: SUGGEST`). On revision conflict: re-fetch, re-resolve,
+   re-plan, retry once; a second conflict is `[conflict]`.
+7. Re-fetch; return `{ revision_id, mode, ops_applied, changes: [{op,
+   handles, preview}], suggestion_ids, warnings }`.
+
+Multi-batch ops (only `insert_table` with data): insert the empty table,
+re-fetch, fill cells. If the fill fails the empty table remains and the
+response says so.
+
+Dry run returns the resolved ranges, the diff hunks, the guard report,
+the exact request list, and a rendered before/after. Nothing is sent.
+
+### 7.4 Markdown coverage
+
+Headings 1–6, paragraphs, bold/italic/strikethrough/inline code, links,
+bullet and numbered lists (nested), hard breaks; task-list checkboxes are
+dropped and their text kept. Fenced code → Courier-styled paragraphs.
+Refused with `[unsupported] <construct> at line N`: images (use
+`insert_object`), tables in content (use `edit_table`), HTML, block
+quotes, horizontal rules.
+
+What markdown cannot say goes through `format_document`: fonts, sizes,
+colours, alignment, spacing, indents, named styles on existing text,
+bullet presets, clearing formatting.
+
+## 8. Collaboration and history
+
+**Comments, two backends behind one tool surface.**
+
+| | Preview (Docs API) | GA (Drive API v3) |
+|---|---|---|
+| list | `documents.get` with `commentsViewMode` → threads with real `Range` → handles | `comments.list` (replies, resolved state, `includeDeleted` opt-in) → `quotedFileContent`; server matches the quote to a block, best effort |
+| add | `insertComment` with a Range → anchored in the UI | `comments.create` with `quotedFileContent` → **unanchored** in the UI (stated in the description and in `warnings`) |
+| reply / resolve / reopen | `addCommentReply` with `commentAction` | `replies.create` with `action` |
+| delete | gated | gated |
+
+`list_comments` always returns the full thread history: every reply with
+author and time, resolved threads included by default, deleted ones on
+request. Resolution is reversible (`reopen`); deletion is gated.
+
+**Suggestions.** `list_suggestions` renders pending insert/delete/style
+suggestions with author and handles (GA). `review_suggestion`
+(`action: accept | reject`, ids or `all`) and `mode: suggest` need
+preview. In SUGGEST mode the API refuses `AddDocumentTab`,
+`CreateNamedRange`, `DeleteFooter`, `DeleteHeader`, `DeleteNamedRange`,
+`DeleteTab`, `UpdateDocumentTabProperties`, `UpdateTableColumnProperties`,
+and cannot suggest document-format or header/footer settings; the planner
+rejects those ops up front with the reason.
+
+**Revisions.** `list_revisions` (Drive: id, time, last modifying user);
+`diff_revisions` exports `text/markdown` at two revisions
+(`files.download` with `revisionId`) and returns a unified diff, budgeted.
+`read_document` accepts `revision_id` for a markdown view of an old
+revision (export path; no handles). Google keeps version history
+automatically for every batch the server sends; restoring an old revision
+is an explicit `replace` of the body from an export, never implicit.
+
+## 9. Tool surface
+
+snake_case verb–noun, no dots. Claude Code prefixes `mcp__<server>__`.
+"Gated" = registered only with `GDOCS_ENABLE_DESTRUCTIVE=1`; gated tools
+also set `_meta["anthropic/requiresUserInteraction"]`. `GDOCS_READ_ONLY=1`
+registers only readOnly rows and requests readonly scopes.
+
+| Tool | Purpose | Annotations | Phase |
+|---|---|---|---|
+| `search_documents` | Locate a Doc by title or content (Drive search restricted to Docs); returns id, title, modified, owner | readOnly | 1 |
+| `get_document` | Title, tabs, revision, owner, counts, capabilities (preview on/off, available write modes, configured default) | readOnly, idempotent | 0 |
+| `get_outline` | Heading tree with `heading_id`, handles, sizes | readOnly | 0 |
+| `read_document` | Scoped, budgeted markdown/text/raw view; `with_styles`; `revision_id` | readOnly | 0 |
+| `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
+| `export_document` | pdf/docx/md/html/txt | readOnly | 1 |
+| `create_document` | Title, optional markdown body | — | 1 |
+| `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1 |
+| `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
+| `list_suggestions` | Pending suggestions with handles and authors | readOnly | 1 |
+| `review_suggestion` | accept / reject (preview) | — | 1 |
+| `list_comments` | Full threads: replies, resolved, quoted text, handles | readOnly | 2 |
+| `add_comment` | Anchored to a Target | — | 2 |
+| `reply_comment` | Reply, resolve, reopen | — | 2 |
+| `delete_comment` | Gated | destructive | 2 |
+| `list_revisions`, `diff_revisions` | History | readOnly | 2 |
+| `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `style_cells`, `pin_header_rows` | — | 2 |
+| `insert_object` | image (URL), date/person/rich-link chips | — | 2 |
+| `manage_tabs` | `action: add \| rename \| move \| delete` (delete gated) | delete destructive | 2 |
+
+\* `edit_document` changes text by design; it is not gated. The write
+mode chosen by the person, the overwrite guard, `dry_run`, per-call
+approval in Claude Code and read-only mode are the safety layers. `replace_all` always carries
+explicit `tabsCriteria`.
+
+Results: read tools return a **markdown text block** plus a small
+object-typed `Out` (`revision_id`, `truncated`, `continue_from`); go-sdk
+v1.7.0 leaves `Content` alone in that case and fills
+`StructuredContent`. Write and metadata tools return typed `Out` only.
+
+## 10. Auth, enrolment, config, process model
+
+- **Google account and Cloud project.** Each deployer runs this server
+  under a Google Cloud project they own. The project may be shared with
+  other tools the deployer runs, but this server always gets its own
+  OAuth client so its tokens can be revoked independently. Setup,
+  documented in the README and verified by `doctor`: create or pick the
+  project; enable the Google
+  Docs API and Google Drive API; configure the OAuth consent screen
+  (**Internal** for a Workspace organisation, which avoids the 7-day
+  token expiry; **External + Testing** with the user added as a test user
+  for consumer accounts, with weekly `login`); add the four scopes; create
+  a **Desktop app** OAuth client; download its `client_secret.json`; run
+  `google-docs-mcp login --client-secret <path>`.
+- **Developer Preview enrolment** (for suggestion mode, anchored
+  comments, accept/reject; **decided: yes** for the maintainer's project;
+  every other deployer enrols their own). Per Google's programme page:
+  apply with the application form linked from
+  https://developers.google.com/workspace/preview, providing "your Google
+  Workspace account and Google Cloud project information"; access is
+  granted "through your Google Cloud project(s)" and by adding the
+  account to a programme Google Group; "the whole process should be done
+  within a couple of days"; the programme "provides access to all the
+  features", not per feature. The terms allow use inside the enrolling
+  organisation and forbid granting "end users access, outside my domain
+  or company" to applications built on pre-GA APIs. Publishing this
+  server's source is not that; anyone else would need their own enrolled
+  project, and the README must say so.
+- **OAuth flow**: Google's documented desktop flow, loopback
+  `127.0.0.1:<random port>` with PKCE (OOB has been blocked since 2023).
+- **Refresh token storage**, in the order `gh` uses: OS keyring; on error
+  (no session bus, no secret service, headless) a 0600 file under
+  `os.UserConfigDir()/google-docs-mcp/` with a stderr warning;
+  `GDOCS_REFRESH_TOKEN` env overrides both. Backends: Secret Service on
+  Linux, Keychain on macOS, Credential Manager on Windows.
+- Scope sets: `full` = `documents` + `drive`; `readonly` =
+  `documents.readonly` + `drive.readonly`. A missing-scope 403 becomes
+  `[forbidden] missing scope …; re-run google-docs-mcp login`.
+- **Config**: `GDOCS_*` env is the source of truth; each setting also has
+  a flag bound to the same name. Settings: `GDOCS_LOG_LEVEL`,
+  `GDOCS_LOG_FORMAT`, `GDOCS_PREVIEW`, `GDOCS_DEFAULT_WRITE_MODE`
+  (`suggest` | `direct` | `comment`; if set to `suggest` without preview
+  the server refuses to start rather than downgrade), `GDOCS_READ_ONLY`,
+  `GDOCS_ENABLE_DESTRUCTIVE`, `GDOCS_EXPORT_DIR`, `GDOCS_HTTP_TIMEOUT`,
+  `GDOCS_PROFILE` (named config directory, so a person with two Google
+  accounts runs two server entries). Operational flags: `--version`,
+  `--dump-schemas`.
+- **Startup**: refresh the access token once (the scope-agnostic
+  credential check). On failure log to stderr and **keep serving**; every
+  tool then returns `[auth] … run google-docs-mcp login`. `doctor` does the
+  full interactive check: token age, consent type, scopes, preview
+  enrolment (a `documents.get` with `commentsViewMode` on a doc id you
+  pass), quota headroom.
+- **Transport**: stdio (**decided**).
+
+## 11. Reliability
+
+- Retries: reads retry on 429/5xx/network with exponential backoff and
+  jitter, cap 30 s, max 5, honouring `Retry-After`. `batchUpdate` retries
+  only on 429/503 received before any response bytes; an ambiguous
+  failure is `[ambiguous] the edit may have been applied; re-read`.
+- Rate limits: per-process token buckets (reads 4/s burst 20, writes
+  0.8/s burst 5).
+- Timeouts: per-call context from the MCP request; `GDOCS_HTTP_TIMEOUT`
+  default 60 s, 120 s for exports.
+- Caching: none for correctness; a 5-second coalescing cache keyed by
+  (docId, revisionId). Writes always re-fetch.
+- Logging: `slog` to stderr, text or JSON. Stdout carries only JSON-RPC.
+
+## 12. Confidentiality, security, safety
+
+**Nothing internal leaves the owner's machine or enters the repository**
+(**decided**).
+
+- The repository never contains organisation names, document ids or
+  URLs, account emails, Cloud project ids, OAuth client ids or secrets,
+  or content from real documents. There is no default project or client
+  baked in; the binary is useless until a deployer supplies their own.
+  The repository shares no code with other projects. Fixtures under `testdata/` are synthetic, generated
+  by a script from lorem text, never recorded from real documents.
+  gitleaks runs in pre-commit and CI, as in the sibling repos, with rules
+  for Google doc-id and client-id shapes added.
+- The server talks only to `*.googleapis.com`. No telemetry, no crash
+  reporting, no update checks.
+- Logs never contain document text, comment text, titles, or search
+  queries at `info`; at `debug` they are redacted to lengths and hashes.
+  Request ids and revision ids are logged; document ids are logged
+  truncated.
+- Exports are written only under `GDOCS_EXPORT_DIR`, path-cleaned, no
+  symlink following. Nothing else touches the filesystem except the
+  credential store and userconfig.
+- Destructive tools are not registered unless
+  `GDOCS_ENABLE_DESTRUCTIVE=1`; annotations are hints the client may not
+  trust (spec), which is why the gate is server-side.
+- The refresh token lives in the keyring or a 0600 file (warned); the
+  client secret file is user-owned and never logged. `logout` deletes and
+  revokes.
+- Regex search is Go `regexp` (RE2, linear time). Inputs are validated
+  before any API call; validation failures are tool errors
+  (`isError: true`), which the SDK produces from a returned `error`. The
+  `[class]` prefix is our convention; the actionable message is what the
+  guidance asks for.
+
+## 13. Distribution and setup
+
+The server is published for other people to run against their own Google
+accounts. That sets these requirements:
+
+- **Artifacts.** goreleaser builds for linux, macOS and Windows on amd64
+  and arm64, with checksums; `go install
+  github.com/mmedum/google-docs-mcp/cmd/google-docs-mcp@latest` as the
+  second path. A Docker image is not a v1 target: the loopback OAuth flow
+  and the keyring both assume the user's desktop. Homebrew tap later.
+- **Client configuration** documented for Claude Code (`claude mcp add
+  --transport stdio google-docs -e GDOCS_… -- google-docs-mcp`), Claude
+  Desktop (`claude_desktop_config.json`) and Cursor (`mcp.json`). All
+  three pass only `command`, `args` and `env`, which is why config is
+  env-first.
+- **Setup guide** in the README, per-deployer, in the order `doctor`
+  checks it: Cloud project → APIs → consent screen (Internal vs Testing)
+  → Desktop OAuth client → `login` → `doctor`. Preview enrolment is a
+  separate, optional section that states the programme terms: use inside
+  your own organisation only, enrol your own project.
+- **Versioning.** Semantic versions; `CHANGELOG.md` in Keep a Changelog
+  form; the schema-dump diff in CI classifies tool removals, renames, and
+  required-field additions as breaking (major after 1.0, minor before).
+- **Documentation set.** README (setup, tool catalogue, safety model),
+  `docs/architecture.md` (this file), `docs/configuration.md`,
+  `docs/security.md` (threat model, scopes, what is stored where),
+  `CONTRIBUTING.md`, `SECURITY.md` (reporting), `CHANGELOG.md`. Licence:
+  Apache-2.0 (already in the repository).
+- **Support matrix.** Keyring backends per platform with the file
+  fallback; `os.UserConfigDir()` paths; Windows paths in export-dir
+  handling; CI runs the unit suite on all three platforms.
+- **Nothing deployer-specific ships.** No client id, no project id, no
+  account, no document ids, no telemetry endpoint (§12).
+
+## 14. Testing
+
+- **Unit, table-driven, no network**: parser on synthetic fixtures
+  (multi-tab, tables, nested lists, headers/footnotes, suggestions,
+  emoji/surrogate pairs, combining marks, empty paragraphs); index-math
+  property tests; minimal-diff tests (unchanged spans keep their
+  offsets); overwrite-guard tests; renderer and planner golden files;
+  markdown fragment tests per construct plus the refusal list; text
+  normalisation cases.
+- **Schema-dump gate**: `--dump-schemas` via an in-memory client
+  session; CI diffs against the previous tag.
+- **Integration** (`//go:build integration`, `GDOCS_TEST_FOLDER_ID` in a
+  scratch folder, never a real working document): creates a document per
+  test, applies ops, reads back, asserts, trashes. Includes the preview
+  checks (suggest mode visible in the UI, anchored comments), run
+  manually until enrolment exists in CI.
+- **Stdio smoke**: initialise, list tools, `get_document` on a scratch id.
+- **Agent evals** (Phase 3): 10–15 tasks through Claude Code headless
+  against the scratch folder, scored on end-state. Measures markdown vs
+  text output, handle defaults, and naming style.
+
+## 15. Confirmed decisions and their consequences
+
+| Decision | Consequence in the design |
+|---|---|
+| Deployer-owned Cloud project (may be shared with other tools) with a dedicated OAuth client; the repository is isolated and distributed for other people | §10, §13; setup guide covers Workspace (Internal) and consumer (Testing) accounts; no baked-in identifiers |
+| Enrol in Developer Preview | Spike A first; `mode: suggest` default; anchored comments; accept/reject |
+| Edits happen live in shared documents; never overwrite; full history | Minimal-diff replace, overwrite guard, history tools in Phase 2, comment threads complete by default |
+| The person chooses how changes land: suggestion, direct edit, or comment | `mode` on every write with a configured default; `comment` mode works without preview; no silent downgrades |
+| Paragraph handles: short labels remembered by the server (option A) | `p12`-style handles with per-document handle memory (§6) |
+| Markdown for new content only; existing content edited in place | `with_styles` reads, format ops, no whole-document round trips |
+| One document, every capability; no folder/move/share/trash/copy | Tool table trimmed; `search_documents` is locate-only |
+| Stdio only | No HTTP auth design |
+| Nothing internal in the repo or in logs | §12 |
+
+## 16. Delivery phases
+
+Each phase ends in a tagged release and waits for an explicit "go".
+
+**Phase 0 — skeleton and spikes (v0.0.1).** Scaffolding and gates
+(Makefile, golangci, govulncheck, go-licenses, gitleaks, goreleaser, CI).
+`login/logout/status/doctor`, raw client, parser, renderer,
+`get_document`, `get_outline`, `read_document`. Spikes:
+
+- **A. Preview**: done 2026-09-03 (see §18). Suggestion mode, anchored
+  comments, the comments view and reject all work, and the owner
+  confirmed in the Docs UI that the suggestion shows as a tracked change
+  and the comment is pinned to its sentence.
+- **B. Index math and minimal diff**: golden set for emoji, nested
+  bullets, tables, footnotes; hunk-level replace keeps comment anchors.
+- **C. Markdown fidelity**: whether Drive `files.create` converts
+  `text/markdown` (the upload guide says yes, the import table doesn't
+  list it), and a construct matrix for `create_document`.
+
+**Phase 1 — core editing (v0.1.0).** `edit_document` with minimal diff,
+the guard and all three modes (`comment` via the Drive backend until
+preview lands), `format_document`, `find_in_document`,
+`search_documents`, `create_document`, `export_document`,
+`list_suggestions`, `review_suggestion`; revision guard, dry run, suggest
+mode if A passed.
+
+**Phase 2 — collaboration, history, structure (v0.2.0).** Comments
+(both backends), revisions and diff, tables, tabs,
+headers/footers/footnotes, images and chips.
+
+**Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Agent evals, resources
+(`gdocs://<id>`), performance on large documents.
+
+## 17. Open decisions
+
+None. Everything in §15 is decided; the next step is Phase 0 (§16), which
+begins only on an explicit go.
+
+## 18. Evidence log: conventions checked, changed, or rejected
+
+Verified 2026-09-02/03 against primary sources. "Inherited" means the
+convention was carried over from the author's earlier MCP servers and was
+checked rather than assumed.
+
+| Convention | Verdict | Effect |
+|---|---|---|
+| Exact-text targets (Anthropic text editor tool; Claude Code Edit; Notion MCP `update_content`; Aider: removing line numbers took GPT-4 Turbo from 20% to 61%; OpenAI `apply_patch`) | Confirmed | `text` is the primary target; normalisation added (SWE-Edit brittleness). |
+| Google `headingId` is stable | Confirmed (Docs API reference) | Sections by `heading_id`. |
+| Inserted text inherits the preceding text's style; newline copies paragraph style incl. bullets | Confirmed (InsertTextRequest reference) | Minimal-diff replace is safe for formatting. |
+| Fingerprinted block handles | No evidence; Anthropic advises against cryptic ids | Plain ordinals + server memory; open in §17. |
+| Per-block handle prefix on every read | Confirmed costly (≈ +27% tokens for `[b12-7f3a] `, ≈ +15% for `[p12] `) | Opt-in. |
+| Markdown in/out | Mixed (Anthropic: measure it; Google added md export for this use) | Markdown for new content; in-place ops for existing; evaluated in Phase 3. |
+| CriticMarkup for suggestions | Confirmed convention (MultiMarkdown-6); used by the adeu docx MCP | Kept. |
+| Preview programme terms | Confirmed (programme FAQ) | In-organisation use allowed; README states others need their own enrolment. |
+| Preview features work as documented (spike A, 2026-09-03, live against a scratch document in an enrolled project) | Confirmed: `commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED` accepted; `writeMode: SUGGEST` returns `suggestionResponses[].createdSuggestionIds` and the inline view carries the id on the run; `insertComment` with a `range` returns a `commentThread`; `rejectSuggestion` removes the suggestion. Response shapes differ from the reference page: a comment thread has `commentId`, `anchorId`, `headPost{postId, content, contentHtml, author{displayName, me, user}, createTime, updateTime, commentAction}`, `status` (OPEN) and `plainTextQuote`, with **no range**; a suggestion thread has `suggestionId`, `headPost`, `status`, `summaryText` ("Add: …") and `summaryHtml`, also without a range. | Phase 2 maps comments to blocks by `plainTextQuote` (plus `anchorId` when the UI exposes it) and maps suggestions to ranges through the inline run ids, not through the thread objects. The `comments`/`suggestions` keys are absent until one exists. |
+| Keyring with env-only fallback (inherited) | Refuted as precedent: `gh` falls back to a 0600 file; `gcloud` uses plaintext files; go-keyring has no fallback | Keyring → file (warned) → env. |
+| Loopback + PKCE OAuth (inherited) | Confirmed (Google native-app guide; OOB blocked since 2023-01-31) | Kept. |
+| 7-day refresh tokens only for sensitive scopes (my claim) | Refuted: any External app in Testing | Internal consent screen. |
+| Env-only configuration (inherited) | Mixed: all three clients pass only `env`; github-mcp-server binds flags and env | Env source of truth plus bound flags. |
+| Server-side read-only mode and destructive gating (inherited) | Confirmed (github-mcp-server; spec: annotations untrusted) | Kept; `requiresUserInteraction` on gated tools. |
+| snake_case verb_noun names (inherited) | Mixed: spec allows more; GitHub mixes styles; Anthropic says measure | Kept; dots banned; measured in evals. |
+| `[class] message` errors (inherited) | Project choice; spec requires only `isError` | Kept as convention. |
+| Parallel tool registry for `--dump-schemas` (inherited) | Refuted as necessary: in-memory client session lists wire schemas | Dropped. |
+| go-sdk leaves `Content` alone with an object `Out` | Confirmed in `mcp/server.go` v1.7.0 | Reads return markdown + small structured `Out`. |
+| Exit on failed startup probe (inherited) | No guidance; GitHub server doesn't probe; Claude Code shows "failed to connect" and the model never sees why | Keep serving with `[auth]` errors; `doctor` for humans. |
+| `cmd/` + `internal/`, no `pkg/` (inherited) | Confirmed (go.dev; Russ Cox) | Kept. |
+| `dry_run` on write tools (inherited) | Mixed: community precedent; not a substitute for client approval | Kept; safety rests on guard, gating, approval. |

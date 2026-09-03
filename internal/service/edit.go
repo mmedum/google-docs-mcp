@@ -29,6 +29,8 @@ type EditOp struct {
 	Content       string
 	ContentFormat string // markdown (default) or text
 	plan.Params
+	Table  *TableOp
+	Object *plan.ObjectParams
 }
 
 // EditRequest is a write call.
@@ -122,6 +124,9 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 		return result, err
 	}
 	result.Applied = len(req.Ops)
+	if mode != plan.ModeComment {
+		s.fillNewTables(ctx, req, ro, result)
+	}
 	after, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
 		result.Warnings = append(result.Warnings, "applied, but re-reading the document failed: "+err.Error())
@@ -143,8 +148,12 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 	}
 	planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})
 	if err != nil {
-		if errors.Is(err, plan.ErrBlocked) {
+		var unsupported *markdown.UnsupportedError
+		switch {
+		case errors.Is(err, plan.ErrBlocked):
 			return nil, nil, &Error{Class: "blocked", Message: strings.TrimPrefix(err.Error(), "blocked: "), Err: err}
+		case errors.As(err, &unsupported):
+			return nil, nil, &Error{Class: "unsupported", Message: err.Error(), Err: err}
 		}
 		return nil, nil, Errorf("invalid", "%v", err)
 	}
@@ -189,7 +198,7 @@ func (s *Service) mode(m string) (plan.Mode, error) {
 func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode plan.Mode) (*resolvedOps, error) {
 	out := &resolvedOps{}
 	for _, op := range ops {
-		if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
+		if deletesContent(op.Kind) {
 			threads, err := s.comments(ctx, f)
 			if err != nil {
 				s.log.WarnContext(ctx, "comment lookup failed; guard cannot see comment anchors", "err", err)
@@ -199,6 +208,14 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		}
 	}
 	for i, op := range ops {
+		if op.Kind == plan.OpSetCells {
+			expanded, err := s.expandSetCells(f, i, op, out)
+			if err != nil {
+				return nil, Errorf(classOf(err), "op %d: %s", i, messageOf(err))
+			}
+			out.ops = append(out.ops, expanded...)
+			continue
+		}
 		p := plan.Op{Seq: i, Kind: op.Kind, Params: op.Params}
 		if op.Content != "" || needsContent(op.Kind) {
 			frag, err := parseContent(op.Content, op.ContentFormat)
@@ -209,7 +226,7 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		}
 		var err error
 		switch op.Kind {
-		case plan.OpInsert, plan.OpPageBreak, plan.OpFootnote, plan.OpAppend:
+		case plan.OpInsert, plan.OpPageBreak, plan.OpFootnote, plan.OpAppend, plan.OpInsertObject:
 			err = s.resolveInsertOp(f, op, &p, out)
 		case plan.OpReplace, plan.OpDelete, plan.OpTextStyle, plan.OpParagraphStyle, plan.OpBullets, plan.OpClearFormatting:
 			err = s.resolveTargetOp(f, op, &p, out)
@@ -217,8 +234,16 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 			err = s.resolveReplaceAll(f, op, &p, mode)
 		case plan.OpCreateHeader, plan.OpCreateFooter:
 			err = resolveCreateSegment(f, op, &p)
+		case plan.OpDeleteHeader, plan.OpDeleteFooter:
+			err = s.resolveDeleteSegment(f, op, &p, out)
+		case plan.OpInsertTable:
+			err = s.resolveInsertTable(f, op, &p, out)
 		default:
-			err = Errorf("invalid", "unknown kind %q", op.Kind)
+			if plan.IsTableOp(op.Kind) {
+				err = s.resolveTableOp(f, op, &p, out)
+			} else {
+				err = Errorf("invalid", "unknown kind %q", op.Kind)
+			}
 		}
 		if err != nil {
 			return nil, Errorf(classOf(err), "op %d: %s", i, messageOf(err))
@@ -226,6 +251,37 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		out.ops = append(out.ops, p)
 	}
 	return out, nil
+}
+
+// resolveDeleteSegment names the header or footer to remove and lists
+// what it holds so the guard can refuse a direct deletion.
+func (s *Service) resolveDeleteSegment(f *Fetched, op EditOp, p *plan.Op, out *resolvedOps) error {
+	var t Target
+	if op.Target != nil {
+		t = *op.Target
+	}
+	kind := strings.TrimPrefix(string(op.Kind), "delete_")
+	if t.Segment == "" {
+		t.Segment = kind
+	}
+	tab, seg, err := tabSegment(f.Doc, t.Tab, t.Segment)
+	if err != nil {
+		return err
+	}
+	if string(seg.Kind) != kind {
+		return Errorf("invalid", "%s is a %s, not a %s", seg.Label(), seg.Kind, kind)
+	}
+	p.Seg = SegmentBounds(tab, tab.Body)
+	p.SegmentRef = seg.ID
+	p.Description = fmt.Sprintf("%s of tab %d", seg.Label(), tab.Number)
+	p.Anchors = anchorsIn(tab, seg, 0, seg.End(), out.threads)
+	for _, blk := range tab.Body.Blocks {
+		if blk.Kind == doc.KindParagraph {
+			p.CommentAnchor = blockRng(tab, tab.Body, blk)
+			break
+		}
+	}
+	return nil
 }
 
 func (s *Service) resolveInsertOp(f *Fetched, op EditOp, p *plan.Op, out *resolvedOps) error {
@@ -247,6 +303,17 @@ func (s *Service) resolveInsertOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	p.AtEnd, p.Inline, p.NearBullet = ip.atEnd, ip.inline, ip.nearBullet
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
+	if op.Kind == plan.OpInsertObject {
+		if op.Object == nil {
+			return Errorf("invalid", "insert_object needs an object")
+		}
+		p.Object = *op.Object
+		if tab, ok := f.Doc.Tab(ip.seg.TabID); ok {
+			if seg := segmentByID(tab, ip.seg.ID); seg != nil && seg.Kind == doc.SegmentFootnote && p.Object.Kind == "image" {
+				return Errorf("unsupported", "images cannot be inserted in footnotes")
+			}
+		}
+	}
 	out.note(ip.seg.TabID, ip.seg.ID, ip.index)
 	return nil
 }
@@ -318,6 +385,15 @@ func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {
 		}
 	}
 	return nil
+}
+
+// deletesContent lists the kinds the overwrite guard inspects.
+func deletesContent(k plan.OpKind) bool {
+	switch k {
+	case plan.OpDelete, plan.OpReplace, plan.OpSetCells, plan.OpDeleteRows, plan.OpDeleteColumns, plan.OpDeleteHeader, plan.OpDeleteFooter:
+		return true
+	}
+	return false
 }
 
 func needsContent(k plan.OpKind) bool {

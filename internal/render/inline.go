@@ -6,6 +6,7 @@ package render
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
@@ -22,6 +23,18 @@ type Options struct {
 	Suggestions bool
 	// MaxChars stops after the block that would cross the budget. 0 = no limit.
 	MaxChars int
+	// Marks are comment anchors to show as {>>c:<id><<} after the text
+	// they cover.
+	Marks []Mark
+}
+
+// Mark is a comment anchored to a range of one segment.
+type Mark struct {
+	TabID     string
+	SegmentID string
+	Start     int64
+	End       int64
+	ID        string
 }
 
 func (o Options) view() doc.View {
@@ -42,7 +55,7 @@ type span struct {
 func suggestionKey(ids []string) string { return strings.Join(ids, ",") }
 
 // inline renders a paragraph's runs as markdown inline content.
-func inline(p *doc.Paragraph, tab *doc.Tab, o Options, inTable bool) string {
+func inline(p *doc.Paragraph, seg *doc.Segment, o Options, inTable bool) string {
 	var spans []span
 	var b strings.Builder
 	flush := func() {
@@ -51,35 +64,65 @@ func inline(p *doc.Paragraph, tab *doc.Tab, o Options, inTable bool) string {
 		}
 		spans = nil
 	}
+	addText := func(text string, r *doc.Run) {
+		s := span{text: text, style: r.Style, inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted)}
+		if inTable {
+			s.text = strings.ReplaceAll(strings.ReplaceAll(s.text, "|", `\|`), "\n", "<br>")
+		}
+		if n := len(spans); n > 0 && spans[n-1].style == s.style && spans[n-1].inserted == s.inserted && spans[n-1].deleted == s.deleted {
+			spans[n-1].text += s.text
+		} else {
+			spans = append(spans, s)
+		}
+	}
+	marks := marksIn(o.Marks, seg, p)
 	for _, r := range p.Runs {
 		if !r.Visible(o.view()) {
 			continue
 		}
-		var s span
-		s.inserted, s.deleted = suggestionKey(r.Inserted), suggestionKey(r.Deleted)
-		switch r.Kind {
-		case doc.RunText:
-			s.text, s.style = strings.TrimSuffix(r.Text, "\n"), r.Style
-			if inTable {
-				s.text = strings.ReplaceAll(strings.ReplaceAll(s.text, "|", `\|`), "\n", "<br>")
+		if r.Kind == doc.RunText {
+			text := strings.TrimSuffix(r.Text, "\n")
+			// Split the run where comment ranges end so the marker lands
+			// right after the commented text.
+			pos := r.Start
+			for _, m := range marks {
+				if m.End <= pos || m.End > r.End {
+					continue
+				}
+				cut := min(doc.UTF16ToByte(text, m.End-r.Start), len(text))
+				addText(text[:cut], r)
+				flush()
+				b.WriteString("{>>c:" + m.ID + "<<}")
+				text, pos = text[cut:], m.End
 			}
-			if n := len(spans); n > 0 && spans[n-1].style == s.style && spans[n-1].inserted == s.inserted && spans[n-1].deleted == s.deleted {
-				spans[n-1].text += s.text
-			} else {
-				spans = append(spans, s)
-			}
+			addText(text, r)
 			continue
-		default:
-			s.text = objectText(r, tab)
-			if s.text == "" {
-				continue
-			}
+		}
+		s := span{text: objectText(r, seg.Tab), inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted)}
+		if s.text == "" {
+			continue
 		}
 		flush()
 		b.WriteString(markSuggestion(s.text, s.inserted, s.deleted, o))
 	}
 	flush()
 	return b.String()
+}
+
+// marksIn lists the marks ending inside the paragraph, in order.
+func marksIn(marks []Mark, seg *doc.Segment, p *doc.Paragraph) []Mark {
+	if len(marks) == 0 || len(p.Runs) == 0 {
+		return nil
+	}
+	start, end := p.Runs[0].Start, p.Runs[len(p.Runs)-1].End
+	var out []Mark
+	for _, m := range marks {
+		if m.SegmentID == seg.ID && m.TabID == seg.Tab.ID && m.End > start && m.End <= end {
+			out = append(out, m)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].End < out[j].End })
+	return out
 }
 
 // objectText renders a non-text run: chips, breaks, objects, references.

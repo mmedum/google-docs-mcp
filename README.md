@@ -11,10 +11,11 @@ Single static binary. Per-user OAuth against your own Google account, in
 your own Google Cloud project. Nothing leaves your machine except calls to
 Google's APIs.
 
-**Status: Phase 1.** Reading, searching, creating, exporting, editing
-with minimal diffs in suggest, direct or comment mode, formatting, and
-reviewing suggestions are in. Comments, tables, tabs, headers, footnotes,
-images and revision history follow in the phases described in
+**Status: Phase 2.** Reading, searching, creating, exporting, editing
+with minimal diffs in suggest, direct or comment mode, formatting,
+reviewing suggestions, comment threads, revision history and diffs,
+tables, tabs, headers, footers, footnotes, images and chips are in. Agent
+evals and resources follow in Phase 3 of
 [docs/architecture.md](docs/architecture.md).
 
 ## Why another Google Docs MCP
@@ -110,15 +111,28 @@ for the defaults.
 |---|---|
 | `get_document` | Title, tabs, revision id, owner, last change, counts, and this server's capabilities (available write modes, default). Cheap; call it first. |
 | `get_outline` | Heading tree per tab with stable `heading_id`s, block handles, and section sizes. |
-| `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Options show handles, styles, and pending suggestions as `{++inserted++}` / `{--deleted--}`. |
+| `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Options show handles, styles, pending suggestions as `{++inserted++}` / `{--deleted--}`, and comment markers `{>>c:id<<}`. |
 | `find_in_document` | Text or regex search returning handles, offsets and context. |
 | `search_documents` | Locate documents by title or content, owner, or modification date. |
 | `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
 | `create_document` | New document, optionally with markdown content. |
-| `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`. Targets are exact text, `heading_id`, handles or cells. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
+| `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`. Targets are exact text, `heading_id`, handles or cells. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. |
 | `list_suggestions` | Pending suggested edits with ids, text and handles. |
 | `review_suggestion` | Accept or reject suggestions by id or all (Developer Preview). |
+| `list_comments` | Comment threads with every reply, resolved and deleted state, quoted text and the block they sit on. |
+| `add_comment` | Comment on a passage (pinned with Developer Preview, quoted otherwise) or on the document. |
+| `reply_comment` | Reply to, resolve or reopen a thread. |
+| `list_revisions` | Version history: revision ids, times, authors. |
+| `diff_revisions` | Unified diff of Google's markdown or text export between two revisions. `read_document` reads an old `revision` whole. |
+| `edit_table` | `insert_table` (with a data grid), `set_cells` (minimal diff per cell), `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `pin_header_rows`. Same modes and guard as text edits. |
+| `insert_object` | Inline image from a public URL, person chip, rich-link chip, or date chip at a location. |
+| `manage_tabs` | Add (with content), rename, move or nest tabs. Always direct: the API cannot suggest tab changes. |
+
+Two more tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:
+`delete_comment` (a thread or one reply) and `delete_tab` (a tab with its
+content and child tabs). Both carry the destructive annotation and ask the
+client to involve the person.
 
 Documents are identified by id or any `docs.google.com` URL.
 
@@ -133,8 +147,10 @@ as markdown. A `replace` is applied as the smallest diff between the old
 and new text, so untouched words keep their formatting and anchored
 comments.
 
-Coming in later phases: comments (list, add, reply, resolve), tables,
-tabs, images and chips, revisions and diffs.
+Tables are named by handle (`tbl1`) and cells as `r2c3`; a table that
+gets a data grid is inserted empty and filled in a second batch once it
+exists. Old revisions are read and diffed through Google's export, so they
+have no handles.
 
 ## Safety model
 
@@ -148,8 +164,9 @@ tabs, images and chips, revisions and diffs.
 - Destructive tools (deleting comments or tabs) are not registered unless
   `GDOCS_ENABLE_DESTRUCTIVE=true`. `GDOCS_READ_ONLY=true` registers only
   read tools and requests read-only scopes.
-- The server talks only to `googleapis.com`. No telemetry. Logs (stderr)
-  never contain document text.
+- The server talks only to Google (`googleapis.com`, and `docs.google.com`
+  for the revision export links Google's API returns). No telemetry. Logs
+  (stderr) never contain document text.
 - Refresh tokens live in the OS keyring; `logout` revokes and deletes.
 
 See [docs/security.md](docs/security.md).

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
 	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 )
 
@@ -184,5 +185,30 @@ func TestSegmentLabelsAndText(t *testing.T) {
 	}
 	if _, ok := (&doc.Document{}).FindCell("x"); ok {
 		t.Fatal("FindCell on empty doc")
+	}
+}
+
+func TestMergedCells(t *testing.T) {
+	w := doctest.WireFixture(t)
+	for _, se := range w.Tabs[0].DocumentTab.Body.Content {
+		if se.Table != nil {
+			se.Table.TableRows[1].TableCells[0].TableCellStyle = &gdocs.TableCellStyle{ColumnSpan: 2}
+		}
+	}
+	parsed, err := doc.Parse(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *doc.Table
+	for _, b := range parsed.Tabs[0].Body.Blocks {
+		if b.Table != nil {
+			got = b.Table
+		}
+	}
+	if got.Cells[1][1].MergedInto != got.Cells[1][0] || got.Cells[1][0].MergedInto != nil || got.Cells[0][1].MergedInto != nil {
+		t.Fatalf("merge marks: %+v", got.Cells[1])
+	}
+	if text := parsed.Tabs[0].Body.Blocks[11].Text(doc.ViewInline); text != "Name\tValue\nAlpha" {
+		t.Fatalf("text skips covered cells: %q", text)
 	}
 }

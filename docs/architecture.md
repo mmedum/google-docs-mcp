@@ -1,11 +1,13 @@
 # Architecture — google-docs-mcp
 
-**Status:** v0.6 (2026-09-03). All design decisions are resolved (§17).
-Phases 0 and 1 are implemented: auth, raw client, model, renderer, reads,
-search, create, export, editing with minimal diffs in all three modes,
-formatting, and suggestion review; §16 lists what later phases add. Every
-convention here was checked against primary sources; §18 lists what was
-confirmed, refuted, and changed.
+**Status:** v0.7 (2026-09-03). All design decisions are resolved (§17).
+Phases 0, 1 and 2 are implemented: auth, raw client, model, renderer,
+reads, search, create, export, editing with minimal diffs in all three
+modes, formatting, suggestion review, comment threads on both backends,
+revision history and diffs, tables, tabs, headers, footers, footnotes,
+images and chips; §16 lists what Phase 3 adds. Every convention here was
+checked against primary sources; §18 lists what was confirmed, refuted,
+and changed.
 
 ## 1. Mission and scope
 
@@ -342,14 +344,19 @@ bullet presets, clearing formatting.
 
 | | Preview (Docs API) | GA (Drive API v3) |
 |---|---|---|
-| list | `documents.get` with `commentsViewMode` → threads with real `Range` → handles | `comments.list` (replies, resolved state, `includeDeleted` opt-in) → `quotedFileContent`; server matches the quote to a block, best effort |
+| list | `documents.get` with `commentsViewMode` → threads plus the tab's `commentAnchors` map (anchor id → ranges) → handles | `comments.list` (replies, resolved state, `includeDeleted` opt-in) → `quotedFileContent`; server matches the quote to a block, best effort |
 | add | `insertComment` with a Range → anchored in the UI | `comments.create` with `quotedFileContent` → **unanchored** in the UI (stated in the description and in `warnings`) |
-| reply / resolve / reopen | `addCommentReply` with `commentAction` | `replies.create` with `action` |
-| delete | gated | gated |
+| reply / resolve / reopen | `replies.create` with `action` (GA works for every deployment; the preview's `addCommentReply` adds nothing for replies) | `replies.create` with `action` |
+| delete | gated, `comments.delete` / `replies.delete` | gated |
 
-`list_comments` always returns the full thread history: every reply with
-author and time, resolved threads included by default, deleted ones on
-request. Resolution is reversible (`reopen`); deletion is gated.
+`list_comments` always lists through the Drive API, which carries every
+reply with author, time and action, resolved and deleted state for every
+deployment, and locates each thread through the preview anchors when the
+fetch carried them, else by its quoted text (a quote that matches once).
+Resolved threads are included by default, deleted ones on request.
+Resolution is reversible (`reopen`); deletion is gated. The guard, reads
+with `include_comments` and the listing share one located thread list
+per fetch.
 
 **Suggestions.** `list_suggestions` renders pending insert/delete/style
 suggestions with author and handles (GA). `review_suggestion`
@@ -360,13 +367,18 @@ preview. In SUGGEST mode the API refuses `AddDocumentTab`,
 and cannot suggest document-format or header/footer settings; the planner
 rejects those ops up front with the reason.
 
-**Revisions.** `list_revisions` (Drive: id, time, last modifying user);
-`diff_revisions` exports `text/markdown` at two revisions
-(`files.download` with `revisionId`) and returns a unified diff, budgeted.
-`read_document` accepts `revision_id` for a markdown view of an old
-revision (export path; no handles). Google keeps version history
-automatically for every batch the server sends; restoring an old revision
-is an explicit `replace` of the body from an export, never implicit.
+**Revisions.** `list_revisions` (Drive: id, time, last modifying user;
+Drive may omit older revisions of busy documents); `diff_revisions`
+exports `text/markdown` or `text/plain` at two revisions through
+`files.download` with `revisionId` (a long-running operation whose
+content URL must stay on a Google host; `files.export` takes no revision)
+and returns a line-level unified diff, budgeted at hunk boundaries.
+`read_document` accepts `revision` for a markdown or text view of an old
+revision (export path; no handles, no scoping). Drive revision ids are a
+different id space from the Docs `revision_id` concurrency token; the tool
+descriptions say so. Google keeps version history automatically for every
+batch the server sends; restoring an old revision is an explicit `replace`
+of the body from an export, never implicit.
 
 ## 9. Tool surface
 
@@ -384,18 +396,19 @@ registers only readOnly rows and requests readonly scopes.
 | `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
 | `export_document` | pdf/docx/md/html/txt | readOnly | 1 |
 | `create_document` | Title, optional markdown body | — | 1 |
-| `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1 |
+| `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2 |
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
 | `list_suggestions` | Pending suggestions with handles and authors | readOnly | 1 |
 | `review_suggestion` | accept / reject (preview) | — | 1 |
-| `list_comments` | Full threads: replies, resolved, quoted text, handles | readOnly | 2 |
-| `add_comment` | Anchored to a Target | — | 2 |
-| `reply_comment` | Reply, resolve, reopen | — | 2 |
-| `delete_comment` | Gated | destructive | 2 |
-| `list_revisions`, `diff_revisions` | History | readOnly | 2 |
-| `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `style_cells`, `pin_header_rows` | — | 2 |
-| `insert_object` | image (URL), date/person/rich-link chips | — | 2 |
-| `manage_tabs` | `action: add \| rename \| move \| delete` (delete gated) | delete destructive | 2 |
+| `list_comments` | Full threads: replies, resolved, deleted, quoted text, handles | readOnly | 2 |
+| `add_comment` | Anchored to a Target (preview) or quoted (Drive); no target = document-level | — | 2 |
+| `reply_comment` | `action: reply \| resolve \| reopen` | — | 2 |
+| `delete_comment` | Gated; a thread or one reply | destructive | 2 |
+| `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
+| `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `pin_header_rows`; one grid change per table per call | — | 2 |
+| `insert_object` | `kind: image \| person \| rich_link \| date` at a Location | — | 2 |
+| `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | — | 2 |
+| `delete_tab` | Gated; child tabs go with it | destructive | 2 |
 
 \* `edit_document` changes text by design; it is not gated. The write
 mode chosen by the person, the overwrite guard, `dry_run`, per-call
@@ -489,8 +502,10 @@ v1.7.0 leaves `Content` alone in that case and fills
   by a script from lorem text, never recorded from real documents.
   gitleaks runs in pre-commit and CI, as in the sibling repos, with rules
   for Google doc-id and client-id shapes added.
-- The server talks only to `*.googleapis.com`. No telemetry, no crash
-  reporting, no update checks.
+- The server talks only to Google: `*.googleapis.com`, plus the
+  `docs.google.com` export URL that `files.download` hands back for an
+  old revision (checked against an allowlist before credentials are
+  sent). No telemetry, no crash reporting, no update checks.
 - Logs never contain document text, comment text, titles, or search
   queries at `info`; at `debug` they are redacted to lengths and hashes.
   Request ids and revision ids are logged; document ids are logged
@@ -605,9 +620,11 @@ preview lands), `format_document`, `find_in_document`,
 `list_suggestions`, `review_suggestion`; revision guard, dry run, suggest
 mode if A passed.
 
-**Phase 2 — collaboration, history, structure (v0.2.0).** Comments
-(both backends), revisions and diff, tables, tabs,
-headers/footers/footnotes, images and chips.
+**Phase 2 — collaboration, history, structure (v0.2.0).** Done
+2026-09-03: comments (both backends), revisions and diff, tables, tabs,
+headers/footers/footnotes, images and chips. A table inserted with data is
+filled in a second batch once it exists (found by the index the insertion
+named); the tab that `add` creates gets its content the same way.
 
 **Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Agent evals, resources
 (`gdocs://<id>`), performance on large documents.
@@ -620,17 +637,15 @@ begins only on an explicit go.
 ## 17a. Deferred cleanups
 
 Findings from the Phase 1 review that were judged right but too wide to
-apply before Phase 2, kept here so they are not forgotten:
+apply at once, kept here so they are not forgotten. Done in Phase 2: one
+block-range resolver (`resolveBlocks`) serves `ResolveScope` and
+`ResolveTarget`, so handles are validated against the last read on both
+paths; comment threads are located once per `Fetched` and shared by the
+guard, `read_document include_comments` and `list_comments`. Still open:
 
-- **One resolver for reads and writes.** `ResolveScope` (reads) and
-  `ResolveTarget` (writes) implement heading, heading-id, handle and
-  handle-range selection twice with different handle validation. Phase 2
-  adds cell and tab selectors; they go into a single block-range resolver
-  that both call.
-- **A per-fetch anchor index.** Comments are located by quoted text on
-  every edit and suggestions by re-scanning runs; `list_comments`,
-  `read_document include_comments` and `add_comment` need the same index.
-  Build it once per `Fetched` and share it with the guard and the renderer.
+- **Suggestion and object anchors per fetch.** `anchorsIn` still rescans
+  runs per range; an index built at parse time would serve it,
+  `list_suggestions` and `Stats` alike.
 - **Raw view in the renderer.** The `raw` read format lives in the service
   with its own budget loop because `doc.Block` does not keep its wire
   element; keep the wire pointer on the block and move it to `render`.
@@ -673,3 +688,13 @@ checked rather than assumed.
 | Exit on failed startup probe (inherited) | No guidance; GitHub server doesn't probe; Claude Code shows "failed to connect" and the model never sees why | Keep serving with `[auth]` errors; `doctor` for humans. |
 | `cmd/` + `internal/`, no `pkg/` (inherited) | Confirmed (go.dev; Russ Cox) | Kept. |
 | `dry_run` on write tools (inherited) | Mixed: community precedent; not a substitute for client approval | Kept; safety rests on guard, gating, approval. |
+| Smart chips cannot be inserted through the API (my assumption) | Refuted (Request reference, 2026-07-07): `insertPerson`, `insertRichLink`, `insertDate` are GA members of the request union | `insert_object` covers images and all three chip kinds. |
+| `tabId` sits inside `Location`, `Range` and `TableCellLocation` (my assumption) | Mostly confirmed: `TableCellLocation` has none, the tab rides on `tableStartLocation`; `deleteHeader`/`deleteFooter`/`deletePositionedObject` take a top-level `tabId` | Builders match; `CellLoc` carries the table location. |
+| `insertTable` leaves an empty paragraph before the table (my assumption) | Refuted: a newline is inserted at the index and the table starts at index + 1, so a mid-paragraph index splits the paragraph | Block-boundary insertions use the previous paragraph's last index so the table follows the block; the leftover newline becomes the paragraph after the table. |
+| Preview comment threads carry no range (spike A) | Refined: the range lives in `DocumentTab.commentAnchors[anchorId].ranges` | Threads are located through the anchor map first, quoted text second. |
+| Reply, resolve and reopen through the preview (`addCommentReply`, `commentAction`) | Confirmed to exist, but `replies.create` with `action: resolve \| reopen` is GA and serves every deployment | One Drive path for thread operations; the preview is used only where it adds anchoring. |
+| Drive comment anchors written by third parties are positioned by the editor (a-bonus #134 hope) | Refuted (manage-comments guide: "Google Workspace editor apps treat these comments as un-anchored comments") | Drive-backend comments quote the text and say they are unanchored. |
+| An old revision can be exported with `files.export?revisionId` (my assumption) | Refuted: `files.export` takes only `mimeType`; `files.download` (POST, long-running operation) takes `revisionId` and `mimeType` for Docs | `ExportRevision` polls the operation and fetches the content URL, refusing non-Google hosts. |
+| `revisions.list` is complete for Docs (my assumption) | Refuted: "might be incomplete for files with a large revision history, including frequently edited Google Docs" | `list_revisions` says so in its output and description. |
+| `deleteTab` fails when the tab has children (my assumption) | Refuted: child tabs are deleted with it | `delete_tab` warns; a document keeps at least one tab. |
+| `comments.*` need the `fields` parameter (Drive guide) | Confirmed for comments (an omitted `fields` is an error); the replies pages list no parameters | Sent on every call. |

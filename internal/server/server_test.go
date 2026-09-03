@@ -21,9 +21,11 @@ import (
 const fixtureID = "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX"
 
 type fakeAPI struct {
-	raw     []byte
-	err     error
-	batches []*gapi.BatchUpdateRequest
+	raw      []byte
+	err      error
+	batches  []*gapi.BatchUpdateRequest
+	comments []*gapi.DriveComment
+	deleted  []string
 }
 
 func (f *fakeAPI) GetDocument(_ context.Context, id string, _ gapi.GetOptions) (*gapi.DocumentResult, error) {
@@ -70,7 +72,38 @@ func (f *fakeAPI) CreateComment(_ context.Context, fileID, content, quote string
 }
 
 func (f *fakeAPI) ListComments(_ context.Context, fileID string, includeDeleted bool) ([]*gapi.DriveComment, error) {
-	return nil, nil
+	return f.comments, nil
+}
+
+func (f *fakeAPI) GetComment(_ context.Context, fileID, commentID string) (*gapi.DriveComment, error) {
+	for _, c := range f.comments {
+		if c.ID == commentID {
+			return c, nil
+		}
+	}
+	return nil, &gapi.APIError{Status: 404, Message: "missing"}
+}
+
+func (f *fakeAPI) CreateReply(_ context.Context, fileID, commentID, content, action string) (*gapi.DriveReply, error) {
+	return &gapi.DriveReply{ID: "r1", Content: content, Action: action}, nil
+}
+
+func (f *fakeAPI) DeleteComment(_ context.Context, fileID, commentID string) error {
+	f.deleted = append(f.deleted, commentID)
+	return nil
+}
+
+func (f *fakeAPI) DeleteReply(_ context.Context, fileID, commentID, replyID string) error {
+	f.deleted = append(f.deleted, commentID+"/"+replyID)
+	return nil
+}
+
+func (f *fakeAPI) ListRevisions(_ context.Context, fileID string) ([]*gapi.Revision, error) {
+	return []*gapi.Revision{{ID: "1", ModifiedTime: "2026-09-01T00:00:00Z"}, {ID: "2", ModifiedTime: "2026-09-02T00:00:00Z"}}, nil
+}
+
+func (f *fakeAPI) ExportRevision(_ context.Context, fileID, revisionID, mimeType string) ([]byte, error) {
+	return []byte("# exported\n\nold line\n"), nil
 }
 
 func connect(t *testing.T, api *fakeAPI) *mcp.ClientSession {
@@ -80,7 +113,7 @@ func connect(t *testing.T, api *fakeAPI) *mcp.ClientSession {
 
 func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSession {
 	t.Helper()
-	svc := service.New(api, service.Options{Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
+	svc := service.New(api, service.Options{Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Version: "test"})
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()
@@ -122,7 +155,8 @@ func TestListToolsAndSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	readTools := map[string]bool{"get_document": true, "get_outline": true, "read_document": true, "find_in_document": true, "search_documents": true, "export_document": true, "list_suggestions": true}
+	readTools := map[string]bool{"get_document": true, "get_outline": true, "read_document": true, "find_in_document": true, "search_documents": true, "export_document": true, "list_suggestions": true,
+		"list_comments": true, "list_revisions": true, "diff_revisions": true}
 	var names []string
 	for _, tool := range res.Tools {
 		names = append(names, tool.Name)
@@ -144,9 +178,30 @@ func TestListToolsAndSchemas(t *testing.T) {
 			t.Errorf("%s schema uses a union or reference", tool.Name)
 		}
 	}
-	want := "create_document,edit_document,export_document,find_in_document,format_document,get_document,get_outline,list_suggestions,read_document,review_suggestion,search_documents"
+	want := "add_comment,create_document,diff_revisions,edit_document,edit_table,export_document,find_in_document,format_document,get_document,get_outline,insert_object,list_comments,list_revisions,list_suggestions,manage_tabs,read_document,reply_comment,review_suggestion,search_documents"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("tools = %v", names)
+	}
+	if strings.Contains(want, "delete_") {
+		t.Fatal("destructive tools must not register by default")
+	}
+	// Destructive tools register only with the flag, carrying the interaction hint.
+	ds := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{EnableDestructive: true, DefaultWriteMode: config.WriteDirect})
+	dres, err := ds.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, tool := range dres.Tools {
+		if tool.Name == "delete_comment" || tool.Name == "delete_tab" {
+			found[tool.Name] = true
+			if tool.Annotations == nil || tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint || tool.Meta["anthropic/requiresUserInteraction"] != true {
+				t.Errorf("%s annotations = %+v meta = %v", tool.Name, tool.Annotations, tool.Meta)
+			}
+		}
+	}
+	if len(found) != 2 || len(dres.Tools) != len(res.Tools)+2 {
+		t.Fatalf("destructive tools = %v (%d tools)", found, len(dres.Tools))
 	}
 	// Read-only servers register only the read tools.
 	ro := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{ReadOnly: true, DefaultWriteMode: config.WriteDirect})
@@ -333,10 +388,99 @@ func TestDumpSchemas(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 11 || out.Tools[0].Name != "create_document" {
+	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 19 || out.Tools[0].Name != "add_comment" {
 		t.Fatalf("dump = %+v", out)
 	}
 	if !errors.Is(context.Canceled, context.Canceled) {
 		t.Fatal("sanity")
+	}
+}
+
+func TestCommentAndHistoryTools(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t), comments: []*gapi.DriveComment{
+		{ID: "c1", Content: "Check this", Author: &gapi.User{DisplayName: "Ann"}, QuotedFileContent: &gapi.QuotedText{Value: "Second point"},
+			Replies: []*gapi.DriveReply{{ID: "r1", Content: "ok", Author: &gapi.User{DisplayName: "Bob"}, Action: "resolve"}}, Resolved: true},
+	}}
+	cs := connectWith(t, api, config.Config{EnableDestructive: true, DefaultWriteMode: config.WriteDirect})
+	res := call(t, cs, "list_comments", map[string]any{"document": fixtureID})
+	if res.IsError || !strings.Contains(textOf(res), "c1 [p7] by Ann [resolved] on “Second point”: Check this") || !strings.Contains(textOf(res), "↳ Bob resolved: ok") {
+		t.Fatalf("list_comments: %q", textOf(res))
+	}
+	res = call(t, cs, "list_comments", map[string]any{"document": fixtureID, "hide_resolved": true})
+	if res.IsError || !strings.HasPrefix(textOf(res), "0 comment thread(s) shown (0 open, 1 resolved)") {
+		t.Fatalf("hide_resolved: %q", textOf(res))
+	}
+	res = call(t, cs, "add_comment", map[string]any{"document": fixtureID, "target": map[string]any{"text": "First point"}, "content": "Why?"})
+	if res.IsError || !strings.Contains(textOf(res), "comment dc1 posted on p5") || !strings.Contains(textOf(res), "unanchored") {
+		t.Fatalf("add_comment: %q", textOf(res))
+	}
+	res = call(t, cs, "reply_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "action": "reopen"})
+	if res.IsError || textOf(res) != "reopened comment c1" {
+		t.Fatalf("reply_comment: %q", textOf(res))
+	}
+	res = call(t, cs, "reply_comment", map[string]any{"document": fixtureID, "comment_id": "c1"})
+	if !res.IsError || !strings.HasPrefix(textOf(res), "[invalid]") {
+		t.Fatalf("reply without content: %q", textOf(res))
+	}
+	res = call(t, cs, "delete_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "reply_id": "r1"})
+	if res.IsError || textOf(res) != "deleted reply r1 of comment c1" || len(api.deleted) != 1 || api.deleted[0] != "c1/r1" {
+		t.Fatalf("delete_comment: %q %v", textOf(res), api.deleted)
+	}
+	res = call(t, cs, "list_revisions", map[string]any{"document": fixtureID, "limit": 1})
+	if res.IsError || !strings.Contains(textOf(res), "2 revision(s), newest first, showing 1") || !strings.Contains(textOf(res), "- 2 at 2026-09-02") {
+		t.Fatalf("list_revisions: %q", textOf(res))
+	}
+	res = call(t, cs, "diff_revisions", map[string]any{"document": fixtureID, "from": "1"})
+	if res.IsError || !strings.Contains(textOf(res), "revision 1 → current (md)") || !strings.Contains(textOf(res), "-old line") {
+		t.Fatalf("diff_revisions: %q", textOf(res))
+	}
+	res = call(t, cs, "read_document", map[string]any{"document": fixtureID, "revision": "1", "max_chars": 12})
+	if res.IsError || !strings.Contains(textOf(res), "revision 1 (md export; no handles)") || !strings.HasSuffix(textOf(res), "# exported\n\n") {
+		t.Fatalf("read at revision: %q", textOf(res))
+	}
+	// Without the flag the delete tool is unknown to the server.
+	plain := connect(t, &fakeAPI{raw: doctest.RawFixture(t)})
+	if _, err := plain.CallTool(context.Background(), &mcp.CallToolParams{Name: "delete_comment", Arguments: map[string]any{"document": fixtureID, "comment_id": "c1"}}); err == nil {
+		t.Fatal("delete_comment should not exist without the flag")
+	}
+}
+
+func TestStructureToolsEndToEnd(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t)}
+	cs := connectWith(t, api, config.Config{EnableDestructive: true, DefaultWriteMode: config.WriteDirect})
+	res := call(t, cs, "edit_table", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{
+		{"op": "insert_rows", "table": "tbl1", "row": 2, "count": 1},
+		{"op": "set_cells", "table": "tbl1", "cells": []map[string]any{{"cell": "r2c2", "content": "2"}}},
+	}})
+	if res.IsError || !strings.Contains(textOf(res), "op 0 insert_rows: tbl1 (2×2)") || !strings.Contains(textOf(res), "op 1 replace: 1 cell(s) of tbl1 (minimal diff)") || !strings.Contains(textOf(res), "insertTableRow") {
+		t.Fatalf("edit_table dry run: %q", textOf(res))
+	}
+	res = call(t, cs, "edit_table", map[string]any{"document": fixtureID, "ops": []map[string]any{{"op": "shuffle", "table": "tbl1"}}})
+	if !res.IsError || !strings.HasPrefix(textOf(res), "[invalid] op 0: unknown op") {
+		t.Fatalf("bad table op: %q", textOf(res))
+	}
+	res = call(t, cs, "insert_object", map[string]any{"document": fixtureID, "kind": "date", "date": "2026-09-03", "date_format": "iso", "location": map[string]any{"at": "after", "of": map[string]any{"text": "Step one"}}, "dry_run": true})
+	if res.IsError || !strings.Contains(textOf(res), "insertDate") || !strings.Contains(textOf(res), "2026-09-03T00:00:00Z") || !strings.Contains(textOf(res), "DATE_FORMAT_ISO8601") {
+		t.Fatalf("insert_object: %q", textOf(res))
+	}
+	res = call(t, cs, "insert_object", map[string]any{"document": fixtureID, "kind": "date", "date": "yesterday", "location": map[string]any{"at": "end"}})
+	if !res.IsError || !strings.HasPrefix(textOf(res), "[invalid] date") {
+		t.Fatalf("bad date: %q", textOf(res))
+	}
+	res = call(t, cs, "manage_tabs", map[string]any{"document": fixtureID, "action": "rename", "tab": "Notes", "title": "Renamed"})
+	if res.IsError || !strings.HasPrefix(textOf(res), "renamed tab t.1 to \"Renamed\"") {
+		t.Fatalf("manage_tabs: %q", textOf(res))
+	}
+	res = call(t, cs, "manage_tabs", map[string]any{"document": fixtureID, "action": "delete", "tab": "Notes"})
+	if !res.IsError || !strings.Contains(textOf(res), "delete_tab") {
+		t.Fatalf("delete through manage_tabs: %q", textOf(res))
+	}
+	res = call(t, cs, "delete_tab", map[string]any{"document": fixtureID, "tab": "Notes"})
+	if res.IsError || !strings.HasPrefix(textOf(res), "deleted tab t.1") {
+		t.Fatalf("delete_tab: %q", textOf(res))
+	}
+	res = call(t, cs, "edit_document", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{{"op": "delete_header", "target": map[string]any{"segment": "header"}}}})
+	if res.IsError || !strings.Contains(textOf(res), "deleteHeader") || !strings.Contains(textOf(res), `"headerId": "kix.h1"`) {
+		t.Fatalf("delete_header: %q", textOf(res))
 	}
 }

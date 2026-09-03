@@ -91,7 +91,7 @@ func TestPreviewSpike(t *testing.T) {
 		t.Fatalf("get with commentsViewMode: %v", err)
 	}
 	report["comments_view_accepted"] = true
-	report["comments_key_present_before"] = got.Preview.Comments != nil
+	report["comments_key_present_before"] = got.Document.Comments != nil
 	tabID := ""
 	if len(got.Document.Tabs) > 0 && got.Document.Tabs[0].TabProperties != nil {
 		tabID = got.Document.Tabs[0].TabProperties.TabID
@@ -132,7 +132,7 @@ func TestPreviewSpike(t *testing.T) {
 		}
 	}
 	report["suggestion_ids_inline"] = suggestionIDs
-	report["suggestions_key_after"] = json.RawMessage(got.Preview.Suggestions)
+	report["suggestions_key_after"] = got.Document.Suggestions
 
 	// 3. Anchored comment on "This sentence gets a comment."
 	start := int64(1 + doc.UTF16Len("Hello spike. "))
@@ -155,7 +155,7 @@ func TestPreviewSpike(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report["comments_after"] = json.RawMessage(got.Preview.Comments)
+	report["comments_after"] = got.Document.Comments
 
 	// 4. Reject a second suggestion to prove accept/reject works, leaving the first for the UI.
 	res, err = c.BatchUpdate(ctx, id, &gapi.BatchUpdateRequest{
@@ -246,7 +246,7 @@ func TestPreviewSpikeReject(t *testing.T) {
 	got, _ = c.GetDocument(ctx, id, gapi.GetOptions{SuggestionsViewMode: gapi.SuggestionsInline, CommentsViewMode: gapi.CommentsIncluded})
 	parsed, _ = doc.Parse(got.Document)
 	t.Logf("body after reject: %q", bodyText(parsed))
-	t.Logf("pending suggestion threads after reject: %s", got.Preview.Suggestions)
+	t.Logf("pending suggestion threads after reject: %+v", got.Document.Suggestions)
 	if findSuggestion(parsed, "to be rejected") != "" {
 		t.Fatal("rejected suggestion still present")
 	}

@@ -45,7 +45,7 @@ type LocationInput struct {
 
 // EditOpInput is one edit_document operation.
 type EditOpInput struct {
-	Op            string         `json:"op" jsonschema:"insert, append, replace, delete, replace_all, insert_break (page break), insert_footnote, create_header, create_footer"`
+	Op            string         `json:"op" jsonschema:"insert, append, replace, delete, replace_all, insert_break (page break), insert_footnote, create_header, create_footer, delete_header, delete_footer"`
 	Target        *TargetInput   `json:"target,omitempty" jsonschema:"what replace, delete or replace_all (tab only) act on"`
 	Location      *LocationInput `json:"location,omitempty" jsonschema:"where insert, insert_break and insert_footnote go; append defaults to the end of the body"`
 	Content       string         `json:"content,omitempty" jsonschema:"new content as markdown: paragraphs, # headings, **bold**, *italic*, ~~strike~~, code, [links](url), bullet and numbered lists (nested by indentation). Tables and images are not accepted here."`
@@ -109,7 +109,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"(quoted from a read), by heading_id or heading (a whole section), by block handle, or by cell; never by " +
 			"position numbers. Ops: insert (at a location), append (end of body), replace (minimal diff, so untouched " +
 			"words keep their formatting and comments), delete, replace_all (find/replace in one tab), insert_break " +
-			"(page break), insert_footnote, create_header, create_footer. Content is markdown. mode chooses how the " +
+			"(page break), insert_footnote, create_header, create_footer, delete_header, delete_footer (target: tab and " +
+			"segment). Content is markdown. mode chooses how the " +
 			"change lands: suggest = tracked change for a person to accept, direct = edit the text, comment = post " +
 			"each proposed change as a comment and change nothing. Direct edits refuse to delete ranges holding " +
 			"comments, suggestions, images or footnotes unless force is set. Use dry_run to preview the plan. " +
@@ -120,9 +121,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 		for i, o := range in.Ops {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
 			switch kind {
-			case plan.OpInsert, plan.OpAppend, plan.OpReplace, plan.OpDelete, plan.OpReplaceAll, plan.OpPageBreak, plan.OpFootnote, plan.OpCreateHeader, plan.OpCreateFooter:
+			case plan.OpInsert, plan.OpAppend, plan.OpReplace, plan.OpDelete, plan.OpReplaceAll, plan.OpPageBreak, plan.OpFootnote, plan.OpCreateHeader, plan.OpCreateFooter, plan.OpDeleteHeader, plan.OpDeleteFooter:
 			default:
-				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use insert, append, replace, delete, replace_all, insert_break, insert_footnote, create_header or create_footer", i, o.Op))
+				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use insert, append, replace, delete, replace_all, insert_break, insert_footnote, create_header, create_footer, delete_header or delete_footer", i, o.Op))
 			}
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
 				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}}

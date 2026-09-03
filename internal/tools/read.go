@@ -47,7 +47,9 @@ type ReadInput struct {
 	WithHandles        bool   `json:"with_handles,omitempty" jsonschema:"prefix every block with its handle like [p12] and headings with {heading_id}; needed before targeting specific blocks; costs about 15% more tokens"`
 	WithStyles         bool   `json:"with_styles,omitempty" jsonschema:"annotate fonts, sizes, colours, underline and alignment that markdown cannot express, e.g. {font: Arial 11pt, color: #c00}"`
 	IncludeSuggestions bool   `json:"include_suggestions,omitempty" jsonschema:"show pending suggested edits as CriticMarkup: {++inserted++} and {--deleted--} followed by {>>s:<suggestion id><<}; default shows the committed text without them"`
+	IncludeComments    bool   `json:"include_comments,omitempty" jsonschema:"mark commented passages with {>>c:<comment id><<} right after the text they cover and list those threads below the content"`
 	MaxChars           int    `json:"max_chars,omitempty" jsonschema:"output budget in characters, cut at a block boundary; default 20000, maximum 400000"`
+	Revision           string `json:"revision,omitempty" jsonschema:"read an old revision by its id from list_revisions: Google's markdown or text export of the whole document at that time, with no handles or scoping"`
 }
 
 // ReadOutput describes what was read.
@@ -103,7 +105,8 @@ func registerRead(s *mcp.Server, d Deps) {
 			"with no scope it reads the whole body of the first tab. Output is budgeted by max_chars (default 20000 " +
 			"characters); when truncated the result carries continue_from to pass back. Set with_handles to see block " +
 			"handles ([p12]) and heading ids before targeting content, with_styles to see formatting markdown cannot " +
-			"show, and include_suggestions to see pending suggested edits inline as {++inserted++} / {--deleted--}. " +
+			"show, include_suggestions to see pending suggested edits inline as {++inserted++} / {--deleted--}, and " +
+			"include_comments to see {>>c:id<<} markers after commented passages with the threads listed below. " +
 			"Empty paragraphs are kept so structure is faithful. Handles are valid for the revision_id returned.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, *ReadOutput, error) {
@@ -123,6 +126,14 @@ func registerRead(s *mcp.Server, d Deps) {
 		if in.Occurrence < 0 {
 			return nil, nil, fail(service.Errorf("invalid", "occurrence must be 1 or more"))
 		}
+		if in.Revision != "" {
+			res, err := d.Service.ReadRevision(ctx, in.Document, in.Revision, in.Format, maxChars)
+			if err != nil {
+				return nil, nil, fail(err)
+			}
+			out := &ReadOutput{RevisionID: res.RevisionID, Segment: res.Segment, Scope: res.Scope, Chars: res.Chars, Truncated: res.Truncated}
+			return text(readHeader(out, in.Format) + res.Text), out, nil
+		}
 		res, err := d.Service.Read(ctx, service.ReadRequest{
 			Document: in.Document,
 			Scope: service.ReadScope{
@@ -130,8 +141,9 @@ func registerRead(s *mcp.Server, d Deps) {
 				HeadingLevel: in.HeadingLevel, Occurrence: in.Occurrence,
 				FromHandle: in.FromHandle, ToHandle: in.ToHandle, ContinueFrom: in.ContinueFrom,
 			},
-			Format:  in.Format,
-			Options: render.Options{WithHandles: in.WithHandles, WithStyles: in.WithStyles, Suggestions: in.IncludeSuggestions, MaxChars: maxChars},
+			Format:          in.Format,
+			Options:         render.Options{WithHandles: in.WithHandles, WithStyles: in.WithStyles, Suggestions: in.IncludeSuggestions, MaxChars: maxChars},
+			IncludeComments: in.IncludeComments,
 		})
 		if err != nil {
 			return nil, nil, fail(err)

@@ -27,12 +27,19 @@ type API interface {
 	Export(ctx context.Context, id, mimeType string) ([]byte, error)
 	CreateComment(ctx context.Context, fileID, content, quote string) (*gapi.DriveComment, error)
 	ListComments(ctx context.Context, fileID string, includeDeleted bool) ([]*gapi.DriveComment, error)
+	GetComment(ctx context.Context, fileID, commentID string) (*gapi.DriveComment, error)
+	CreateReply(ctx context.Context, fileID, commentID, content, action string) (*gapi.DriveReply, error)
+	DeleteComment(ctx context.Context, fileID, commentID string) error
+	DeleteReply(ctx context.Context, fileID, commentID, replyID string) error
+	ListRevisions(ctx context.Context, fileID string) ([]*gapi.Revision, error)
+	ExportRevision(ctx context.Context, fileID, revisionID, mimeType string) ([]byte, error)
 }
 
 // Options configure the service.
 type Options struct {
 	Preview          bool
 	ReadOnly         bool
+	Destructive      bool
 	DefaultWriteMode config.WriteMode
 	Logger           *slog.Logger
 	// ExportDir is where binary exports may be written; empty disables them.
@@ -86,11 +93,17 @@ func Errorf(class, format string, args ...any) *Error {
 	return &Error{Class: class, Message: fmt.Sprintf(format, args...)}
 }
 
-// Fetched is a parsed document plus the wire form it came from.
+// Fetched is a parsed document plus the wire form it came from. Comment
+// threads are looked up once per fetch and shared by the guard, reads
+// and listings.
 type Fetched struct {
 	Doc       *doc.Document
 	Wire      *gdocs.Document
 	FetchedAt time.Time
+
+	threadsOnce sync.Once
+	threads     []CommentThread
+	threadsErr  error
 }
 
 // HandleMemory records what each handle pointed at in the last read so a
@@ -202,6 +215,19 @@ func memory(d *doc.Document, at time.Time) HandleMemory {
 func (s *Service) requireWritable() error {
 	if s.opts.ReadOnly {
 		return Errorf("forbidden", "this server runs read-only (GDOCS_READ_ONLY=true)")
+	}
+	return nil
+}
+
+// requireDestructive refuses deletions unless the deployment enabled them.
+// The tools are not registered without the flag; this guards direct
+// callers as well.
+func (s *Service) requireDestructive() error {
+	if err := s.requireWritable(); err != nil {
+		return err
+	}
+	if !s.opts.Destructive {
+		return Errorf("forbidden", "destructive operations are disabled (set GDOCS_ENABLE_DESTRUCTIVE=true to allow them)")
 	}
 	return nil
 }

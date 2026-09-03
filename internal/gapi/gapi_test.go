@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -339,5 +340,114 @@ func TestCreateDocument(t *testing.T) {
 	d, err := c.CreateDocument(context.Background(), "T")
 	if err != nil || d.DocumentID != "new1" || d.Title != "T" {
 		t.Fatalf("create: %+v %v", d, err)
+	}
+}
+
+func TestRepliesRevisionsAndDeletes(t *testing.T) {
+	var seen []string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments/c1/replies"):
+			var in map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in["action"] != "resolve" || in["content"] != "done" || !strings.Contains(r.URL.RawQuery, "fields=") {
+				t.Errorf("reply body wrong: %v %s", in, r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"id":"r9","content":"done","action":"resolve"}`))
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments/c1"):
+			if r.URL.Query().Get("includeDeleted") != "true" {
+				t.Errorf("get comment query: %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"id":"c1","content":"x","replies":[{"id":"r1"}]}`))
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/revisions"):
+			if r.URL.Query().Get("pageToken") == "" {
+				_, _ = w.Write([]byte(`{"revisions":[{"id":"1","modifiedTime":"2026-09-01T00:00:00Z","exportLinks":{"text/markdown":"https://example.test/x"}}],"nextPageToken":"p2"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"revisions":[{"id":"7","keepForever":true,"lastModifyingUser":{"displayName":"Ann"}}]}`))
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	ctx := context.Background()
+	rp, err := c.CreateReply(ctx, "abc", "c1", "done", "resolve")
+	if err != nil || rp.ID != "r9" || rp.Action != "resolve" {
+		t.Fatalf("reply: %+v %v", rp, err)
+	}
+	cm, err := c.GetComment(ctx, "abc", "c1")
+	if err != nil || cm.ID != "c1" || len(cm.Replies) != 1 {
+		t.Fatalf("get comment: %+v %v", cm, err)
+	}
+	if err := c.DeleteComment(ctx, "abc", "c1"); err != nil {
+		t.Fatalf("delete comment: %v", err)
+	}
+	if err := c.DeleteReply(ctx, "abc", "c1", "r1"); err != nil {
+		t.Fatalf("delete reply: %v", err)
+	}
+	revs, err := c.ListRevisions(ctx, "abc")
+	if err != nil || len(revs) != 2 || revs[0].ID != "1" || revs[0].ExportLinks["text/markdown"] == "" || !revs[1].KeepForever || revs[1].LastModifyingUser.DisplayName != "Ann" {
+		t.Fatalf("revisions: %+v %v", revs, err)
+	}
+	want := []string{"POST /drive/v3/files/abc/comments/c1/replies", "GET /drive/v3/files/abc/comments/c1", "DELETE /drive/v3/files/abc/comments/c1", "DELETE /drive/v3/files/abc/comments/c1/replies/r1", "GET /drive/v3/files/abc/revisions", "GET /drive/v3/files/abc/revisions"}
+	if strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls %v", seen)
+	}
+}
+
+func TestExportRevision(t *testing.T) {
+	var polls int32
+	var srvURL string
+	c, srv := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/files/abc/download"):
+			q := r.URL.Query()
+			if q.Get("revisionId") != "12" || q.Get("mimeType") != "text/markdown" {
+				t.Errorf("download query: %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"name":"op1","done":false}`))
+		case strings.HasSuffix(r.URL.Path, "/operations/op1"):
+			if atomic.AddInt32(&polls, 1) < 2 {
+				_, _ = w.Write([]byte(`{"name":"op1","done":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"name":"op1","done":true,"response":{"downloadUri":"` + srvURL + `/content"}}`))
+		case r.URL.Path == "/content":
+			_, _ = w.Write([]byte("# old"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	srvURL = srv.URL
+	// The test server is not a Google host; allow it through the guard by
+	// rewriting the check for this test.
+	old := contentURLAllowed
+	contentURLAllowed = func(*url.URL) bool { return true }
+	t.Cleanup(func() { contentURLAllowed = old })
+	data, err := c.ExportRevision(context.Background(), "abc", "12", "text/markdown")
+	if err != nil || string(data) != "# old" || polls != 2 {
+		t.Fatalf("export revision: %q %v polls=%d", data, err, polls)
+	}
+	if !googleHost("docs.googleapis.com") || !googleHost("docs.google.com") || googleHost("evil.example") || googleHost("googleapis.com.evil.example") || googleHost("docs.google.com.evil.example") {
+		t.Fatal("googleHost")
+	}
+}
+
+func TestExportRevisionErrors(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"op1","done":true,"error":{"code":3,"message":"revision unsupported"}}`))
+	}))
+	_, err := c.ExportRevision(context.Background(), "abc", "12", "text/markdown")
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "revision unsupported") {
+		t.Fatalf("operation error: %v", err)
+	}
+	c, _ = newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"op1","done":true,"response":{"downloadUri":"https://evil.example/x"}}`))
+	}))
+	_, err = c.ExportRevision(context.Background(), "abc", "12", "text/markdown")
+	if !errors.Is(err, ErrUnexpected) {
+		t.Fatalf("foreign host: %v", err)
 	}
 }

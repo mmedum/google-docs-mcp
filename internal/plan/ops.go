@@ -106,6 +106,13 @@ type Op struct {
 	// CommentAnchor is where a comment-mode proposal attaches. Defaults to Target.
 	CommentAnchor *Rng
 	Anchors       []Anchor
+
+	// TableAt is the start of the table a table op works on.
+	TableAt *Loc
+	Table   TableParams
+	Object  ObjectParams
+	// SegmentRef names the header or footer a delete_header/delete_footer removes.
+	SegmentRef string
 }
 
 // Options control planning.
@@ -172,13 +179,17 @@ func Plan(ops []Op, o Options) (*Result, error) {
 		}
 	}
 	if o.Mode == ModeComment {
+		seen := map[int]bool{}
 		for i := range ops {
 			p, err := proposal(&ops[i])
 			if err != nil {
 				return nil, err
 			}
 			res.Proposals = append(res.Proposals, p)
-			res.Summary = append(res.Summary, OpSummary{Seq: ops[i].Seq, Kind: ops[i].Kind, Description: ops[i].Description})
+			if !seen[ops[i].Seq] {
+				seen[ops[i].Seq] = true
+				res.Summary = append(res.Summary, OpSummary{Seq: ops[i].Seq, Kind: ops[i].Kind, Description: ops[i].Description})
+			}
 		}
 		return res, nil
 	}
@@ -216,6 +227,12 @@ func Plan(ops []Op, o Options) (*Result, error) {
 	summaries := map[int]*OpSummary{}
 	add := func(op *Op, reqs []json.RawMessage, minimal bool) {
 		res.Requests = append(res.Requests, reqs...)
+		if sm := summaries[op.Seq]; sm != nil {
+			// Ops expanded from one caller op (set_cells) share a summary.
+			sm.Requests += len(reqs)
+			sm.Minimal = sm.Minimal && minimal
+			return
+		}
 		summaries[op.Seq] = &OpSummary{Seq: op.Seq, Kind: op.Kind, Description: op.Description, Requests: len(reqs), Minimal: minimal}
 	}
 	for _, op := range formats {
@@ -237,6 +254,7 @@ func Plan(ops []Op, o Options) (*Result, error) {
 	for i := range ops {
 		if s := summaries[ops[i].Seq]; s != nil {
 			res.Summary = append(res.Summary, *s)
+			delete(summaries, ops[i].Seq)
 		}
 	}
 	return res, nil
@@ -302,6 +320,16 @@ func validate(op *Op) error {
 		return errors.Join(needInsert(), needFragment())
 	case OpCreateHeader, OpCreateFooter:
 		return needFragment()
+	case OpDeleteHeader, OpDeleteFooter:
+		if op.SegmentRef == "" {
+			return fmt.Errorf("op %d (%s): no segment", op.Seq, op.Kind)
+		}
+		return nil
+	case OpInsertObject:
+		return validateObjectOp(op)
+	}
+	if IsTableOp(op.Kind) {
+		return validateTableOp(op)
 	}
 	return fmt.Errorf("op %d: unknown kind %q", op.Seq, op.Kind)
 }
@@ -313,6 +341,9 @@ func keyIndex(op *Op) int64 {
 	if op.Insert != nil {
 		return op.Insert.Index
 	}
+	if op.TableAt != nil {
+		return op.TableAt.Index
+	}
 	return -1
 }
 
@@ -320,7 +351,7 @@ func keyIndex(op *Op) int64 {
 func guard(ops []Op, o Options, res *Result) error {
 	for i := range ops {
 		op := &ops[i]
-		if (op.Kind != OpReplace && op.Kind != OpDelete) || len(op.Anchors) == 0 {
+		if !deletes(op.Kind) || len(op.Anchors) == 0 {
 			continue
 		}
 		if o.Mode == ModeSuggest {
@@ -334,6 +365,16 @@ func guard(ops []Op, o Options, res *Result) error {
 		return fmt.Errorf("%w: op %d (%s of %s) would destroy %s; use mode suggest or comment, narrow the target, or pass force: true", ErrBlocked, op.Seq, op.Kind, op.Description, describeAnchors(op.Anchors))
 	}
 	return nil
+}
+
+// deletes reports whether the kind removes existing content, which is
+// what the overwrite guard protects.
+func deletes(k OpKind) bool {
+	switch k {
+	case OpReplace, OpDelete, OpDeleteRows, OpDeleteColumns, OpDeleteHeader, OpDeleteFooter:
+		return true
+	}
+	return false
 }
 
 func describeAnchors(as []Anchor) string {
@@ -364,16 +405,29 @@ func checkOverlaps(ops []Op) error {
 		s, e int64
 	}
 	var spans []span
+	structural := map[string]*Op{}
 	for i := range ops {
 		op := &ops[i]
 		switch op.Kind {
-		case OpTextStyle, OpParagraphStyle, OpBullets, OpClearFormatting, OpReplaceAll, OpCreateHeader, OpCreateFooter:
+		case OpTextStyle, OpParagraphStyle, OpBullets, OpClearFormatting, OpReplaceAll, OpCreateHeader, OpCreateFooter, OpDeleteHeader, OpDeleteFooter:
 			continue
 		}
-		if op.Target != nil {
+		switch {
+		case op.Target != nil:
 			spans = append(spans, span{op, op.Target.Start, op.Target.End})
-		} else if op.Insert != nil {
+		case op.Insert != nil:
 			spans = append(spans, span{op, op.Insert.Index, op.Insert.Index})
+		case op.TableAt != nil:
+			// The table's first index stands for the whole grid: a delete of
+			// the table block overlaps it, cell edits inside it do not.
+			spans = append(spans, span{op, op.TableAt.Index, op.TableAt.Index + 1})
+			if isStructural(op.Kind) {
+				key := fmt.Sprintf("%s/%s/%d", op.TableAt.TabID, op.TableAt.SegmentID, op.TableAt.Index)
+				if prev := structural[key]; prev != nil {
+					return fmt.Errorf("ops %d and %d both change the grid of %s; rows and columns renumber after the first, so split them into separate calls", prev.Seq, op.Seq, op.Description)
+				}
+				structural[key] = op
+			}
 		}
 	}
 	for i := 0; i < len(spans); i++ {
@@ -381,6 +435,9 @@ func checkOverlaps(ops []Op) error {
 			a, b := spans[i], spans[j]
 			if a.op.Seg.ID != b.op.Seg.ID || a.op.Seg.TabID != b.op.Seg.TabID {
 				continue
+			}
+			if a.op.TableAt != nil && b.op.TableAt != nil {
+				continue // two ops on one table: the structural rule above decides
 			}
 			// Half-open overlap; it also covers an insertion point that
 			// falls strictly inside another op's range.
@@ -436,6 +493,17 @@ func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
 		return []json.RawMessage{CreateHeader(op.Seg.TabID)}, false, nil
 	case OpCreateFooter:
 		return []json.RawMessage{CreateFooter(op.Seg.TabID)}, false, nil
+	case OpDeleteHeader:
+		return []json.RawMessage{DeleteHeader(op.SegmentRef, op.Seg.TabID)}, false, nil
+	case OpDeleteFooter:
+		return []json.RawMessage{DeleteFooter(op.SegmentRef, op.Seg.TabID)}, false, nil
+	case OpInsertObject:
+		reqs, err := objectRequests(op)
+		return reqs, false, err
+	}
+	if IsTableOp(op.Kind) {
+		reqs, err := tableRequests(op)
+		return reqs, false, err
 	}
 	return nil, false, fmt.Errorf("op %d: unknown kind %q", op.Seq, op.Kind)
 }
@@ -527,6 +595,14 @@ func proposal(op *Op) (Proposal, error) {
 		p.Content = "Proposed: " + map[string]string{"bullet": "make this a bulleted list", "numbered": "make this a numbered list", "checkbox": "make this a checklist", "none": "remove the list formatting"}[op.Bullets] + "."
 	case OpClearFormatting:
 		p.Content = "Proposed: clear the formatting of " + quote(op.TargetText) + "."
+	case OpDeleteHeader, OpDeleteFooter:
+		p.Content = "Proposed: remove the " + strings.TrimPrefix(string(op.Kind), "delete_") + " of this tab."
+	case OpInsertObject:
+		p.Content = objectProposal(op)
+	default:
+		if IsTableOp(op.Kind) {
+			p.Content = tableProposal(op)
+		}
 	}
 	return p, nil
 }

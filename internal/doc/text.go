@@ -58,7 +58,9 @@ func (b *Block) Text(v View) string {
 		for _, row := range b.Table.Cells {
 			var cells []string
 			for _, c := range row {
-				cells = append(cells, c.Text(v))
+				if c.MergedInto == nil {
+					cells = append(cells, c.Text(v))
+				}
 			}
 			rows = append(rows, strings.Join(cells, "\t"))
 		}

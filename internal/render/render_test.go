@@ -195,3 +195,49 @@ func TestEscapingAndEdgeCases(t *testing.T) {
 		t.Errorf("toc/footnote rendering: %s", md)
 	}
 }
+
+func TestCommentMarks(t *testing.T) {
+	d, seg := body(t)
+	// "Revenue grew " starts at 29; comment on "Revenue grew" and one that
+	// ends at the paragraph's newline, plus one in another tab (ignored).
+	marks := []render.Mark{
+		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 29, End: 41, ID: "c1"},
+		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 60, End: 68, ID: "c2"},
+		{TabID: d.Tabs[1].ID, SegmentID: "", Start: 1, End: 4, ID: "c3"},
+	}
+	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
+	for _, c := range []string{"Revenue grew{>>c:c1<<} a lot in Q3.{>>c:c2<<}"} {
+		if !strings.Contains(md, c) {
+			t.Errorf("markdown lacks %q:\n%s", c, md)
+		}
+	}
+	if strings.Contains(md, "c3") {
+		t.Error("mark from another tab leaked")
+	}
+	// A mark ending inside a styled run splits it without breaking markdown.
+	marks = []render.Mark{{TabID: d.Tabs[0].ID, Start: 41, End: 44, ID: "c4"}}
+	md = render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks, Suggestions: true}).Text
+	if !strings.Contains(md, "{--a --}{>>s:s1<<}{>>c:c4<<}") && !strings.Contains(md, "{>>c:c4<<}") {
+		t.Errorf("split mark missing:\n%s", md)
+	}
+}
+
+func TestMergedCellsRender(t *testing.T) {
+	d, seg := body(t)
+	var tbl *doc.Table
+	for _, b := range seg.Blocks {
+		if b.Table != nil {
+			tbl = b.Table
+		}
+	}
+	tbl.Cells[1][0].ColSpan = 2
+	tbl.Cells[1][1].MergedInto = tbl.Cells[1][0]
+	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{WithHandles: true}).Text
+	if !strings.Contains(md, "| Alpha |\n<!-- merged: tbl1:r2c1 spans 1×2 -->") || strings.Contains(md, "| Alpha | 1 |") {
+		t.Fatalf("merged render:\n%s", md)
+	}
+	if !strings.Contains(render.Plain(seg, 0, len(seg.Blocks), render.Options{}).Text, "Alpha\n") {
+		t.Fatal("plain render should skip the covered cell")
+	}
+	_ = d
+}

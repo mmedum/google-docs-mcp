@@ -33,6 +33,29 @@ type ExportResult struct {
 
 var inlineFormats = map[string]bool{"md": true, "txt": true, "html": true}
 
+// dataURI matches the base64 image payloads Google's markdown and HTML
+// exports embed; they are noise to a reader and swamp any budget.
+var dataURI = regexp.MustCompile(`data:[a-z]+/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]{16,}`)
+
+// stripDataURIs replaces embedded base64 payloads with a short marker.
+func stripDataURIs(text string) string {
+	return dataURI.ReplaceAllStringFunc(text, func(m string) string {
+		return strings.SplitN(m, ";base64,", 2)[0] + ";base64,<omitted>"
+	})
+}
+
+// clipUTF8 cuts text to at most limit bytes on a character boundary.
+func clipUTF8(text string, limit int) (string, bool) {
+	if limit <= 0 || len(text) <= limit {
+		return text, false
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut], true
+}
+
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._ -]+`)
 
 // Export downloads the document as md, txt or html (returned inline) or
@@ -63,20 +86,11 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	res := &ExportResult{Format: format, MimeType: mime, Bytes: len(data)}
 	if inlineFormats[format] {
 		res.Inline = true
-		text := string(data)
 		limit := req.MaxChars
 		if limit <= 0 {
 			limit = DefaultMaxChars
 		}
-		if len(text) > limit {
-			cut := limit
-			for cut > 0 && !utf8.RuneStart(text[cut]) {
-				cut--
-			}
-			text = text[:cut]
-			res.Truncated = true
-		}
-		res.Text = text
+		res.Text, res.Truncated = clipUTF8(stripDataURIs(string(data)), limit)
 		return res, nil
 	}
 	// Drive metadata is a small call; the title names the file.

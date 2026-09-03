@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/internal/config"
@@ -162,10 +163,11 @@ const (
 
 // ReadRequest is the read_document input after validation.
 type ReadRequest struct {
-	Document string
-	Scope    ReadScope
-	Format   string
-	Options  render.Options
+	Document        string
+	Scope           ReadScope
+	Format          string
+	Options         render.Options
+	IncludeComments bool
 }
 
 // ReadResult is the read_document result.
@@ -196,9 +198,16 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error
 	if err != nil {
 		return nil, err
 	}
-	rs, err := ResolveScope(f.Doc, req.Scope)
+	rs, err := s.ResolveScope(f, req.Scope)
 	if err != nil {
 		return nil, err
+	}
+	var threads []CommentThread
+	if req.IncludeComments && format != FormatRaw {
+		if threads, err = s.comments(ctx, f); err != nil {
+			return nil, err
+		}
+		req.Options.Marks = commentMarks(threads)
 	}
 	var r render.Result
 	switch format {
@@ -212,12 +221,84 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error
 			return nil, err
 		}
 	}
+	if req.IncludeComments && format != FormatRaw {
+		r.Text += commentFooter(rs, r, threads)
+	}
 	return &ReadResult{
 		Text: r.Text, RevisionID: f.Doc.RevisionID,
 		TabNumber: rs.Tab.Number, TabID: rs.Tab.ID, TabTitle: rs.Tab.Title,
 		Segment: rs.Segment.Label(), Scope: rs.Description,
 		Blocks: r.Blocks, Chars: r.Chars, Truncated: r.Truncated, ContinueFrom: r.ContinueFrom,
 	}, nil
+}
+
+// commentMarks turns located, live threads into renderer marks.
+func commentMarks(threads []CommentThread) []render.Mark {
+	var marks []render.Mark
+	for _, t := range threads {
+		if t.Handle == "" || t.Deleted {
+			continue
+		}
+		marks = append(marks, render.Mark{TabID: t.Tab, SegmentID: t.Segment, Start: t.Start, End: t.End, ID: t.ID})
+	}
+	return marks
+}
+
+// commentFooter lists the threads marked in the rendered range and
+// counts the ones outside it.
+func commentFooter(rs Resolved, r render.Result, threads []CommentThread) string {
+	if len(threads) == 0 {
+		return "\n\n<!-- no comments -->"
+	}
+	to := rs.To
+	if r.Truncated {
+		for i, b := range rs.Segment.Blocks {
+			if b.Handle == r.ContinueFrom {
+				to = i
+				break
+			}
+		}
+	}
+	var start, end int64
+	if to > rs.From && to <= len(rs.Segment.Blocks) {
+		start, end = rs.Segment.Blocks[rs.From].Start, rs.Segment.Blocks[to-1].End
+	}
+	var sb strings.Builder
+	other := 0
+	for _, t := range threads {
+		if t.Deleted {
+			continue
+		}
+		inRange := t.Handle != "" && t.Tab == rs.Tab.ID && t.Segment == rs.Segment.ID && t.End > start && t.Start < end
+		if !inRange {
+			other++
+			continue
+		}
+		fmt.Fprintf(&sb, "\n- c:%s [%s]", t.ID, t.Handle)
+		if t.Author != "" {
+			sb.WriteString(" by " + t.Author)
+		}
+		if t.Resolved {
+			sb.WriteString(" [resolved]")
+		}
+		sb.WriteString(": " + oneLine(t.Content))
+		if n := len(t.Replies); n > 0 {
+			fmt.Fprintf(&sb, " (%d repl", n)
+			if n == 1 {
+				sb.WriteString("y)")
+			} else {
+				sb.WriteString("ies)")
+			}
+		}
+	}
+	out := "\n\ncomments:" + sb.String()
+	if sb.Len() == 0 {
+		out = "\n\ncomments: none in this range"
+	}
+	if other > 0 {
+		out += fmt.Sprintf("\n(%d more elsewhere or unlocated; use list_comments)", other)
+	}
+	return out
 }
 
 // rawJSON returns the API's structural elements for the range, one JSON

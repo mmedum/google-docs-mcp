@@ -192,7 +192,7 @@ func runServer(args []string) int {
 
 	api := gapi.New(ts, gapi.Options{Logger: logger, Timeout: cfg.HTTPTimeout, UserAgent: "google-docs-mcp/" + version.Version})
 	svc := service.New(api, service.Options{
-		Preview: cfg.Preview, ReadOnly: cfg.ReadOnly,
+		Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive,
 		DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir, Logger: logger,
 	})
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Logger: logger, Version: version.Version})

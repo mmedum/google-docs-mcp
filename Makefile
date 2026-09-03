@@ -26,8 +26,9 @@ fmt: ## Fail if gofmt would change anything
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt issues:"; echo "$$out"; exit 1; fi
 
 .PHONY: vet
-vet:
+vet: ## go vet, including the integration-tagged tests so they keep compiling
 	$(GO) vet ./...
+	$(GO) vet -tags=integration ./...
 
 .PHONY: lint
 lint:

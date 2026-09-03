@@ -139,7 +139,7 @@ func (r *mdRenderer) block(b *doc.Block, depth int) string {
 func (r *mdRenderer) paragraph(b *doc.Block) string {
 	p := b.Paragraph
 	r.collectFootnotes(p)
-	content := inline(p, r.seg.Tab, r.o, false)
+	content := inline(p, r.seg, r.o, false)
 	if p.Bullet == nil && p.Level == 0 && !p.IsTitle {
 		content = escapeLineStart(content)
 	}
@@ -216,19 +216,29 @@ func (r *mdRenderer) table(b *doc.Block, depth int) string {
 		sb.WriteString("[nested table]")
 		return sb.String()
 	}
+	var merges []string
 	for ri, row := range t.Cells {
 		sb.WriteString("|")
 		for _, c := range row {
+			if c.MergedInto != nil {
+				continue // covered by a merged cell; markdown has no spans
+			}
 			sb.WriteString(" " + r.cell(c) + " |")
+			if r.o.WithHandles && (c.RowSpan > 1 || c.ColSpan > 1) {
+				merges = append(merges, fmt.Sprintf("%s spans %d×%d", c.Handle, c.RowSpan, c.ColSpan))
+			}
 		}
 		sb.WriteString("\n")
 		if ri == 0 {
 			sb.WriteString("|")
-			for range row {
+			for range t.Cols {
 				sb.WriteString(" --- |")
 			}
 			sb.WriteString("\n")
 		}
+	}
+	if len(merges) > 0 {
+		sb.WriteString("<!-- merged: " + strings.Join(merges, ", ") + " -->\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
@@ -239,7 +249,7 @@ func (r *mdRenderer) cell(c *doc.Cell) string {
 		switch {
 		case b.Paragraph != nil:
 			r.collectFootnotes(b.Paragraph)
-			text := inline(b.Paragraph, r.seg.Tab, r.o, true)
+			text := inline(b.Paragraph, r.seg, r.o, true)
 			if b.Paragraph.Bullet != nil {
 				text = "• " + text
 			}

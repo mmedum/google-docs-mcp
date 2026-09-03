@@ -237,3 +237,193 @@ func (c *Client) ListComments(ctx context.Context, fileID string, includeDeleted
 		token = page.NextPageToken
 	}
 }
+
+// CreateReply posts a reply on a comment thread. action is "" for a plain
+// reply, "resolve" to resolve the thread or "reopen" to reopen it.
+func (c *Client) CreateReply(ctx context.Context, fileID, commentID, content, action string) (*DriveReply, error) {
+	payload := map[string]any{}
+	if content != "" {
+		payload["content"] = content
+	}
+	if action != "" {
+		payload["action"] = action
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments/" + url.PathEscape(commentID) + "/replies?fields=" + url.QueryEscape(ReplyFields)
+	data, err := c.do(ctx, kindDriveWrite, http.MethodPost, u, body)
+	if err != nil {
+		return nil, wrapAmbiguousWrite(err)
+	}
+	var out DriveReply
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("%w: decode reply: %w", ErrUnexpected, err)
+	}
+	return &out, nil
+}
+
+// ReplyFields is what reply calls ask for.
+const ReplyFields = "id,content,author(displayName,emailAddress),createdTime,action,deleted"
+
+// GetComment returns one comment thread with its replies.
+func (c *Client) GetComment(ctx context.Context, fileID, commentID string) (*DriveComment, error) {
+	v := url.Values{}
+	v.Set("fields", CommentFields)
+	v.Set("includeDeleted", "true")
+	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments/" + url.PathEscape(commentID) + "?" + v.Encode()
+	data, err := c.do(ctx, kindRead, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out DriveComment
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("%w: decode comment: %w", ErrUnexpected, err)
+	}
+	return &out, nil
+}
+
+// DeleteComment deletes a comment thread. Drive keeps it listable with
+// includeDeleted=true.
+func (c *Client) DeleteComment(ctx context.Context, fileID, commentID string) error {
+	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments/" + url.PathEscape(commentID)
+	_, err := c.do(ctx, kindDriveWrite, http.MethodDelete, u, nil)
+	return wrapAmbiguousWrite(err)
+}
+
+// DeleteReply deletes one reply of a thread.
+func (c *Client) DeleteReply(ctx context.Context, fileID, commentID, replyID string) error {
+	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments/" + url.PathEscape(commentID) + "/replies/" + url.PathEscape(replyID)
+	_, err := c.do(ctx, kindDriveWrite, http.MethodDelete, u, nil)
+	return wrapAmbiguousWrite(err)
+}
+
+// Revision is a Drive revision (version history entry) of a document.
+type Revision struct {
+	ID                string            `json:"id,omitempty"`
+	MimeType          string            `json:"mimeType,omitempty"`
+	ModifiedTime      string            `json:"modifiedTime,omitempty"`
+	KeepForever       bool              `json:"keepForever,omitempty"`
+	LastModifyingUser *User             `json:"lastModifyingUser,omitempty"`
+	ExportLinks       map[string]string `json:"exportLinks,omitempty"`
+}
+
+// RevisionFields is what ListRevisions asks for per revision.
+const RevisionFields = "id,mimeType,modifiedTime,keepForever,lastModifyingUser(displayName,emailAddress),exportLinks"
+
+// ListRevisions returns every revision of the file, oldest first as Drive
+// orders them.
+func (c *Client) ListRevisions(ctx context.Context, fileID string) ([]*Revision, error) {
+	var all []*Revision
+	token := ""
+	for {
+		v := url.Values{}
+		v.Set("fields", "nextPageToken,revisions("+RevisionFields+")")
+		v.Set("pageSize", "200")
+		if token != "" {
+			v.Set("pageToken", token)
+		}
+		body, err := c.do(ctx, kindRead, http.MethodGet, c.drive+"/files/"+url.PathEscape(fileID)+"/revisions?"+v.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Revisions     []*Revision `json:"revisions"`
+			NextPageToken string      `json:"nextPageToken"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("%w: decode revisions: %w", ErrUnexpected, err)
+		}
+		all = append(all, page.Revisions...)
+		if page.NextPageToken == "" || len(all) > 5000 {
+			return all, nil
+		}
+		token = page.NextPageToken
+	}
+}
+
+// operation is the long-running operation files.download returns.
+type operation struct {
+	Name  string `json:"name"`
+	Done  bool   `json:"done"`
+	Error *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+	Response struct {
+		DownloadURI string `json:"downloadUri"`
+	} `json:"response"`
+}
+
+// ExportRevision exports one revision of a document through
+// files.download, the only Drive method that takes a revisionId for
+// Docs files. It starts a long-running operation, polls it, then fetches
+// the content it names. The content URL must stay on Google's hosts.
+func (c *Client) ExportRevision(ctx context.Context, fileID, revisionID, mimeType string) ([]byte, error) {
+	v := url.Values{}
+	v.Set("mimeType", mimeType)
+	v.Set("revisionId", revisionID)
+	body, err := c.do(ctx, kindRead, http.MethodPost, c.drive+"/files/"+url.PathEscape(fileID)+"/download?"+v.Encode(), []byte("{}"))
+	if err != nil {
+		return nil, err
+	}
+	var op operation
+	if err := json.Unmarshal(body, &op); err != nil {
+		return nil, fmt.Errorf("%w: decode download operation: %w", ErrUnexpected, err)
+	}
+	for attempt := 1; !op.Done; attempt++ {
+		if attempt > 20 {
+			return nil, fmt.Errorf("%w: the export of revision %s did not finish in time", ErrServer, revisionID)
+		}
+		if err := c.sleep(ctx, c.backoff(min(attempt, 4), 0)); err != nil {
+			return nil, err
+		}
+		body, err = c.do(ctx, kindRead, http.MethodGet, c.drive+"/operations/"+url.PathEscape(op.Name), nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &op); err != nil {
+			return nil, fmt.Errorf("%w: decode operation: %w", ErrUnexpected, err)
+		}
+	}
+	if op.Error != nil {
+		return nil, fmt.Errorf("%w: export of revision %s: %s", rpcClass(op.Error.Code), revisionID, op.Error.Message)
+	}
+	u, err := url.Parse(op.Response.DownloadURI)
+	if err != nil || !contentURLAllowed(u) {
+		return nil, fmt.Errorf("%w: download operation returned no usable content URL", ErrUnexpected)
+	}
+	return c.doAccept(ctx, kindRead, http.MethodGet, op.Response.DownloadURI, nil, "*/*")
+}
+
+// contentURLAllowed says whether credentials may be sent to a content
+// URL an operation named. Replaced in tests, whose server is plain HTTP.
+var contentURLAllowed = func(u *url.URL) bool { return u.Scheme == "https" && googleHost(u.Host) }
+
+// googleHost reports whether a host is one this server may send
+// credentials to: the APIs, Google's content hosts, and docs.google.com,
+// where the export URLs that files.download returns for old revisions
+// live (observed live 2026-09-03: docs.google.com/feeds/download/...).
+func googleHost(host string) bool {
+	host = strings.ToLower(host)
+	return host == "googleapis.com" || strings.HasSuffix(host, ".googleapis.com") || strings.HasSuffix(host, ".googleusercontent.com") || host == "docs.google.com"
+}
+
+// rpcClass maps a google.rpc.Code from an operation error onto the
+// sentinel classes.
+func rpcClass(code int) error {
+	switch code {
+	case 3:
+		return ErrInvalid
+	case 5:
+		return ErrNotFound
+	case 7:
+		return ErrForbidden
+	case 8:
+		return ErrRateLimited
+	case 16:
+		return ErrUnauthorized
+	}
+	return ErrServer
+}

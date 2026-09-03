@@ -85,6 +85,23 @@ type DocumentTab struct {
 	Footnotes     map[string]Footnote     `json:"footnotes,omitempty"`
 	Lists         map[string]List         `json:"lists,omitempty"`
 	InlineObjects map[string]InlineObject `json:"inlineObjects,omitempty"`
+	// CommentAnchors map anchor ids to ranges (Developer Preview, with
+	// commentsViewMode).
+	CommentAnchors map[string]CommentAnchor `json:"commentAnchors,omitempty"`
+}
+
+// CommentAnchor is where a comment thread is pinned (Developer Preview).
+type CommentAnchor struct {
+	AnchorID string   `json:"anchorId,omitempty"`
+	Ranges   []*Range `json:"ranges,omitempty"`
+}
+
+// Range is a half-open UTF-16 range in one segment of one tab.
+type Range struct {
+	SegmentID  string `json:"segmentId,omitempty"`
+	StartIndex int64  `json:"startIndex,omitempty"`
+	EndIndex   int64  `json:"endIndex,omitempty"`
+	TabID      string `json:"tabId,omitempty"`
 }
 
 // Body is the main content segment.

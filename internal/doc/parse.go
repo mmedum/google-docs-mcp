@@ -216,7 +216,27 @@ func parseTable(seg *Segment, t *gdocs.Table, handle string) *Table {
 	if tbl.Cols == 0 && len(tbl.Cells) > 0 {
 		tbl.Cols = len(tbl.Cells[0])
 	}
+	markMerged(tbl)
 	return tbl
+}
+
+// markMerged points every cell covered by another cell's span at that
+// head cell.
+func markMerged(tbl *Table) {
+	for _, row := range tbl.Cells {
+		for _, head := range row {
+			if head.RowSpan <= 1 && head.ColSpan <= 1 {
+				continue
+			}
+			for r := head.Row - 1; r < head.Row-1+head.RowSpan && r < len(tbl.Cells); r++ {
+				for c := head.Col - 1; c < head.Col-1+head.ColSpan && c < len(tbl.Cells[r]); c++ {
+					if cell := tbl.Cells[r][c]; cell != head && cell.MergedInto == nil {
+						cell.MergedInto = head
+					}
+				}
+			}
+		}
+	}
 }
 
 func parseParagraph(tab *Tab, p *gdocs.Paragraph) *Paragraph {

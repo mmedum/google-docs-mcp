@@ -75,68 +75,43 @@ func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
 		return nil, err
 	}
 	switch {
-	case t.HeadingID != "":
-		ht, sec, ok := d.HeadingByID(t.HeadingID)
-		if !ok {
-			return nil, Errorf("not_found", "no heading with id %q; call get_outline for current ids", t.HeadingID)
-		}
-		return sectionRange(ht, sec, t.IncludeHeading), nil
-	case t.Heading != "":
-		rs, err := resolveHeadingText(tab, seg, ReadScope{Heading: t.Heading, HeadingLevel: t.HeadingLevel, Occurrence: t.Occurrence})
-		if err != nil {
-			return nil, err
-		}
-		sec := doc.Section{Heading: seg.Blocks[rs.From], Level: seg.Blocks[rs.From].Paragraph.Level, From: rs.From, To: rs.To}
-		return sectionRange(tab, sec, t.IncludeHeading), nil
-	case t.Handle != "":
-		i, err := s.checkedIndex(f, seg, t.Handle)
-		if err != nil {
-			return nil, err
-		}
-		return blockRange(tab, seg, i, i), nil
-	case t.From != "" || t.To != "":
-		from, to := 0, len(seg.Blocks)-1
-		if t.From != "" {
-			if from, err = s.checkedIndex(f, seg, t.From); err != nil {
-				return nil, err
-			}
-		}
-		if t.To != "" {
-			if to, err = s.checkedIndex(f, seg, t.To); err != nil {
-				return nil, err
-			}
-		}
-		if to < from {
-			return nil, Errorf("invalid", "to handle %s comes before from handle %s", t.To, t.From)
-		}
-		return blockRange(tab, seg, from, to), nil
 	case t.Cell != "":
 		c, ok := d.FindCell(t.Cell)
 		if !ok {
 			return nil, Errorf("not_found", "no cell %s; cells are named like tbl1:r2c3", t.Cell)
+		}
+		if c.MergedInto != nil {
+			return nil, Errorf("invalid", "cell %s is merged into %s; target that cell instead", t.Cell, c.MergedInto.Handle)
 		}
 		if len(c.Blocks) == 0 {
 			return nil, Errorf("invalid", "cell %s has no content blocks", t.Cell)
 		}
 		return &TargetRange{Tab: tab, Segment: seg, Start: c.Blocks[0].Start, End: c.ContentEnd(), Text: c.Text(doc.ViewInline),
 			Description: "cell " + t.Cell}, nil
+	case t.Text != "":
+		return s.resolveText(f, tab, seg, t)
 	}
-	return s.resolveText(f, tab, seg, t)
+	rs, err := s.resolveBlocks(f, tab, seg, blockSelector{HeadingID: t.HeadingID, Heading: t.Heading, HeadingLevel: t.HeadingLevel, Occurrence: t.Occurrence,
+		Handle: t.Handle, From: t.From, To: t.To, IncludeHeading: t.IncludeHeading})
+	if err != nil {
+		return nil, err
+	}
+	if rs.Section != nil {
+		return sectionRange(rs), nil
+	}
+	return blockRange(rs.Tab, rs.Segment, rs.From, rs.To-1), nil
 }
 
-func sectionRange(tab *doc.Tab, sec doc.Section, includeHeading *bool) *TargetRange {
-	seg := tab.Body
-	from := sec.From
-	if includeHeading != nil && !*includeHeading {
-		from++
-	}
-	if from >= sec.To {
-		// Empty section body: a zero-length range right after the heading.
+// sectionRange is the range of a resolved section, with or without its
+// heading; an empty body is a zero-length range after the heading.
+func sectionRange(rs Resolved) *TargetRange {
+	seg, sec := rs.Segment, rs.Section
+	if rs.From >= rs.To {
 		h := seg.Blocks[sec.From]
-		return &TargetRange{Tab: tab, Segment: seg, Start: h.End, End: h.End, Block: h, Description: fmt.Sprintf("the empty body of section %q", h.Paragraph.Text(doc.ViewCurrent))}
+		return &TargetRange{Tab: rs.Tab, Segment: seg, Start: h.End, End: h.End, Block: h, Description: fmt.Sprintf("the empty body of section %q", h.Paragraph.Text(doc.ViewCurrent))}
 	}
-	r := blockRange(tab, seg, from, sec.To-1)
-	r.Description = fmt.Sprintf("section %q (%s)", sec.Heading.Paragraph.Text(doc.ViewCurrent), handleRange(seg, from, sec.To))
+	r := blockRange(rs.Tab, seg, rs.From, rs.To-1)
+	r.Description = fmt.Sprintf("section %q (%s)", sec.Heading.Paragraph.Text(doc.ViewCurrent), handleRange(seg, rs.From, rs.To))
 	return r
 }
 
@@ -245,7 +220,7 @@ func (s *Service) resolveText(f *Fetched, tab *doc.Tab, seg *doc.Segment, t Targ
 func (s *Service) withinBlocks(f *Fetched, tab *doc.Tab, seg *doc.Segment, within string) ([]*doc.Block, string, error) {
 	within = strings.TrimSpace(within)
 	if strings.HasPrefix(within, "heading:") {
-		rs, err := resolveHeadingText(tab, seg, ReadScope{Heading: strings.TrimPrefix(within, "heading:")})
+		rs, err := resolveHeadingText(tab, seg, blockSelector{Heading: strings.TrimPrefix(within, "heading:")})
 		if err != nil {
 			return nil, "", err
 		}

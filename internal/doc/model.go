@@ -323,17 +323,20 @@ type Table struct {
 	Cells  [][]*Cell
 }
 
-// Cell is one table cell with its nested blocks.
+// Cell is one table cell with its nested blocks. A cell covered by
+// another cell's span stays in the grid (the API keeps it, empty) and
+// points at the head cell through MergedInto.
 type Cell struct {
-	Table   *Table
-	Row     int // 1-based
-	Col     int // 1-based
-	Handle  string
-	Start   int64
-	End     int64
-	RowSpan int
-	ColSpan int
-	Blocks  []*Block
+	Table      *Table
+	Row        int // 1-based
+	Col        int // 1-based
+	Handle     string
+	Start      int64
+	End        int64
+	RowSpan    int
+	ColSpan    int
+	Blocks     []*Block
+	MergedInto *Cell
 }
 
 // TOC is a table of contents; read-only in the API.

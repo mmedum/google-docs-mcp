@@ -7,3 +7,4 @@ schemas.json
 client_secret*.json
 token.json
 .env
+__pycache__/

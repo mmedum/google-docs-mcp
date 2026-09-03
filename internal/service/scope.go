@@ -23,94 +23,134 @@ type ReadScope struct {
 	ContinueFrom string
 }
 
-// Resolved is a block range of one segment.
+// Resolved is a block range of one segment. Section is set when the
+// range came from a heading.
 type Resolved struct {
 	Tab         *doc.Tab
 	Segment     *doc.Segment
 	From        int
 	To          int
+	Section     *doc.Section
 	Description string
+}
+
+// blockSelector is the part of a read scope or a write target that
+// names whole blocks. At most one of heading_id, heading, handle and
+// from/to is set.
+type blockSelector struct {
+	HeadingID      string
+	Heading        string
+	HeadingLevel   int
+	Occurrence     int
+	Handle         string
+	From           string
+	To             string
+	IncludeHeading *bool
+}
+
+func (b blockSelector) isSet() bool {
+	return b.HeadingID != "" || b.Heading != "" || b.Handle != "" || b.From != "" || b.To != ""
 }
 
 var segmentRef = regexp.MustCompile(`^(body|header|footer|footnote)\s*(\d*)$`)
 
 // ResolveScope turns a ReadScope into a block range.
-func ResolveScope(d *doc.Document, sc ReadScope) (Resolved, error) {
-	tab, err := tabOf(d, sc.Tab)
+func (s *Service) ResolveScope(f *Fetched, sc ReadScope) (Resolved, error) {
+	tab, seg, err := tabSegment(f.Doc, sc.Tab, sc.Segment)
 	if err != nil {
 		return Resolved{}, err
 	}
-	if sc.HeadingID != "" {
-		ht, sec, ok := d.HeadingByID(sc.HeadingID)
-		if !ok {
-			return Resolved{}, Errorf("not_found", "no heading with id %q in this document; call get_outline for current ids", sc.HeadingID)
-		}
-		return Resolved{Tab: ht, Segment: ht.Body, From: sec.From, To: sec.To,
-			Description: fmt.Sprintf("%s, section %q (%s)", segmentName(ht, ht.Body), sec.Heading.Paragraph.Text(doc.ViewCurrent), handleRange(ht.Body, sec.From, sec.To))}, nil
+	sel := blockSelector{HeadingID: sc.HeadingID, Heading: sc.Heading, HeadingLevel: sc.HeadingLevel, Occurrence: sc.Occurrence, From: sc.FromHandle, To: sc.ToHandle}
+	if sel.isSet() {
+		return s.resolveBlocks(f, tab, seg, sel)
 	}
-	seg, err := selectSegment(tab, sc.Segment)
-	if err != nil {
-		return Resolved{}, err
-	}
-	res := Resolved{Tab: tab, Segment: seg, From: 0, To: len(seg.Blocks)}
-
-	switch {
-	case sc.Heading != "":
-		return resolveHeadingText(tab, seg, sc)
-	case sc.FromHandle != "" || sc.ToHandle != "":
-		if sc.FromHandle != "" {
-			i, err := topLevelIndex(seg, sc.FromHandle)
-			if err != nil {
-				return Resolved{}, err
-			}
-			res.From = i
-		}
-		if sc.ToHandle != "" {
-			j, err := topLevelIndex(seg, sc.ToHandle)
-			if err != nil {
-				return Resolved{}, err
-			}
-			if j < res.From {
-				return Resolved{}, Errorf("invalid", "to_handle %s comes before from_handle %s", sc.ToHandle, sc.FromHandle)
-			}
-			res.To = j + 1
-		}
-		res.Description = fmt.Sprintf("%s, blocks %s", segmentName(tab, seg), handleRange(seg, res.From, res.To))
-		return res, nil
-	}
+	res := Resolved{Tab: tab, Segment: seg, From: 0, To: len(seg.Blocks), Description: segmentName(tab, seg)}
 	if sc.ContinueFrom != "" {
-		i, err := topLevelIndex(seg, sc.ContinueFrom)
+		i, err := s.checkedIndex(f, seg, sc.ContinueFrom)
 		if err != nil {
 			return Resolved{}, err
 		}
 		res.From = i
 		res.Description = fmt.Sprintf("%s, continuing from %s", segmentName(tab, seg), sc.ContinueFrom)
-		return res, nil
 	}
-	res.Description = segmentName(tab, seg)
 	return res, nil
 }
 
-func resolveHeadingText(tab *doc.Tab, seg *doc.Segment, sc ReadScope) (Resolved, error) {
+// resolveBlocks turns a block selector into a block range. Handles are
+// checked against the memory of the last read; a heading id may point
+// into another tab, which then replaces the given one.
+func (s *Service) resolveBlocks(f *Fetched, tab *doc.Tab, seg *doc.Segment, sel blockSelector) (Resolved, error) {
+	var res Resolved
+	switch {
+	case sel.HeadingID != "":
+		ht, sec, ok := f.Doc.HeadingByID(sel.HeadingID)
+		if !ok {
+			return Resolved{}, Errorf("not_found", "no heading with id %q in this document; call get_outline for current ids", sel.HeadingID)
+		}
+		res = sectionResolved(ht, ht.Body, sec)
+	case sel.Heading != "":
+		var err error
+		if res, err = resolveHeadingText(tab, seg, sel); err != nil {
+			return Resolved{}, err
+		}
+	case sel.Handle != "":
+		i, err := s.checkedIndex(f, seg, sel.Handle)
+		if err != nil {
+			return Resolved{}, err
+		}
+		res = Resolved{Tab: tab, Segment: seg, From: i, To: i + 1}
+	default:
+		from, to := 0, len(seg.Blocks)
+		var err error
+		if sel.From != "" {
+			if from, err = s.checkedIndex(f, seg, sel.From); err != nil {
+				return Resolved{}, err
+			}
+		}
+		if sel.To != "" {
+			j, err := s.checkedIndex(f, seg, sel.To)
+			if err != nil {
+				return Resolved{}, err
+			}
+			if j < from {
+				return Resolved{}, Errorf("invalid", "to handle %s comes before from handle %s", sel.To, sel.From)
+			}
+			to = j + 1
+		}
+		res = Resolved{Tab: tab, Segment: seg, From: from, To: to}
+	}
+	if res.Section != nil && sel.IncludeHeading != nil && !*sel.IncludeHeading {
+		res.From++
+	}
+	if res.Description == "" {
+		res.Description = fmt.Sprintf("%s, blocks %s", segmentName(res.Tab, res.Segment), handleRange(res.Segment, res.From, res.To))
+	}
+	return res, nil
+}
+
+func sectionResolved(tab *doc.Tab, seg *doc.Segment, sec doc.Section) Resolved {
+	return Resolved{Tab: tab, Segment: seg, From: sec.From, To: sec.To, Section: &sec,
+		Description: fmt.Sprintf("%s, section %q (%s)", segmentName(tab, seg), sec.Heading.Paragraph.Text(doc.ViewCurrent), handleRange(seg, sec.From, sec.To))}
+}
+
+func resolveHeadingText(tab *doc.Tab, seg *doc.Segment, sel blockSelector) (Resolved, error) {
 	if seg.Kind != doc.SegmentBody {
 		return Resolved{}, Errorf("invalid", "heading scopes apply to the body; segment %q has no sections", seg.Label())
 	}
-	secs := seg.SectionsByHeading(sc.Heading, sc.HeadingLevel)
+	secs := seg.SectionsByHeading(sel.Heading, sel.HeadingLevel)
 	switch {
 	case len(secs) == 0:
-		return Resolved{}, Errorf("not_found", "no heading %q in %s; %s", sc.Heading, segmentName(tab, seg), closestHeadings(seg, sc.Heading))
-	case len(secs) > 1 && sc.Occurrence <= 0:
+		return Resolved{}, Errorf("not_found", "no heading %q in %s; %s", sel.Heading, segmentName(tab, seg), closestHeadings(seg, sel.Heading))
+	case len(secs) > 1 && sel.Occurrence <= 0:
 		hs := make([]string, 0, len(secs))
 		for _, s := range secs {
 			hs = append(hs, s.Heading.Handle)
 		}
-		return Resolved{}, Errorf("ambiguous", "heading %q matches %d sections (%s); pass occurrence (1-based) or use heading_id from get_outline", sc.Heading, len(secs), strings.Join(hs, ", "))
-	case sc.Occurrence > len(secs):
-		return Resolved{}, Errorf("not_found", "heading %q has %d match(es), occurrence %d does not exist", sc.Heading, len(secs), sc.Occurrence)
+		return Resolved{}, Errorf("ambiguous", "heading %q matches %d sections (%s); pass occurrence (1-based) or use heading_id from get_outline", sel.Heading, len(secs), strings.Join(hs, ", "))
+	case sel.Occurrence > len(secs):
+		return Resolved{}, Errorf("not_found", "heading %q has %d match(es), occurrence %d does not exist", sel.Heading, len(secs), sel.Occurrence)
 	}
-	sec := secs[max(sc.Occurrence, 1)-1]
-	return Resolved{Tab: tab, Segment: seg, From: sec.From, To: sec.To,
-		Description: fmt.Sprintf("%s, section %q (%s)", segmentName(tab, seg), sec.Heading.Paragraph.Text(doc.ViewCurrent), handleRange(seg, sec.From, sec.To))}, nil
+	return sectionResolved(tab, seg, secs[max(sel.Occurrence, 1)-1]), nil
 }
 
 func selectSegment(tab *doc.Tab, ref string) (*doc.Segment, error) {

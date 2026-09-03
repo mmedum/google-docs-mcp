@@ -27,14 +27,61 @@ type fakeAPI struct {
 	file     *gapi.File
 	lastOpts gapi.GetOptions
 
-	batches   []*gapi.BatchUpdateRequest
-	batchErrs []error
-	replies   []string
-	created   []string
-	searchQ   string
-	exported  string
-	comments  []*gapi.DriveComment
-	listErr   error
+	batches         []*gapi.BatchUpdateRequest
+	batchErrs       []error
+	replies         []string
+	created         []string
+	searchQ         string
+	exported        string
+	comments        []*gapi.DriveComment
+	listErr         error
+	posted          []string // "commentID:content:action"
+	deleted         []string
+	revisions       []*gapi.Revision
+	revisionExports map[string]string
+	revisionErr     error
+}
+
+func (f *fakeAPI) GetComment(_ context.Context, fileID, commentID string) (*gapi.DriveComment, error) {
+	for _, c := range f.comments {
+		if c.ID == commentID {
+			return c, nil
+		}
+	}
+	return nil, &gapi.APIError{Status: 404, Message: "comment not found"}
+}
+
+func (f *fakeAPI) CreateReply(_ context.Context, fileID, commentID, content, action string) (*gapi.DriveReply, error) {
+	if _, err := f.GetComment(context.Background(), fileID, commentID); err != nil {
+		return nil, err
+	}
+	f.posted = append(f.posted, commentID+":"+content+":"+action)
+	return &gapi.DriveReply{ID: fmt.Sprintf("r%d", len(f.posted)), Content: content, Action: action}, nil
+}
+
+func (f *fakeAPI) DeleteComment(_ context.Context, fileID, commentID string) error {
+	f.deleted = append(f.deleted, commentID)
+	return nil
+}
+
+func (f *fakeAPI) DeleteReply(_ context.Context, fileID, commentID, replyID string) error {
+	f.deleted = append(f.deleted, commentID+"/"+replyID)
+	return nil
+}
+
+func (f *fakeAPI) ListRevisions(_ context.Context, fileID string) ([]*gapi.Revision, error) {
+	if f.revisionErr != nil {
+		return nil, f.revisionErr
+	}
+	return f.revisions, nil
+}
+
+func (f *fakeAPI) ExportRevision(_ context.Context, fileID, revisionID, mimeType string) ([]byte, error) {
+	text, ok := f.revisionExports[revisionID]
+	if !ok {
+		return nil, &gapi.APIError{Status: 400, Message: "unsupported"}
+	}
+	return []byte(text), nil
 }
 
 func (f *fakeAPI) BatchUpdate(_ context.Context, id string, req *gapi.BatchUpdateRequest) (*gapi.BatchUpdateResponse, error) {
@@ -248,7 +295,11 @@ func TestOutline(t *testing.T) {
 }
 
 func TestResolveScope(t *testing.T) {
-	d := doctest.Fixture(t)
+	svc, _ := newService(t)
+	f, err := svc.Fetch(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name  string
 		scope ReadScope
@@ -285,7 +336,7 @@ func TestResolveScope(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := ResolveScope(d, tc.scope)
+			res, err := svc.ResolveScope(f, tc.scope)
 			if tc.class != "" {
 				var se *Error
 				if !errors.As(err, &se) || se.Class != tc.class {
@@ -307,18 +358,30 @@ func TestResolveScope(t *testing.T) {
 }
 
 func TestResolveScopeAmbiguousHeading(t *testing.T) {
-	d := doctest.Fixture(t)
+	svc, _ := newService(t)
+	f, err := svc.Fetch(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Duplicate a heading text in tab 1 to force ambiguity.
-	body := d.Tabs[0].Body
+	body := f.Doc.Tabs[0].Body
 	body.Blocks[13].Paragraph.Runs[0].Text = "Background\n"
-	_, err := ResolveScope(d, ReadScope{Heading: "Background"})
+	_, err = svc.ResolveScope(f, ReadScope{Heading: "Background"})
 	var se *Error
 	if !errors.As(err, &se) || se.Class != "ambiguous" || !strings.Contains(se.Message, "p12") {
 		t.Fatalf("got %v", err)
 	}
-	res, err := ResolveScope(d, ReadScope{Heading: "Background", Occurrence: 2})
+	res, err := svc.ResolveScope(f, ReadScope{Heading: "Background", Occurrence: 2})
 	if err != nil || res.From != 13 {
 		t.Fatalf("occurrence 2: %+v %v", res, err)
+	}
+	// A handle remembered from an older revision must still name the same
+	// text for reads as for writes.
+	svc.Remember(f)
+	f.Doc.RevisionID = "rev-0009"
+	body.Blocks[5].Paragraph.Runs[0].Text = "Changed\n"
+	if _, err := svc.ResolveScope(f, ReadScope{FromHandle: "p5"}); classOf(err) != "stale" {
+		t.Fatalf("stale handle on read: %v", err)
 	}
 }
 

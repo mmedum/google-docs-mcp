@@ -772,9 +772,10 @@ style, alignment, line spacing, space above and below, both indents,
 keep-with-next and page-break-before, on `format_document` and on
 `named_style` alike; it does not carry borders, shading, tab stops, end
 indent, content direction, keep-lines-together or widow and orphan
-control. Those are compound or rarely asked for, and each would need a
-field in the model, a line in the renderer and a schema field to be worth
-having. A field the server can read but not write is the asymmetry to
+control. Table cell style is the same shape: background, content
+alignment and padding, but not the four cell borders. Those are compound
+or rarely asked for, and each would need a field in the model, a line in
+the renderer and a schema field to be worth having. A field the server can read but not write is the asymmetry to
 avoid — `pageBreakBefore` was one for a day.
 
 **Second client, first round (Claude Desktop, 2026-09-03).** The server

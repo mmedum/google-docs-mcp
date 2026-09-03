@@ -11,13 +11,16 @@ Single static binary. Per-user OAuth against your own Google account, in
 your own Google Cloud project. Nothing leaves your machine except calls to
 Google's APIs.
 
-**Status: Phase 3 done (v0.3.0).** Reading, searching, creating,
-exporting, editing with minimal diffs in suggest, direct or comment mode,
-formatting, reviewing suggestions, comment threads, revision history and
-diffs, tables, tabs, headers, footers, footnotes, images, chips,
-`gdocs://` resources, large-document performance and agent evals are in;
-see [docs/architecture.md](docs/architecture.md) for the design and what
-the evals found.
+**Status: v0.5.0.** Reading, searching, creating, exporting, editing with
+minimal diffs in suggest, direct or comment mode, formatting, reviewing
+suggestions, comment threads, revision history and diffs, tables, tabs,
+headers, footers, footnotes, images, chips, named ranges, page and section
+layout, named styles, `gdocs://` resources, large-document performance and
+agent evals are in. Every GA member of the Docs API's `Request` union is
+emitted; §16 of the architecture says which fields of those requests the
+tools expose and which they deliberately do not. See
+[docs/architecture.md](docs/architecture.md) for the design and what the
+evals found.
 
 ## Why another Google Docs MCP
 
@@ -65,6 +68,9 @@ google-docs-mcp login
 google-docs-mcp doctor https://docs.google.com/document/d/<some doc you can open>/edit
 ```
 
+The document is optional: `doctor` on its own checks credentials, scopes
+and API reachability, and reads the document when given one.
+
 `login` opens a browser, completes Google's desktop OAuth flow on a
 loopback port, and stores the refresh token in your OS keyring (Secret
 Service, Keychain or Credential Manager), falling back to a 0600 file
@@ -101,6 +107,11 @@ Claude Desktop (`claude_desktop_config.json`) or Cursor (`mcp.json`):
   }
 }
 ```
+
+Claude Desktop rewrites `claude_desktop_config.json` from its own state
+while it runs, dropping edits made behind its back: quit it fully, then
+edit, then start it. It also loads tool definitions lazily, so give it a
+moment before expecting the tools in a chat.
 
 All settings are environment variables; see
 [docs/configuration.md](docs/configuration.md). Nothing needs to be set

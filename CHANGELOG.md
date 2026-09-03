@@ -7,6 +7,27 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+- The test suite passes on Windows and macOS, not just Linux. CI's first
+  run ever caught three Linux-only assumptions: an export directory
+  hardcoded as `/tmp/exports` (not an absolute path on Windows, so the
+  config rightly refused it), a token file asserted to be `0600` (Windows
+  has no POSIX permission bits; its ACL is what protects the file), and
+  golden files compared byte for byte after a checkout had rewritten them
+  as CRLF. A `.gitattributes` now pins line endings to LF.
+
+### Changed
+- CI and the release workflow pin what they run: actions moved from
+  checkout v4, setup-go v5, upload-artifact v4, goreleaser v6,
+  golangci-lint v8 and gitleaks v2 to their current majors, `go-version:
+  stable` became `go-version-file: go.mod` so CI uses the toolchain the
+  code declares, and golangci-lint, govulncheck and go-licenses are on
+  explicit versions instead of `@latest`, which made a green build
+  unreproducible. Dependabot already proposes these weekly.
+- A tag now publishes a real GitHub release rather than a draft, with the
+  archives and `checksums.txt`. docs/development.md describes the whole
+  process.
+
 ## [0.6.0] - 2026-09-03
 
 ### Added

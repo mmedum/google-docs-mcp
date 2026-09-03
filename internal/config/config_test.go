@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"flag"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -78,11 +79,15 @@ func TestValidation(t *testing.T) {
 }
 
 func TestExplicitModesAndDirs(t *testing.T) {
-	c, err := build(t, map[string]string{"GDOCS_PREVIEW": "1", "GDOCS_DEFAULT_WRITE_MODE": "comment", "GDOCS_EXPORT_DIR": "/tmp/exports/", "GDOCS_ENABLE_DESTRUCTIVE": "on"})
+	// What counts as absolute is the platform's business: C:\... on
+	// Windows, /tmp/... elsewhere. Build one rather than hardcode a
+	// POSIX path the config would rightly refuse.
+	dir := filepath.Join(t.TempDir(), "exports")
+	c, err := build(t, map[string]string{"GDOCS_PREVIEW": "1", "GDOCS_DEFAULT_WRITE_MODE": "comment", "GDOCS_EXPORT_DIR": dir + string(filepath.Separator), "GDOCS_ENABLE_DESTRUCTIVE": "on"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.DefaultWriteMode != WriteComment || c.ExportDir != "/tmp/exports" || !c.EnableDestructive {
+	if c.DefaultWriteMode != WriteComment || c.ExportDir != dir || !c.EnableDestructive {
 		t.Fatalf("got %+v", c)
 	}
 }

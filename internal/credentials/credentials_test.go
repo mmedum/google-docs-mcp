@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -110,8 +111,13 @@ func TestFileFallbackWhenKeyringBroken(t *testing.T) {
 		t.Fatalf("expected plaintext warning, got %v", *warnings)
 	}
 	st, err := os.Stat(s.FilePath)
-	if err != nil || st.Mode().Perm() != 0o600 {
-		t.Fatalf("token file mode: %v %v", st, err)
+	if err != nil {
+		t.Fatalf("token file: %v", err)
+	}
+	// Windows has no POSIX permission bits, so the 0600 the store asks
+	// for cannot be asserted there; the file's ACL is what protects it.
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
+		t.Fatalf("token file mode: %v", st.Mode().Perm())
 	}
 	tok, src, err := s.Resolve()
 	if err != nil || tok != "tok-2" || src != SourceFile {

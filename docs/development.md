@@ -71,3 +71,31 @@ Commit at each milestone (a phase, a review pass, a live-test fix) with a
 message that says what changed and why. Nothing deployer-specific ever
 enters the repository: no document ids, account emails, project or client
 ids, or content from real documents.
+
+## Releasing
+
+A tag is the whole release process; nothing is published by hand.
+
+1. Put the changes under a `## [N.N.N] - YYYY-MM-DD` heading in
+   `CHANGELOG.md`, above the previous release and below `[Unreleased]`.
+2. Commit that as `Release N.N.N`.
+3. Tag it: `git tag -a vN.N.N -m "vN.N.N — what this release is"`.
+4. `make check`. The staleness gate fails *between* steps 2 and 3 —
+   "source changed since vX but [Unreleased] is empty" — so run it after
+   the tag, not before.
+5. Push the commit, let CI go green, then push the tag.
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds with
+GoReleaser for linux, darwin and windows on amd64 and arm64, and
+publishes a GitHub release with the archives and `checksums.txt`. The
+release is **not** a draft, so the tag is the decision — a draft nobody
+remembers to publish is how releases go missing. `goreleaser release
+--snapshot --clean --skip=publish` does the same build locally without
+touching GitHub, which is worth running once if the packaging changed.
+
+Actions and tool versions are pinned, not floating: `go-version-file:
+go.mod` so CI uses the toolchain the code declares, and explicit versions
+for golangci-lint, govulncheck and go-licenses so a green build stays
+reproducible. Dependabot proposes the bumps weekly (gomod and
+github-actions, `.github/dependabot.yml`); take them through a PR so CI
+judges each one.

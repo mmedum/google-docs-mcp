@@ -33,4 +33,11 @@ changelog:
     exclude: ["^docs:", "^test:", "^chore:"]
 
 release:
-  draft: true
+  # A tag is the decision; a draft nobody publishes is how releases go
+  # missing. Pre-1.0 tags are still marked as pre-releases automatically
+  # for anything carrying a suffix like -rc1.
+  draft: false
+  prerelease: auto
+  footer: |
+    Built by GoReleaser from the tag. Verify a download against
+    `checksums.txt`; every archive carries the binary, LICENSE and README.

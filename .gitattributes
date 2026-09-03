@@ -1,0 +1,6 @@
+# Golden files are compared byte for byte, so they must arrive with LF
+# on every platform: a Windows checkout that rewrote them as CRLF failed
+# the renderer's golden tests.
+* text=auto eol=lf
+*.png binary
+*.pdf binary

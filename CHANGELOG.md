@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-03
+
 ### Added
 - `layout_document`: `page` (page size, margins, background, landscape,
   where page numbering starts, first- and even-page headers and footers),

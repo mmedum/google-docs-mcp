@@ -6,6 +6,9 @@ follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-09-03
+
 ### Added
 - `get_document` reports each tab's named style definitions — the font,
   size, colour, alignment and spacing that `NORMAL_TEXT`, `TITLE`,

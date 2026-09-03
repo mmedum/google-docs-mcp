@@ -11,12 +11,12 @@ Single static binary. Per-user OAuth against your own Google account, in
 your own Google Cloud project. Nothing leaves your machine except calls to
 Google's APIs.
 
-**Status: Phase 2.** Reading, searching, creating, exporting, editing
-with minimal diffs in suggest, direct or comment mode, formatting,
-reviewing suggestions, comment threads, revision history and diffs,
-tables, tabs, headers, footers, footnotes, images and chips are in. Agent
-evals and resources follow in Phase 3 of
-[docs/architecture.md](docs/architecture.md).
+**Status: Phase 3 in progress.** Reading, searching, creating,
+exporting, editing with minimal diffs in suggest, direct or comment mode,
+formatting, reviewing suggestions, comment threads, revision history and
+diffs, tables, tabs, headers, footers, footnotes, images, chips and
+`gdocs://` resources are in. Agent evals and large-document performance
+are the rest of Phase 3 of [docs/architecture.md](docs/architecture.md).
 
 ## Why another Google Docs MCP
 
@@ -135,6 +135,18 @@ content and child tabs). Both carry the destructive annotation and ask the
 client to involve the person.
 
 Documents are identified by id or any `docs.google.com` URL.
+
+### Resources
+
+Clients that attach context as MCP resources can read a document without
+a tool call. Each is markdown with no handles, suggestions or comments;
+the read tools are for scoped, budgeted reads.
+
+- `gdocs://<id>` — every tab's body, cut at 400000 characters with a
+  note saying where `read_document` can continue.
+- `gdocs://<id>/outline` — the heading tree `get_outline` returns.
+- `gdocs://<id>/tabs/<tab>` — one tab's body; `tab` is an id, title or
+  number.
 
 ### How edits are addressed
 

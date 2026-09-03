@@ -28,7 +28,9 @@ const instructions = "Google Docs tools. Start with get_document (metadata, capa
 	"get_outline (headings with stable heading_id and block handles), then read_document scoped to a section; avoid " +
 	"reading long documents whole. Edit with edit_document and format_document: target content by quoting exact text, " +
 	"by heading_id, or by handle; never by position. Every write takes mode suggest, direct or comment; use the mode " +
-	"the person asked for, and dry_run when unsure. Handles like p12 are valid for the revision_id they came with."
+	"the person asked for, and dry_run when unsure. Handles like p12 are valid for the revision_id they came with. " +
+	"Resources gdocs://<id>, gdocs://<id>/outline and gdocs://<id>/tabs/<tab> hold the same content as markdown for " +
+	"clients that attach a document whole; they carry no handles."
 
 // Deps are what the server needs.
 type Deps struct {
@@ -49,8 +51,9 @@ func New(d Deps) *mcp.Server {
 	return s
 }
 
-// DumpSchemas writes the tool list as the wire would carry it: the SDK
-// has no public tool enumerator, so an in-memory client asks the server.
+// DumpSchemas writes the tool list and the resource templates as the wire
+// would carry them: the SDK has no public enumerator, so an in-memory
+// client asks the server.
 func DumpSchemas(ctx context.Context, s *mcp.Server, w io.Writer, version string) error {
 	ct, st := mcp.NewInMemoryTransports()
 	ss, err := s.Connect(ctx, st, nil)
@@ -69,12 +72,20 @@ func DumpSchemas(ctx context.Context, s *mcp.Server, w io.Writer, version string
 		return fmt.Errorf("list tools: %w", err)
 	}
 	sort.Slice(res.Tools, func(i, j int) bool { return res.Tools[i].Name < res.Tools[j].Name })
+	tmpls, err := cs.ListResourceTemplates(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("list resource templates: %w", err)
+	}
+	sort.Slice(tmpls.ResourceTemplates, func(i, j int) bool {
+		return tmpls.ResourceTemplates[i].URITemplate < tmpls.ResourceTemplates[j].URITemplate
+	})
 	out := struct {
-		Server  string      `json:"server"`
-		Version string      `json:"version"`
-		SDK     string      `json:"sdk"`
-		Tools   []*mcp.Tool `json:"tools"`
-	}{Name, version, SDKVersion, res.Tools}
+		Server            string                  `json:"server"`
+		Version           string                  `json:"version"`
+		SDK               string                  `json:"sdk"`
+		Tools             []*mcp.Tool             `json:"tools"`
+		ResourceTemplates []*mcp.ResourceTemplate `json:"resourceTemplates"`
+	}{Name, version, SDKVersion, res.Tools, tmpls.ResourceTemplates}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)

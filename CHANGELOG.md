@@ -8,6 +8,14 @@ and new required fields are breaking; the schema diff in CI flags them.
 ## [Unreleased]
 
 ### Added
+- Resources: `gdocs://<id>` (every tab's body as markdown under one
+  budget), `gdocs://<id>/outline` and `gdocs://<id>/tabs/<tab>`, for
+  clients that attach a document whole; `--dump-schemas` lists the
+  resource templates next to the tools.
+
+## [0.2.0] - 2026-09-03
+
+### Added
 - Phase 2: comments on both backends: `list_comments` (full threads with
   replies, resolved and deleted state, located by the preview's anchors or
   by quoted text), `add_comment` (pinned to a target with Developer

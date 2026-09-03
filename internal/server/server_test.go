@@ -386,11 +386,13 @@ func TestDumpSchemas(t *testing.T) {
 	var out struct {
 		Server, Version, SDK string
 		Tools                []struct{ Name string }
+		ResourceTemplates    []struct{ URITemplate string }
 	}
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 19 || out.Tools[0].Name != "add_comment" {
+	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 19 || out.Tools[0].Name != "add_comment" ||
+		len(out.ResourceTemplates) != 3 || out.ResourceTemplates[0].URITemplate != "gdocs://{document}" {
 		t.Fatalf("dump = %+v", out)
 	}
 	if !errors.Is(context.Canceled, context.Canceled) {
@@ -484,5 +486,66 @@ func TestStructureToolsEndToEnd(t *testing.T) {
 	res = call(t, cs, "edit_document", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{{"op": "delete_header", "target": map[string]any{"segment": "header"}}}})
 	if res.IsError || !strings.Contains(textOf(res), "requests: deleteHeader") {
 		t.Fatalf("delete_header: %q", textOf(res))
+	}
+}
+
+func TestResources(t *testing.T) {
+	cs := connect(t, &fakeAPI{raw: doctest.RawFixture(t)})
+	ctx := context.Background()
+	tmpls, err := cs.ListResourceTemplates(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uris []string
+	for _, rt := range tmpls.ResourceTemplates {
+		uris = append(uris, rt.URITemplate)
+	}
+	if strings.Join(uris, " ") != "gdocs://{document} gdocs://{document}/outline gdocs://{document}/tabs/{tab}" {
+		t.Fatalf("templates = %v", uris)
+	}
+
+	read := func(uri string) (string, error) {
+		t.Helper()
+		res, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{URI: uri})
+		if err != nil {
+			return "", err
+		}
+		if len(res.Contents) != 1 || res.Contents[0].MIMEType != "text/markdown" || res.Contents[0].URI != uri {
+			t.Fatalf("%s: contents = %+v", uri, res.Contents)
+		}
+		return res.Contents[0].Text, nil
+	}
+	whole, err := read("gdocs://" + fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"<!-- \"Quarterly Report\" · revision rev-0001 · 2 tab(s) -->\n", "<!-- tab 1 \"Main\" -->\n\n", "\n\n<!-- tab 2 \"Notes\" -->\n\n", "# Background", "| **Name** |"} {
+		if !strings.Contains(whole, want) {
+			t.Errorf("whole document lacks %q:\n%s", want, whole)
+		}
+	}
+	if strings.Contains(whole, "[p2]") || strings.Contains(whole, "{++") {
+		t.Errorf("whole document shows handles or suggestions:\n%s", whole)
+	}
+	outline, err := read("gdocs://" + fixtureID + "/outline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(outline, "[p2] H1 Background {h.bg}") {
+		t.Errorf("outline: %s", outline)
+	}
+	tab, err := read("gdocs://" + fixtureID + "/tabs/Notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(tab, "<!-- tab 2 body · revision rev-0001 · ") {
+		t.Errorf("tab: %s", tab)
+	}
+	for _, uri := range []string{"gdocs://1NoSuchDocumentIdXXXXXXXXXXXXXXXXXXXXXXXXXXX/outline", "gdocs://" + fixtureID + "/tabs/Missing", "gdocs://" + fixtureID + "/nope", "gdocs://" + fixtureID + "/tabs/Notes/extra"} {
+		if _, err := read(uri); err == nil {
+			t.Errorf("%s: expected an error", uri)
+		} else if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "Resource not found") {
+			t.Errorf("%s: %v", uri, err)
+		}
 	}
 }

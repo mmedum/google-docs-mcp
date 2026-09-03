@@ -417,6 +417,18 @@ mode chosen by the person, the overwrite guard, `dry_run`, per-call
 approval in Claude Code and read-only mode are the safety layers. `replace_all` always carries
 explicit `tabsCriteria`.
 
+**Resources** (Phase 3). Three templates, all `text/markdown`, for
+clients that attach a document as context instead of calling a tool:
+`gdocs://{document}` (every tab's body under one 400 000-character
+budget, tabs separated by `<!-- tab N "title" -->`, a closing comment
+naming where `read_document` continues), `gdocs://{document}/outline`
+(the `get_outline` text) and `gdocs://{document}/tabs/{tab}`. They carry
+no handles, suggestions or comments; the read tools remain the way to
+scope, budget and target. No static resource list (that would be a Drive
+listing) and no subscriptions (Google offers no push; polling would spend
+the read quota). A document that does not exist is the spec's
+resource-not-found error; other failures carry the `[class] message`.
+
 Results: read tools return a **markdown text block** plus a small
 object-typed `Out` (`revision_id`, `truncated`, `continue_from`); go-sdk
 v1.7.0 leaves `Content` alone in that case and fills
@@ -629,7 +641,8 @@ filled in a second batch once it exists (found by the index the insertion
 named); the tab that `add` creates gets its content the same way.
 
 **Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Agent evals, resources
-(`gdocs://<id>`), performance on large documents.
+(`gdocs://<id>`, done 2026-09-03), performance on large documents, and
+the §17a cleanups.
 
 ## 17. Open decisions
 
@@ -716,3 +729,4 @@ checked rather than assumed.
 | `revisions.list` is complete for Docs (my assumption) | Refuted: "might be incomplete for files with a large revision history, including frequently edited Google Docs" | `list_revisions` says so in its output and description. |
 | `deleteTab` fails when the tab has children (my assumption) | Refuted: child tabs are deleted with it | `delete_tab` warns; a document keeps at least one tab. |
 | `comments.*` need the `fields` parameter (Drive guide) | Confirmed for comments (an omitted `fields` is an error); the replies pages list no parameters | Sent on every call. |
+| Resource templates with a shared prefix shadow each other (my worry) | Refuted in go-sdk v1.7.0: a template matches through an anchored RFC 6570 regexp in which `{var}` excludes `/`, so `gdocs://{document}` does not match `gdocs://id/outline`; an unmatched URI is resource-not-found (code -32602 since SEP-2164) | Three templates registered side by side; handlers parse the URI themselves. |

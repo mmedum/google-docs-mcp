@@ -445,3 +445,24 @@ func TestErrorType(t *testing.T) {
 		t.Fatal("sanity")
 	}
 }
+
+func TestReadWholeBudget(t *testing.T) {
+	svc, _ := newService(t)
+	res, err := svc.ReadWhole(context.Background(), fixtureID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Truncated || res.Tabs != 2 || res.Title != "Quarterly Report" || !strings.Contains(res.Text, "<!-- tab 2 \"Notes\" -->") {
+		t.Fatalf("unbudgeted: %+v", res)
+	}
+	small, err := svc.ReadWhole(context.Background(), fixtureID, 120)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !small.Truncated || !strings.Contains(small.Text, "<!-- truncated; continue with read_document tab 1 continue_from p") || strings.Contains(small.Text, "Notes") {
+		t.Fatalf("budgeted: %s", small.Text)
+	}
+	if _, err := svc.ReadWhole(context.Background(), "not a document", 0); err == nil {
+		t.Fatal("expected an error for a bad reference")
+	}
+}

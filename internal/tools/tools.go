@@ -29,6 +29,7 @@ func Register(s *mcp.Server, d Deps) {
 	registerMoreRead(s, d)
 	registerCommentsRead(s, d)
 	registerHistory(s, d)
+	registerResources(s, d)
 	if !d.Config.ReadOnly {
 		registerWrite(s, d)
 		registerCommentsWrite(s, d)

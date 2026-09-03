@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 	"github.com/mmedum/google-docs-mcp/internal/plan"
 	"github.com/mmedum/google-docs-mcp/internal/render"
 )
@@ -54,5 +57,41 @@ func TestSegmentByID(t *testing.T) {
 	}
 	if _, err := svc.Read(ctx, ReadRequest{Document: fixtureID, Scope: ReadScope{Segment: "kix.nope"}}); err == nil {
 		t.Fatal("unknown segment id accepted")
+	}
+}
+
+func TestFootnoteFollowupReplacesTheBlankParagraph(t *testing.T) {
+	svc, api := writable(t, false)
+	ctx := context.Background()
+	api.replies = []string{`{"replies":[{"createFootnote":{"footnoteId":"kix.newfn"}}],"writeControl":{"requiredRevisionId":"rev-0002"}}`}
+	// Google creates a footnote whose paragraph holds one space.
+	var after gdocs.Document
+	if err := json.Unmarshal(doctest.RawFixture(t), &after); err != nil {
+		t.Fatal(err)
+	}
+	after.RevisionID = "rev-0002"
+	after.Tabs[0].DocumentTab.Footnotes["kix.newfn"] = gdocs.Footnote{FootnoteID: "kix.newfn", Content: []*gdocs.StructuralElement{{StartIndex: 0, EndIndex: 2,
+		Paragraph: &gdocs.Paragraph{Elements: []*gdocs.ParagraphElement{{StartIndex: 0, EndIndex: 2, TextRun: &gdocs.TextRun{Content: " \n"}}}}}}}
+	api.afterBatch, _ = json.Marshal(&after)
+	res, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{{Kind: plan.OpFootnote, Location: &Location{At: "after", Of: &Target{Text: "Revenue grew"}}, Content: "Source: finance report."}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.batches) != 2 {
+		t.Fatalf("batches = %d; warnings %v", len(api.batches), res.Warnings)
+	}
+	second := kindsOf(t, api.batches[1].Requests)
+	if !strings.Contains(second, "deleteContentRange[0,1)") || !strings.Contains(second, "insertText@0") {
+		t.Fatalf("second batch should replace the space, got %s", second)
+	}
+	var m map[string]map[string]any
+	_ = json.Unmarshal(api.batches[1].Requests[0], &m)
+	for _, req := range m {
+		if loc, ok := req["range"].(map[string]any); ok && loc["segmentId"] != "kix.newfn" {
+			t.Fatalf("second batch targets %v", loc)
+		}
+	}
+	if !strings.Contains(res.Changes[0].Description, "content written") {
+		t.Fatalf("changes: %+v", res.Changes)
 	}
 }

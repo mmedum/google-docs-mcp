@@ -57,7 +57,9 @@ type EditResult struct {
 	SuggestionIDs []string         `json:"suggestion_ids,omitempty"`
 	CommentIDs    []string         `json:"comment_ids,omitempty"`
 	Warnings      []string         `json:"warnings,omitempty"`
-	Preview       string           `json:"-"`
+	// Preview is the edited region rendered with handles, in the JSON as
+	// well as the text because a client may show the model only one.
+	Preview string `json:"preview,omitempty"`
 	// Requests is the dry run's request list, for tests and debugging;
 	// the person and the model see RequestKinds, never the indices.
 	Requests     json.RawMessage `json:"-"`

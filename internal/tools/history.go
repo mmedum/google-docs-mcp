@@ -31,12 +31,12 @@ func registerHistory(s *mcp.Server, d Deps) {
 			"feed diff_revisions and read_document's revision parameter; they are Drive revision ids, not the revision_id " +
 			"that reads and writes return for concurrency control. Drive may omit older revisions of busy documents.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RevisionsInput) (*mcp.CallToolResult, *service.RevisionsResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RevisionsInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.ListRevisions(ctx, in.Document, in.Limit)
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(res.Text), res, nil
+		return text(res.Text), nil, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -45,7 +45,7 @@ func registerHistory(s *mcp.Server, d Deps) {
 			"(or plain text) export, with line counts per hunk. Pass from (older) and optionally to (newer, default " +
 			"current). Use list_revisions to pick ids.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DiffInput) (*mcp.CallToolResult, *service.DiffResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DiffInput) (*mcp.CallToolResult, any, error) {
 		if in.MaxChars < 0 || in.Context < 0 {
 			return nil, nil, fail(service.Errorf("invalid", "max_chars and context must be positive"))
 		}
@@ -53,6 +53,6 @@ func registerHistory(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(res.Text), res, nil
+		return text(res.Text), nil, nil
 	})
 }

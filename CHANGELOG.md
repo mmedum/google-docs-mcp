@@ -14,8 +14,18 @@ and new required fields are breaking; the schema diff in CI flags them.
   resource templates next to the tools.
 - `make bench` and a synthetic large-document generator
   (`internal/doc/doctest.Large`) for the numbers below.
+- Agent evals (`scripts/evals/run.py`): thirteen tasks through Claude
+  Code headless against scratch documents, scored on the end state and
+  the tool-call trace; the design document records the run.
 
 ### Changed
+- Read tools (`get_document`, `get_outline`, `read_document`,
+  `find_in_document`, `search_documents`, `export_document`,
+  `list_suggestions`, `list_comments`, `list_revisions`, `diff_revisions`)
+  return a text block only: Claude Code shows the model only a result's
+  structured form when one is present, which made every read look like
+  metadata. Write results keep both forms and their JSON now carries the
+  rendered `preview`.
 - Dry runs list what a second batch will do (`followups`), and the
   content of new headers, footers, footnotes and data-filled tables lands
   through one follow-up edit against the refetched document instead of
@@ -35,6 +45,9 @@ and new required fields are breaking; the schema diff in CI flags them.
   quoted text from 384 ms to 38 ms.
 
 ### Fixed
+- A footnote inserted with content no longer starts with a blank line:
+  Google creates the footnote with a paragraph holding one space, and the
+  content now replaces it.
 - Content written into an empty paragraph (a new header, footer,
   footnote or tab, or an append into an empty last paragraph) takes the
   content's own paragraph styles; a heading no longer comes out as normal

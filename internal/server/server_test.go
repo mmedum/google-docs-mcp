@@ -301,10 +301,10 @@ func TestGetDocumentTool(t *testing.T) {
 	if !strings.Contains(textOf(res), "Quarterly Report") || !strings.Contains(textOf(res), "write modes direct/comment") {
 		t.Fatalf("text: %s", textOf(res))
 	}
-	sc, _ := json.Marshal(res.StructuredContent)
-	var info service.Info
-	if err := json.Unmarshal(sc, &info); err != nil || info.RevisionID != "rev-0001" || len(info.Tabs) != 2 {
-		t.Fatalf("structured: %s %v", sc, err)
+	// Read tools carry everything in their text: a client may show the
+	// model only the structured form when one is present.
+	if res.StructuredContent != nil || !strings.Contains(textOf(res), "revision rev-0001") || !strings.Contains(textOf(res), "2 tab(s)") {
+		t.Fatalf("read result: structured=%v text=%s", res.StructuredContent, textOf(res))
 	}
 }
 
@@ -322,9 +322,8 @@ func TestReadAndOutlineTools(t *testing.T) {
 	if !strings.HasPrefix(text, "<!-- tab 1 body, section \"Details\"") || !strings.Contains(text, "[p8] ## Details {h.det}") || !strings.Contains(text, "| **Name** |") {
 		t.Fatalf("read text: %s", text)
 	}
-	sc, _ := json.Marshal(res.StructuredContent)
-	if !bytes.Contains(sc, []byte(`"revision_id":"rev-0001"`)) || !bytes.Contains(sc, []byte(`"blocks":5`)) {
-		t.Fatalf("read structured: %s", sc)
+	if res.StructuredContent != nil || !strings.Contains(text, "· revision rev-0001 · 5 block(s) -->") {
+		t.Fatalf("read result: structured=%v header=%s", res.StructuredContent, text[:80])
 	}
 	res = call(t, cs, "read_document", map[string]any{"document": fixtureID, "format": "raw", "from_handle": "p2", "to_handle": "p2"})
 	if res.IsError || !strings.HasPrefix(textOf(res), "[{") {

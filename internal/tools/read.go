@@ -25,6 +25,11 @@ type OutlineInput struct {
 	Tab      string `json:"tab,omitempty" jsonschema:"tab id, title or number to limit the outline to; default all tabs"`
 }
 
+// Read tools return text only. A client may show the model either a
+// result's text or its structured form (Claude Code shows only the
+// structured form when both are present), so a tool whose substance is
+// prose carries it in the one form every client shows.
+
 // OutlineOutput is the structured outline.
 type OutlineOutput struct {
 	RevisionID string              `json:"revision_id"`
@@ -77,12 +82,12 @@ func registerRead(s *mcp.Server, d Deps) {
 			"(whether suggestion mode is available, the default write mode, read-only). Cheap; call it first when handed a " +
 			"document id or URL. Then use get_outline for the heading tree and read_document for content.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DocumentInput) (*mcp.CallToolResult, *service.Info, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DocumentInput) (*mcp.CallToolResult, any, error) {
 		info, err := d.Service.Info(ctx, in.Document)
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(infoText(info)), info, nil
+		return text(infoText(info)), nil, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -92,12 +97,12 @@ func registerRead(s *mcp.Server, d Deps) {
 			"headers, footers and footnotes. Use it to pick a section to read with read_document (pass heading_id) " +
 			"instead of reading a long document whole, and to learn block handles. Cheap.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in OutlineInput) (*mcp.CallToolResult, *OutlineOutput, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in OutlineInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.Outline(ctx, in.Document, in.Tab)
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(res.Text), &OutlineOutput{RevisionID: res.RevisionID, Tabs: res.Tabs}, nil
+		return text(res.Text), nil, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -112,7 +117,7 @@ func registerRead(s *mcp.Server, d Deps) {
 			"include_comments to see {>>c:id<<} markers after commented passages with the threads listed below. " +
 			"Empty paragraphs are kept so structure is faithful. Handles are valid for the revision_id returned.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, *ReadOutput, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
 		if in.MaxChars < 0 {
 			return nil, nil, fail(service.Errorf("invalid", "max_chars must be positive"))
 		}
@@ -135,7 +140,7 @@ func registerRead(s *mcp.Server, d Deps) {
 				return nil, nil, fail(err)
 			}
 			out := &ReadOutput{Revision: res.Revision, Segment: res.Segment, Scope: res.Scope, Chars: res.Chars, Truncated: res.Truncated}
-			return text(readHeader(out, in.Format) + res.Text), out, nil
+			return text(readHeader(out, in.Format) + res.Text), nil, nil
 		}
 		res, err := d.Service.Read(ctx, service.ReadRequest{
 			Document: in.Document,
@@ -153,7 +158,7 @@ func registerRead(s *mcp.Server, d Deps) {
 		}
 		out := &ReadOutput{RevisionID: res.RevisionID, Tab: res.TabNumber, TabID: res.TabID, TabTitle: res.TabTitle,
 			Segment: res.Segment, Scope: res.Scope, Blocks: res.Blocks, Chars: res.Chars, Truncated: res.Truncated, ContinueFrom: res.ContinueFrom}
-		return text(readHeader(out, in.Format) + res.Text), out, nil
+		return text(readHeader(out, in.Format) + res.Text), nil, nil
 	})
 }
 

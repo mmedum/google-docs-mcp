@@ -11,12 +11,13 @@ Single static binary. Per-user OAuth against your own Google account, in
 your own Google Cloud project. Nothing leaves your machine except calls to
 Google's APIs.
 
-**Status: Phase 3 in progress.** Reading, searching, creating,
+**Status: Phase 3 done (v0.3.0).** Reading, searching, creating,
 exporting, editing with minimal diffs in suggest, direct or comment mode,
 formatting, reviewing suggestions, comment threads, revision history and
-diffs, tables, tabs, headers, footers, footnotes, images, chips and
-`gdocs://` resources are in. Agent evals and large-document performance
-are the rest of Phase 3 of [docs/architecture.md](docs/architecture.md).
+diffs, tables, tabs, headers, footers, footnotes, images, chips,
+`gdocs://` resources, large-document performance and agent evals are in;
+see [docs/architecture.md](docs/architecture.md) for the design and what
+the evals found.
 
 ## Why another Google Docs MCP
 
@@ -192,7 +193,9 @@ make build
 ```
 
 Test fixtures are synthetic. Never add content, ids or URLs from real
-documents; gitleaks runs in pre-commit and CI.
+documents; gitleaks runs in pre-commit and CI. `make bench` measures the
+large-document paths; `scripts/evals/run.py` runs the agent evals
+against your own account (see its header).
 
 ## Licence
 

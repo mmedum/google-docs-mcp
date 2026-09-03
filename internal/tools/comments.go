@@ -47,12 +47,12 @@ func registerCommentsRead(s *mcp.Server, d Deps) {
 			"Resolved threads are included unless hide_resolved is set; deleted ones only with include_deleted. Thread " +
 			"ids feed reply_comment and delete_comment.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListCommentsInput) (*mcp.CallToolResult, *service.CommentsResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListCommentsInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.ListComments(ctx, service.ListCommentsRequest{Document: in.Document, HideResolved: in.HideResolved, IncludeDeleted: in.IncludeDeleted})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(res.Text), res, nil
+		return text(res.Text), nil, nil
 	})
 }
 

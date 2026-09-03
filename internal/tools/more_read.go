@@ -44,13 +44,13 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 			"offset and surrounding context. Use it to locate passages before targeting them with edit_document " +
 			"(quote the matched text as the target) and to check how many times a phrase occurs.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FindInput) (*mcp.CallToolResult, *service.FindResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FindInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.Find(ctx, service.FindRequest{Document: in.Document, Query: in.Query, Regex: in.Regex, MatchCase: in.MatchCase,
 			Tab: in.Tab, Segment: in.Segment, Limit: in.Limit, Context: in.Context})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(res.Text), res, nil
+		return text(res.Text), nil, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -59,12 +59,12 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 			"limited by owner or modification date, newest first. Returns ids and URLs to pass to the other tools. " +
 			"With no filters it lists recently modified documents.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, *service.SearchResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.Search(ctx, service.SearchRequest{Query: in.Query, Title: in.Title, ModifiedAfter: in.ModifiedAfter, Owner: in.Owner, Limit: in.Limit, PageToken: in.PageToken})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(res.Text), res, nil
+		return text(res.Text), nil, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -74,12 +74,12 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 			"the path is returned. The markdown export is Google's own rendering, useful for a faithful whole-document " +
 			"dump; read_document is better for working with sections.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ExportInput) (*mcp.CallToolResult, *service.ExportResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ExportInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.Export(ctx, service.ExportRequest{Document: in.Document, Format: in.Format, MaxChars: in.MaxChars})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(res.Text), res, nil
+		return text(res.Text), nil, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -88,11 +88,11 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 			"structure), the inserted and deleted text, the block handle, and, with Developer Preview, the author and " +
 			"status. Ids feed review_suggestion.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DocumentInput) (*mcp.CallToolResult, *service.SuggestionsResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DocumentInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.ListSuggestions(ctx, in.Document)
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(res.Text), res, nil
+		return text(res.Text), nil, nil
 	})
 }

@@ -34,6 +34,14 @@ and are preferred by the Makefile; install them with
   `GDOCS_ENABLE_DESTRUCTIVE=true` for the deletion steps.
 - `go vet -tags=integration ./...` (part of `make vet`) keeps the tagged
   tests compiling even though CI never runs them.
+- `scripts/evals/run.py` runs the agent evals: each task seeds a
+  scratch document through the server, runs `claude -p` with only this
+  server's tools, and scores the end state and the tool-call trace. It
+  needs a login, the `claude` CLI, and spends API usage (about 20-40
+  cents per task with the default model); `--list`, task names, and
+  `--report` are the arguments. Read the traces in `$LIVE_OUT/evals`
+  when a task fails: the model's final message usually says what it
+  could not see or do.
 - `make bench` runs the benchmarks over `doctest.Large`, a generated
   document of about 150 pages (6 400 body blocks, 130 tables, 300
   comments, 200 suggestions, 100 footnotes). The numbers to hold are in

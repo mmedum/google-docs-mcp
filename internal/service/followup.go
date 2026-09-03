@@ -83,6 +83,10 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 					result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the table was created but could not be found again to fill it; use set_cells", fu.Seq))
 					continue
 				}
+			} else if b := blankFirstParagraph(f.Doc, op.Location.Of); b != nil {
+				// A new footnote starts with a paragraph holding one space;
+				// appending would leave it as a blank line. Replace it instead.
+				op = EditOp{Kind: plan.OpReplace, Fragment: op.Fragment, Target: &Target{Tab: op.Location.Of.Tab, Segment: op.Location.Of.Segment, Handle: b.Handle}, followup: fu}
 			}
 			ready = append(ready, op)
 		}
@@ -109,6 +113,23 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 			}
 		}
 	}
+}
+
+// blankFirstParagraph returns the only paragraph of a segment when it
+// holds nothing but whitespace (and more than its newline), nil otherwise.
+func blankFirstParagraph(d *doc.Document, t *Target) *doc.Block {
+	tab, seg, err := tabSegment(d, t.Tab, t.Segment)
+	if err != nil || tab == nil {
+		return nil
+	}
+	content := seg.ContentBlocks()
+	if len(content) != 1 || content[0].Paragraph == nil || content[0].IsEmptyParagraph() {
+		return nil
+	}
+	if strings.TrimSpace(content[0].Paragraph.Text(doc.ViewInline)) != "" {
+		return nil
+	}
+	return content[0]
 }
 
 // newSegmentIDs collects created header, footer and footnote ids from

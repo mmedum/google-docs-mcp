@@ -429,10 +429,16 @@ listing) and no subscriptions (Google offers no push; polling would spend
 the read quota). A document that does not exist is the spec's
 resource-not-found error; other failures carry the `[class] message`.
 
-Results: read tools return a **markdown text block** plus a small
-object-typed `Out` (`revision_id`, `truncated`, `continue_from`); go-sdk
-v1.7.0 leaves `Content` alone in that case and fills
-`StructuredContent`. Write and metadata tools return typed `Out` only.
+Results: a client may show the model a result's text **or** its
+structured form (Claude Code 2.1 shows only `structuredContent` when
+both are present; the spec makes the text the backwards-compatible
+form). So read tools (`get_document`, `get_outline`, `read_document`,
+`find_in_document`, `search_documents`, `export_document`,
+`list_suggestions`, `list_comments`, `list_revisions`,
+`diff_revisions`) return a **text block only**, with the revision,
+block count and continuation in a header comment; write tools return
+both, and their JSON carries everything their text does, the rendered
+preview included. Measured in the Phase 3 evals (§14).
 
 ## 10. Auth, enrolment, config, process model
 
@@ -605,9 +611,24 @@ accounts. That sets these requirements:
   checks (suggest mode visible in the UI, anchored comments), run
   manually until enrolment exists in CI.
 - **Stdio smoke**: initialise, list tools, `get_document` on a scratch id.
-- **Agent evals** (Phase 3): 10–15 tasks through Claude Code headless
-  against the scratch folder, scored on end-state. Measures markdown vs
-  text output, handle defaults, and naming style.
+- **Agent evals** (`scripts/evals/run.py`, Phase 3): thirteen tasks
+  through Claude Code headless (`claude -p` with only this server's
+  tools), each against a scratch document the harness seeds through the
+  server, scored on the end state read back through the server and on
+  the tool-call trace. Run 2026-09-03 with the default model: 13/13
+  pass, 2–6 tool calls per task, about $3 in total. What they found:
+  Claude Code shows the model only a result's `structuredContent` when
+  one is present, so reads looked like metadata until the read tools
+  went text-only (the four affected tasks fell from 17, 7, 8 and 22 tool
+  calls to 4, 2, 4 and 4); a new footnote's paragraph holds a space, so
+  the follow-up now replaces it instead of appending after it; every
+  task starts with Claude Code's own tool lookup (`ToolSearch
+  select:mcp__gdocs__…`) and no task called a tool that does not exist,
+  so the snake_case verb_noun names are found by name; the model asked
+  for `with_handles` on three of four reads and never for `format:
+  text` once reads were visible, targeted by text and by handle equally,
+  used no dry runs for one-op edits, and stopped at the overwrite guard
+  and explained it instead of forcing.
 
 ## 15. Confirmed decisions and their consequences
 
@@ -655,9 +676,11 @@ headers/footers/footnotes, images and chips. A table inserted with data is
 filled in a second batch once it exists (found by the index the insertion
 named); the tab that `add` creates gets its content the same way.
 
-**Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Resources
-(`gdocs://<id>`), performance on large documents and the §17a cleanups
-done 2026-09-03; agent evals next.
+**Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Done 2026-09-03:
+resources (`gdocs://<id>`), performance on large documents, the §17a
+cleanups, and the agent evals with the two fixes they forced (§14).
+v1.0.0 waits for use in anger and a second eval round with another
+client.
 
 ## 17. Open decisions
 
@@ -705,10 +728,13 @@ checked rather than assumed.
 | 7-day refresh tokens only for sensitive scopes (my claim) | Refuted: any External app in Testing | Internal consent screen. |
 | Env-only configuration (inherited) | Mixed: all three clients pass only `env`; github-mcp-server binds flags and env | Env source of truth plus bound flags. |
 | Server-side read-only mode and destructive gating (inherited) | Confirmed (github-mcp-server; spec: annotations untrusted) | Kept; `requiresUserInteraction` on gated tools. |
-| snake_case verb_noun names (inherited) | Mixed: spec allows more; GitHub mixes styles; Anthropic says measure | Kept; dots banned; measured in evals. |
+| snake_case verb_noun names (inherited) | Mixed: spec allows more; GitHub mixes styles; Anthropic says measure. Measured in the Phase 3 evals: 13 tasks, 15 tool lookups by name, no call to a tool that does not exist | Kept. |
+| Per-block handle prefix opt-in (§7.2) | Evals: the model asked for `with_handles` on three of four reads and targeted by handle as often as by text | Kept opt-in (the cost is per read, the ask is one flag); revisit with a second client. |
+| A new footnote starts empty (my assumption) | Refuted live: `createFootnote` yields a paragraph holding one space, so an append after it left a blank line the model then deleted | The follow-up replaces a blank first paragraph. |
 | `[class] message` errors (inherited) | Project choice; spec requires only `isError` | Kept as convention. |
 | Parallel tool registry for `--dump-schemas` (inherited) | Refuted as necessary: in-memory client session lists wire schemas | Dropped. |
-| go-sdk leaves `Content` alone with an object `Out` | Confirmed in `mcp/server.go` v1.7.0 | Reads return markdown + small structured `Out`. |
+| go-sdk leaves `Content` alone with an object `Out` | Confirmed in `mcp/server.go` v1.7.0 | Both forms reach the wire. |
+| Clients show the model the text block as well as `structuredContent` (my assumption behind "markdown plus a small `Out`") | Refuted by the agent evals (2026-09-03): Claude Code 2.1.259 shows only `structuredContent` when present, so scoped reads looked like metadata; the model said so ("returned only metadata … so I fell back to the whole-document markdown resource") and probed `find_in_document` with `.+` to see text | Read tools return text only (go-sdk emits neither output schema nor structured content for an `any` output); write tools' JSON includes the preview. |
 | Exit on failed startup probe (inherited) | No guidance; GitHub server doesn't probe; Claude Code shows "failed to connect" and the model never sees why | Keep serving with `[auth]` errors; `doctor` for humans. |
 | `cmd/` + `internal/`, no `pkg/` (inherited) | Confirmed (go.dev; Russ Cox) | Kept. |
 | `dry_run` on write tools (inherited) | Mixed: community precedent; not a substitute for client approval | Kept; safety rests on guard, gating, approval. |

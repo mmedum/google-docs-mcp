@@ -68,14 +68,42 @@ var NamedStyleOrder = []string{"NORMAL_TEXT", "TITLE", "SUBTITLE",
 // points. A named style defines one, and a paragraph shows it unless an
 // edit overrode it on the paragraph itself, so both carry this type.
 type ParagraphStyle struct {
-	Alignment         string
-	LineSpacing       float64
-	SpaceAbovePt      float64
-	SpaceBelowPt      float64
-	IndentStartPt     float64
-	IndentFirstLinePt float64
-	KeepWithNext      bool
-	PageBreakBefore   bool
+	Alignment           string
+	Direction           string // LEFT_TO_RIGHT, RIGHT_TO_LEFT or ""
+	SpacingMode         string // NEVER_COLLAPSE, COLLAPSE_LISTS or ""
+	LineSpacing         float64
+	SpaceAbovePt        float64
+	SpaceBelowPt        float64
+	IndentStartPt       float64
+	IndentEndPt         float64
+	IndentFirstLinePt   float64
+	KeepWithNext        bool
+	KeepLinesTogether   bool
+	AvoidWidowAndOrphan bool
+	PageBreakBefore     bool
+	// Shading is the paragraph's background as #rrggbb, "" when unset.
+	Shading string
+	// Borders are the paragraph's edges, nil when unset. Between is the
+	// border drawn between consecutive paragraphs sharing it.
+	BorderTop, BorderBottom, BorderLeft, BorderRight, BorderBetween *Border
+	// TabStops are read-only: the API reports them and refuses to set
+	// them, so nothing here writes them back.
+	TabStops []TabStop
+}
+
+// Border is one edge of a paragraph or table cell. Paragraph borders
+// carry padding; cell borders do not.
+type Border struct {
+	Color     string // #rrggbb, "" when unset
+	WidthPt   float64
+	PaddingPt float64
+	DashStyle string // SOLID, DOT, DASH or ""
+}
+
+// TabStop is one read-only tab stop.
+type TabStop struct {
+	OffsetPt  float64
+	Alignment string // START, CENTER, END
 }
 
 // NamedStyleDef is what one named style means in a tab: the formatting
@@ -496,6 +524,20 @@ type Cell struct {
 	ColSpan    int
 	Blocks     []*Block
 	MergedInto *Cell
+	// Style is what the cell carries itself: background, content
+	// alignment, per-side padding and borders.
+	Style CellStyle
+}
+
+// CellStyle is a table cell's own formatting.
+type CellStyle struct {
+	Background                                       string // #rrggbb, "" when unset
+	ContentAlignment                                 string // TOP, MIDDLE, BOTTOM or ""
+	PaddingTopPt                                     float64
+	PaddingBottomPt                                  float64
+	PaddingLeftPt                                    float64
+	PaddingRightPt                                   float64
+	BorderTop, BorderBottom, BorderLeft, BorderRight *Border
 }
 
 // TOC is a table of contents; read-only in the API.

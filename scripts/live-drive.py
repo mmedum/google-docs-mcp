@@ -132,7 +132,9 @@ show("comment mode", err, text)
 
 err, text, _ = call("format_document", {"document": doc, "mode": "direct", "ops": [
     {"op": "text_style", "target": {"text": "Closing line"}, "bold": True, "color": "#1a73e8"},
-    {"op": "paragraph_style", "target": {"text": "Appended paragraph at the very end."}, "alignment": "CENTER"},
+    {"op": "paragraph_style", "target": {"text": "Appended paragraph at the very end."}, "alignment": "CENTER",
+     "border": "1pt solid #cccccc", "border_padding_pt": 4, "shading": "#eeeeee",
+     "indent_end_pt": 18, "keep_lines_together": True, "avoid_widow_and_orphan": True},
 ]})
 show("format", err, text)
 # with_styles annotates only what a run sets itself: Google reports no
@@ -347,6 +349,8 @@ err, text, _ = call("read_document", {"document": doc, "with_handles": True, "he
 m = re.search(r"\[((?:tab\d+/)?tbl\d+)\]", text)
 tbl = m.group(1) if m else tbl
 err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [
+    {"op": "style_cells", "table": tbl, "from_cell": "r1c1", "to_cell": "r2c2",
+     "border": "1pt solid #999999", "border_top": "3pt dash #ff0000", "padding_pt": 6, "padding_left_pt": 12},
     {"op": "style_columns", "table": tbl, "column_numbers": [1], "width_pt": 140},
     {"op": "style_rows", "table": tbl, "row_numbers": [1], "min_height_pt": 28, "prevent_overflow": True},
 ]})

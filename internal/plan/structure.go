@@ -63,7 +63,47 @@ func UnmergeTableCells(cell CellLoc, rowSpan, colSpan int) json.RawMessage {
 type CellStyleSpec struct {
 	Background string // #rrggbb or none
 	Align      string // TOP, MIDDLE, BOTTOM (contentAlignment)
-	PaddingPt  *float64
+	// PaddingPt sets every side; the four below override one side each.
+	PaddingPt       *float64
+	PaddingTopPt    *float64
+	PaddingBottomPt *float64
+	PaddingLeftPt   *float64
+	PaddingRightPt  *float64
+	// Borders take the same shorthand as a paragraph's, minus padding:
+	// "1pt solid #cccccc", or "none". Border sets all four sides.
+	Border       string
+	BorderTop    string
+	BorderBottom string
+	BorderLeft   string
+	BorderRight  string
+}
+
+// cellSides pairs each border and padding field with its API name.
+func (s CellStyleSpec) cellSides() []struct {
+	raw     string
+	padding *float64
+	border  string
+	pad     string
+} {
+	return []struct {
+		raw     string
+		padding *float64
+		border  string
+		pad     string
+	}{
+		{firstSet(s.BorderTop, s.Border), firstFloat(s.PaddingTopPt, s.PaddingPt), "borderTop", "paddingTop"},
+		{firstSet(s.BorderBottom, s.Border), firstFloat(s.PaddingBottomPt, s.PaddingPt), "borderBottom", "paddingBottom"},
+		{firstSet(s.BorderLeft, s.Border), firstFloat(s.PaddingLeftPt, s.PaddingPt), "borderLeft", "paddingLeft"},
+		{firstSet(s.BorderRight, s.Border), firstFloat(s.PaddingRightPt, s.PaddingPt), "borderRight", "paddingRight"},
+	}
+}
+
+// firstFloat is the per-side value when given, else the all-sides one.
+func firstFloat(side, all *float64) *float64 {
+	if side != nil {
+		return side
+	}
+	return all
 }
 
 // IsZero reports whether the spec changes nothing.
@@ -79,8 +119,15 @@ func (s CellStyleSpec) Validate() error {
 	if s.Align != "" && !cellAlignments[s.Align] {
 		return fmt.Errorf("align must be TOP, MIDDLE or BOTTOM")
 	}
-	if s.PaddingPt != nil && (*s.PaddingPt < 0 || *s.PaddingPt > 100) {
-		return fmt.Errorf("padding_pt must be between 0 and 100")
+	for _, p := range []*float64{s.PaddingPt, s.PaddingTopPt, s.PaddingBottomPt, s.PaddingLeftPt, s.PaddingRightPt} {
+		if p != nil && (*p < 0 || *p > 100) {
+			return fmt.Errorf("padding_pt must be between 0 and 100")
+		}
+	}
+	for _, side := range s.cellSides() {
+		if _, _, err := ParseBorder(side.raw); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -98,11 +145,14 @@ func (s CellStyleSpec) body() (map[string]any, []string) {
 		style["contentAlignment"] = s.Align
 		fields = append(fields, "contentAlignment")
 	}
-	if s.PaddingPt != nil {
-		pt := map[string]any{"magnitude": *s.PaddingPt, "unit": "PT"}
-		for _, side := range []string{"paddingTop", "paddingBottom", "paddingLeft", "paddingRight"} {
-			style[side] = pt
-			fields = append(fields, side)
+	for _, side := range s.cellSides() {
+		if side.padding != nil {
+			style[side.pad] = pt(*side.padding)
+			fields = append(fields, side.pad)
+		}
+		if b, ok, err := ParseBorder(side.raw); ok && err == nil {
+			style[side.border] = b.json(nil)
+			fields = append(fields, side.border)
 		}
 	}
 	return style, fields

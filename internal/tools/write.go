@@ -78,29 +78,42 @@ type EditInput struct {
 
 // FormatOpInput is one format_document operation.
 type FormatOpInput struct {
-	Op                string      `json:"op" jsonschema:"text_style, paragraph_style, bullets, clear_formatting"`
-	Target            TargetInput `json:"target"`
-	Bold              *bool       `json:"bold,omitempty"`
-	Italic            *bool       `json:"italic,omitempty"`
-	Underline         *bool       `json:"underline,omitempty"`
-	Strikethrough     *bool       `json:"strikethrough,omitempty"`
-	SmallCaps         *bool       `json:"small_caps,omitempty"`
-	Font              string      `json:"font,omitempty" jsonschema:"font family name, or none to inherit"`
-	SizePt            float64     `json:"size_pt,omitempty" jsonschema:"font size in points"`
-	Color             string      `json:"color,omitempty" jsonschema:"text colour as #rrggbb, or none"`
-	Background        string      `json:"background,omitempty" jsonschema:"highlight colour as #rrggbb, or none"`
-	Link              string      `json:"link,omitempty" jsonschema:"URL to link the text to, or none to remove the link"`
-	Baseline          string      `json:"baseline,omitempty" jsonschema:"SUPERSCRIPT, SUBSCRIPT or NONE"`
-	NamedStyle        string      `json:"named_style,omitempty" jsonschema:"paragraph_style: NORMAL_TEXT, TITLE, SUBTITLE, HEADING_1 … HEADING_6"`
-	Alignment         string      `json:"alignment,omitempty" jsonschema:"paragraph_style: START, CENTER, END, JUSTIFIED"`
-	LineSpacing       float64     `json:"line_spacing,omitempty" jsonschema:"paragraph_style: percent, 100 = single"`
-	SpaceAbovePt      *float64    `json:"space_above_pt,omitempty"`
-	SpaceBelowPt      *float64    `json:"space_below_pt,omitempty"`
-	IndentPt          *float64    `json:"indent_pt,omitempty" jsonschema:"paragraph_style: left indent in points"`
-	FirstLineIndentPt *float64    `json:"first_line_indent_pt,omitempty"`
-	KeepWithNext      *bool       `json:"keep_with_next,omitempty"`
-	PageBreakBefore   *bool       `json:"page_break_before,omitempty" jsonschema:"paragraph_style: start this paragraph on a new page"`
-	Bullets           string      `json:"bullets,omitempty" jsonschema:"bullets op: bullet, numbered, checkbox, or none to remove list formatting"`
+	Op                  string      `json:"op" jsonschema:"text_style, paragraph_style, bullets, clear_formatting"`
+	Target              TargetInput `json:"target"`
+	Bold                *bool       `json:"bold,omitempty"`
+	Italic              *bool       `json:"italic,omitempty"`
+	Underline           *bool       `json:"underline,omitempty"`
+	Strikethrough       *bool       `json:"strikethrough,omitempty"`
+	SmallCaps           *bool       `json:"small_caps,omitempty"`
+	Font                string      `json:"font,omitempty" jsonschema:"font family name, or none to inherit"`
+	SizePt              float64     `json:"size_pt,omitempty" jsonschema:"font size in points"`
+	Color               string      `json:"color,omitempty" jsonschema:"text colour as #rrggbb, or none"`
+	Background          string      `json:"background,omitempty" jsonschema:"highlight colour as #rrggbb, or none"`
+	Link                string      `json:"link,omitempty" jsonschema:"URL to link the text to, or none to remove the link"`
+	Baseline            string      `json:"baseline,omitempty" jsonschema:"SUPERSCRIPT, SUBSCRIPT or NONE"`
+	NamedStyle          string      `json:"named_style,omitempty" jsonschema:"paragraph_style: NORMAL_TEXT, TITLE, SUBTITLE, HEADING_1 … HEADING_6"`
+	Alignment           string      `json:"alignment,omitempty" jsonschema:"paragraph_style: START, CENTER, END, JUSTIFIED"`
+	LineSpacing         float64     `json:"line_spacing,omitempty" jsonschema:"paragraph_style: percent, 100 = single"`
+	SpaceAbovePt        *float64    `json:"space_above_pt,omitempty"`
+	SpaceBelowPt        *float64    `json:"space_below_pt,omitempty"`
+	IndentPt            *float64    `json:"indent_pt,omitempty" jsonschema:"paragraph_style: left indent in points"`
+	FirstLineIndentPt   *float64    `json:"first_line_indent_pt,omitempty"`
+	KeepWithNext        *bool       `json:"keep_with_next,omitempty"`
+	PageBreakBefore     *bool       `json:"page_break_before,omitempty" jsonschema:"paragraph_style: start this paragraph on a new page"`
+	IndentEndPt         *float64    `json:"indent_end_pt,omitempty" jsonschema:"paragraph_style: right indent in points"`
+	Direction           string      `json:"direction,omitempty" jsonschema:"paragraph_style: left_to_right (default) or right_to_left"`
+	SpacingMode         string      `json:"spacing_mode,omitempty" jsonschema:"paragraph_style: never_collapse or collapse_lists, for space above and below inside lists"`
+	KeepLinesTogether   *bool       `json:"keep_lines_together,omitempty" jsonschema:"paragraph_style: keep the paragraph on one page"`
+	AvoidWidowAndOrphan *bool       `json:"avoid_widow_and_orphan,omitempty" jsonschema:"paragraph_style: keep single lines off page boundaries"`
+	Shading             string      `json:"shading,omitempty" jsonschema:"paragraph_style: paragraph background as #rrggbb, or none"`
+	Border              string      `json:"border,omitempty" jsonschema:"paragraph_style: all four edges, as a width, dash style and colour in any order, e.g. 1pt solid #cccccc; none removes them. Defaults when a part is left out: 1pt, solid, black"`
+	BorderTop           string      `json:"border_top,omitempty" jsonschema:"paragraph_style: the top edge alone, same form as border"`
+	BorderBottom        string      `json:"border_bottom,omitempty"`
+	BorderLeft          string      `json:"border_left,omitempty"`
+	BorderRight         string      `json:"border_right,omitempty"`
+	BorderBetween       string      `json:"border_between,omitempty" jsonschema:"paragraph_style: the edge drawn between consecutive paragraphs that share it"`
+	BorderPaddingPt     *float64    `json:"border_padding_pt,omitempty" jsonschema:"paragraph_style: space between the border and the text, in points"`
+	Bullets             string      `json:"bullets,omitempty" jsonschema:"bullets op: bullet, numbered, checkbox, or none to remove list formatting"`
 }
 
 // FormatInput is the format_document call.
@@ -175,7 +188,12 @@ func registerWrite(s *mcp.Server, d Deps) {
 			case plan.OpParagraphStyle:
 				eo.Para = plan.ParagraphStyleSpec{NamedStyle: strings.ToUpper(strings.TrimSpace(o.NamedStyle)), Alignment: strings.ToUpper(strings.TrimSpace(o.Alignment)),
 					LineSpacing: o.LineSpacing, SpaceAbovePt: o.SpaceAbovePt, SpaceBelowPt: o.SpaceBelowPt, IndentStartPt: o.IndentPt, IndentFirstLine: o.FirstLineIndentPt, KeepWithNext: o.KeepWithNext,
-					PageBreakBefore: o.PageBreakBefore}
+					PageBreakBefore: o.PageBreakBefore, IndentEndPt: o.IndentEndPt,
+					Direction: strings.ToUpper(strings.TrimSpace(o.Direction)), SpacingMode: strings.ToUpper(strings.TrimSpace(o.SpacingMode)),
+					KeepLinesTogether: o.KeepLinesTogether, AvoidWidowAndOrphan: o.AvoidWidowAndOrphan,
+					Shading: o.Shading, Border: o.Border, BorderTop: o.BorderTop, BorderBottom: o.BorderBottom,
+					BorderLeft: o.BorderLeft, BorderRight: o.BorderRight, BorderBetween: o.BorderBetween,
+					BorderPaddingPt: o.BorderPaddingPt}
 			case plan.OpBullets:
 				eo.Bullets = strings.ToLower(strings.TrimSpace(o.Bullets))
 			case plan.OpClearFormatting:

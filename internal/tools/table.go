@@ -42,6 +42,15 @@ type TableOpInput struct {
 	Background      string         `json:"background,omitempty" jsonschema:"style_cells: cell background as #rrggbb, or none"`
 	Align           string         `json:"align,omitempty" jsonschema:"style_cells: vertical content alignment TOP, MIDDLE or BOTTOM"`
 	PaddingPt       *float64       `json:"padding_pt,omitempty" jsonschema:"style_cells: padding on every side in points"`
+	PaddingTopPt    *float64       `json:"padding_top_pt,omitempty" jsonschema:"style_cells: overrides padding_pt on the top side"`
+	PaddingBottomPt *float64       `json:"padding_bottom_pt,omitempty"`
+	PaddingLeftPt   *float64       `json:"padding_left_pt,omitempty"`
+	PaddingRightPt  *float64       `json:"padding_right_pt,omitempty"`
+	Border          string         `json:"border,omitempty" jsonschema:"style_cells: all four edges as a width, dash style and colour in any order, e.g. 1pt solid #cccccc; none removes them. Defaults when a part is left out: 1pt, solid, black"`
+	BorderTop       string         `json:"border_top,omitempty" jsonschema:"style_cells: the top edge alone, same form as border"`
+	BorderBottom    string         `json:"border_bottom,omitempty"`
+	BorderLeft      string         `json:"border_left,omitempty"`
+	BorderRight     string         `json:"border_right,omitempty"`
 }
 
 // TableInput is the edit_table call.
@@ -57,7 +66,11 @@ type TableInput struct {
 func (o TableOpInput) tableOp() *service.TableOp {
 	t := &service.TableOp{Table: o.Table, Rows: o.Rows, Cols: o.Columns, Data: o.Data, StartCell: o.StartCell, Row: o.Row, Column: o.Column,
 		Count: o.Count, Before: o.Before, RowList: o.RowNumbers, ColList: o.ColumnNumbers, FromCell: o.FromCell, ToCell: o.ToCell,
-		Style:   plan.CellStyleSpec{Background: o.Background, Align: strings.ToUpper(strings.TrimSpace(o.Align)), PaddingPt: o.PaddingPt},
+		Style: plan.CellStyleSpec{Background: o.Background, Align: strings.ToUpper(strings.TrimSpace(o.Align)),
+			PaddingPt: o.PaddingPt, PaddingTopPt: o.PaddingTopPt, PaddingBottomPt: o.PaddingBottomPt,
+			PaddingLeftPt: o.PaddingLeftPt, PaddingRightPt: o.PaddingRightPt,
+			Border: o.Border, BorderTop: o.BorderTop, BorderBottom: o.BorderBottom,
+			BorderLeft: o.BorderLeft, BorderRight: o.BorderRight},
 		WidthPt: o.WidthPt, Even: strings.EqualFold(strings.TrimSpace(o.WidthType), "even"),
 		MinHeightPt: o.MinHeightPt, PreventOverflow: o.PreventOverflow}
 	for _, c := range o.Cells {

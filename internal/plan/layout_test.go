@@ -221,3 +221,78 @@ func TestImageObjectRequests(t *testing.T) {
 		t.Fatalf("delete = %+v", del.body)
 	}
 }
+
+// TestBorderShorthand covers the form callers write borders in: tokens
+// in any order, defaults for the parts left out, "none" to clear, and
+// the errors for the rest.
+func TestBorderShorthand(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		width float64
+		dash  string
+		color string
+	}{
+		{"1pt solid #cccccc", 1, "SOLID", "#cccccc"},
+		{"#ff0000 dot 2.5pt", 2.5, "DOT", "#ff0000"},
+		{"dash", 1, "DASH", "#000000"},
+		{"3pt", 3, "SOLID", "#000000"},
+	} {
+		b, ok, err := ParseBorder(tc.raw)
+		if !ok || err != nil || b.WidthPt != tc.width || b.DashStyle != tc.dash || b.Color != tc.color {
+			t.Errorf("%q: %+v ok=%t err=%v", tc.raw, b, ok, err)
+		}
+	}
+	if b, ok, err := ParseBorder("none"); !ok || err != nil || !b.Clear {
+		t.Errorf("none: %+v %t %v", b, ok, err)
+	}
+	if _, ok, err := ParseBorder("   "); ok || err != nil {
+		t.Errorf("blank should be unset: %t %v", ok, err)
+	}
+	for _, bad := range []string{"1pt dotted #ccc", "#12345", "-2pt", "1pt solid #cccccc extra"} {
+		if _, _, err := ParseBorder(bad); err == nil {
+			t.Errorf("%q should not parse", bad)
+		}
+	}
+}
+
+// TestParagraphBordersAndShading checks the request a full paragraph
+// style produces: every side, the padding that goes on each, the
+// shading, and the fields mask naming all of them.
+func TestParagraphBordersAndShading(t *testing.T) {
+	pad := 4.0
+	spec := ParagraphStyleSpec{Border: "1pt solid #cccccc", BorderBottom: "2pt dash #ff0000",
+		BorderBetween: "none", BorderPaddingPt: &pad, Shading: "#eeeeee",
+		Direction: "RIGHT_TO_LEFT", SpacingMode: "COLLAPSE_LISTS", IndentEndPt: &pad,
+		KeepLinesTogether: new(true), AvoidWidowAndOrphan: new(true)}
+	if err := spec.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	v := view(t, UpdateParagraphStyle(Rng{Start: 1, End: 2}, spec))
+	style := v.body["paragraphStyle"].(map[string]any)
+	top := style["borderTop"].(map[string]any)
+	if top["dashStyle"] != "SOLID" || top["padding"].(map[string]any)["magnitude"] != 4.0 {
+		t.Fatalf("top border: %v", top)
+	}
+	if bottom := style["borderBottom"].(map[string]any); bottom["dashStyle"] != "DASH" {
+		t.Fatalf("per-side border overrides the shorthand: %v", bottom)
+	}
+	// Clearing sends an empty border, which is how the API removes one.
+	if between := style["borderBetween"].(map[string]any); len(between) != 0 {
+		t.Fatalf("border between should be cleared: %v", between)
+	}
+	if style["shading"].(map[string]any)["backgroundColor"] == nil || style["direction"] != "RIGHT_TO_LEFT" {
+		t.Fatalf("shading and direction: %v", style)
+	}
+	for _, want := range []string{"borderTop", "borderBottom", "borderLeft", "borderRight", "borderBetween",
+		"shading", "direction", "spacingMode", "indentEnd", "keepLinesTogether", "avoidWidowAndOrphan"} {
+		if !strings.Contains(v.body["fields"].(string), want) {
+			t.Errorf("fields mask lacks %s: %s", want, v.body["fields"])
+		}
+	}
+	if (ParagraphStyleSpec{Direction: "SIDEWAYS"}).Validate() == nil ||
+		(ParagraphStyleSpec{SpacingMode: "NOPE"}).Validate() == nil ||
+		(ParagraphStyleSpec{Shading: "red"}).Validate() == nil ||
+		(ParagraphStyleSpec{Border: "1pt dotted"}).Validate() == nil {
+		t.Fatal("invalid values should be refused")
+	}
+}

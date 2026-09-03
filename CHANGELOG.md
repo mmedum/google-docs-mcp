@@ -7,6 +7,22 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- The rest of the writable style surface, so nothing the API accepts is
+  missing: paragraph borders on all five edges with their padding,
+  paragraph shading, end indent, content direction, spacing mode,
+  keep-lines-together and widow and orphan control, on `format_document`'s
+  `paragraph_style` and `layout_document`'s `named_style`; and on
+  `edit_table`'s `style_cells`, all four cell borders and per-side
+  padding. Borders take a shorthand — `1pt solid #cccccc`, or `none` —
+  with the parts left out defaulting to 1pt solid black. All of it reads
+  back: `get_document`'s named style lines and `read_document with_styles`
+  report borders and shading, and a zero-width border reads as no border,
+  which is what Google's empty border object means. Verified live against
+  paragraphs, a named style and a table.
+- Tab stops, `headingId` and a cell's row and column span are read and
+  reported but never written: the discovery document marks them read-only.
+
 ## [0.5.0] - 2026-09-03
 
 ### Added

@@ -253,3 +253,53 @@ func TestNamedStyles(t *testing.T) {
 		t.Fatalf("named styles out of nothing: %+v", parsed.Tabs[1].NamedStyles)
 	}
 }
+
+// TestParagraphBordersAndCellStyle covers the read side of everything a
+// write can now set, plus the tab stops the API reports and refuses to
+// take back.
+func TestParagraphBordersAndCellStyle(t *testing.T) {
+	w := doctest.WireFixture(t)
+	dt := w.Tabs[0].DocumentTab
+	border := &gdocs.ParagraphBorder{Width: &gdocs.Dimension{Magnitude: 1, Unit: "PT"}, DashStyle: "SOLID",
+		Padding: &gdocs.Dimension{Magnitude: 4, Unit: "PT"},
+		Color:   &gdocs.OptionalColor{Color: &gdocs.Color{RgbColor: &gdocs.RgbColor{Red: 0.8, Green: 0.8, Blue: 0.8}}}}
+	ps := dt.Body.Content[3].Paragraph.ParagraphStyle
+	ps.BorderTop, ps.BorderBetween = border, border
+	ps.Direction, ps.SpacingMode = "RIGHT_TO_LEFT", "COLLAPSE_LISTS"
+	ps.KeepLinesTogether, ps.AvoidWidowAndOrphan = true, true
+	ps.IndentEnd = &gdocs.Dimension{Magnitude: 18, Unit: "PT"}
+	ps.Shading = &gdocs.Shading{BackgroundColor: &gdocs.OptionalColor{Color: &gdocs.Color{RgbColor: &gdocs.RgbColor{Red: 1}}}}
+	ps.TabStops = []*gdocs.TabStop{{Offset: &gdocs.Dimension{Magnitude: 36, Unit: "PT"}, Alignment: "CENTER"}}
+	for _, se := range dt.Body.Content {
+		if se.Table == nil {
+			continue
+		}
+		se.Table.TableRows[0].TableCells[0].TableCellStyle = &gdocs.TableCellStyle{
+			ContentAlignment: "MIDDLE",
+			PaddingTop:       &gdocs.Dimension{Magnitude: 3, Unit: "PT"},
+			BorderLeft:       &gdocs.TableCellBorder{Width: &gdocs.Dimension{Magnitude: 2, Unit: "PT"}, DashStyle: "DOT"},
+		}
+	}
+	parsed, err := doc.Parse(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Content[3] is the paragraph the styles above were put on; the
+	// section break at Content[0] is a block too.
+	p := parsed.Tabs[0].Body.Blocks[3].Paragraph
+	if p.BorderTop == nil || p.BorderTop.WidthPt != 1 || p.BorderTop.Color != "#cccccc" || p.BorderTop.PaddingPt != 4 {
+		t.Fatalf("paragraph border: %+v", p.BorderTop)
+	}
+	if p.Direction != "RIGHT_TO_LEFT" || p.SpacingMode != "COLLAPSE_LISTS" || !p.KeepLinesTogether ||
+		!p.AvoidWidowAndOrphan || p.IndentEndPt != 18 || p.Shading != "#ff0000" {
+		t.Fatalf("paragraph style: %+v", p.ParagraphStyle)
+	}
+	if len(p.TabStops) != 1 || p.TabStops[0].OffsetPt != 36 || p.TabStops[0].Alignment != "CENTER" {
+		t.Fatalf("tab stops are read even though no write sets them: %+v", p.TabStops)
+	}
+	cell, ok := parsed.FindCell("tbl1:r1c1")
+	if !ok || cell.Style.ContentAlignment != "MIDDLE" || cell.Style.PaddingTopPt != 3 ||
+		cell.Style.BorderLeft == nil || cell.Style.BorderLeft.WidthPt != 2 || cell.Style.BorderLeft.DashStyle != "DOT" {
+		t.Fatalf("cell style: %+v", cell)
+	}
+}

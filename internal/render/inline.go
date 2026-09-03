@@ -390,7 +390,7 @@ func NamedStyle(d *doc.NamedStyleDef) string {
 		name string
 	}{
 		{d.SpaceAbovePt, "space above"}, {d.SpaceBelowPt, "space below"},
-		{d.IndentStartPt, "indent"}, {d.IndentFirstLinePt, "first line indent"},
+		{d.IndentStartPt, "indent"}, {d.IndentEndPt, "indent end"}, {d.IndentFirstLinePt, "first line indent"},
 	} {
 		if f.pt != 0 {
 			parts = append(parts, fmt.Sprintf("%s %gpt", f.name, f.pt))
@@ -399,13 +399,75 @@ func NamedStyle(d *doc.NamedStyleDef) string {
 	if d.KeepWithNext {
 		parts = append(parts, "keep with next")
 	}
+	if d.KeepLinesTogether {
+		parts = append(parts, "keep lines together")
+	}
+	if d.AvoidWidowAndOrphan {
+		parts = append(parts, "avoid widows and orphans")
+	}
 	if d.PageBreakBefore {
 		parts = append(parts, "page break before")
 	}
+	if d.Direction == "RIGHT_TO_LEFT" {
+		parts = append(parts, "right to left")
+	}
+	if d.SpacingMode != "" && d.SpacingMode != "SPACING_MODE_UNSPECIFIED" {
+		parts = append(parts, strings.ToLower(strings.ReplaceAll(d.SpacingMode, "_", " ")))
+	}
+	if d.Shading != "" {
+		parts = append(parts, "shading "+d.Shading)
+	}
+	parts = append(parts, borderParts(d.ParagraphStyle)...)
 	if len(parts) == 0 {
 		return "no formatting of its own"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// borderParts names a paragraph's edges, collapsing the four sides into
+// one phrase when they match, which is how they are usually set.
+func borderParts(p doc.ParagraphStyle) []string {
+	sides := []struct {
+		b    *doc.Border
+		name string
+	}{{p.BorderTop, "top"}, {p.BorderBottom, "bottom"}, {p.BorderLeft, "left"}, {p.BorderRight, "right"}}
+	same := p.BorderTop != nil
+	for _, s := range sides {
+		if s.b == nil || *s.b != *p.BorderTop {
+			same = false
+			break
+		}
+	}
+	var parts []string
+	switch {
+	case same:
+		parts = append(parts, "border "+borderText(p.BorderTop))
+	default:
+		for _, s := range sides {
+			if s.b != nil {
+				parts = append(parts, s.name+" border "+borderText(s.b))
+			}
+		}
+	}
+	if p.BorderBetween != nil {
+		parts = append(parts, "border between "+borderText(p.BorderBetween))
+	}
+	return parts
+}
+
+// borderText is one edge in the same shorthand a caller writes.
+func borderText(b *doc.Border) string {
+	out := fmt.Sprintf("%gpt", b.WidthPt)
+	if b.DashStyle != "" && b.DashStyle != "DASH_STYLE_UNSPECIFIED" {
+		out += " " + strings.ToLower(b.DashStyle)
+	}
+	if b.Color != "" {
+		out += " " + b.Color
+	}
+	if b.PaddingPt > 0 {
+		out += fmt.Sprintf(" (padding %gpt)", b.PaddingPt)
+	}
+	return out
 }
 
 // fontLabel is a font family and size as both readers of a style write
@@ -473,6 +535,10 @@ func paragraphAnnotation(p *doc.Paragraph) string {
 	if p.IndentStartPt > 0 && p.Bullet == nil {
 		parts = append(parts, fmt.Sprintf("indent: %gpt", p.IndentStartPt))
 	}
+	if p.Shading != "" {
+		parts = append(parts, "shading: "+p.Shading)
+	}
+	parts = append(parts, borderParts(p.ParagraphStyle)...)
 	if len(parts) == 0 {
 		return ""
 	}

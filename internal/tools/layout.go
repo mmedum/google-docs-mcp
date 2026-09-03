@@ -38,24 +38,37 @@ type LayoutOpInput struct {
 	ContentDirection string   `json:"content_direction,omitempty" jsonschema:"section: left_to_right (default) or right_to_left"`
 	SectionType      string   `json:"section_type,omitempty" jsonschema:"section_break: next_page (default) or continuous. A section's type is fixed by the break that made it and cannot be changed afterwards."`
 
-	Style             string   `json:"style,omitempty" jsonschema:"named_style: which style to redefine — NORMAL_TEXT, TITLE, SUBTITLE, HEADING_1 … HEADING_6"`
-	Bold              *bool    `json:"bold,omitempty" jsonschema:"named_style: as in format_document"`
-	Italic            *bool    `json:"italic,omitempty"`
-	Underline         *bool    `json:"underline,omitempty"`
-	Strikethrough     *bool    `json:"strikethrough,omitempty"`
-	SmallCaps         *bool    `json:"small_caps,omitempty"`
-	Font              string   `json:"font,omitempty" jsonschema:"named_style: font family name, or none to inherit"`
-	SizePt            float64  `json:"size_pt,omitempty" jsonschema:"named_style: font size in points"`
-	Color             string   `json:"color,omitempty" jsonschema:"named_style: text colour as #rrggbb, or none"`
-	TextBackground    string   `json:"text_background,omitempty" jsonschema:"named_style: highlight colour as #rrggbb, or none"`
-	Alignment         string   `json:"alignment,omitempty" jsonschema:"named_style: START, CENTER, END, JUSTIFIED"`
-	LineSpacing       float64  `json:"line_spacing,omitempty" jsonschema:"named_style: percent, 100 = single"`
-	SpaceAbovePt      *float64 `json:"space_above_pt,omitempty"`
-	SpaceBelowPt      *float64 `json:"space_below_pt,omitempty"`
-	IndentPt          *float64 `json:"indent_pt,omitempty"`
-	FirstLineIndentPt *float64 `json:"first_line_indent_pt,omitempty"`
-	KeepWithNext      *bool    `json:"keep_with_next,omitempty"`
-	PageBreakBefore   *bool    `json:"page_break_before,omitempty" jsonschema:"named_style: start every paragraph of this style on a new page"`
+	Style               string   `json:"style,omitempty" jsonschema:"named_style: which style to redefine — NORMAL_TEXT, TITLE, SUBTITLE, HEADING_1 … HEADING_6"`
+	Bold                *bool    `json:"bold,omitempty" jsonschema:"named_style: as in format_document"`
+	Italic              *bool    `json:"italic,omitempty"`
+	Underline           *bool    `json:"underline,omitempty"`
+	Strikethrough       *bool    `json:"strikethrough,omitempty"`
+	SmallCaps           *bool    `json:"small_caps,omitempty"`
+	Font                string   `json:"font,omitempty" jsonschema:"named_style: font family name, or none to inherit"`
+	SizePt              float64  `json:"size_pt,omitempty" jsonschema:"named_style: font size in points"`
+	Color               string   `json:"color,omitempty" jsonschema:"named_style: text colour as #rrggbb, or none"`
+	TextBackground      string   `json:"text_background,omitempty" jsonschema:"named_style: highlight colour as #rrggbb, or none"`
+	Alignment           string   `json:"alignment,omitempty" jsonschema:"named_style: START, CENTER, END, JUSTIFIED"`
+	LineSpacing         float64  `json:"line_spacing,omitempty" jsonschema:"named_style: percent, 100 = single"`
+	SpaceAbovePt        *float64 `json:"space_above_pt,omitempty"`
+	SpaceBelowPt        *float64 `json:"space_below_pt,omitempty"`
+	IndentPt            *float64 `json:"indent_pt,omitempty"`
+	FirstLineIndentPt   *float64 `json:"first_line_indent_pt,omitempty"`
+	KeepWithNext        *bool    `json:"keep_with_next,omitempty"`
+	PageBreakBefore     *bool    `json:"page_break_before,omitempty" jsonschema:"named_style: start every paragraph of this style on a new page"`
+	IndentEndPt         *float64 `json:"indent_end_pt,omitempty" jsonschema:"named_style: right indent in points"`
+	Direction           string   `json:"direction,omitempty" jsonschema:"named_style: left_to_right (default) or right_to_left"`
+	SpacingMode         string   `json:"spacing_mode,omitempty" jsonschema:"named_style: never_collapse or collapse_lists"`
+	KeepLinesTogether   *bool    `json:"keep_lines_together,omitempty"`
+	AvoidWidowAndOrphan *bool    `json:"avoid_widow_and_orphan,omitempty"`
+	Shading             string   `json:"shading,omitempty" jsonschema:"named_style: paragraph background as #rrggbb, or none"`
+	Border              string   `json:"border,omitempty" jsonschema:"named_style: all four edges as a width, dash style and colour in any order, e.g. 1pt solid #cccccc; none removes them"`
+	BorderTop           string   `json:"border_top,omitempty"`
+	BorderBottom        string   `json:"border_bottom,omitempty"`
+	BorderLeft          string   `json:"border_left,omitempty"`
+	BorderRight         string   `json:"border_right,omitempty"`
+	BorderBetween       string   `json:"border_between,omitempty" jsonschema:"named_style: the edge between consecutive paragraphs sharing this style"`
+	BorderPaddingPt     *float64 `json:"border_padding_pt,omitempty" jsonschema:"named_style: space between border and text, in points"`
 }
 
 // LayoutInput is the layout_document call.
@@ -111,7 +124,12 @@ func (o LayoutOpInput) editOp(kind plan.OpKind) service.EditOp {
 			Para: plan.ParagraphStyleSpec{Alignment: up(o.Alignment), LineSpacing: o.LineSpacing,
 				SpaceAbovePt: o.SpaceAbovePt, SpaceBelowPt: o.SpaceBelowPt, IndentStartPt: o.IndentPt,
 				IndentFirstLine: o.FirstLineIndentPt, KeepWithNext: o.KeepWithNext,
-				PageBreakBefore: o.PageBreakBefore},
+				PageBreakBefore: o.PageBreakBefore, IndentEndPt: o.IndentEndPt,
+				Direction: up(o.Direction), SpacingMode: up(o.SpacingMode),
+				KeepLinesTogether: o.KeepLinesTogether, AvoidWidowAndOrphan: o.AvoidWidowAndOrphan,
+				Shading: o.Shading, Border: o.Border, BorderTop: o.BorderTop, BorderBottom: o.BorderBottom,
+				BorderLeft: o.BorderLeft, BorderRight: o.BorderRight, BorderBetween: o.BorderBetween,
+				BorderPaddingPt: o.BorderPaddingPt},
 		}
 	}
 	target := o.Target.target()

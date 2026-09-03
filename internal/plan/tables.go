@@ -191,7 +191,7 @@ func validateCellRangeOp(op *Op) error {
 	}
 	if op.Kind == OpStyleCells {
 		if t.Cell.IsZero() {
-			return fmt.Errorf("op %d: style_cells changes nothing; set background, align or padding_pt", op.Seq)
+			return fmt.Errorf("op %d: style_cells changes nothing; set background, align, padding or a border", op.Seq)
 		}
 		if err := t.Cell.Validate(); err != nil {
 			return fmt.Errorf("op %d: %w", op.Seq, err)
@@ -311,6 +311,26 @@ func describeCell(s CellStyleSpec) string {
 	}
 	if s.PaddingPt != nil {
 		parts = append(parts, fmt.Sprintf("padding %gpt", *s.PaddingPt))
+	}
+	for _, side := range []struct {
+		pt   *float64
+		name string
+	}{
+		{s.PaddingTopPt, "top"}, {s.PaddingBottomPt, "bottom"}, {s.PaddingLeftPt, "left"}, {s.PaddingRightPt, "right"},
+	} {
+		if side.pt != nil {
+			parts = append(parts, fmt.Sprintf("%s padding %gpt", side.name, *side.pt))
+		}
+	}
+	if b := strings.TrimSpace(s.Border); b != "" {
+		parts = append(parts, "border "+b)
+	}
+	for _, side := range []struct{ raw, name string }{
+		{s.BorderTop, "top"}, {s.BorderBottom, "bottom"}, {s.BorderLeft, "left"}, {s.BorderRight, "right"},
+	} {
+		if strings.TrimSpace(side.raw) != "" {
+			parts = append(parts, fmt.Sprintf("%s border %s", side.name, side.raw))
+		}
 	}
 	return strings.Join(parts, ", ")
 }

@@ -405,3 +405,31 @@ func TestFollowupsNeedContentOrData(t *testing.T) {
 		}
 	}
 }
+
+// TestCellBordersAndPadding checks that a cell's four edges and per-side
+// padding reach the request, with the all-sides values as the fallback.
+func TestCellBordersAndPadding(t *testing.T) {
+	all, top := 6.0, 2.0
+	spec := CellStyleSpec{Border: "1pt solid #cccccc", BorderTop: "none", PaddingPt: &all, PaddingTopPt: &top}
+	if err := spec.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	v := view(t, UpdateTableCellStyle(CellLoc{Table: Loc{Index: 1}}, 1, 1, spec))
+	style := v.body["tableCellStyle"].(map[string]any)
+	if len(style["borderTop"].(map[string]any)) != 0 {
+		t.Fatalf("border_top none should clear: %v", style["borderTop"])
+	}
+	if style["borderLeft"].(map[string]any)["dashStyle"] != "SOLID" {
+		t.Fatalf("border falls back to the all-sides value: %v", style["borderLeft"])
+	}
+	if style["paddingTop"].(map[string]any)["magnitude"] != 2.0 || style["paddingLeft"].(map[string]any)["magnitude"] != 6.0 {
+		t.Fatalf("per-side padding overrides the all-sides one: %v", style)
+	}
+	// A cell border carries no padding of its own; the cell's does that.
+	if _, ok := style["borderLeft"].(map[string]any)["padding"]; ok {
+		t.Fatal("cell borders have no padding in the API")
+	}
+	if (CellStyleSpec{Border: "1pt dotted"}).Validate() == nil {
+		t.Fatal("a bad border should be refused")
+	}
+}

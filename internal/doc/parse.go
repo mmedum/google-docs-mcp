@@ -264,6 +264,7 @@ func parseTable(seg *Segment, t *gdocs.Table, handle string) *Table {
 				if st.ColumnSpan > 0 {
 					c.ColSpan = int(st.ColumnSpan)
 				}
+				c.Style = parseCellStyle(st)
 			}
 			c.Blocks = parseBlocks(seg, c, c.Handle+"/", tc.Content)
 			cells = append(cells, c)
@@ -556,11 +557,59 @@ func parseParagraphStyle(ps *gdocs.ParagraphStyle) ParagraphStyle {
 	if ps == nil {
 		return ParagraphStyle{}
 	}
-	return ParagraphStyle{
-		Alignment: ps.Alignment, LineSpacing: ps.LineSpacing,
+	out := ParagraphStyle{
+		Alignment: ps.Alignment, Direction: ps.Direction, SpacingMode: ps.SpacingMode,
+		LineSpacing:  ps.LineSpacing,
 		SpaceAbovePt: ptOf(ps.SpaceAbove), SpaceBelowPt: ptOf(ps.SpaceBelow),
-		IndentStartPt: ptOf(ps.IndentStart), IndentFirstLinePt: ptOf(ps.IndentFirstLine),
-		KeepWithNext: ps.KeepWithNext, PageBreakBefore: ps.PageBreakBefore,
+		IndentStartPt: ptOf(ps.IndentStart), IndentEndPt: ptOf(ps.IndentEnd),
+		IndentFirstLinePt: ptOf(ps.IndentFirstLine),
+		KeepWithNext:      ps.KeepWithNext, KeepLinesTogether: ps.KeepLinesTogether,
+		AvoidWidowAndOrphan: ps.AvoidWidowAndOrphan, PageBreakBefore: ps.PageBreakBefore,
+		BorderTop: parseBorder(ps.BorderTop), BorderBottom: parseBorder(ps.BorderBottom),
+		BorderLeft: parseBorder(ps.BorderLeft), BorderRight: parseBorder(ps.BorderRight),
+		BorderBetween: parseBorder(ps.BorderBetween),
+	}
+	if ps.Shading != nil {
+		out.Shading = hexColor(ps.Shading.BackgroundColor)
+	}
+	for _, t := range ps.TabStops {
+		if t != nil {
+			out.TabStops = append(out.TabStops, TabStop{OffsetPt: ptOf(t.Offset), Alignment: t.Alignment})
+		}
+	}
+	return out
+}
+
+// parseBorder reads one paragraph edge. A cell border has no padding,
+// so parseCellBorder feeds the same type with padding left at zero.
+func parseBorder(b *gdocs.ParagraphBorder) *Border {
+	// Google reports an empty border object for an edge that is not
+	// drawn, and a border with no width draws nothing, so both read as
+	// "no border" rather than as "0pt solid".
+	if b == nil || ptOf(b.Width) == 0 {
+		return nil
+	}
+	return &Border{Color: hexColor(b.Color), WidthPt: ptOf(b.Width), PaddingPt: ptOf(b.Padding), DashStyle: b.DashStyle}
+}
+
+func parseCellBorder(b *gdocs.TableCellBorder) *Border {
+	if b == nil || ptOf(b.Width) == 0 {
+		return nil
+	}
+	return &Border{Color: hexColor(b.Color), WidthPt: ptOf(b.Width), DashStyle: b.DashStyle}
+}
+
+// parseCellStyle reads what a table cell carries itself.
+func parseCellStyle(cs *gdocs.TableCellStyle) CellStyle {
+	if cs == nil {
+		return CellStyle{}
+	}
+	return CellStyle{
+		Background: hexColor(cs.BackgroundColor), ContentAlignment: cs.ContentAlignment,
+		PaddingTopPt: ptOf(cs.PaddingTop), PaddingBottomPt: ptOf(cs.PaddingBottom),
+		PaddingLeftPt: ptOf(cs.PaddingLeft), PaddingRightPt: ptOf(cs.PaddingRight),
+		BorderTop: parseCellBorder(cs.BorderTop), BorderBottom: parseCellBorder(cs.BorderBottom),
+		BorderLeft: parseCellBorder(cs.BorderLeft), BorderRight: parseCellBorder(cs.BorderRight),
 	}
 }
 

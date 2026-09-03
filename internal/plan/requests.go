@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -201,17 +202,124 @@ func ClearTextStyle(r Rng) json.RawMessage {
 	return raw(map[string]any{"updateTextStyle": map[string]any{"range": r.json(), "textStyle": map[string]any{}, "fields": "*"}})
 }
 
+// BorderSpec is one edge as a caller writes it: "1pt solid #cccccc", or
+// "none" to clear it. Tokens come in any order; a missing width is 1pt, a
+// missing dash is solid and a missing colour is black, because the API
+// draws nothing unless all three are set.
+type BorderSpec struct {
+	Raw string
+}
+
+// Border is a parsed edge.
+type Border struct {
+	Clear     bool
+	Color     string
+	WidthPt   float64
+	DashStyle string
+}
+
+var borderDashes = map[string]string{"solid": "SOLID", "dot": "DOT", "dash": "DASH"}
+
+// ParseBorder reads the shorthand. An empty string means "not set".
+func ParseBorder(raw string) (Border, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return Border{}, false, nil
+	}
+	if strings.EqualFold(raw, "none") {
+		return Border{Clear: true}, true, nil
+	}
+	b := Border{Color: "#000000", WidthPt: 1, DashStyle: "SOLID"}
+	for _, tok := range strings.Fields(raw) {
+		low := strings.ToLower(tok)
+		switch {
+		case strings.HasPrefix(tok, "#"):
+			if !ValidColor(tok) {
+				return b, true, fmt.Errorf("border colour %q must be #rrggbb", tok)
+			}
+			b.Color = tok
+		case borderDashes[low] != "":
+			b.DashStyle = borderDashes[low]
+		case strings.HasSuffix(low, "pt"):
+			v, err := strconv.ParseFloat(strings.TrimSuffix(low, "pt"), 64)
+			if err != nil || v < 0 {
+				return b, true, fmt.Errorf("border width %q must be a length like 1pt", tok)
+			}
+			b.WidthPt = v
+		default:
+			return b, true, fmt.Errorf("border %q: use a width like 1pt, a dash style (solid, dot, dash), a colour #rrggbb, or none", tok)
+		}
+	}
+	return b, true, nil
+}
+
+// json is the border as the API takes it. Clearing sends an empty
+// border, which is how the API removes one.
+func (b Border) json(padding *float64) map[string]any {
+	if b.Clear {
+		return map[string]any{}
+	}
+	out := map[string]any{"width": pt(b.WidthPt), "dashStyle": b.DashStyle}
+	if c, ok := colorJSON(b.Color); ok {
+		out["color"] = c
+	}
+	if padding != nil {
+		out["padding"] = pt(*padding)
+	}
+	return out
+}
+
 // ParagraphStyleSpec is a set of paragraph-formatting changes.
 type ParagraphStyleSpec struct {
 	NamedStyle      string // NORMAL_TEXT, HEADING_1..6, TITLE, SUBTITLE
 	Alignment       string // START, CENTER, END, JUSTIFIED
+	Direction       string // LEFT_TO_RIGHT, RIGHT_TO_LEFT
+	SpacingMode     string // NEVER_COLLAPSE, COLLAPSE_LISTS
 	LineSpacing     float64
 	SpaceAbovePt    *float64
 	SpaceBelowPt    *float64
 	IndentStartPt   *float64
+	IndentEndPt     *float64
 	IndentFirstLine *float64
 	KeepWithNext    *bool
-	PageBreakBefore *bool
+	// Shading is the paragraph background, #rrggbb or "none".
+	Shading string
+	// Borders are the shorthand strings; Border replaces every side.
+	Border              string
+	BorderTop           string
+	BorderBottom        string
+	BorderLeft          string
+	BorderRight         string
+	BorderBetween       string
+	BorderPaddingPt     *float64
+	KeepLinesTogether   *bool
+	AvoidWidowAndOrphan *bool
+	PageBreakBefore     *bool
+}
+
+// sides pairs each border field with the API name it sets.
+func (s ParagraphStyleSpec) sides() []struct {
+	raw   string
+	field string
+} {
+	return []struct {
+		raw   string
+		field string
+	}{
+		{firstSet(s.BorderTop, s.Border), "borderTop"},
+		{firstSet(s.BorderBottom, s.Border), "borderBottom"},
+		{firstSet(s.BorderLeft, s.Border), "borderLeft"},
+		{firstSet(s.BorderRight, s.Border), "borderRight"},
+		{s.BorderBetween, "borderBetween"},
+	}
+}
+
+// firstSet is the per-side value when given, else the all-sides one.
+func firstSet(side, all string) string {
+	if strings.TrimSpace(side) != "" {
+		return side
+	}
+	return all
 }
 
 // IsZero reports whether the spec changes nothing.
@@ -229,6 +337,20 @@ func (s ParagraphStyleSpec) Validate() error {
 	}
 	if s.LineSpacing < 0 {
 		return fmt.Errorf("line_spacing must be positive")
+	}
+	if s.Direction != "" && s.Direction != "LEFT_TO_RIGHT" && s.Direction != "RIGHT_TO_LEFT" {
+		return fmt.Errorf("direction must be LEFT_TO_RIGHT or RIGHT_TO_LEFT")
+	}
+	if s.SpacingMode != "" && s.SpacingMode != "NEVER_COLLAPSE" && s.SpacingMode != "COLLAPSE_LISTS" {
+		return fmt.Errorf("spacing_mode must be NEVER_COLLAPSE or COLLAPSE_LISTS")
+	}
+	if !ValidColor(s.Shading) {
+		return fmt.Errorf("shading must be #rrggbb or none")
+	}
+	for _, side := range s.sides() {
+		if _, _, err := ParseBorder(side.raw); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -267,6 +389,33 @@ func (s ParagraphStyleSpec) body() (map[string]any, []string) {
 	}
 	if s.PageBreakBefore != nil {
 		set("pageBreakBefore", *s.PageBreakBefore)
+	}
+	if s.Direction != "" {
+		set("direction", s.Direction)
+	}
+	if s.SpacingMode != "" {
+		set("spacingMode", s.SpacingMode)
+	}
+	if s.IndentEndPt != nil {
+		set("indentEnd", pt(*s.IndentEndPt))
+	}
+	if s.KeepLinesTogether != nil {
+		set("keepLinesTogether", *s.KeepLinesTogether)
+	}
+	if s.AvoidWidowAndOrphan != nil {
+		set("avoidWidowAndOrphan", *s.AvoidWidowAndOrphan)
+	}
+	if c, ok := colorJSON(s.Shading); ok {
+		set("shading", map[string]any{"backgroundColor": c})
+	} else if s.Shading == "none" {
+		set("shading", map[string]any{})
+	}
+	for _, side := range s.sides() {
+		b, ok, err := ParseBorder(side.raw)
+		if err != nil || !ok {
+			continue
+		}
+		set(side.field, b.json(s.BorderPaddingPt))
 	}
 	return style, fields
 }

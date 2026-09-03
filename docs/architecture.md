@@ -764,36 +764,28 @@ What was added:
   equivalents of the comment edits were refused in favour of the Drive
   path, per the existing rule that thread operations use one backend.
 
-**What "everything" means here.** The completeness claim is about the
-`Request` union, not every field of every request. Text style is
-complete: bold, italic, underline, strikethrough, small caps, baseline,
-size, family, both colours and links. Paragraph style carries the named
-style, alignment, line spacing, space above and below, both indents,
-keep-with-next and page-break-before, on `format_document` and on
-`named_style` alike; it does not carry borders, shading, tab stops, end
-indent, content direction, keep-lines-together or widow and orphan
-control. Table cell style is the same shape: background, content
-alignment and padding, but not the four cell borders. Those are compound
-or rarely asked for, and each would need a field in the model, a line in
-the renderer and a schema field to be worth having. A field the server can read but not write is the asymmetry to
-avoid — `pageBreakBefore` was one for a day.
+**What "everything" means here.** Every GA member of the `Request` union
+is emitted, and every field of those requests that the API accepts on a
+write. Text style: bold, italic, underline, strikethrough, small caps,
+baseline, size, family, both colours, links. Paragraph style: named
+style, alignment, content direction, spacing mode, line spacing, space
+above and below, all three indents, keep-with-next, keep-lines-together,
+widow and orphan control, page break before, shading, and all five
+borders. Table cell style: background, content alignment, per-side
+padding and all four borders. Column and row properties as in Phase 4.
 
-**Second client, first round (Claude Desktop, 2026-09-03).** The server
-connected, served `tools/list` and `resources/list` — a call Claude Code
-never makes — and answered three tasks. It confirmed what Claude Code
-structurally cannot: this client shows the model a result's **text**
-block, since the model reported a tab's named styles back in prose. The
-default write mode was honoured (a suggestion without being asked twice),
-and the one direct edit was announced as such, so nothing was silently
-substituted. What it found: asked to make every `HEADING_2` start on a new
-page, the model set `pageBreakBefore` on each paragraph through
-`format_document` and then told the person "the Docs API doesn't expose
-editing the named style itself" — while `layout_document`'s `named_style`
-op does exactly that. Nothing in `format_document` pointed at it, and the
-client loads tool definitions lazily, so the tool it needed may never have
-been in front of it. Both descriptions now name the other: passages here,
-the definition there. A tool the model never sees is a tool that does not
-exist, and only a second client showed it.
+What is left out is only what the **discovery document** marks read-only,
+so no client can set it: `tabStops` and `headingId` on a paragraph,
+`rowSpan` and `columnSpan` on a cell (a merge is what changes those), and
+`TableRowStyle.tableHeader`, which the schema lists and the API refuses
+(§18). Those are read and reported, never sent.
+
+Borders take a shorthand — `1pt solid #cccccc`, `none` to clear, tokens
+in any order, defaulting to 1pt solid black for the parts left out —
+because a flat field per part would be fifteen schema entries for
+paragraph borders alone and twelve more for cells. A width of zero reads
+back as no border, which is what Google means by the empty border object
+it returns for an edge that is not drawn.
 
 v1.0.0 waits for use in anger and a further eval round with another
 client.
@@ -896,4 +888,5 @@ checked rather than assumed.
 | Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalised units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalised string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
 | `TabProperties.index` is the tab's 0-based position among its siblings, so a requested 1-based position converts with `-1` (the API reference, applied to both add and move) | **Refuted for `move`, live 2026-09-03.** For `add` the index is 0-based as documented, but a move inserts the tab at that index with the tab *still in its old slot* and removes it afterwards, so moving one later lands it a place short, and moving it to the very next position does nothing while reporting success. Four probes: 3→1 gave 1; 1→3 gave 2; 2→3 gave 2; 4→2 gave 2 | `moveTabRequest` raises the index by one when the tab is moving later within the same parent (`siblingIndex`). Moving earlier, and moving under a different parent, are unchanged. The bug hid because every earlier test moved a tab to position 1, where the two readings agree. |
 | `read_document with_styles` shows a run's formatting | Confirmed, and sharpened live 2026-09-03: Google returns only the properties a run sets itself, so the annotation already *is* the deviation from what the run inherits. A read of a document whose `HEADING_2` had just been redefined blue, centred and single-spaced annotated nothing at all | No per-run comparison to build (an earlier plan of mine, dropped). Inherited formatting is reported once per tab by `get_document` instead of once per paragraph. |
+| `ParagraphStyle.tabStops` is a field the tools should expose (implied by "implement everything") | Refuted by the discovery document, 2026-09-03: "The list of tab stops is not inherited. This property is read-only." The same holds for `headingId` and a cell's `rowSpan`/`columnSpan` | Read and reported, never sent. §16 lists the read-only set, so "not implemented" is not confused with "not possible". |
 | Resource templates with a shared prefix shadow each other (my worry) | Refuted in go-sdk v1.7.0: a template matches through an anchored RFC 6570 regexp in which `{var}` excludes `/`, so `gdocs://{document}` does not match `gdocs://id/outline`; an unmatched URI is resource-not-found (code -32602 since SEP-2164) | Three templates registered side by side; handlers parse the URI themselves. |

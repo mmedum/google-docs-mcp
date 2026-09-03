@@ -324,6 +324,20 @@ func TestNamedStyleDescription(t *testing.T) {
 		// neither, so only what Google left out is left out.
 		{"explicit defaults are still named", doc.NamedStyleDef{ParagraphStyle: doc.ParagraphStyle{Alignment: "START", LineSpacing: 100}}, "align start, line spacing 100%"},
 		{"nothing at all", doc.NamedStyleDef{ParagraphStyle: doc.ParagraphStyle{Alignment: "ALIGNMENT_UNSPECIFIED"}}, "no formatting of its own"},
+		// Four matching edges collapse into one phrase, which is how they
+		// are usually set; anything else is named side by side.
+		{"a box", doc.NamedStyleDef{ParagraphStyle: doc.ParagraphStyle{
+			BorderTop:    &doc.Border{WidthPt: 1, DashStyle: "SOLID", Color: "#cccccc", PaddingPt: 4},
+			BorderBottom: &doc.Border{WidthPt: 1, DashStyle: "SOLID", Color: "#cccccc", PaddingPt: 4},
+			BorderLeft:   &doc.Border{WidthPt: 1, DashStyle: "SOLID", Color: "#cccccc", PaddingPt: 4},
+			BorderRight:  &doc.Border{WidthPt: 1, DashStyle: "SOLID", Color: "#cccccc", PaddingPt: 4},
+			Shading:      "#eeeeee"}},
+			"shading #eeeeee, border 1pt solid #cccccc (padding 4pt)"},
+		{"one edge and the rest of the flags", doc.NamedStyleDef{ParagraphStyle: doc.ParagraphStyle{
+			BorderBottom: &doc.Border{WidthPt: 2, DashStyle: "DOT", Color: "#ff0000"},
+			Direction:    "RIGHT_TO_LEFT", SpacingMode: "COLLAPSE_LISTS",
+			KeepLinesTogether: true, AvoidWidowAndOrphan: true, IndentEndPt: 18}},
+			"indent end 18pt, keep lines together, avoid widows and orphans, right to left, collapse lists, bottom border 2pt dot #ff0000"},
 	} {
 		if got := render.NamedStyle(&tc.def); got != tc.want {
 			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)

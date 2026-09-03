@@ -243,19 +243,52 @@ type Paragraph struct {
 	PositionedObjectIDs []string            `json:"positionedObjectIds,omitempty"`
 }
 
-// ParagraphStyle is the subset of paragraph formatting we read.
+// ParagraphStyle is paragraph formatting. Every field the API accepts on
+// a write is here; tabStops and headingId are read-only per the
+// discovery document, so they are read and never sent.
 type ParagraphStyle struct {
-	NamedStyleType  string     `json:"namedStyleType,omitempty"`
-	HeadingID       string     `json:"headingId,omitempty"`
-	Alignment       string     `json:"alignment,omitempty"`
-	Direction       string     `json:"direction,omitempty"`
-	IndentStart     *Dimension `json:"indentStart,omitempty"`
-	IndentFirstLine *Dimension `json:"indentFirstLine,omitempty"`
-	LineSpacing     float64    `json:"lineSpacing,omitempty"`
-	SpaceAbove      *Dimension `json:"spaceAbove,omitempty"`
-	SpaceBelow      *Dimension `json:"spaceBelow,omitempty"`
-	KeepWithNext    bool       `json:"keepWithNext,omitempty"`
-	PageBreakBefore bool       `json:"pageBreakBefore,omitempty"`
+	NamedStyleType      string           `json:"namedStyleType,omitempty"`
+	HeadingID           string           `json:"headingId,omitempty"`
+	Alignment           string           `json:"alignment,omitempty"`
+	Direction           string           `json:"direction,omitempty"`
+	SpacingMode         string           `json:"spacingMode,omitempty"`
+	IndentStart         *Dimension       `json:"indentStart,omitempty"`
+	IndentEnd           *Dimension       `json:"indentEnd,omitempty"`
+	IndentFirstLine     *Dimension       `json:"indentFirstLine,omitempty"`
+	LineSpacing         float64          `json:"lineSpacing,omitempty"`
+	SpaceAbove          *Dimension       `json:"spaceAbove,omitempty"`
+	SpaceBelow          *Dimension       `json:"spaceBelow,omitempty"`
+	KeepWithNext        bool             `json:"keepWithNext,omitempty"`
+	KeepLinesTogether   bool             `json:"keepLinesTogether,omitempty"`
+	AvoidWidowAndOrphan bool             `json:"avoidWidowAndOrphan,omitempty"`
+	PageBreakBefore     bool             `json:"pageBreakBefore,omitempty"`
+	Shading             *Shading         `json:"shading,omitempty"`
+	BorderTop           *ParagraphBorder `json:"borderTop,omitempty"`
+	BorderBottom        *ParagraphBorder `json:"borderBottom,omitempty"`
+	BorderLeft          *ParagraphBorder `json:"borderLeft,omitempty"`
+	BorderRight         *ParagraphBorder `json:"borderRight,omitempty"`
+	BorderBetween       *ParagraphBorder `json:"borderBetween,omitempty"`
+	TabStops            []*TabStop       `json:"tabStops,omitempty"`
+}
+
+// ParagraphBorder is one edge of a paragraph's box.
+type ParagraphBorder struct {
+	Color     *OptionalColor `json:"color,omitempty"`
+	Width     *Dimension     `json:"width,omitempty"`
+	Padding   *Dimension     `json:"padding,omitempty"`
+	DashStyle string         `json:"dashStyle,omitempty"`
+}
+
+// Shading is a paragraph's background.
+type Shading struct {
+	BackgroundColor *OptionalColor `json:"backgroundColor,omitempty"`
+}
+
+// TabStop is one tab stop. The API reports these and refuses to set
+// them: "This property is read-only" (discovery document).
+type TabStop struct {
+	Offset    *Dimension `json:"offset,omitempty"`
+	Alignment string     `json:"alignment,omitempty"`
 }
 
 // Dimension is a magnitude with a unit (PT).
@@ -450,8 +483,28 @@ type TableCell struct {
 
 // TableCellStyle is the subset of cell formatting we read.
 type TableCellStyle struct {
-	RowSpan    int64 `json:"rowSpan,omitempty"`
-	ColumnSpan int64 `json:"columnSpan,omitempty"`
+	// RowSpan and ColumnSpan are read-only (discovery document); a merge
+	// is what changes them.
+	RowSpan          int64            `json:"rowSpan,omitempty"`
+	ColumnSpan       int64            `json:"columnSpan,omitempty"`
+	BackgroundColor  *OptionalColor   `json:"backgroundColor,omitempty"`
+	ContentAlignment string           `json:"contentAlignment,omitempty"`
+	PaddingTop       *Dimension       `json:"paddingTop,omitempty"`
+	PaddingBottom    *Dimension       `json:"paddingBottom,omitempty"`
+	PaddingLeft      *Dimension       `json:"paddingLeft,omitempty"`
+	PaddingRight     *Dimension       `json:"paddingRight,omitempty"`
+	BorderTop        *TableCellBorder `json:"borderTop,omitempty"`
+	BorderBottom     *TableCellBorder `json:"borderBottom,omitempty"`
+	BorderLeft       *TableCellBorder `json:"borderLeft,omitempty"`
+	BorderRight      *TableCellBorder `json:"borderRight,omitempty"`
+}
+
+// TableCellBorder is one edge of a cell. Unlike a paragraph border it
+// has no padding: the cell's own padding covers that.
+type TableCellBorder struct {
+	Color     *OptionalColor `json:"color,omitempty"`
+	Width     *Dimension     `json:"width,omitempty"`
+	DashStyle string         `json:"dashStyle,omitempty"`
 }
 
 // SectionBreak starts a section.

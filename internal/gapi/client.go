@@ -57,6 +57,9 @@ type Options struct {
 	UserAgent    string
 	// Sleep is replaced in tests.
 	Sleep func(context.Context, time.Duration) error
+	// AllowURL decides which URLs receive credentials; nil means HTTPS to
+	// Google's API and content hosts only. Tests point it at their server.
+	AllowURL func(u *url.URL) bool
 }
 
 // Client talks to Google with one user's credentials.
@@ -73,6 +76,7 @@ type Client struct {
 	driveWriteLim *rate.Limiter
 	ua            string
 	sleep         func(context.Context, time.Duration) error
+	allowURL      func(*url.URL) bool
 }
 
 // New builds a client whose requests carry tokens from ts.
@@ -92,6 +96,10 @@ func New(ts oauth2.TokenSource, o Options) *Client {
 		writeLim: o.WriteLimiter,
 		ua:       o.UserAgent,
 		sleep:    o.Sleep,
+		allowURL: o.AllowURL,
+	}
+	if c.allowURL == nil {
+		c.allowURL = func(u *url.URL) bool { return u.Scheme == "https" && googleHost(u.Host) }
 	}
 	if c.docs == "" {
 		c.docs = DefaultDocsBaseURL
@@ -205,6 +213,9 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, rdr)
 	if err != nil {
 		return nil, err
+	}
+	if !c.allowURL(req.URL) {
+		return nil, fmt.Errorf("%w: refusing to send credentials to %s", ErrUnexpected, req.URL.Host)
 	}
 	req.Header.Set("Accept", accept)
 	req.Header.Set("User-Agent", c.ua)

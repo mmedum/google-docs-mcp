@@ -24,8 +24,9 @@ func newTestClient(t *testing.T, h http.Handler) (*Client, *httptest.Server) {
 		DocsBaseURL: srv.URL, DriveBaseURL: srv.URL + "/drive/v3",
 		Retry:       RetryPolicy{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 5 * time.Millisecond},
 		ReadLimiter: rate.NewLimiter(rate.Inf, 1), WriteLimiter: rate.NewLimiter(rate.Inf, 1),
-		Sleep:   func(context.Context, time.Duration) error { return nil },
-		Timeout: 5 * time.Second,
+		Sleep:    func(context.Context, time.Duration) error { return nil },
+		Timeout:  5 * time.Second,
+		AllowURL: func(*url.URL) bool { return true },
 	})
 	return c, srv
 }
@@ -212,7 +213,7 @@ func TestGetFile(t *testing.T) {
 }
 
 func TestAuthErrors(t *testing.T) {
-	c := New(NoCredentials{}, Options{DocsBaseURL: "http://127.0.0.1:1", Retry: RetryPolicy{MaxAttempts: 1, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}})
+	c := New(NoCredentials{}, Options{DocsBaseURL: "http://127.0.0.1:1", Retry: RetryPolicy{MaxAttempts: 1, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}, AllowURL: func(*url.URL) bool { return true }})
 	_, err := c.GetDocument(context.Background(), "abc", GetOptions{})
 	if !errors.Is(err, ErrUnauthorized) || Class(err) != "auth" || !strings.Contains(err.Error(), "login") {
 		t.Fatalf("got %v", err)
@@ -388,7 +389,7 @@ func TestRepliesRevisionsAndDeletes(t *testing.T) {
 		t.Fatalf("delete reply: %v", err)
 	}
 	revs, err := c.ListRevisions(ctx, "abc")
-	if err != nil || len(revs) != 2 || revs[0].ID != "1" || revs[0].ExportLinks["text/markdown"] == "" || !revs[1].KeepForever || revs[1].LastModifyingUser.DisplayName != "Ann" {
+	if err != nil || len(revs) != 2 || revs[0].ID != "1" || !revs[1].KeepForever || revs[1].LastModifyingUser.DisplayName != "Ann" {
 		t.Fatalf("revisions: %+v %v", revs, err)
 	}
 	want := []string{"POST /drive/v3/files/abc/comments/c1/replies", "GET /drive/v3/files/abc/comments/c1", "DELETE /drive/v3/files/abc/comments/c1", "DELETE /drive/v3/files/abc/comments/c1/replies/r1", "GET /drive/v3/files/abc/revisions", "GET /drive/v3/files/abc/revisions"}
@@ -421,11 +422,6 @@ func TestExportRevision(t *testing.T) {
 		}
 	}))
 	srvURL = srv.URL
-	// The test server is not a Google host; allow it through the guard by
-	// rewriting the check for this test.
-	old := contentURLAllowed
-	contentURLAllowed = func(*url.URL) bool { return true }
-	t.Cleanup(func() { contentURLAllowed = old })
 	data, err := c.ExportRevision(context.Background(), "abc", "12", "text/markdown")
 	if err != nil || string(data) != "# old" || polls != 2 {
 		t.Fatalf("export revision: %q %v polls=%d", data, err, polls)
@@ -443,11 +439,13 @@ func TestExportRevisionErrors(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "revision unsupported") {
 		t.Fatalf("operation error: %v", err)
 	}
-	c, _ = newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// A content URL outside the allowlist is refused before any request.
+	c, srv := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"name":"op1","done":true,"response":{"downloadUri":"https://evil.example/x"}}`))
 	}))
+	c.allowURL = func(u *url.URL) bool { return strings.HasPrefix(srv.URL, "http://"+u.Host) }
 	_, err = c.ExportRevision(context.Background(), "abc", "12", "text/markdown")
-	if !errors.Is(err, ErrUnexpected) {
+	if !errors.Is(err, ErrUnexpected) || !strings.Contains(err.Error(), "evil.example") {
 		t.Fatalf("foreign host: %v", err)
 	}
 }

@@ -127,9 +127,9 @@ func (s *Service) FetchFresh(ctx context.Context, ref string) (*Fetched, error) 
 }
 
 func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, error) {
-	id, err := doc.ParseID(ref)
+	id, err := parseRef(ref)
 	if err != nil {
-		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", ref)
+		return nil, err
 	}
 	if !fresh {
 		s.mu.Lock()
@@ -257,6 +257,38 @@ func tabSegment(d *doc.Document, tabRef, segRef string) (*doc.Tab, *doc.Segment,
 // DefaultMaxChars is the output budget when a caller gives none
 // (about 5k tokens).
 const DefaultMaxChars = 20000
+
+// parseRef turns a document id or URL into an id.
+func parseRef(ref string) (string, error) {
+	id, err := doc.ParseID(ref)
+	if err != nil {
+		return "", Errorf("invalid", "%q is not a Google Docs document id or URL", ref)
+	}
+	return id, nil
+}
+
+// checkRevision refuses work planned against a revision the document has
+// left; before names the action for the message.
+func checkRevision(expect, actual, before string) error {
+	if expect != "" && expect != actual {
+		return Errorf("conflict", "the document is at revision %s, not %s; re-read before %s", actual, expect, before)
+	}
+	return nil
+}
+
+// segmentAt finds a segment of a tab by their ids.
+func segmentAt(d *doc.Document, tabID, segID string) *doc.Segment {
+	tab, ok := d.Tab(tabID)
+	if !ok {
+		return nil
+	}
+	for _, seg := range tab.Segments() {
+		if seg.ID == segID {
+			return seg
+		}
+	}
+	return nil
+}
 
 // wrapAPI turns a Google API failure into an actionable Error.
 func wrapAPI(err error, what string) error {

@@ -53,7 +53,9 @@ func TestManageTabs(t *testing.T) {
 		{TabRequest{Document: fixtureID, Action: "move", Tab: "Notes", Parent: "none"}, "unsupported"},
 		{TabRequest{Document: fixtureID, Action: "split"}, "invalid"},
 		{TabRequest{Document: fixtureID, Action: "add", Title: "x", ExpectRevision: "old"}, "conflict"},
-		{TabRequest{Document: fixtureID, Action: "delete", Tab: "Notes"}, "forbidden"},
+		{TabRequest{Document: fixtureID, Action: "delete", Tab: "Notes"}, "invalid"},
+		{TabRequest{Document: fixtureID, Action: "rename", Tab: "Notes", Title: "x", Position: 2}, "invalid"},
+		{TabRequest{Document: fixtureID, Action: "move", Tab: "Notes", Position: 1, Title: "x"}, "invalid"},
 	} {
 		if _, err := svc.ManageTabs(ctx, tc.req); classOf(err) != tc.class {
 			t.Errorf("%+v: %v", tc.req, err)
@@ -67,9 +69,12 @@ func TestManageTabs(t *testing.T) {
 	}
 
 	// Deletion needs the destructive flag and a second tab.
+	if _, err := svc.DeleteTab(ctx, TabRequest{Document: fixtureID, Tab: "Notes"}); classOf(err) != "forbidden" {
+		t.Fatalf("delete without flag: %v", err)
+	}
 	svc = New(api, Options{Destructive: true, DefaultWriteMode: "direct", CacheTTL: 1})
 	api.batches, api.replies = nil, nil
-	res, err = svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "delete", Tab: "Notes"})
+	res, err = svc.DeleteTab(ctx, TabRequest{Document: fixtureID, Tab: "Notes"})
 	if err != nil || res.TabID != "t.1" || !strings.Contains(string(api.batches[0].Requests[0]), `"deleteTab":{"tabId":"t.1"}`) || !strings.HasPrefix(res.Text, `deleted tab t.1 ("Notes")`) {
 		t.Fatalf("delete: %+v %v", res, err)
 	}

@@ -28,9 +28,7 @@ func TestStructureRequestBuilders(t *testing.T) {
 		"deleteFooter":                DeleteFooter("f1", ""),
 		"insertPerson":                InsertPerson("Ann", "ann@example.test", Loc{Index: 5}),
 		"insertRichLink":              InsertRichLink("https://docs.google.com/x", "Doc", Loc{Index: 5}),
-		"insertDate":                  InsertDate(DateSpec{Timestamp: "2026-09-03T00:00:00Z", TimeZoneID: "Europe/Copenhagen", DateFormat: "DATE_FORMAT_ISO8601"}, Loc{Index: 5}),
-		"addCommentReply":             AddCommentReply("c1", "", "RESOLVE"),
-		"deleteComment":               DeleteComment("c1"),
+		"insertDate":                  InsertDate(DateSpec{Timestamp: "2026-09-03T00:00:00Z", TimeZoneID: "Europe/Copenhagen", DateFormat: "iso"}, Loc{Index: 5}),
 	}
 	for kind, req := range checks {
 		if Kind(req) != kind {
@@ -69,12 +67,8 @@ func TestStructureRequestBuilders(t *testing.T) {
 		t.Fatal("header/footer tab ids")
 	}
 	date := view(t, checks["insertDate"]).body["dateElementProperties"].(map[string]any)
-	if date["timeZoneId"] != "Europe/Copenhagen" || date["timeFormat"] != nil {
+	if date["timeZoneId"] != "Europe/Copenhagen" || date["timeFormat"] != nil || date["dateFormat"] != "DATE_FORMAT_ISO8601" {
 		t.Fatalf("date = %v", date)
-	}
-	reply := view(t, checks["addCommentReply"]).body
-	if reply["commentId"] != "c1" || reply["post"].(map[string]any)["commentAction"] != "RESOLVE" || reply["post"].(map[string]any)["content"] != nil {
-		t.Fatalf("reply = %v", reply)
 	}
 	for _, bad := range []CellStyleSpec{{Background: "yellow"}, {Align: "LEFT"}, {PaddingPt: floatp(-1)}} {
 		if bad.Validate() == nil {

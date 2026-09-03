@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/internal/render"
 )
@@ -30,9 +29,9 @@ type RevisionsResult struct {
 // ListRevisions returns the newest revisions of a document. Drive may
 // omit older revisions of frequently edited documents.
 func (s *Service) ListRevisions(ctx context.Context, ref string, limit int) (*RevisionsResult, error) {
-	id, err := doc.ParseID(ref)
+	id, err := parseRef(ref)
 	if err != nil {
-		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", ref)
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 20
@@ -92,24 +91,30 @@ type DiffResult struct {
 	Text      string           `json:"-"`
 }
 
-// DiffRevisions exports two revisions through Google's converter and
-// returns their line-level unified diff.
+// DiffRevisions exports two revisions through Google's converter, side by
+// side, and returns their line-level unified diff.
 func (s *Service) DiffRevisions(ctx context.Context, req DiffRequest) (*DiffResult, error) {
-	id, err := doc.ParseID(req.Document)
+	id, err := parseRef(req.Document)
 	if err != nil {
-		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", req.Document)
+		return nil, err
 	}
-	if strings.TrimSpace(req.From) == "" {
+	from := strings.TrimSpace(req.From)
+	if from == "" {
 		return nil, Errorf("invalid", "from is empty; pass a revision id from list_revisions")
 	}
 	format, mime, err := exportTextFormat(req.Format)
 	if err != nil {
 		return nil, err
 	}
-	oldText, err := s.api.ExportRevision(ctx, id, strings.TrimSpace(req.From), mime)
-	if err != nil {
-		return nil, wrapAPI(err, "revision "+req.From)
+	type export struct {
+		data []byte
+		err  error
 	}
+	oldCh := make(chan export, 1)
+	go func() {
+		data, err := s.api.ExportRevision(ctx, id, from, mime)
+		oldCh <- export{data, err}
+	}()
 	var newText []byte
 	to := strings.TrimSpace(req.To)
 	if to == "" {
@@ -117,6 +122,10 @@ func (s *Service) DiffRevisions(ctx context.Context, req DiffRequest) (*DiffResu
 		newText, err = s.api.Export(ctx, id, mime)
 	} else {
 		newText, err = s.api.ExportRevision(ctx, id, to, mime)
+	}
+	old := <-oldCh
+	if old.err != nil {
+		return nil, wrapAPI(old.err, "revision "+from)
 	}
 	if err != nil {
 		return nil, wrapAPI(err, "revision "+to)
@@ -129,10 +138,10 @@ func (s *Service) DiffRevisions(ctx context.Context, req DiffRequest) (*DiffResu
 	if maxChars <= 0 {
 		maxChars = DefaultMaxChars
 	}
-	d := render.UnifiedDiff(stripDataURIs(string(oldText)), stripDataURIs(string(newText)), contextLines, maxChars)
-	res := &DiffResult{From: req.From, To: to, Format: format, Stats: d.Stats, Truncated: d.Truncated}
+	d := render.UnifiedDiff(stripDataURIs(string(old.data)), stripDataURIs(string(newText)), contextLines, maxChars)
+	res := &DiffResult{From: from, To: to, Format: format, Stats: d.Stats, Truncated: d.Truncated}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "revision %s → %s (%s): +%d −%d lines in %d hunk(s)", req.From, to, format, d.Stats.Added, d.Stats.Removed, d.Stats.Hunks)
+	fmt.Fprintf(&sb, "revision %s → %s (%s): +%d −%d lines in %d hunk(s)", from, to, format, d.Stats.Added, d.Stats.Removed, d.Stats.Hunks)
 	if d.Truncated {
 		sb.WriteString(", truncated; raise max_chars or diff a narrower pair")
 	}
@@ -145,13 +154,13 @@ func (s *Service) DiffRevisions(ctx context.Context, req DiffRequest) (*DiffResu
 	return res, nil
 }
 
-// exportTextFormat maps a short text format name to its MIME type.
+// exportTextFormat maps a short text format name to its MIME type,
+// accepting only the formats a diff or an old revision can be read in.
 func exportTextFormat(format string) (string, string, error) {
-	format = strings.ToLower(strings.TrimSpace(format))
-	switch format {
-	case "", "md", "markdown":
+	switch format = normalizeExportFormat(format); format {
+	case "", "md":
 		return "md", gapi.ExportMimeTypes["md"], nil
-	case "txt", "text":
+	case "txt":
 		return "txt", gapi.ExportMimeTypes["txt"], nil
 	}
 	return "", "", Errorf("invalid", "format %q; use md or txt", format)
@@ -161,13 +170,13 @@ func exportTextFormat(format string) (string, string, error) {
 // budgeted. Old revisions have no structure to address, so there are no
 // handles or scopes.
 func (s *Service) ReadRevision(ctx context.Context, ref, revision, format string, maxChars int) (*ReadResult, error) {
-	id, err := doc.ParseID(ref)
+	id, err := parseRef(ref)
 	if err != nil {
-		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", ref)
+		return nil, err
 	}
 	f, mime, err := exportTextFormat(format)
 	if err != nil {
-		return nil, Errorf("invalid", "format %q; old revisions can be read as markdown or text", format)
+		return nil, err
 	}
 	data, err := s.api.ExportRevision(ctx, id, revision, mime)
 	if err != nil {

@@ -43,6 +43,13 @@ type LocationInput struct {
 	Of *TargetInput `json:"of,omitempty" jsonschema:"the block, section or text the position is relative to"`
 }
 
+func (l *LocationInput) location() *service.Location {
+	if l == nil {
+		return nil
+	}
+	return &service.Location{At: l.At, Of: l.Of.target()}
+}
+
 // EditOpInput is one edit_document operation.
 type EditOpInput struct {
 	Op            string         `json:"op" jsonschema:"insert, append, replace, delete, replace_all, insert_break (page break), insert_footnote, create_header, create_footer, delete_header, delete_footer"`
@@ -101,8 +108,6 @@ type FormatInput struct {
 }
 
 func registerWrite(s *mcp.Server, d Deps) {
-	writeAnn := &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
-
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "edit_document",
 		Description: "Change the text of a Google Doc with one atomic batch of operations. Address content by exact text " +
@@ -115,7 +120,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"each proposed change as a comment and change nothing. Direct edits refuse to delete ranges holding " +
 			"comments, suggestions, images or footnotes unless force is set. Use dry_run to preview the plan. " +
 			"Returns the new revision id, suggestion or comment ids, and a rendered preview of the edited region.",
-		Annotations: writeAnn,
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in EditInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
@@ -127,9 +132,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			}
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
 				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}}
-			if o.Location != nil {
-				eo.Location = &service.Location{At: o.Location.At, Of: o.Location.Of.target()}
-			}
+			eo.Location = o.Location.location()
 			ops = append(ops, eo)
 		}
 		res, err := d.Service.Edit(ctx, service.EditRequest{Document: in.Document, Ops: ops, Mode: in.Mode, DryRun: in.DryRun, ExpectRevision: in.ExpectRevision, Force: in.Force})
@@ -146,7 +149,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"such as HEADING_2 or NORMAL_TEXT, alignment, line spacing, spacing, indents), bullets (bullet, numbered, " +
 			"checkbox, or none), and clear_formatting. Targets work as in edit_document. Same mode, dry_run and " +
 			"expect_revision semantics.",
-		Annotations: writeAnn,
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FormatInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
@@ -182,7 +185,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 		Description: "Create a new Google Doc in the signed-in account's Drive, optionally with initial content written " +
 			"as markdown (headings, formatting, lists). Returns the id and URL. Initial content is written directly " +
 			"because a new document has nothing to suggest against.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)},
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, *service.CreateResult, error) {
 		res, err := d.Service.Create(ctx, service.CreateRequest{Title: in.Title, Content: in.Content, ContentFormat: in.ContentFormat})
 		if err != nil {
@@ -200,7 +203,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 		Description: "Accept or reject pending suggested edits by id (from list_suggestions) or all of them. Needs " +
 			"Developer Preview. Accepting applies the suggested text; rejecting discards it. Pass expect_revision to " +
 			"refuse if the document changed since the list was read.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)},
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReviewInput) (*mcp.CallToolResult, *service.ReviewResult, error) {
 		res, err := d.Service.Review(ctx, service.ReviewRequest{Document: in.Document, Action: in.Action, IDs: in.IDs, All: in.All, ExpectRevision: in.ExpectRevision})
 		if err != nil {

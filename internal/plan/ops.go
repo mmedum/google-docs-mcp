@@ -76,7 +76,9 @@ type Params struct {
 }
 
 // Op is one resolved operation. The service fills in ranges, text and
-// anchors; the planner only does arithmetic.
+// anchors; the planner only does arithmetic. Seq is the caller's op
+// number; several ops may share it when the service expands one caller
+// op (set_cells), and their summaries are then aggregated.
 type Op struct {
 	Seq         int
 	Kind        OpKind
@@ -178,20 +180,35 @@ func Plan(ops []Op, o Options) (*Result, error) {
 			return nil, err
 		}
 	}
+	summaries := map[int]*OpSummary{}
+	add := func(op *Op, reqs []json.RawMessage, minimal bool) {
+		res.Requests = append(res.Requests, reqs...)
+		if sm := summaries[op.Seq]; sm != nil {
+			sm.Requests += len(reqs)
+			sm.Minimal = sm.Minimal && minimal
+			return
+		}
+		summaries[op.Seq] = &OpSummary{Seq: op.Seq, Kind: op.Kind, Description: op.Description, Requests: len(reqs), Minimal: minimal}
+	}
+	finish := func() *Result {
+		for i := range ops {
+			if s := summaries[ops[i].Seq]; s != nil {
+				res.Summary = append(res.Summary, *s)
+				delete(summaries, ops[i].Seq)
+			}
+		}
+		return res
+	}
 	if o.Mode == ModeComment {
-		seen := map[int]bool{}
 		for i := range ops {
 			p, err := proposal(&ops[i])
 			if err != nil {
 				return nil, err
 			}
 			res.Proposals = append(res.Proposals, p)
-			if !seen[ops[i].Seq] {
-				seen[ops[i].Seq] = true
-				res.Summary = append(res.Summary, OpSummary{Seq: ops[i].Seq, Kind: ops[i].Kind, Description: ops[i].Description})
-			}
+			add(&ops[i], nil, false)
 		}
-		return res, nil
+		return finish(), nil
 	}
 	if err := guard(ops, o, res); err != nil {
 		return res, err
@@ -224,17 +241,6 @@ func Plan(ops []Op, o Options) (*Result, error) {
 		}
 		return content[i].Seq > content[j].Seq
 	})
-	summaries := map[int]*OpSummary{}
-	add := func(op *Op, reqs []json.RawMessage, minimal bool) {
-		res.Requests = append(res.Requests, reqs...)
-		if sm := summaries[op.Seq]; sm != nil {
-			// Ops expanded from one caller op (set_cells) share a summary.
-			sm.Requests += len(reqs)
-			sm.Minimal = sm.Minimal && minimal
-			return
-		}
-		summaries[op.Seq] = &OpSummary{Seq: op.Seq, Kind: op.Kind, Description: op.Description, Requests: len(reqs), Minimal: minimal}
-	}
 	for _, op := range formats {
 		add(op, formatRequests(op), false)
 	}
@@ -251,13 +257,7 @@ func Plan(ops []Op, o Options) (*Result, error) {
 	for _, op := range global {
 		add(op, []json.RawMessage{ReplaceAllText(op.Find, op.Replace, op.MatchCase, op.Seg.TabID)}, false)
 	}
-	for i := range ops {
-		if s := summaries[ops[i].Seq]; s != nil {
-			res.Summary = append(res.Summary, *s)
-			delete(summaries, ops[i].Seq)
-		}
-	}
-	return res, nil
+	return finish(), nil
 }
 
 func validate(op *Op) error {
@@ -351,7 +351,7 @@ func keyIndex(op *Op) int64 {
 func guard(ops []Op, o Options, res *Result) error {
 	for i := range ops {
 		op := &ops[i]
-		if !deletes(op.Kind) || len(op.Anchors) == 0 {
+		if !Deletes(op.Kind) || len(op.Anchors) == 0 {
 			continue
 		}
 		if o.Mode == ModeSuggest {
@@ -367,9 +367,9 @@ func guard(ops []Op, o Options, res *Result) error {
 	return nil
 }
 
-// deletes reports whether the kind removes existing content, which is
+// Deletes reports whether the kind removes existing content, which is
 // what the overwrite guard protects.
-func deletes(k OpKind) bool {
+func Deletes(k OpKind) bool {
 	switch k {
 	case OpReplace, OpDelete, OpDeleteRows, OpDeleteColumns, OpDeleteHeader, OpDeleteFooter:
 		return true
@@ -405,7 +405,7 @@ func checkOverlaps(ops []Op) error {
 		s, e int64
 	}
 	var spans []span
-	structural := map[string]*Op{}
+	structural := map[Loc]*Op{}
 	for i := range ops {
 		op := &ops[i]
 		switch op.Kind {
@@ -422,11 +422,10 @@ func checkOverlaps(ops []Op) error {
 			// the table block overlaps it, cell edits inside it do not.
 			spans = append(spans, span{op, op.TableAt.Index, op.TableAt.Index + 1})
 			if isStructural(op.Kind) {
-				key := fmt.Sprintf("%s/%s/%d", op.TableAt.TabID, op.TableAt.SegmentID, op.TableAt.Index)
-				if prev := structural[key]; prev != nil {
+				if prev := structural[*op.TableAt]; prev != nil {
 					return fmt.Errorf("ops %d and %d both change the grid of %s; rows and columns renumber after the first, so split them into separate calls", prev.Seq, op.Seq, op.Description)
 				}
-				structural[key] = op
+				structural[*op.TableAt] = op
 			}
 		}
 	}

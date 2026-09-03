@@ -53,4 +53,13 @@ func fail(err error) error {
 	return errors.New("[unexpected] " + err.Error())
 }
 
-var readOnly = &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)}
+var (
+	readOnly = &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)}
+	// writeSafe marks tools that change the document but never delete
+	// beyond what the person asked and the guard allows.
+	writeSafe = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
+	// destructive marks gated tools; the meta asks the client to involve
+	// the person.
+	destructive     = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
+	destructiveMeta = mcp.Meta{"anthropic/requiresUserInteraction": true}
+)

@@ -181,8 +181,21 @@ type DriveReply struct {
 	Deleted     bool   `json:"deleted,omitempty"`
 }
 
+// ReplyFields is what reply calls ask for.
+const ReplyFields = "id,content,author(displayName,emailAddress),createdTime,action,deleted"
+
 // CommentFields is what the comment calls ask for.
-const CommentFields = "id,content,htmlContent,author(displayName,emailAddress),createdTime,modifiedTime,resolved,deleted,anchor,quotedFileContent,replies(id,content,author(displayName,emailAddress),createdTime,action,deleted)"
+const CommentFields = "id,content,htmlContent,author(displayName,emailAddress),createdTime,modifiedTime,resolved,deleted,anchor,quotedFileContent,replies(" + ReplyFields + ")"
+
+// commentURL is the Drive URL of a file's comment collection or, with an
+// id, of one thread.
+func (c *Client) commentURL(fileID, commentID string) string {
+	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments"
+	if commentID != "" {
+		u += "/" + url.PathEscape(commentID)
+	}
+	return u
+}
 
 // CreateComment adds a Drive comment quoting text. The Docs UI shows it
 // unanchored (with the quote) because Drive anchors are opaque to Docs.
@@ -195,8 +208,7 @@ func (c *Client) CreateComment(ctx context.Context, fileID, content, quote strin
 	if err != nil {
 		return nil, err
 	}
-	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments?fields=" + url.QueryEscape(CommentFields)
-	data, err := c.do(ctx, kindDriveWrite, http.MethodPost, u, body)
+	data, err := c.do(ctx, kindDriveWrite, http.MethodPost, c.commentURL(fileID, "")+"?fields="+url.QueryEscape(CommentFields), body)
 	if err != nil {
 		return nil, wrapAmbiguousWrite(err)
 	}
@@ -209,32 +221,41 @@ func (c *Client) CreateComment(ctx context.Context, fileID, content, quote strin
 
 // ListComments returns every comment thread on the file.
 func (c *Client) ListComments(ctx context.Context, fileID string, includeDeleted bool) ([]*DriveComment, error) {
-	var all []*DriveComment
-	token := ""
+	v := url.Values{}
+	v.Set("fields", "nextPageToken,comments("+CommentFields+")")
+	v.Set("pageSize", "100")
+	v.Set("includeDeleted", fmt.Sprint(includeDeleted))
+	return listPages[DriveComment](ctx, c, c.commentURL(fileID, ""), v, "comments")
+}
+
+// listPages collects every page of a Drive list call whose items sit
+// under field, stopping after a generous cap.
+func listPages[T any](ctx context.Context, c *Client, base string, v url.Values, field string) ([]*T, error) {
+	var all []*T
 	for {
-		v := url.Values{}
-		v.Set("fields", "nextPageToken,comments("+CommentFields+")")
-		v.Set("pageSize", "100")
-		v.Set("includeDeleted", fmt.Sprint(includeDeleted))
-		if token != "" {
-			v.Set("pageToken", token)
-		}
-		body, err := c.do(ctx, kindRead, http.MethodGet, c.drive+"/files/"+url.PathEscape(fileID)+"/comments?"+v.Encode(), nil)
+		body, err := c.do(ctx, kindRead, http.MethodGet, base+"?"+v.Encode(), nil)
 		if err != nil {
 			return nil, err
 		}
-		var page struct {
-			Comments      []*DriveComment `json:"comments"`
-			NextPageToken string          `json:"nextPageToken"`
-		}
+		var page map[string]json.RawMessage
 		if err := json.Unmarshal(body, &page); err != nil {
-			return nil, fmt.Errorf("%w: decode comments: %w", ErrUnexpected, err)
+			return nil, fmt.Errorf("%w: decode %s: %w", ErrUnexpected, field, err)
 		}
-		all = append(all, page.Comments...)
-		if page.NextPageToken == "" || len(all) > 5000 {
+		var items []*T
+		if raw, ok := page[field]; ok {
+			if err := json.Unmarshal(raw, &items); err != nil {
+				return nil, fmt.Errorf("%w: decode %s: %w", ErrUnexpected, field, err)
+			}
+		}
+		all = append(all, items...)
+		var token string
+		if raw, ok := page["nextPageToken"]; ok {
+			_ = json.Unmarshal(raw, &token)
+		}
+		if token == "" || len(all) > 5000 {
 			return all, nil
 		}
-		token = page.NextPageToken
+		v.Set("pageToken", token)
 	}
 }
 
@@ -252,8 +273,7 @@ func (c *Client) CreateReply(ctx context.Context, fileID, commentID, content, ac
 	if err != nil {
 		return nil, err
 	}
-	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments/" + url.PathEscape(commentID) + "/replies?fields=" + url.QueryEscape(ReplyFields)
-	data, err := c.do(ctx, kindDriveWrite, http.MethodPost, u, body)
+	data, err := c.do(ctx, kindDriveWrite, http.MethodPost, c.commentURL(fileID, commentID)+"/replies?fields="+url.QueryEscape(ReplyFields), body)
 	if err != nil {
 		return nil, wrapAmbiguousWrite(err)
 	}
@@ -264,16 +284,12 @@ func (c *Client) CreateReply(ctx context.Context, fileID, commentID, content, ac
 	return &out, nil
 }
 
-// ReplyFields is what reply calls ask for.
-const ReplyFields = "id,content,author(displayName,emailAddress),createdTime,action,deleted"
-
 // GetComment returns one comment thread with its replies.
 func (c *Client) GetComment(ctx context.Context, fileID, commentID string) (*DriveComment, error) {
 	v := url.Values{}
 	v.Set("fields", CommentFields)
 	v.Set("includeDeleted", "true")
-	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments/" + url.PathEscape(commentID) + "?" + v.Encode()
-	data, err := c.do(ctx, kindRead, http.MethodGet, u, nil)
+	data, err := c.do(ctx, kindRead, http.MethodGet, c.commentURL(fileID, commentID)+"?"+v.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -287,60 +303,35 @@ func (c *Client) GetComment(ctx context.Context, fileID, commentID string) (*Dri
 // DeleteComment deletes a comment thread. Drive keeps it listable with
 // includeDeleted=true.
 func (c *Client) DeleteComment(ctx context.Context, fileID, commentID string) error {
-	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments/" + url.PathEscape(commentID)
-	_, err := c.do(ctx, kindDriveWrite, http.MethodDelete, u, nil)
+	_, err := c.do(ctx, kindDriveWrite, http.MethodDelete, c.commentURL(fileID, commentID), nil)
 	return wrapAmbiguousWrite(err)
 }
 
 // DeleteReply deletes one reply of a thread.
 func (c *Client) DeleteReply(ctx context.Context, fileID, commentID, replyID string) error {
-	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments/" + url.PathEscape(commentID) + "/replies/" + url.PathEscape(replyID)
-	_, err := c.do(ctx, kindDriveWrite, http.MethodDelete, u, nil)
+	_, err := c.do(ctx, kindDriveWrite, http.MethodDelete, c.commentURL(fileID, commentID)+"/replies/"+url.PathEscape(replyID), nil)
 	return wrapAmbiguousWrite(err)
 }
 
 // Revision is a Drive revision (version history entry) of a document.
 type Revision struct {
-	ID                string            `json:"id,omitempty"`
-	MimeType          string            `json:"mimeType,omitempty"`
-	ModifiedTime      string            `json:"modifiedTime,omitempty"`
-	KeepForever       bool              `json:"keepForever,omitempty"`
-	LastModifyingUser *User             `json:"lastModifyingUser,omitempty"`
-	ExportLinks       map[string]string `json:"exportLinks,omitempty"`
+	ID                string `json:"id,omitempty"`
+	MimeType          string `json:"mimeType,omitempty"`
+	ModifiedTime      string `json:"modifiedTime,omitempty"`
+	KeepForever       bool   `json:"keepForever,omitempty"`
+	LastModifyingUser *User  `json:"lastModifyingUser,omitempty"`
 }
 
 // RevisionFields is what ListRevisions asks for per revision.
-const RevisionFields = "id,mimeType,modifiedTime,keepForever,lastModifyingUser(displayName,emailAddress),exportLinks"
+const RevisionFields = "id,mimeType,modifiedTime,keepForever,lastModifyingUser(displayName,emailAddress)"
 
 // ListRevisions returns every revision of the file, oldest first as Drive
 // orders them.
 func (c *Client) ListRevisions(ctx context.Context, fileID string) ([]*Revision, error) {
-	var all []*Revision
-	token := ""
-	for {
-		v := url.Values{}
-		v.Set("fields", "nextPageToken,revisions("+RevisionFields+")")
-		v.Set("pageSize", "200")
-		if token != "" {
-			v.Set("pageToken", token)
-		}
-		body, err := c.do(ctx, kindRead, http.MethodGet, c.drive+"/files/"+url.PathEscape(fileID)+"/revisions?"+v.Encode(), nil)
-		if err != nil {
-			return nil, err
-		}
-		var page struct {
-			Revisions     []*Revision `json:"revisions"`
-			NextPageToken string      `json:"nextPageToken"`
-		}
-		if err := json.Unmarshal(body, &page); err != nil {
-			return nil, fmt.Errorf("%w: decode revisions: %w", ErrUnexpected, err)
-		}
-		all = append(all, page.Revisions...)
-		if page.NextPageToken == "" || len(all) > 5000 {
-			return all, nil
-		}
-		token = page.NextPageToken
-	}
+	v := url.Values{}
+	v.Set("fields", "nextPageToken,revisions("+RevisionFields+")")
+	v.Set("pageSize", "1000")
+	return listPages[Revision](ctx, c, c.drive+"/files/"+url.PathEscape(fileID)+"/revisions", v, "revisions")
 }
 
 // operation is the long-running operation files.download returns.
@@ -390,16 +381,12 @@ func (c *Client) ExportRevision(ctx context.Context, fileID, revisionID, mimeTyp
 	if op.Error != nil {
 		return nil, fmt.Errorf("%w: export of revision %s: %s", rpcClass(op.Error.Code), revisionID, op.Error.Message)
 	}
-	u, err := url.Parse(op.Response.DownloadURI)
-	if err != nil || !contentURLAllowed(u) {
-		return nil, fmt.Errorf("%w: download operation returned no usable content URL", ErrUnexpected)
+	if op.Response.DownloadURI == "" {
+		return nil, fmt.Errorf("%w: download operation returned no content URL", ErrUnexpected)
 	}
+	// The URL is checked against the host allowlist like every request.
 	return c.doAccept(ctx, kindRead, http.MethodGet, op.Response.DownloadURI, nil, "*/*")
 }
-
-// contentURLAllowed says whether credentials may be sent to a content
-// URL an operation named. Replaced in tests, whose server is plain HTTP.
-var contentURLAllowed = func(u *url.URL) bool { return u.Scheme == "https" && googleHost(u.Host) }
 
 // googleHost reports whether a host is one this server may send
 // credentials to: the APIs, Google's content hosts, and docs.google.com,

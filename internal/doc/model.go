@@ -414,6 +414,9 @@ func (d *Document) FindCell(handle string) (*Cell, bool) {
 	return nil, false
 }
 
+// Covered reports whether another cell's span hides this one.
+func (c *Cell) Covered() bool { return c.MergedInto != nil }
+
 // ContentEnd is the index before the cell's final newline, the last
 // position text can occupy.
 func (c *Cell) ContentEnd() int64 {

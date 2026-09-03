@@ -35,11 +35,8 @@ func registerTabs(s *mcp.Server, d Deps) {
 			"and initial markdown content; rename changes the title or emoji; move changes the position among siblings " +
 			"or nests the tab under a parent. Tab changes are always direct edits (the API cannot suggest them). Other " +
 			"tools address tabs by id, title or number; get_document lists them.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)},
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TabInput) (*mcp.CallToolResult, *service.TabResult, error) {
-		if in.Action == "delete" {
-			return nil, nil, fail(service.Errorf("invalid", "deleting a tab is the delete_tab tool, registered only with GDOCS_ENABLE_DESTRUCTIVE=true"))
-		}
 		res, err := d.Service.ManageTabs(ctx, service.TabRequest{Document: in.Document, Action: in.Action, Tab: in.Tab, Title: in.Title, Position: in.Position,
 			Parent: in.Parent, Emoji: in.Emoji, Content: in.Content, ExpectRevision: in.ExpectRevision})
 		if err != nil {
@@ -56,10 +53,10 @@ func registerTabs(s *mcp.Server, d Deps) {
 		Description: "Delete a tab of a Google Doc together with everything in it and any child tabs. Irreversible " +
 			"through this server (version history keeps the content). Ask the person first; a document keeps at " +
 			"least one tab.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)},
-		Meta:        mcp.Meta{"anthropic/requiresUserInteraction": true},
+		Annotations: destructive,
+		Meta:        destructiveMeta,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteTabInput) (*mcp.CallToolResult, *service.TabResult, error) {
-		res, err := d.Service.ManageTabs(ctx, service.TabRequest{Document: in.Document, Action: "delete", Tab: in.Tab, ExpectRevision: in.ExpectRevision})
+		res, err := d.Service.DeleteTab(ctx, service.TabRequest{Document: in.Document, Tab: in.Tab, ExpectRevision: in.ExpectRevision})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

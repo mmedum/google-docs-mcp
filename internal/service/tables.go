@@ -23,14 +23,13 @@ type TableOp struct {
 	Cells     []CellContent // set_cells: explicit cells
 	Row       int           // insert_rows: reference row
 	Column    int           // insert_columns: reference column
-	Count     int
+	Count     int           // insert_rows, insert_columns, pin_header_rows
 	Before    bool
 	RowList   []int // delete_rows
 	ColList   []int // delete_columns
 	FromCell  string
 	ToCell    string
 	Style     plan.CellStyleSpec
-	HeaderRow int // pin_header_rows
 }
 
 // CellContent is new content for one cell.
@@ -88,11 +87,7 @@ func tableCell(b *doc.Block, row, col int) (*doc.Cell, error) {
 	if row < 1 || row > len(t.Cells) || col < 1 || col > len(t.Cells[row-1]) {
 		return nil, Errorf("not_found", "%s has no cell r%dc%d (it is %d×%d)", b.Handle, row, col, t.Rows, t.Cols)
 	}
-	c := t.Cells[row-1][col-1]
-	if c.MergedInto != nil {
-		return nil, Errorf("invalid", "cell r%dc%d is merged into r%dc%d; write that cell instead", row, col, c.MergedInto.Row, c.MergedInto.Col)
-	}
-	return c, nil
+	return t.Cells[row-1][col-1], nil
 }
 
 // resolveTableOp fills a planner op for every edit_table kind except
@@ -111,7 +106,7 @@ func (s *Service) resolveTableOp(f *Fetched, op EditOp, p *plan.Op, out *resolve
 	p.TableAt = &plan.Loc{Index: b.Start, SegmentID: seg.ID, TabID: tab.ID}
 	p.Table = plan.TableParams{Rows: b.Table.Rows, Cols: b.Table.Cols}
 	p.Description = fmt.Sprintf("%s (%d×%d)", b.Handle, b.Table.Rows, b.Table.Cols)
-	p.CommentAnchor = tableAnchor(tab, seg, b)
+	p.CommentAnchor = firstParagraphRng(tab, seg, doc.Flatten([]*doc.Block{b}))
 	out.note(tab.ID, seg.ID, b.Start)
 	tp := &p.Table
 	switch op.Kind {
@@ -134,14 +129,14 @@ func (s *Service) resolveTableOp(f *Fetched, op EditOp, p *plan.Op, out *resolve
 				tp.Indices = append(tp.Indices, n-1)
 			}
 		}
-		p.Anchors = tableLineAnchors(b, op.Kind == plan.OpDeleteRows, tp.Indices, out.threads)
+		p.Anchors = tableLineAnchors(b, op.Kind == plan.OpDeleteRows, seen, out.threads)
 	case plan.OpMergeCells, plan.OpUnmergeCells, plan.OpStyleCells:
 		if err := cellRange(b, to, tp); err != nil {
 			return err
 		}
 		tp.Cell = to.Style
 	case plan.OpPinHeaderRows:
-		tp.HeaderRows = to.HeaderRow
+		tp.HeaderRows = to.Count
 	default:
 		return Errorf("invalid", "unknown table op %q", op.Kind)
 	}
@@ -175,39 +170,28 @@ func cellRange(b *doc.Block, to *TableOp, tp *plan.TableParams) error {
 	return nil
 }
 
-// tableAnchor is where a comment-mode proposal about a table attaches:
-// the first paragraph of its first cell.
-func tableAnchor(tab *doc.Tab, seg *doc.Segment, b *doc.Block) *plan.Rng {
-	for _, row := range b.Table.Cells {
-		for _, c := range row {
-			for _, nb := range c.Blocks {
-				if nb.Paragraph != nil {
-					return blockRng(tab, seg, nb)
-				}
-			}
-		}
-	}
-	return blockRng(tab, seg, b)
-}
-
 // tableLineAnchors lists anchored content inside the rows or columns a
-// deletion removes.
-func tableLineAnchors(b *doc.Block, rows bool, indices []int, threads []CommentThread) []plan.Anchor {
+// deletion removes: one scan of the table, then a filter per cell.
+func tableLineAnchors(b *doc.Block, rows bool, indices map[int]bool, threads []CommentThread) []plan.Anchor {
+	all := anchorsIn(b.Segment.Tab, b.Segment, b.Start, b.End, threads)
+	if len(all) == 0 {
+		return nil
+	}
 	var out []plan.Anchor
 	seen := map[string]bool{}
-	tab, seg := b.Segment.Tab, b.Segment
-	for _, i := range indices {
-		for ri, row := range b.Table.Cells {
-			for ci, c := range row {
-				if (rows && ri != i) || (!rows && ci != i) {
-					continue
-				}
-				for _, a := range anchorsIn(tab, seg, c.Start, c.End, threads) {
-					key := a.Kind + ":" + a.ID
-					if !seen[key] {
-						seen[key] = true
-						out = append(out, a)
-					}
+	for ri, row := range b.Table.Cells {
+		for ci, c := range row {
+			line := ci + 1
+			if rows {
+				line = ri + 1
+			}
+			if !indices[line] {
+				continue
+			}
+			for _, a := range anchorsWithin(all, c.Start, c.End) {
+				if key := a.Kind + ":" + a.ID; !seen[key] {
+					seen[key] = true
+					out = append(out, a)
 				}
 			}
 		}
@@ -231,41 +215,51 @@ func (s *Service) expandSetCells(f *Fetched, seq int, op EditOp, out *resolvedOp
 		return nil, err
 	}
 	tab, seg := b.Segment.Tab, b.Segment
+	bounds := SegmentBounds(tab, seg)
+	all := anchorsIn(tab, seg, b.Start, b.End, out.threads)
 	desc := fmt.Sprintf("%d cell(s) of %s", len(cells), b.Handle)
 	ops := make([]plan.Op, 0, len(cells))
 	for _, cc := range cells {
-		r, c, err := parseCell(cc.Cell, b.Handle)
+		cell, err := tableCell(b, cc.row, cc.col)
 		if err != nil {
 			return nil, err
 		}
-		cell, err := tableCell(b, r, c)
+		r, err := cellTarget(tab, seg, cell)
 		if err != nil {
 			return nil, err
 		}
-		if len(cell.Blocks) == 0 {
-			return nil, Errorf("invalid", "cell %s has no content blocks", cell.Handle)
-		}
-		frag, err := parseContent(cc.Content, op.ContentFormat)
+		frag, err := parseContent(cc.content, op.ContentFormat)
 		if err != nil {
 			return nil, Errorf("unsupported", "cell %s: %v", cell.Handle, err)
 		}
 		if len(frag.Blocks) == 0 {
-			frag = parseEmpty()
+			frag = markdown.Plain("") // one empty paragraph clears the cell
 		}
-		p := plan.Op{Seq: seq, Kind: plan.OpReplace, Seg: SegmentBounds(tab, seg), Description: desc, Fragment: frag,
-			Target: &plan.Rng{Start: cell.Blocks[0].Start, End: cell.ContentEnd(), SegmentID: seg.ID, TabID: tab.ID}, TargetText: cell.Text(doc.ViewInline)}
-		p.Anchors = anchorsIn(tab, seg, p.Target.Start, p.Target.End, out.threads)
-		p.CommentAnchor = &plan.Rng{Start: cell.Blocks[0].Start, End: cell.Blocks[0].End, SegmentID: seg.ID, TabID: tab.ID}
-		ops = append(ops, p)
+		rng := r.Rng()
+		ops = append(ops, plan.Op{Seq: seq, Kind: plan.OpReplace, Seg: bounds, Description: desc, Fragment: frag,
+			Target: &rng, TargetText: r.Text, Anchors: anchorsWithin(all, r.Start, r.End), CommentAnchor: blockRng(tab, seg, cell.Blocks[0])})
 	}
 	out.note(tab.ID, seg.ID, b.Start)
 	return ops, nil
 }
 
+// cellWrite is one cell of a set_cells op with its 1-based position.
+type cellWrite struct {
+	row, col int
+	content  string
+}
+
 // cellContents lists the cells a set_cells op writes: the explicit list,
 // plus a grid laid out from start_cell.
-func cellContents(b *doc.Block, to *TableOp) ([]CellContent, error) {
-	cells := append([]CellContent(nil), to.Cells...)
+func cellContents(b *doc.Block, to *TableOp) ([]cellWrite, error) {
+	var cells []cellWrite
+	for _, c := range to.Cells {
+		r, col, err := parseCell(c.Cell, b.Handle)
+		if err != nil {
+			return nil, err
+		}
+		cells = append(cells, cellWrite{r, col, c.Content})
+	}
 	if len(to.Data) > 0 {
 		r0, c0 := 1, 1
 		if to.StartCell != "" {
@@ -276,19 +270,20 @@ func cellContents(b *doc.Block, to *TableOp) ([]CellContent, error) {
 		}
 		for ri, row := range to.Data {
 			for ci, text := range row {
-				cells = append(cells, CellContent{Cell: fmt.Sprintf("r%dc%d", r0+ri, c0+ci), Content: text})
+				cells = append(cells, cellWrite{r0 + ri, c0 + ci, text})
 			}
 		}
 	}
 	if len(cells) == 0 {
 		return nil, Errorf("invalid", "set_cells needs cells or data")
 	}
-	seen := map[string]bool{}
+	seen := map[[2]int]bool{}
 	for _, c := range cells {
-		if seen[c.Cell] {
-			return nil, Errorf("invalid", "cell %s is set twice", c.Cell)
+		if key := [2]int{c.row, c.col}; seen[key] {
+			return nil, Errorf("invalid", "cell r%dc%d is set twice", c.row, c.col)
+		} else {
+			seen[key] = true
 		}
-		seen[c.Cell] = true
 	}
 	return cells, nil
 }
@@ -308,60 +303,35 @@ func (s *Service) resolveInsertTable(f *Fetched, op EditOp, p *plan.Op, out *res
 	if err != nil {
 		return err
 	}
-	tab, ok := f.Doc.Tab(ip.seg.TabID)
-	if !ok {
-		return Errorf("unexpected", "tab %s vanished", ip.seg.TabID)
-	}
-	seg := segmentByID(tab, ip.seg.ID)
-	if seg != nil && seg.Kind == doc.SegmentFootnote {
+	if ip.segment.Kind == doc.SegmentFootnote {
 		return Errorf("unsupported", "tables cannot be inserted in footnotes")
 	}
 	index := ip.index
-	if !ip.inline && !ip.atEnd && seg != nil {
-		for _, b := range seg.Blocks {
+	if !ip.inline && !ip.atEnd {
+		for _, b := range ip.segment.Blocks {
 			if b.End == index && b.Paragraph != nil {
 				index = b.End - 1
 				break
 			}
 		}
 	}
-	p.Seg = ip.seg
-	p.Insert = &plan.Loc{Index: index, SegmentID: ip.seg.ID, TabID: ip.seg.TabID}
+	p.Seg = ip.bounds()
+	p.Insert = &plan.Loc{Index: index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
 	p.Table = plan.TableParams{Rows: op.Table.Rows, Cols: op.Table.Cols, Data: op.Table.Data}
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
-	out.note(ip.seg.TabID, ip.seg.ID, index)
-	return nil
-}
-
-// parseEmpty is the fragment that clears a cell: one empty paragraph.
-func parseEmpty() *markdown.Fragment { return markdown.Plain("") }
-
-func segmentByID(tab *doc.Tab, id string) *doc.Segment {
-	for _, sg := range tab.Segments() {
-		if sg.ID == id {
-			return sg
-		}
-	}
+	out.note(ip.tab.ID, ip.segment.ID, index)
 	return nil
 }
 
 // fillNewTables writes the data of every insert_table op into the table
-// it created, one edit per table, after the first batch landed. The
-// tables are found by the index the insertion named.
+// it created, one edit per table against the document as it is after
+// the first batch. The tables are found by the index the insertion named.
 func (s *Service) fillNewTables(ctx context.Context, req EditRequest, ro *resolvedOps, result *EditResult) {
-	type fill struct {
-		seq   int
-		seg   plan.Segment
-		index int64
-		data  [][]string
-		rows  int
-		cols  int
-	}
-	var fills []fill
+	var fills []plan.Op
 	for _, p := range ro.ops {
 		if p.Kind == plan.OpInsertTable && len(p.Table.Data) > 0 {
-			fills = append(fills, fill{p.Seq, p.Seg, p.Insert.Index, p.Table.Data, p.Table.Rows, p.Table.Cols})
+			fills = append(fills, p)
 		}
 	}
 	if len(fills) == 0 {
@@ -375,13 +345,9 @@ func (s *Service) fillNewTables(ctx context.Context, req EditRequest, ro *resolv
 	// Handles of the new tables, before any fill shifts indices.
 	handles := make([]string, len(fills))
 	for i, fl := range fills {
-		tab, ok := f.Doc.Tab(fl.seg.TabID)
-		if !ok {
-			continue
-		}
-		if seg := segmentByID(tab, fl.seg.ID); seg != nil {
+		if seg := segmentAt(f.Doc, fl.Seg.TabID, fl.Seg.ID); seg != nil {
 			for _, b := range seg.Blocks {
-				if b.Table != nil && b.Start == fl.index+1 {
+				if b.Table != nil && b.Start == fl.Insert.Index+1 {
 					handles[i] = b.Handle
 				}
 			}
@@ -390,34 +356,46 @@ func (s *Service) fillNewTables(ctx context.Context, req EditRequest, ro *resolv
 	s.Remember(f)
 	for i, fl := range fills {
 		if handles[i] == "" {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the table was created but could not be found again to fill it; use set_cells", fl.seq))
+			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the table was created but could not be found again to fill it; use set_cells", fl.Seq))
 			continue
 		}
-		data := fl.data
-		if len(data) > fl.rows {
-			data = data[:fl.rows]
-			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: data has more rows than the table; extra rows were dropped", fl.seq))
-		}
-		data = append([][]string(nil), data...) // never trim the caller's rows in place
-		for ri := range data {
-			if len(data[ri]) > fl.cols {
-				data[ri] = data[ri][:fl.cols]
-				result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: row %d has more cells than the table; extras were dropped", fl.seq, ri+1))
-			}
-		}
+		data := fitGrid(fl.Table.Data, fl.Table.Rows, fl.Table.Cols, fl.Seq, result)
 		sub := EditRequest{Document: req.Document, Mode: req.Mode, Ops: []EditOp{{Kind: plan.OpSetCells, Table: &TableOp{Table: handles[i], Data: data}}}}
-		res, err := s.Edit(ctx, sub)
+		res, err := s.editFetched(ctx, f, sub)
 		if err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the empty table %s exists but filling it failed: %v", fl.seq, handles[i], err))
+			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the empty table %s exists but filling it failed: %v", fl.Seq, handles[i], err))
 			continue
 		}
 		result.RevisionID = res.RevisionID
 		result.SuggestionIDs = append(result.SuggestionIDs, res.SuggestionIDs...)
 		result.Warnings = append(result.Warnings, res.Warnings...)
 		for j := range result.Changes {
-			if result.Changes[j].Seq == fl.seq {
+			if result.Changes[j].Seq == fl.Seq {
 				result.Changes[j].Description += fmt.Sprintf(", filled as %s", handles[i])
 			}
 		}
+		if i+1 < len(fills) {
+			if f, err = s.FetchFresh(ctx, req.Document); err != nil {
+				result.Warnings = append(result.Warnings, "re-reading the document between table fills failed: "+err.Error())
+				return
+			}
+		}
 	}
+}
+
+// fitGrid trims data to the table's size, warning about what was dropped,
+// without touching the caller's rows.
+func fitGrid(data [][]string, rows, cols, seq int, result *EditResult) [][]string {
+	if len(data) > rows {
+		data = data[:rows]
+		result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: data has more rows than the table; extra rows were dropped", seq))
+	}
+	data = append([][]string(nil), data...)
+	for ri := range data {
+		if len(data[ri]) > cols {
+			data[ri] = data[ri][:cols]
+			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: row %d has more cells than the table; extras were dropped", seq, ri+1))
+		}
+	}
+	return data
 }

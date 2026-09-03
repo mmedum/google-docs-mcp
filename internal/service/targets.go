@@ -80,14 +80,7 @@ func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
 		if !ok {
 			return nil, Errorf("not_found", "no cell %s; cells are named like tbl1:r2c3", t.Cell)
 		}
-		if c.MergedInto != nil {
-			return nil, Errorf("invalid", "cell %s is merged into %s; target that cell instead", t.Cell, c.MergedInto.Handle)
-		}
-		if len(c.Blocks) == 0 {
-			return nil, Errorf("invalid", "cell %s has no content blocks", t.Cell)
-		}
-		return &TargetRange{Tab: tab, Segment: seg, Start: c.Blocks[0].Start, End: c.ContentEnd(), Text: c.Text(doc.ViewInline),
-			Description: "cell " + t.Cell}, nil
+		return cellTarget(tab, seg, c)
 	case t.Text != "":
 		return s.resolveText(f, tab, seg, t)
 	}
@@ -100,6 +93,18 @@ func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
 		return sectionRange(rs), nil
 	}
 	return blockRange(rs.Tab, rs.Segment, rs.From, rs.To-1), nil
+}
+
+// cellTarget is the writable content range of a cell: everything before
+// its final newline. Cells covered by a merge have no content of their own.
+func cellTarget(tab *doc.Tab, seg *doc.Segment, c *doc.Cell) (*TargetRange, error) {
+	if c.MergedInto != nil {
+		return nil, Errorf("invalid", "cell %s is merged into %s; use that cell instead", c.Handle, c.MergedInto.Handle)
+	}
+	if len(c.Blocks) == 0 {
+		return nil, Errorf("invalid", "cell %s has no content blocks", c.Handle)
+	}
+	return &TargetRange{Tab: tab, Segment: seg, Start: c.Blocks[0].Start, End: c.ContentEnd(), Text: c.Text(doc.ViewInline), Description: "cell " + c.Handle}, nil
 }
 
 // sectionRange is the range of a resolved section, with or without its

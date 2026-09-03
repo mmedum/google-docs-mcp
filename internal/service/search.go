@@ -48,7 +48,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 		parts = append(parts, "fullText contains "+gapi.QuoteDriveValue(q))
 	}
 	if m := strings.TrimSpace(req.ModifiedAfter); m != "" {
-		ts, err := parseTime(m)
+		ts, err := ParseTime(m)
 		if err != nil {
 			return nil, Errorf("invalid", "modified_after %q: use YYYY-MM-DD or RFC 3339", m)
 		}
@@ -94,7 +94,8 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	return res, nil
 }
 
-func parseTime(s string) (string, error) {
+// ParseTime accepts YYYY-MM-DD or RFC 3339 and returns RFC 3339 in UTC.
+func ParseTime(s string) (string, error) {
 	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC().Format(time.RFC3339), nil

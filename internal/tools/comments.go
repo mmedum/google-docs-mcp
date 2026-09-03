@@ -57,15 +57,13 @@ func registerCommentsRead(s *mcp.Server, d Deps) {
 }
 
 func registerCommentsWrite(s *mcp.Server, d Deps) {
-	writeAnn := &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
-
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "add_comment",
 		Description: "Post a comment on a Google Doc. With a target (exact text, heading_id, handle or cell) the comment " +
 			"is pinned to that passage when Developer Preview is on; without preview it quotes the text and the editor " +
 			"shows it unanchored, which the result says. Without a target it is a comment on the document as a whole. " +
 			"Nothing in the document text changes. To propose an edit as a comment, use edit_document with mode comment.",
-		Annotations: writeAnn,
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in AddCommentInput) (*mcp.CallToolResult, *service.AddCommentResult, error) {
 		res, err := d.Service.AddComment(ctx, service.AddCommentRequest{Document: in.Document, Target: in.Target.target(), Content: in.Content, Assignee: in.Assignee, ExpectRevision: in.ExpectRevision})
 		if err != nil {
@@ -78,7 +76,7 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 		Name: "reply_comment",
 		Description: "Reply to a comment thread, resolve it, or reopen it. Resolving and reopening are reversible; both " +
 			"may carry a message. Thread ids come from list_comments.",
-		Annotations: writeAnn,
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReplyInput) (*mcp.CallToolResult, *service.ReplyResult, error) {
 		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, Content: in.Content, Action: in.Action})
 		if err != nil {
@@ -94,8 +92,8 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 		Name: "delete_comment",
 		Description: "Delete a comment thread, or one reply of it, from a Google Doc. Only the author can delete; a " +
 			"resolved thread is usually the better outcome (reply_comment with action resolve). Ask the person first.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)},
-		Meta:        mcp.Meta{"anthropic/requiresUserInteraction": true},
+		Annotations: destructive,
+		Meta:        destructiveMeta,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteCommentInput) (*mcp.CallToolResult, *service.DeleteCommentResult, error) {
 		res, err := d.Service.DeleteComment(ctx, service.DeleteCommentRequest{Document: in.Document, CommentID: in.CommentID, ReplyID: in.ReplyID})
 		if err != nil {

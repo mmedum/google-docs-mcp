@@ -10,20 +10,19 @@ import (
 // Table operations (edit_table). set_cells is expanded by the service
 // into replace ops on cells and never reaches the planner.
 const (
-	OpInsertTable    OpKind = "insert_table"
-	OpSetCells       OpKind = "set_cells"
-	OpInsertRows     OpKind = "insert_rows"
-	OpDeleteRows     OpKind = "delete_rows"
-	OpInsertColumns  OpKind = "insert_columns"
-	OpDeleteColumns  OpKind = "delete_columns"
-	OpMergeCells     OpKind = "merge_cells"
-	OpUnmergeCells   OpKind = "unmerge_cells"
-	OpStyleCells     OpKind = "style_cells"
-	OpPinHeaderRows  OpKind = "pin_header_rows"
-	OpDeleteHeader   OpKind = "delete_header"
-	OpDeleteFooter   OpKind = "delete_footer"
-	OpInsertObject   OpKind = "insert_object"
-	opTableStructure        = "structure" // internal grouping label
+	OpInsertTable   OpKind = "insert_table"
+	OpSetCells      OpKind = "set_cells"
+	OpInsertRows    OpKind = "insert_rows"
+	OpDeleteRows    OpKind = "delete_rows"
+	OpInsertColumns OpKind = "insert_columns"
+	OpDeleteColumns OpKind = "delete_columns"
+	OpMergeCells    OpKind = "merge_cells"
+	OpUnmergeCells  OpKind = "unmerge_cells"
+	OpStyleCells    OpKind = "style_cells"
+	OpPinHeaderRows OpKind = "pin_header_rows"
+	OpDeleteHeader  OpKind = "delete_header"
+	OpDeleteFooter  OpKind = "delete_footer"
+	OpInsertObject  OpKind = "insert_object"
 )
 
 // TableParams are the resolved arguments of a table op. Row and column
@@ -324,6 +323,9 @@ func validateObjectOp(op *Op) error {
 	case "date":
 		if o.Date.Timestamp == "" {
 			return fmt.Errorf("op %d: a date chip needs a date (RFC 3339 or YYYY-MM-DD)", op.Seq)
+		}
+		if _, ok := DateFormats[o.Date.DateFormat]; !ok {
+			return fmt.Errorf("op %d: date_format must be iso, full, abbreviated or month_day", op.Seq)
 		}
 	default:
 		return fmt.Errorf("op %d: kind must be image, person, rich_link or date", op.Seq)

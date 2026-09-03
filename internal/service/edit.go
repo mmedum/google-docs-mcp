@@ -106,8 +106,8 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	if err := validateEditRequest(req); err != nil {
 		return nil, err
 	}
-	if req.ExpectRevision != "" && req.ExpectRevision != f.Doc.RevisionID {
-		return nil, Errorf("conflict", "the document is at revision %s, not %s; re-read before editing", f.Doc.RevisionID, req.ExpectRevision)
+	if err := checkRevision(req.ExpectRevision, f.Doc.RevisionID, "editing"); err != nil {
+		return nil, err
 	}
 	result, ro, err := s.planAndApply(ctx, f, req, mode)
 	if errors.Is(err, gapi.ErrConflict) {
@@ -271,14 +271,20 @@ func (s *Service) resolveDeleteSegment(f *Fetched, op EditOp, p *plan.Op, out *r
 	if string(seg.Kind) != kind {
 		return Errorf("invalid", "%s is a %s, not a %s", seg.Label(), seg.Kind, kind)
 	}
-	p.Seg = SegmentBounds(tab, tab.Body)
+	p.Seg = SegmentBounds(tab, seg)
 	p.SegmentRef = seg.ID
 	p.Description = fmt.Sprintf("%s of tab %d", seg.Label(), tab.Number)
 	p.Anchors = anchorsIn(tab, seg, 0, seg.End(), out.threads)
-	for _, blk := range tab.Body.Blocks {
-		if blk.Kind == doc.KindParagraph {
-			p.CommentAnchor = blockRng(tab, tab.Body, blk)
-			break
+	p.CommentAnchor = firstParagraphRng(tab, tab.Body, tab.Body.Blocks)
+	return nil
+}
+
+// firstParagraphRng is the range of the first paragraph among blocks, the
+// place a comment about a segment or a table attaches; nil when none.
+func firstParagraphRng(tab *doc.Tab, seg *doc.Segment, blocks []*doc.Block) *plan.Rng {
+	for _, b := range blocks {
+		if b.Paragraph != nil {
+			return blockRng(tab, seg, b)
 		}
 	}
 	return nil
@@ -298,8 +304,8 @@ func (s *Service) resolveInsertOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	if err != nil {
 		return err
 	}
-	p.Seg = ip.seg
-	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.seg.ID, TabID: ip.seg.TabID}
+	p.Seg = ip.bounds()
+	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
 	p.AtEnd, p.Inline, p.NearBullet = ip.atEnd, ip.inline, ip.nearBullet
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
@@ -308,13 +314,11 @@ func (s *Service) resolveInsertOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 			return Errorf("invalid", "insert_object needs an object")
 		}
 		p.Object = *op.Object
-		if tab, ok := f.Doc.Tab(ip.seg.TabID); ok {
-			if seg := segmentByID(tab, ip.seg.ID); seg != nil && seg.Kind == doc.SegmentFootnote && p.Object.Kind == "image" {
-				return Errorf("unsupported", "images cannot be inserted in footnotes")
-			}
+		if ip.segment.Kind == doc.SegmentFootnote && p.Object.Kind == "image" {
+			return Errorf("unsupported", "images cannot be inserted in footnotes")
 		}
 	}
-	out.note(ip.seg.TabID, ip.seg.ID, ip.index)
+	out.note(ip.tab.ID, ip.segment.ID, ip.index)
 	return nil
 }
 
@@ -378,22 +382,14 @@ func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {
 	}
 	p.Seg = SegmentBounds(tab, tab.Body)
 	p.Description = fmt.Sprintf("new %s of tab %d", kind, tab.Number)
-	for _, blk := range tab.Body.Blocks {
-		if blk.Kind == doc.KindParagraph {
-			p.CommentAnchor = blockRng(tab, tab.Body, blk)
-			break
-		}
-	}
+	p.CommentAnchor = firstParagraphRng(tab, tab.Body, tab.Body.Blocks)
 	return nil
 }
 
-// deletesContent lists the kinds the overwrite guard inspects.
+// deletesContent lists the kinds the overwrite guard inspects: the
+// planner's deleting kinds plus set_cells, which expands into replaces.
 func deletesContent(k plan.OpKind) bool {
-	switch k {
-	case plan.OpDelete, plan.OpReplace, plan.OpSetCells, plan.OpDeleteRows, plan.OpDeleteColumns, plan.OpDeleteHeader, plan.OpDeleteFooter:
-		return true
-	}
-	return false
+	return plan.Deletes(k) || k == plan.OpSetCells
 }
 
 func needsContent(k plan.OpKind) bool {
@@ -419,7 +415,8 @@ func parseContent(content, format string) (*markdown.Fragment, error) {
 }
 
 type insertPoint struct {
-	seg         plan.Segment
+	tab         *doc.Tab
+	segment     *doc.Segment
 	index       int64
 	atEnd       bool
 	inline      bool
@@ -427,6 +424,8 @@ type insertPoint struct {
 	description string
 	anchor      *plan.Rng
 }
+
+func (ip *insertPoint) bounds() plan.Segment { return SegmentBounds(ip.tab, ip.segment) }
 
 // resolveLocation turns a Location into an insertion index.
 func (s *Service) resolveLocation(f *Fetched, loc Location) (*insertPoint, error) {
@@ -464,7 +463,7 @@ func (s *Service) segmentEdge(f *Fetched, t Target, at string) (*insertPoint, er
 	if len(content) == 0 {
 		return nil, Errorf("invalid", "%s has no content blocks", segmentName(tab, seg))
 	}
-	ip := &insertPoint{seg: SegmentBounds(tab, seg)}
+	ip := &insertPoint{tab: tab, segment: seg}
 	switch at {
 	case "start":
 		first := content[0]
@@ -494,7 +493,7 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 	tab, seg := r.Tab, r.Segment
 	bounds := SegmentBounds(tab, seg)
 	first, last := r.Blocks[0], r.Blocks[len(r.Blocks)-1]
-	ip := &insertPoint{seg: bounds}
+	ip := &insertPoint{tab: tab, segment: seg}
 	switch at {
 	case "before":
 		if first.Kind == doc.KindTable {
@@ -534,7 +533,7 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 
 // textRelative positions inline next to a text match or cell content.
 func textRelative(r *TargetRange, at string) (*insertPoint, error) {
-	ip := &insertPoint{seg: SegmentBounds(r.Tab, r.Segment), inline: true, nearBullet: hasBullet(r.Block)}
+	ip := &insertPoint{tab: r.Tab, segment: r.Segment, inline: true, nearBullet: hasBullet(r.Block)}
 	switch at {
 	case "before", "start":
 		ip.index = r.Start

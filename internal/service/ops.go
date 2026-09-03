@@ -63,9 +63,9 @@ func (s *Service) capabilities() Capabilities {
 // Info describes a document: structure counts plus Drive metadata. The
 // two Google calls need only the id, so they run concurrently.
 func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
-	id, err := doc.ParseID(ref)
+	id, err := parseRef(ref)
 	if err != nil {
-		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", ref)
+		return nil, err
 	}
 	type fileResult struct {
 		file *gapi.File
@@ -250,18 +250,9 @@ func commentFooter(rs Resolved, r render.Result, threads []CommentThread) string
 	if len(threads) == 0 {
 		return "\n\n<!-- no comments -->"
 	}
-	to := rs.To
-	if r.Truncated {
-		for i, b := range rs.Segment.Blocks {
-			if b.Handle == r.ContinueFrom {
-				to = i
-				break
-			}
-		}
-	}
 	var start, end int64
-	if to > rs.From && to <= len(rs.Segment.Blocks) {
-		start, end = rs.Segment.Blocks[rs.From].Start, rs.Segment.Blocks[to-1].End
+	if r.To > rs.From && r.To <= len(rs.Segment.Blocks) {
+		start, end = rs.Segment.Blocks[rs.From].Start, rs.Segment.Blocks[r.To-1].End
 	}
 	var sb strings.Builder
 	other := 0
@@ -283,12 +274,11 @@ func commentFooter(rs Resolved, r render.Result, threads []CommentThread) string
 		}
 		sb.WriteString(": " + oneLine(t.Content))
 		if n := len(t.Replies); n > 0 {
-			fmt.Fprintf(&sb, " (%d repl", n)
+			label := "replies"
 			if n == 1 {
-				sb.WriteString("y)")
-			} else {
-				sb.WriteString("ies)")
+				label = "reply"
 			}
+			fmt.Fprintf(&sb, " (%d %s)", n, label)
 		}
 	}
 	out := "\n\ncomments:" + sb.String()
@@ -328,6 +318,7 @@ func rawJSON(w *gdocs.Document, rs Resolved, maxChars int) (render.Result, error
 		}
 		sb.Write(data)
 		res.Blocks++
+		res.To = i + 1
 	}
 	sb.WriteString("]")
 	res.Text = sb.String()
@@ -340,17 +331,13 @@ func wireElements(w *gdocs.Document, tab *doc.Tab, seg *doc.Segment) []*gdocs.St
 	if len(w.Tabs) == 0 {
 		dt = &gdocs.DocumentTab{Body: w.Body, Headers: w.Headers, Footers: w.Footers, Footnotes: w.Footnotes}
 	} else {
-		var walk func([]*gdocs.Tab)
-		walk = func(tabs []*gdocs.Tab) {
-			for _, t := range tabs {
-				if t.TabProperties != nil && t.TabProperties.TabID == tab.ID {
-					dt = t.DocumentTab
-					return
-				}
-				walk(t.ChildTabs)
+		gdocs.WalkTabs(w.Tabs, func(t *gdocs.Tab) bool {
+			if t.TabProperties != nil && t.TabProperties.TabID == tab.ID {
+				dt = t.DocumentTab
+				return false
 			}
-		}
-		walk(w.Tabs)
+			return true
+		})
 	}
 	if dt == nil {
 		return nil

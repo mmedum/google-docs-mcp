@@ -21,6 +21,73 @@ type replyEnvelope struct {
 	CommentUpdateState string `json:"commentUpdateState"`
 }
 
+// each calls fn with the payload of every reply of one request kind.
+func (e replyEnvelope) each(kind string, fn func(raw json.RawMessage)) {
+	for _, r := range e.Replies {
+		if raw, ok := r[kind]; ok {
+			fn(raw)
+		}
+	}
+}
+
+// suggestionIDs lists the suggestions the batch created.
+func (e replyEnvelope) suggestionIDs() []string {
+	var out []string
+	for _, sr := range e.SuggestionResponses {
+		out = append(out, sr.CreatedSuggestionIDs...)
+	}
+	return out
+}
+
+// commentIDs lists the threads insertComment requests created.
+func (e replyEnvelope) commentIDs() []string {
+	var out []string
+	e.each("insertComment", func(raw json.RawMessage) {
+		var v struct {
+			CommentThread struct {
+				CommentID string `json:"commentId"`
+			} `json:"commentThread"`
+		}
+		if json.Unmarshal(raw, &v) == nil && v.CommentThread.CommentID != "" {
+			out = append(out, v.CommentThread.CommentID)
+		}
+	})
+	return out
+}
+
+// addedTabID is the id of the tab an addDocumentTab request created.
+func (e replyEnvelope) addedTabID() string {
+	id := ""
+	e.each("addDocumentTab", func(raw json.RawMessage) {
+		var v struct {
+			TabProperties struct {
+				TabID string `json:"tabId"`
+			} `json:"tabProperties"`
+		}
+		if json.Unmarshal(raw, &v) == nil && id == "" {
+			id = v.TabProperties.TabID
+		}
+	})
+	return id
+}
+
+// batchUpdate sends requests guarded by the fetched revision, drops the
+// cached copy, and returns the decoded replies and the new revision.
+// writeMode is "" or "SUGGEST".
+func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMessage, writeMode string) (replyEnvelope, string, error) {
+	wc := &gapi.WriteControl{RequiredRevisionID: f.Doc.RevisionID, WriteMode: writeMode}
+	res, err := s.api.BatchUpdate(ctx, f.Doc.ID, &gapi.BatchUpdateRequest{Requests: reqs, WriteControl: wc})
+	if err != nil {
+		return replyEnvelope{}, "", wrapWriteError(err)
+	}
+	s.Invalidate(f.Doc.ID)
+	revision := f.Doc.RevisionID
+	if res.WriteControl != nil && res.WriteControl.RequiredRevisionID != "" {
+		revision = res.WriteControl.RequiredRevisionID
+	}
+	return decodeReplies(res.Raw), revision, nil
+}
+
 // apply sends a plan to Google in the chosen mode and records ids.
 func (s *Service) apply(ctx context.Context, f *Fetched, planned *plan.Result, mode plan.Mode, result *EditResult) error {
 	if mode == plan.ModeComment {
@@ -30,23 +97,15 @@ func (s *Service) apply(ctx context.Context, f *Fetched, planned *plan.Result, m
 		result.Warnings = append(result.Warnings, "no changes were needed; the document already matches")
 		return nil
 	}
-	wc := &gapi.WriteControl{RequiredRevisionID: f.Doc.RevisionID}
+	writeMode := ""
 	if mode == plan.ModeSuggest {
-		wc.WriteMode = "SUGGEST"
+		writeMode = "SUGGEST"
 	}
-	res, err := s.api.BatchUpdate(ctx, f.Doc.ID, &gapi.BatchUpdateRequest{Requests: planned.Requests, WriteControl: wc})
+	env, revision, err := s.batchUpdate(ctx, f, planned.Requests, writeMode)
 	if err != nil {
-		return wrapWriteError(err)
+		return err
 	}
-	s.Invalidate(f.Doc.ID)
-	env := decodeReplies(res.Raw)
-	for _, sr := range env.SuggestionResponses {
-		result.SuggestionIDs = append(result.SuggestionIDs, sr.CreatedSuggestionIDs...)
-	}
-	revision := f.Doc.RevisionID
-	if res.WriteControl != nil && res.WriteControl.RequiredRevisionID != "" {
-		revision = res.WriteControl.RequiredRevisionID
-	}
+	result.SuggestionIDs = append(result.SuggestionIDs, env.suggestionIDs()...)
 	if len(planned.Followups) == 0 {
 		return nil
 	}
@@ -71,15 +130,13 @@ func (s *Service) apply(ctx context.Context, f *Fetched, planned *plan.Result, m
 	if len(second) == 0 {
 		return nil
 	}
-	wc2 := &gapi.WriteControl{RequiredRevisionID: revision, WriteMode: wc.WriteMode}
-	res2, err := s.api.BatchUpdate(ctx, f.Doc.ID, &gapi.BatchUpdateRequest{Requests: second, WriteControl: wc2})
+	f.Doc.RevisionID = revision // the second batch is guarded by the first's outcome
+	env2, _, err := s.batchUpdate(ctx, f, second, writeMode)
 	if err != nil {
-		result.Warnings = append(result.Warnings, "the header/footer/footnote was created but filling it failed: "+wrapWriteError(err).Error())
-		return nil
+		result.Warnings = append(result.Warnings, "the header/footer/footnote was created but filling it failed: "+err.Error())
+		return nil //nolint:nilerr // the segment exists; the caller gets it with a warning
 	}
-	for _, sr := range decodeReplies(res2.Raw).SuggestionResponses {
-		result.SuggestionIDs = append(result.SuggestionIDs, sr.CreatedSuggestionIDs...)
-	}
+	result.SuggestionIDs = append(result.SuggestionIDs, env2.suggestionIDs()...)
 	return nil
 }
 
@@ -93,21 +150,17 @@ func decodeReplies(raw json.RawMessage) replyEnvelope {
 // replies, in request order.
 func newSegmentIDs(env replyEnvelope) map[plan.OpKind][]string {
 	out := map[plan.OpKind][]string{}
-	for _, r := range env.Replies {
-		var v struct {
-			HeaderID   string `json:"headerId"`
-			FooterID   string `json:"footerId"`
-			FootnoteID string `json:"footnoteId"`
-		}
-		if raw, ok := r["createHeader"]; ok && json.Unmarshal(raw, &v) == nil && v.HeaderID != "" {
-			out[plan.OpCreateHeader] = append(out[plan.OpCreateHeader], v.HeaderID)
-		}
-		if raw, ok := r["createFooter"]; ok && json.Unmarshal(raw, &v) == nil && v.FooterID != "" {
-			out[plan.OpCreateFooter] = append(out[plan.OpCreateFooter], v.FooterID)
-		}
-		if raw, ok := r["createFootnote"]; ok && json.Unmarshal(raw, &v) == nil && v.FootnoteID != "" {
-			out[plan.OpFootnote] = append(out[plan.OpFootnote], v.FootnoteID)
-		}
+	for kind, field := range map[plan.OpKind]string{plan.OpCreateHeader: "createHeader", plan.OpCreateFooter: "createFooter", plan.OpFootnote: "createFootnote"} {
+		env.each(field, func(raw json.RawMessage) {
+			var v map[string]string
+			if json.Unmarshal(raw, &v) == nil {
+				for _, id := range v { // headerId, footerId or footnoteId
+					if id != "" {
+						out[kind] = append(out[kind], id)
+					}
+				}
+			}
+		})
 	}
 	return out
 }
@@ -123,21 +176,11 @@ func (s *Service) applyProposals(ctx context.Context, f *Fetched, proposals []pl
 		for _, p := range proposals {
 			reqs = append(reqs, plan.InsertComment(p.Content, p.Range, ""))
 		}
-		res, err := s.api.BatchUpdate(ctx, f.Doc.ID, &gapi.BatchUpdateRequest{Requests: reqs, WriteControl: &gapi.WriteControl{RequiredRevisionID: f.Doc.RevisionID}})
+		env, _, err := s.batchUpdate(ctx, f, reqs, "")
 		if err != nil {
-			return wrapWriteError(err)
+			return err
 		}
-		s.Invalidate(f.Doc.ID)
-		for _, r := range decodeReplies(res.Raw).Replies {
-			var v struct {
-				CommentThread struct {
-					CommentID string `json:"commentId"`
-				} `json:"commentThread"`
-			}
-			if raw, ok := r["insertComment"]; ok && json.Unmarshal(raw, &v) == nil && v.CommentThread.CommentID != "" {
-				result.CommentIDs = append(result.CommentIDs, v.CommentThread.CommentID)
-			}
-		}
+		result.CommentIDs = append(result.CommentIDs, env.commentIDs()...)
 		return nil
 	}
 	for _, p := range proposals {
@@ -170,17 +213,7 @@ func regionPreview(d *doc.Document, ro *resolvedOps) string {
 	if ro == nil || !ro.hasPreview {
 		return ""
 	}
-	tab, ok := d.Tab(ro.previewTab)
-	if !ok {
-		return ""
-	}
-	var seg *doc.Segment
-	for _, sg := range tab.Segments() {
-		if sg.ID == ro.previewSeg {
-			seg = sg
-			break
-		}
-	}
+	seg := segmentAt(d, ro.previewTab, ro.previewSeg)
 	if seg == nil {
 		return ""
 	}

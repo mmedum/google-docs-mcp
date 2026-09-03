@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 	"github.com/mmedum/google-docs-mcp/internal/plan"
 )
@@ -150,8 +149,8 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	if err != nil {
 		return nil, err
 	}
-	if req.ExpectRevision != "" && req.ExpectRevision != list.RevisionID {
-		return nil, Errorf("conflict", "the document is at revision %s, not %s; re-read before reviewing", list.RevisionID, req.ExpectRevision)
+	if err := checkRevision(req.ExpectRevision, list.RevisionID, "reviewing"); err != nil {
+		return nil, err
 	}
 	pending := map[string]bool{}
 	var all []string
@@ -183,15 +182,12 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.api.BatchUpdate(ctx, f.Doc.ID, &gapi.BatchUpdateRequest{Requests: reqs, WriteControl: &gapi.WriteControl{RequiredRevisionID: list.RevisionID}})
+	f.Doc.RevisionID = list.RevisionID // guard against the revision the list came from
+	_, revision, err := s.batchUpdate(ctx, f, reqs, "")
 	if err != nil {
-		return nil, wrapWriteError(err)
+		return nil, err
 	}
-	s.Invalidate(f.Doc.ID)
-	out := &ReviewResult{Action: action, IDs: ids, RevisionID: list.RevisionID}
-	if res.WriteControl != nil && res.WriteControl.RequiredRevisionID != "" {
-		out.RevisionID = res.WriteControl.RequiredRevisionID
-	}
+	out := &ReviewResult{Action: action, IDs: ids, RevisionID: revision}
 	out.Remaining = len(all) - len(ids)
 	out.Text = fmt.Sprintf("%sed %d suggestion(s); %d remain pending (revision %s)", action, len(ids), out.Remaining, out.RevisionID)
 	return out, nil

@@ -110,24 +110,21 @@ func previewAnchors(w *gdocs.Document) map[string]*gdocs.Range {
 		return nil
 	}
 	byAnchor := map[string]*gdocs.Range{}
-	var walk func([]*gdocs.Tab)
-	walk = func(tabs []*gdocs.Tab) {
-		for _, t := range tabs {
-			if t.DocumentTab != nil {
-				for id, a := range t.DocumentTab.CommentAnchors {
-					if len(a.Ranges) > 0 && a.Ranges[0] != nil {
-						r := *a.Ranges[0]
-						if r.TabID == "" && t.TabProperties != nil {
-							r.TabID = t.TabProperties.TabID
-						}
-						byAnchor[id] = &r
-					}
-				}
-			}
-			walk(t.ChildTabs)
+	gdocs.WalkTabs(w.Tabs, func(t *gdocs.Tab) bool {
+		if t.DocumentTab == nil {
+			return true
 		}
-	}
-	walk(w.Tabs)
+		for id, a := range t.DocumentTab.CommentAnchors {
+			if len(a.Ranges) > 0 && a.Ranges[0] != nil {
+				r := *a.Ranges[0]
+				if r.TabID == "" && t.TabProperties != nil {
+					r.TabID = t.TabProperties.TabID
+				}
+				byAnchor[id] = &r
+			}
+		}
+		return true
+	})
 	out := map[string]*gdocs.Range{}
 	for _, c := range w.Comments {
 		if r := byAnchor[c.AnchorID]; r != nil && c.AnchorID != "" {
@@ -139,7 +136,8 @@ func previewAnchors(w *gdocs.Document) map[string]*gdocs.Range {
 
 // locateComments finds where each thread sits in the document: by the
 // preview's anchor ranges when present, else by its quoted text, which
-// must match exactly once. Paragraph units are built once and shared.
+// must match exactly once. Paragraph units are built on first use and
+// shared across threads.
 func locateComments(f *Fetched, threads []CommentThread) []CommentThread {
 	d := f.Doc
 	anchors := previewAnchors(f.Wire)
@@ -148,11 +146,7 @@ func locateComments(f *Fetched, threads []CommentThread) []CommentThread {
 		units []unit
 	}
 	var paras []para
-	for _, b := range d.AllBlocks() {
-		if b.Paragraph != nil {
-			paras = append(paras, para{b, units(b.Paragraph)})
-		}
-	}
+	built := false
 	for i := range threads {
 		t := &threads[i]
 		if r := anchors[t.ID]; r != nil {
@@ -164,6 +158,14 @@ func locateComments(f *Fetched, threads []CommentThread) []CommentThread {
 		q := []rune(doc.Normalize(t.Quote))
 		if len(q) == 0 {
 			continue
+		}
+		if !built {
+			built = true
+			for _, b := range d.AllBlocks() {
+				if b.Paragraph != nil {
+					paras = append(paras, para{b, units(b.Paragraph)})
+				}
+			}
 		}
 		var hit *doc.Block
 		var span [2]int64
@@ -185,23 +187,17 @@ func locateComments(f *Fetched, threads []CommentThread) []CommentThread {
 // blockAt finds the innermost paragraph block covering an index of a
 // segment, or the top-level block when no paragraph does.
 func blockAt(d *doc.Document, tabID, segID string, index int64) *doc.Block {
-	tab, ok := d.Tab(tabID)
-	if !ok {
+	seg := segmentAt(d, tabID, segID)
+	if seg == nil {
 		return nil
 	}
-	for _, seg := range tab.Segments() {
-		if seg.ID != segID {
-			continue
+	var best *doc.Block
+	for _, b := range seg.AllBlocks() {
+		if b.Start <= index && index < b.End && (best == nil || b.Paragraph != nil) {
+			best = b
 		}
-		var best *doc.Block
-		for _, b := range seg.AllBlocks() {
-			if b.Start <= index && index < b.End && (best == nil || b.Paragraph != nil) {
-				best = b
-			}
-		}
-		return best
 	}
-	return nil
+	return best
 }
 
 // anchorsIn lists everything inside [start, end) of a segment that a
@@ -258,5 +254,16 @@ func anchorsIn(tab *doc.Tab, seg *doc.Segment, start, end int64, threads []Comme
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
+	return out
+}
+
+// anchorsWithin filters an anchor list to those overlapping [start, end).
+func anchorsWithin(all []plan.Anchor, start, end int64) []plan.Anchor {
+	var out []plan.Anchor
+	for _, a := range all {
+		if a.End > start && a.Start < end {
+			out = append(out, a)
+		}
+	}
 	return out
 }

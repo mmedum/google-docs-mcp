@@ -50,15 +50,12 @@ type TableInput struct {
 	Force          bool           `json:"force,omitempty" jsonschema:"direct mode only: allow deleting rows or columns that hold comments, suggestions, images or footnotes"`
 }
 
-func (o TableOpInput) tableOp(kind plan.OpKind) *service.TableOp {
+func (o TableOpInput) tableOp() *service.TableOp {
 	t := &service.TableOp{Table: o.Table, Rows: o.Rows, Cols: o.Columns, Data: o.Data, StartCell: o.StartCell, Row: o.Row, Column: o.Column,
 		Count: o.Count, Before: o.Before, RowList: o.RowNumbers, ColList: o.ColumnNumbers, FromCell: o.FromCell, ToCell: o.ToCell,
 		Style: plan.CellStyleSpec{Background: o.Background, Align: strings.ToUpper(strings.TrimSpace(o.Align)), PaddingPt: o.PaddingPt}}
 	for _, c := range o.Cells {
 		t.Cells = append(t.Cells, service.CellContent{Cell: c.Cell, Content: c.Content})
-	}
-	if kind == plan.OpPinHeaderRows {
-		t.HeaderRow = o.Count
 	}
 	return t
 }
@@ -73,7 +70,7 @@ func registerTable(s *mcp.Server, d Deps) {
 			"with with_handles; cells as r2c3. Text inside cells can also be edited with edit_document (target cell) and " +
 			"styled with format_document. Same mode, dry_run, expect_revision and force semantics as edit_document; " +
 			"deleting rows or columns that hold comments or suggestions is refused in direct mode unless forced.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)},
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TableInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
@@ -81,11 +78,7 @@ func registerTable(s *mcp.Server, d Deps) {
 			if !plan.IsTableOp(kind) {
 				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use insert_table, set_cells, insert_rows, delete_rows, insert_columns, delete_columns, merge_cells, unmerge_cells, style_cells or pin_header_rows", i, o.Op))
 			}
-			eo := service.EditOp{Kind: kind, Table: o.tableOp(kind), ContentFormat: o.ContentFormat}
-			if o.Location != nil {
-				eo.Location = &service.Location{At: o.Location.At, Of: o.Location.Of.target()}
-			}
-			ops = append(ops, eo)
+			ops = append(ops, service.EditOp{Kind: kind, Table: o.tableOp(), ContentFormat: o.ContentFormat, Location: o.Location.location()})
 		}
 		res, err := d.Service.Edit(ctx, service.EditRequest{Document: in.Document, Ops: ops, Mode: in.Mode, DryRun: in.DryRun, ExpectRevision: in.ExpectRevision, Force: in.Force})
 		if err != nil {

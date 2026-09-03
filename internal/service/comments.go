@@ -29,17 +29,32 @@ type CommentsResult struct {
 
 // ListComments returns every comment thread through the Drive API, which
 // carries replies, resolution and deletion for every deployment, located
-// in the document by the preview's anchors or by quoted text.
+// in the document by the preview's anchors or by quoted text. The
+// document fetch and the Drive list are independent and run together.
 func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*CommentsResult, error) {
-	f, err := s.Fetch(ctx, req.Document)
+	id, err := parseRef(req.Document)
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.api.ListComments(ctx, f.Doc.ID, req.IncludeDeleted)
-	if err != nil {
-		return nil, wrapAPI(err, "comments")
+	type listed struct {
+		list []*gapi.DriveComment
+		err  error
 	}
-	threads := locateComments(f, driveThreads(list))
+	ch := make(chan listed, 1)
+	go func() {
+		list, err := s.api.ListComments(ctx, id, req.IncludeDeleted)
+		ch <- listed{list, err}
+	}()
+	f, err := s.Fetch(ctx, id)
+	if err != nil {
+		<-ch
+		return nil, err
+	}
+	l := <-ch
+	if l.err != nil {
+		return nil, wrapAPI(l.err, "comments")
+	}
+	threads := locateComments(f, driveThreads(l.list))
 	res := &CommentsResult{RevisionID: f.Doc.RevisionID, Threads: []CommentThread{}}
 	for _, t := range threads {
 		if t.Resolved {
@@ -136,19 +151,16 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	if err := s.requireWritable(); err != nil {
 		return nil, err
 	}
-	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		return nil, Errorf("invalid", "content is empty")
-	}
-	if len(content) > 2048 {
-		return nil, Errorf("invalid", "content is %d bytes; comments are limited to 2048", len(content))
+	content, err := commentText(req.Content, "content")
+	if err != nil {
+		return nil, err
 	}
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
 		return nil, err
 	}
-	if req.ExpectRevision != "" && req.ExpectRevision != f.Doc.RevisionID {
-		return nil, Errorf("conflict", "the document is at revision %s, not %s; re-read before commenting", f.Doc.RevisionID, req.ExpectRevision)
+	if err := checkRevision(req.ExpectRevision, f.Doc.RevisionID, "commenting"); err != nil {
+		return nil, err
 	}
 	res := &AddCommentResult{RevisionID: f.Doc.RevisionID}
 	var r *TargetRange
@@ -169,7 +181,7 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	if s.opts.Preview && r != nil {
 		err = s.postAnchoredComment(ctx, f, r.Rng(), content, strings.TrimSpace(req.Assignee), res)
 	} else {
-		err = s.postDriveComment(ctx, f, content, req.Assignee, r != nil, res)
+		err = s.postDriveComment(ctx, f, content, req.Assignee, res)
 	}
 	if err != nil {
 		return nil, err
@@ -187,35 +199,35 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	return res, nil
 }
 
+// commentText validates a comment or reply body against the API limit.
+func commentText(text, what string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", Errorf("invalid", "%s is empty", what)
+	}
+	if len(text) > 2048 {
+		return "", Errorf("invalid", "%s is %d bytes; comments are limited to 2048", what, len(text))
+	}
+	return text, nil
+}
+
 // postAnchoredComment pins a comment to a range through the preview API,
 // guarded by the revision the range was resolved against.
 func (s *Service) postAnchoredComment(ctx context.Context, f *Fetched, rng plan.Rng, content, assignee string, res *AddCommentResult) error {
-	reqs := []json.RawMessage{plan.InsertComment(content, rng, assignee)}
-	out, err := s.api.BatchUpdate(ctx, f.Doc.ID, &gapi.BatchUpdateRequest{Requests: reqs, WriteControl: &gapi.WriteControl{RequiredRevisionID: f.Doc.RevisionID}})
+	env, revision, err := s.batchUpdate(ctx, f, []json.RawMessage{plan.InsertComment(content, rng, assignee)}, "")
 	if err != nil {
-		return wrapWriteError(err)
+		return err
 	}
-	s.Invalidate(f.Doc.ID)
-	for _, rep := range decodeReplies(out.Raw).Replies {
-		var v struct {
-			CommentThread struct {
-				CommentID string `json:"commentId"`
-			} `json:"commentThread"`
-		}
-		if raw, ok := rep["insertComment"]; ok && json.Unmarshal(raw, &v) == nil {
-			res.ID = v.CommentThread.CommentID
-		}
+	if ids := env.commentIDs(); len(ids) > 0 {
+		res.ID = ids[0]
 	}
-	if out.WriteControl != nil && out.WriteControl.RequiredRevisionID != "" {
-		res.RevisionID = out.WriteControl.RequiredRevisionID
-	}
-	res.Anchored = true
+	res.RevisionID, res.Anchored = revision, true
 	return nil
 }
 
 // postDriveComment posts through the Drive API, quoting the target text
 // when there is one; the editor shows such comments unanchored.
-func (s *Service) postDriveComment(ctx context.Context, f *Fetched, content, assignee string, targeted bool, res *AddCommentResult) error {
+func (s *Service) postDriveComment(ctx context.Context, f *Fetched, content, assignee string, res *AddCommentResult) error {
 	if assignee != "" {
 		res.Warnings = append(res.Warnings, "assignee is only supported with Developer Preview; the comment was posted without one")
 	}
@@ -224,7 +236,7 @@ func (s *Service) postDriveComment(ctx context.Context, f *Fetched, content, ass
 		return wrapWriteError(err)
 	}
 	res.ID = c.ID
-	if targeted {
+	if res.Quote != "" {
 		res.Warnings = append(res.Warnings, "the comment quotes the text but is not pinned to it in the editor (Developer Preview anchors comments)")
 	}
 	return nil
@@ -253,35 +265,27 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 	if err := s.requireWritable(); err != nil {
 		return nil, err
 	}
-	id, err := doc.ParseID(req.Document)
-	if err != nil {
-		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", req.Document)
-	}
-	commentID := strings.TrimSpace(req.CommentID)
-	if commentID == "" {
-		return nil, Errorf("invalid", "comment_id is empty; ids come from list_comments")
-	}
 	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		action = "reply"
+	}
 	content := strings.TrimSpace(req.Content)
 	switch action {
-	case "", "reply":
-		action = ""
-		if content == "" {
-			return nil, Errorf("invalid", "content is empty")
+	case "reply":
+		var err error
+		if content, err = commentText(content, "content"); err != nil {
+			return nil, err
 		}
 	case "resolve", "reopen":
+		if len(content) > 2048 {
+			return nil, Errorf("invalid", "content is %d bytes; replies are limited to 2048", len(content))
+		}
 	default:
 		return nil, Errorf("invalid", "action %q; use reply, resolve or reopen", req.Action)
 	}
-	if len(content) > 2048 {
-		return nil, Errorf("invalid", "content is %d bytes; replies are limited to 2048", len(content))
-	}
-	thread, err := s.api.GetComment(ctx, id, commentID)
+	id, commentID, thread, err := s.commentRef(ctx, req.Document, req.CommentID)
 	if err != nil {
-		return nil, wrapAPI(err, "comment")
-	}
-	if thread.Deleted {
-		return nil, Errorf("not_found", "comment %s was deleted", commentID)
+		return nil, err
 	}
 	if action == "resolve" && thread.Resolved {
 		return nil, Errorf("invalid", "comment %s is already resolved", commentID)
@@ -289,24 +293,46 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 	if action == "reopen" && !thread.Resolved {
 		return nil, Errorf("invalid", "comment %s is not resolved", commentID)
 	}
-	rp, err := s.api.CreateReply(ctx, id, commentID, content, action)
+	apiAction := action
+	if action == "reply" {
+		apiAction = ""
+	}
+	rp, err := s.api.CreateReply(ctx, id, commentID, content, apiAction)
 	if err != nil {
 		return nil, wrapWriteError(err)
 	}
 	s.Invalidate(id)
-	res := &ReplyResult{CommentID: commentID, ReplyID: rp.ID, Action: action, Resolved: thread.Resolved}
+	res := &ReplyResult{CommentID: commentID, ReplyID: rp.ID, Action: action, Resolved: action == "resolve" || (action == "reply" && thread.Resolved)}
 	switch action {
-	case "":
-		res.Action = "reply"
+	case "reply":
 		res.Text = fmt.Sprintf("replied to comment %s (reply %s)", commentID, rp.ID)
 	case "resolve":
-		res.Resolved = true
-		res.Text = fmt.Sprintf("resolved comment %s", commentID)
-	case "reopen":
-		res.Resolved = false
-		res.Text = fmt.Sprintf("reopened comment %s", commentID)
+		res.Text = "resolved comment " + commentID
+	default:
+		res.Text = "reopened comment " + commentID
 	}
 	return res, nil
+}
+
+// commentRef resolves the document and checks that the thread exists and
+// is not deleted.
+func (s *Service) commentRef(ctx context.Context, docRef, commentID string) (string, string, *gapi.DriveComment, error) {
+	id, err := parseRef(docRef)
+	if err != nil {
+		return "", "", nil, err
+	}
+	commentID = strings.TrimSpace(commentID)
+	if commentID == "" {
+		return "", "", nil, Errorf("invalid", "comment_id is empty; ids come from list_comments")
+	}
+	thread, err := s.api.GetComment(ctx, id, commentID)
+	if err != nil {
+		return "", "", nil, wrapAPI(err, "comment")
+	}
+	if thread.Deleted {
+		return "", "", nil, Errorf("not_found", "comment %s was deleted", commentID)
+	}
+	return id, commentID, thread, nil
 }
 
 // DeleteCommentRequest removes a thread or one reply.
@@ -329,16 +355,9 @@ func (s *Service) DeleteComment(ctx context.Context, req DeleteCommentRequest) (
 	if err := s.requireDestructive(); err != nil {
 		return nil, err
 	}
-	id, err := doc.ParseID(req.Document)
+	id, commentID, _, err := s.commentRef(ctx, req.Document, req.CommentID)
 	if err != nil {
-		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", req.Document)
-	}
-	commentID := strings.TrimSpace(req.CommentID)
-	if commentID == "" {
-		return nil, Errorf("invalid", "comment_id is empty; ids come from list_comments")
-	}
-	if _, err := s.api.GetComment(ctx, id, commentID); err != nil {
-		return nil, wrapAPI(err, "comment")
+		return nil, err
 	}
 	res := &DeleteCommentResult{CommentID: commentID, ReplyID: strings.TrimSpace(req.ReplyID)}
 	if res.ReplyID != "" {

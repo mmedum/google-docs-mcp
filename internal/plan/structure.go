@@ -187,20 +187,20 @@ func DeleteTab(tabID string) json.RawMessage {
 
 // DeleteHeader removes a header segment.
 func DeleteHeader(headerID, tabID string) json.RawMessage {
-	req := map[string]any{"headerId": headerID}
-	if tabID != "" {
-		req["tabId"] = tabID
-	}
-	return raw(map[string]any{"deleteHeader": req})
+	return deleteSegment("deleteHeader", "headerId", headerID, tabID)
 }
 
 // DeleteFooter removes a footer segment.
 func DeleteFooter(footerID, tabID string) json.RawMessage {
-	req := map[string]any{"footerId": footerID}
+	return deleteSegment("deleteFooter", "footerId", footerID, tabID)
+}
+
+func deleteSegment(kind, idField, id, tabID string) json.RawMessage {
+	req := map[string]any{idField: id}
 	if tabID != "" {
 		req["tabId"] = tabID
 	}
-	return raw(map[string]any{"deleteFooter": req})
+	return raw(map[string]any{kind: req})
 }
 
 // InsertPerson inserts a people chip. The email is required; the name
@@ -227,8 +227,13 @@ func InsertRichLink(uri, title string, at Loc) json.RawMessage {
 type DateSpec struct {
 	Timestamp  string // RFC 3339
 	TimeZoneID string // CLDR id such as Europe/Copenhagen; default UTC
-	DateFormat string // DATE_FORMAT_* enum
+	DateFormat string // a DateFormats key; "" for the API default
 	TimeFormat string // TIME_FORMAT_* enum
+}
+
+// DateFormats maps the friendly date_format names to the API enum.
+var DateFormats = map[string]string{
+	"": "", "iso": "DATE_FORMAT_ISO8601", "full": "DATE_FORMAT_MONTH_DAY_FULL", "abbreviated": "DATE_FORMAT_MONTH_DAY_YEAR_ABBREVIATED", "month_day": "DATE_FORMAT_MONTH_DAY_ABBREVIATED",
 }
 
 // InsertDate inserts a date chip.
@@ -237,29 +242,11 @@ func InsertDate(d DateSpec, at Loc) json.RawMessage {
 	if d.TimeZoneID != "" {
 		props["timeZoneId"] = d.TimeZoneID
 	}
-	if d.DateFormat != "" {
-		props["dateFormat"] = d.DateFormat
+	if f := DateFormats[d.DateFormat]; f != "" {
+		props["dateFormat"] = f
 	}
 	if d.TimeFormat != "" {
 		props["timeFormat"] = d.TimeFormat
 	}
 	return raw(map[string]any{"insertDate": map[string]any{"dateElementProperties": props, "location": at.json()}})
-}
-
-// AddCommentReply replies on a comment thread (Developer Preview).
-// action is "" for a plain reply, RESOLVE or REOPEN to change the state.
-func AddCommentReply(commentID, content, action string) json.RawMessage {
-	post := map[string]any{}
-	if content != "" {
-		post["content"] = content
-	}
-	if action != "" {
-		post["commentAction"] = action
-	}
-	return raw(map[string]any{"addCommentReply": map[string]any{"commentId": commentID, "post": post}})
-}
-
-// DeleteComment deletes a comment thread (Developer Preview; author only).
-func DeleteComment(commentID string) json.RawMessage {
-	return raw(map[string]any{"deleteComment": map[string]any{"commentId": commentID}})
 }

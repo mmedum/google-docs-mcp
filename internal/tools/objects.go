@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -31,10 +30,6 @@ type ObjectInput struct {
 	ExpectRevision string        `json:"expect_revision,omitempty"`
 }
 
-var dateFormats = map[string]string{
-	"": "", "iso": "DATE_FORMAT_ISO8601", "full": "DATE_FORMAT_MONTH_DAY_FULL", "abbreviated": "DATE_FORMAT_MONTH_DAY_YEAR_ABBREVIATED", "month_day": "DATE_FORMAT_MONTH_DAY_ABBREVIATED",
-}
-
 func registerObjects(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "insert_object",
@@ -42,43 +37,29 @@ func registerObjects(s *mcp.Server, d Deps) {
 			"sized in points), a person chip (email), a rich-link chip to a Google resource (Drive file, Calendar event, " +
 			"YouTube video), or a date chip. Objects go inline in a paragraph; use edit_document to add surrounding " +
 			"text. Same mode, dry_run and expect_revision semantics as edit_document; suggestion mode tracks the insertion.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)},
+		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ObjectInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		obj := &plan.ObjectParams{Kind: strings.ToLower(strings.TrimSpace(in.Kind)), URL: strings.TrimSpace(in.URL), WidthPt: in.WidthPt, HeightPt: in.HeightPt,
 			Name: strings.TrimSpace(in.Name), Email: strings.TrimSpace(in.Email), Title: strings.TrimSpace(in.Title)}
 		if obj.Kind == "date" {
-			ts, err := parseDate(in.Date)
+			if strings.TrimSpace(in.Date) == "" {
+				return nil, nil, fail(service.Errorf("invalid", "date is empty; pass YYYY-MM-DD or an RFC 3339 timestamp"))
+			}
+			ts, err := service.ParseTime(in.Date)
 			if err != nil {
-				return nil, nil, fail(err)
+				return nil, nil, fail(service.Errorf("invalid", "date %q; use YYYY-MM-DD or an RFC 3339 timestamp", in.Date))
 			}
-			format, ok := dateFormats[strings.ToLower(strings.TrimSpace(in.DateFormat))]
-			if !ok {
-				return nil, nil, fail(service.Errorf("invalid", "date_format %q; use iso, full, abbreviated or month_day", in.DateFormat))
-			}
-			obj.Date = plan.DateSpec{Timestamp: ts, TimeZoneID: strings.TrimSpace(in.TimeZone), DateFormat: format}
+			// The friendly format name is validated by the planner.
+			obj.Date = plan.DateSpec{Timestamp: ts, TimeZoneID: strings.TrimSpace(in.TimeZone), DateFormat: strings.ToLower(strings.TrimSpace(in.DateFormat))}
 			if in.WithTime {
 				obj.Date.TimeFormat = "TIME_FORMAT_HOUR_MINUTE"
 			}
 		}
-		op := service.EditOp{Kind: plan.OpInsertObject, Object: obj, Location: &service.Location{At: in.Location.At, Of: in.Location.Of.target()}}
+		op := service.EditOp{Kind: plan.OpInsertObject, Object: obj, Location: in.Location.location()}
 		res, err := d.Service.Edit(ctx, service.EditRequest{Document: in.Document, Ops: []service.EditOp{op}, Mode: in.Mode, DryRun: in.DryRun, ExpectRevision: in.ExpectRevision})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
 		return text(editText(res)), res, nil
 	})
-}
-
-// parseDate accepts YYYY-MM-DD or RFC 3339 and returns RFC 3339 in UTC.
-func parseDate(s string) (string, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", service.Errorf("invalid", "date is empty; pass YYYY-MM-DD or an RFC 3339 timestamp")
-	}
-	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.UTC().Format(time.RFC3339), nil
-		}
-	}
-	return "", service.Errorf("invalid", "date %q; use YYYY-MM-DD or an RFC 3339 timestamp", s)
 }

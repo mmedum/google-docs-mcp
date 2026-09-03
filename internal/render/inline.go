@@ -54,8 +54,21 @@ type span struct {
 
 func suggestionKey(ids []string) string { return strings.Join(ids, ",") }
 
-// inline renders a paragraph's runs as markdown inline content.
-func inline(p *doc.Paragraph, seg *doc.Segment, o Options, inTable bool) string {
+// marksFor keeps the marks of one segment, sorted by end offset.
+func marksFor(marks []Mark, seg *doc.Segment) []Mark {
+	var out []Mark
+	for _, m := range marks {
+		if m.SegmentID == seg.ID && m.TabID == seg.Tab.ID {
+			out = append(out, m)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].End < out[j].End })
+	return out
+}
+
+// inline renders a paragraph's runs as markdown inline content. marks
+// are the segment's marks sorted by end.
+func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable bool) string {
 	var spans []span
 	var b strings.Builder
 	flush := func() {
@@ -75,7 +88,7 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, inTable bool) string 
 			spans = append(spans, s)
 		}
 	}
-	marks := marksIn(o.Marks, seg, p)
+	marks = marksIn(marks, p)
 	for _, r := range p.Runs {
 		if !r.Visible(o.view()) {
 			continue
@@ -109,20 +122,47 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, inTable bool) string 
 	return b.String()
 }
 
-// marksIn lists the marks ending inside the paragraph, in order.
-func marksIn(marks []Mark, seg *doc.Segment, p *doc.Paragraph) []Mark {
+// marksIn is the sub-slice of sorted marks ending inside the paragraph.
+func marksIn(marks []Mark, p *doc.Paragraph) []Mark {
 	if len(marks) == 0 || len(p.Runs) == 0 {
 		return nil
 	}
 	start, end := p.Runs[0].Start, p.Runs[len(p.Runs)-1].End
-	var out []Mark
-	for _, m := range marks {
-		if m.SegmentID == seg.ID && m.TabID == seg.Tab.ID && m.End > start && m.End <= end {
-			out = append(out, m)
+	lo := sort.Search(len(marks), func(i int) bool { return marks[i].End > start })
+	hi := sort.Search(len(marks), func(i int) bool { return marks[i].End > end })
+	return marks[lo:hi]
+}
+
+// textWithMarks is the paragraph's plain text with comment markers after
+// the text they cover, for the plain renderer.
+func textWithMarks(p *doc.Paragraph, view doc.View, marks []Mark) string {
+	marks = marksIn(marks, p)
+	if len(marks) == 0 {
+		return p.Text(view)
+	}
+	var b strings.Builder
+	for _, r := range p.Runs {
+		if !r.Visible(view) {
+			continue
+		}
+		switch r.Kind {
+		case doc.RunText:
+			text := strings.TrimSuffix(r.Text, "\n")
+			pos := r.Start
+			for _, m := range marks {
+				if m.End <= pos || m.End > r.End {
+					continue
+				}
+				cut := min(doc.UTF16ToByte(text, m.End-r.Start), len(text))
+				b.WriteString(text[:cut] + "{>>c:" + m.ID + "<<}")
+				text, pos = text[cut:], m.End
+			}
+			b.WriteString(text)
+		case doc.RunPerson, doc.RunRichLink, doc.RunDate:
+			b.WriteString(r.Text)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].End < out[j].End })
-	return out
+	return b.String()
 }
 
 // objectText renders a non-text run: chips, breaks, objects, references.

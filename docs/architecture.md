@@ -646,6 +646,22 @@ guard, `read_document include_comments` and `list_comments`. Still open:
 - **Suggestion and object anchors per fetch.** `anchorsIn` still rescans
   runs per range; an index built at parse time would serve it,
   `list_suggestions` and `Stats` alike.
+- **One op-kind registry.** Adding `delete_header` touched nine kind
+  lists across tools, service and plan (allowed-op strings, resolver
+  switch, `deletesContent`, `needsContent`, `validate`, `contentRequests`,
+  `proposal`, the overlap skip-list, `Deletes`). A `plan` table keyed by
+  kind (tool, shape, deletes, structural, followup) should drive them all.
+- **One follow-up batch mechanism.** Headers, footers and footnotes fill
+  through `plan.Followup`; tables inserted with data and added tabs fill
+  through a recursive edit with its own fetches, guard and numbering, and
+  `dry_run` never shows the fill. A follow-up hook that re-resolves
+  against the refetched document would serve all three, and would let
+  several grid changes on one table land in one call instead of the
+  current one-structural-op-per-table rule.
+- **Comment footer in the renderer.** `include_comments` markers come
+  from `render`, the thread list below them from the service, and
+  `commentsText` formats threads a third way; `Mark` carrying the thread
+  fields would let `render` emit both.
 - **Raw view in the renderer.** The `raw` read format lives in the service
   with its own budget loop because `doc.Block` does not keep its wire
   element; keep the wire pointer on the block and move it to `render`.
@@ -653,8 +669,8 @@ guard, `read_document include_comments` and `list_comments`. Still open:
   point or content is answered by switches in tools, service and plan;
   a single table should drive validation, grouping and the tool's
   allowed-op lists.
-- **Result text shaping.** Some results are rendered to text in the
-  service, others in the tools; settle on the tools.
+- **Result text shaping.** `edit_document`'s text is built in the tools
+  (`editText`), every other result's in the service; settle on one.
 - **Segment identity on `plan.Op`.** `Seg`, `Target`, `Insert` and
   `CommentAnchor` each carry the tab and segment ids; the request
   builders could take a segment once.

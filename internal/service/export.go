@@ -9,7 +9,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
 )
 
@@ -32,6 +31,18 @@ type ExportResult struct {
 }
 
 var inlineFormats = map[string]bool{"md": true, "txt": true, "html": true}
+
+// normalizeExportFormat maps the accepted spellings onto the short names
+// ExportMimeTypes is keyed by.
+func normalizeExportFormat(format string) string {
+	switch format = strings.ToLower(strings.TrimSpace(format)); format {
+	case "markdown":
+		return "md"
+	case "text":
+		return "txt"
+	}
+	return format
+}
 
 // dataURI matches the base64 image payloads Google's markdown and HTML
 // exports embed; they are noise to a reader and swamp any budget.
@@ -61,20 +72,14 @@ var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._ -]+`)
 // Export downloads the document as md, txt or html (returned inline) or
 // pdf, docx, odt, rtf, epub (written under the export directory).
 func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult, error) {
-	format := strings.ToLower(strings.TrimSpace(req.Format))
-	if format == "markdown" {
-		format = "md"
-	}
-	if format == "text" {
-		format = "txt"
-	}
+	format := normalizeExportFormat(req.Format)
 	mime, ok := gapi.ExportMimeTypes[format]
 	if !ok {
 		return nil, Errorf("invalid", "format %q; use md, txt, html, pdf, docx, odt, rtf or epub", req.Format)
 	}
-	id, err := doc.ParseID(req.Document)
+	id, err := parseRef(req.Document)
 	if err != nil {
-		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", req.Document)
+		return nil, err
 	}
 	if !inlineFormats[format] && s.opts.ExportDir == "" {
 		return nil, Errorf("unavailable", "binary exports need GDOCS_EXPORT_DIR to be set to a directory; md, txt and html are returned inline")

@@ -140,6 +140,7 @@ func TestObjectAndSegmentOps(t *testing.T) {
 		{Kind: OpInsertObject, Seg: seg(), Insert: at, Object: ObjectParams{Kind: "person", Email: "nobody"}},
 		{Kind: OpInsertObject, Seg: seg(), Insert: at, Object: ObjectParams{Kind: "rich_link", URL: "http://x"}},
 		{Kind: OpInsertObject, Seg: seg(), Insert: at, Object: ObjectParams{Kind: "date"}},
+		{Kind: OpInsertObject, Seg: seg(), Insert: at, Object: ObjectParams{Kind: "date", Date: DateSpec{Timestamp: "2026-09-03T00:00:00Z", DateFormat: "DATE_FORMAT_ISO8601"}}},
 		{Kind: OpInsertObject, Seg: seg(), Insert: at, Object: ObjectParams{Kind: "chart"}},
 		{Kind: OpInsertObject, Seg: seg(), Object: ObjectParams{Kind: "image", URL: "https://x"}},
 		{Kind: OpDeleteHeader, Seg: seg()},

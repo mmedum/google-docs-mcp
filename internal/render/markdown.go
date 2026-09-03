@@ -8,10 +8,12 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 )
 
-// Result is a rendered block range.
+// Result is a rendered block range. To is the index one past the last
+// block the render consumed (the continuation point when truncated).
 type Result struct {
 	Text         string
 	Blocks       int
+	To           int
 	Chars        int
 	Truncated    bool
 	ContinueFrom string
@@ -19,13 +21,14 @@ type Result struct {
 
 // Markdown renders blocks [from, to) of a segment as markdown.
 func Markdown(seg *doc.Segment, from, to int, o Options) Result {
-	r := &mdRenderer{seg: seg, o: o}
+	r := &mdRenderer{seg: seg, o: o, marks: marksFor(o.Marks, seg)}
 	return r.render(from, to)
 }
 
 type mdRenderer struct {
 	seg       *doc.Segment
 	o         Options
+	marks     []Mark   // this segment's marks, sorted by end
 	footnotes []string // referenced footnote ids in order
 	seen      map[string]bool
 }
@@ -64,7 +67,7 @@ func budgeted(blocks []*doc.Block, from, to, maxChars int, chunk func(*doc.Block
 	from = max(from, 0)
 	to = min(to, len(blocks))
 	var out strings.Builder
-	var res Result
+	res := Result{To: to}
 	for i := from; i < to; i++ {
 		b := blocks[i]
 		text, emit := chunk(b)
@@ -75,6 +78,7 @@ func budgeted(blocks []*doc.Block, from, to, maxChars int, chunk func(*doc.Block
 		if maxChars > 0 && res.Blocks > 0 && out.Len()+len(s)+len(text) > maxChars {
 			res.Truncated = true
 			res.ContinueFrom = b.Handle
+			res.To = i
 			break
 		}
 		out.WriteString(s)
@@ -139,7 +143,7 @@ func (r *mdRenderer) block(b *doc.Block, depth int) string {
 func (r *mdRenderer) paragraph(b *doc.Block) string {
 	p := b.Paragraph
 	r.collectFootnotes(p)
-	content := inline(p, r.seg, r.o, false)
+	content := inline(p, r.seg, r.o, r.marks, false)
 	if p.Bullet == nil && p.Level == 0 && !p.IsTitle {
 		content = escapeLineStart(content)
 	}
@@ -220,8 +224,8 @@ func (r *mdRenderer) table(b *doc.Block, depth int) string {
 	for ri, row := range t.Cells {
 		sb.WriteString("|")
 		for _, c := range row {
-			if c.MergedInto != nil {
-				continue // covered by a merged cell; markdown has no spans
+			if c.Covered() {
+				continue // markdown has no spans
 			}
 			sb.WriteString(" " + r.cell(c) + " |")
 			if r.o.WithHandles && (c.RowSpan > 1 || c.ColSpan > 1) {
@@ -249,7 +253,7 @@ func (r *mdRenderer) cell(c *doc.Cell) string {
 		switch {
 		case b.Paragraph != nil:
 			r.collectFootnotes(b.Paragraph)
-			text := inline(b.Paragraph, r.seg, r.o, true)
+			text := inline(b.Paragraph, r.seg, r.o, r.marks, true)
 			if b.Paragraph.Bullet != nil {
 				text = "• " + text
 			}

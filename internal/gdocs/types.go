@@ -67,6 +67,17 @@ type Tab struct {
 	ChildTabs     []*Tab         `json:"childTabs,omitempty"`
 }
 
+// WalkTabs visits tabs in document order, parents before children,
+// stopping when fn returns false.
+func WalkTabs(tabs []*Tab, fn func(*Tab) bool) bool {
+	for _, t := range tabs {
+		if !fn(t) || !WalkTabs(t.ChildTabs, fn) {
+			return false
+		}
+	}
+	return true
+}
+
 // TabProperties identify and place a tab.
 type TabProperties struct {
 	TabID        string `json:"tabId,omitempty"`

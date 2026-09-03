@@ -241,3 +241,19 @@ func TestMergedCellsRender(t *testing.T) {
 	}
 	_ = d
 }
+
+func TestPlainCommentMarks(t *testing.T) {
+	d, seg := body(t)
+	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 41, ID: "c1"}, {TabID: d.Tabs[0].ID, Start: 60, End: 68, ID: "c2"}}
+	text := render.Plain(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
+	if !strings.Contains(text, "Revenue grew{>>c:c1<<} a lot in Q3.{>>c:c2<<}") {
+		t.Fatalf("plain marks:\n%s", text)
+	}
+	res := render.Markdown(seg, 0, len(seg.Blocks), render.Options{MaxChars: 60})
+	if !res.Truncated || res.To != 4 || seg.Blocks[res.To].Handle != res.ContinueFrom {
+		t.Fatalf("To on truncation: %+v", res)
+	}
+	if res := render.Markdown(seg, 2, 5, render.Options{}); res.To != 5 || res.Truncated {
+		t.Fatalf("To on full render: %+v", res)
+	}
+}

@@ -41,7 +41,7 @@ func TestTableOpsResolve(t *testing.T) {
 		{"merge", EditOp{Kind: plan.OpMergeCells, Table: &TableOp{Table: "tbl1", FromCell: "r1c1", ToCell: "tbl1:r1c2"}}, "mergeTableCells", []string{`"rowSpan":1`, `"columnSpan":2`}},
 		{"unmerge whole", EditOp{Kind: plan.OpUnmergeCells, Table: &TableOp{Table: "tbl1"}}, "unmergeTableCells", []string{`"rowSpan":2`, `"columnSpan":2`}},
 		{"style", EditOp{Kind: plan.OpStyleCells, Table: &TableOp{Table: "tbl1", FromCell: "r2c1", Style: plan.CellStyleSpec{Background: "#ffff00"}}}, "updateTableCellStyle", []string{`"rowIndex":1`, `"columnIndex":0`, `"rowSpan":1`, `"backgroundColor"`}},
-		{"pin", EditOp{Kind: plan.OpPinHeaderRows, Table: &TableOp{Table: "tbl1", HeaderRow: 1}}, "pinTableHeaderRows", []string{`"pinnedHeaderRowsCount":1`}},
+		{"pin", EditOp{Kind: plan.OpPinHeaderRows, Table: &TableOp{Table: "tbl1", Count: 1}}, "pinTableHeaderRows", []string{`"pinnedHeaderRowsCount":1`}},
 		{"set cells grid", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Data: [][]string{{"Name", "Score"}, {"Beta", "2"}}}}, "deleteContentRange[155,156) insertText@155 deleteContentRange[148,152) insertText@148 deleteContentRange[141,145) insertText@141", []string{`"text":"Bet"`, `"text":"Scor"`}},
 		{"set cells list with markdown", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: "**two**\nlines"}}}}, "deleteContentRange[155,156) insertText@155 updateTextStyle[155,164) updateParagraphStyle[155,164) updateTextStyle[155,158)", []string{`"text":"two lines"`}},
 		{"set cells clears", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: ""}}}}, "deleteContentRange[155,156)", nil},
@@ -103,7 +103,7 @@ func TestTableOpErrors(t *testing.T) {
 		{EditOp{Kind: plan.OpInsertTable, Table: &TableOp{Rows: 2, Cols: 2}}, "invalid", "needs a location"},
 		{EditOp{Kind: plan.OpInsertTable, Location: &Location{At: "end"}}, "invalid", "rows and columns"},
 		{EditOp{Kind: plan.OpInsertTable, Location: &Location{At: "end", Of: &Target{Segment: "footnote"}}, Table: &TableOp{Rows: 1, Cols: 1}}, "unsupported", "footnotes"},
-		{EditOp{Kind: plan.OpPinHeaderRows, Table: &TableOp{Table: "tbl1", HeaderRow: 2}}, "invalid", "between 0 and 1"},
+		{EditOp{Kind: plan.OpPinHeaderRows, Table: &TableOp{Table: "tbl1", Count: 2}}, "invalid", "between 0 and 1"},
 	} {
 		_, err := svc.Edit(ctx, tableEdit(tc.op))
 		if classOf(err) != tc.class || !strings.Contains(messageOf(err), tc.msg) {
@@ -122,7 +122,7 @@ func TestTableOpErrors(t *testing.T) {
 		}
 	}
 	api.raw, _ = json.Marshal(&w)
-	if _, err := svc.Edit(ctx, tableEdit(EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: "x"}}}})); classOf(err) != "invalid" || !strings.Contains(messageOf(err), "merged into r2c1") {
+	if _, err := svc.Edit(ctx, tableEdit(EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: "x"}}}})); classOf(err) != "invalid" || !strings.Contains(messageOf(err), "merged into tbl1:r2c1") {
 		t.Fatalf("write to merged cell: %v", err)
 	}
 	if _, err := svc.ResolveTarget(fetched(t, svc), Target{Cell: "tbl1:r2c2"}); classOf(err) != "invalid" {

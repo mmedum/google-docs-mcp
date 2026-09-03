@@ -20,12 +20,13 @@ import (
 const fixtureID = "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX"
 
 type fakeAPI struct {
-	raw      []byte
-	getCalls int
-	getErr   error
-	fileErr  error
-	file     *gapi.File
-	lastOpts gapi.GetOptions
+	raw        []byte
+	afterBatch []byte // served once a batch has been sent, when set
+	getCalls   int
+	getErr     error
+	fileErr    error
+	file       *gapi.File
+	lastOpts   gapi.GetOptions
 
 	batches         []*gapi.BatchUpdateRequest
 	batchErrs       []error
@@ -146,8 +147,12 @@ func (f *fakeAPI) GetDocument(_ context.Context, id string, o gapi.GetOptions) (
 	if id != fixtureID {
 		return nil, &gapi.APIError{Status: 404, Message: "not found"}
 	}
+	raw := f.raw
+	if f.afterBatch != nil && len(f.batches) > 0 {
+		raw = f.afterBatch
+	}
 	var d gdocs.Document
-	if err := json.Unmarshal(f.raw, &d); err != nil {
+	if err := json.Unmarshal(raw, &d); err != nil {
 		return nil, err
 	}
 	return &gapi.DocumentResult{Document: &d}, nil
@@ -329,7 +334,7 @@ func TestResolveScope(t *testing.T) {
 		{"bad segment", ReadScope{Segment: "sidebar"}, 0, "", 0, 0, "invalid"},
 		{"missing footer", ReadScope{Segment: "footer"}, 0, "", 0, 0, "not_found"},
 		{"footnote out of range", ReadScope{Segment: "footnote9"}, 0, "", 0, 0, "not_found"},
-		{"bad handle", ReadScope{FromHandle: "p99"}, 0, "", 0, 0, "not_found"},
+		{"bad handle", ReadScope{FromHandle: "p99"}, 0, "", 0, 0, "unknown"},
 		{"cell handle", ReadScope{FromHandle: "tbl1:r1c1/p1"}, 0, "", 0, 0, "invalid"},
 		{"reversed range", ReadScope{FromHandle: "p7", ToHandle: "p5"}, 0, "", 0, 0, "invalid"},
 		{"foreign handle", ReadScope{FromHandle: "tab2/p1"}, 0, "", 0, 0, "not_found"},

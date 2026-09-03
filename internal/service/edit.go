@@ -54,8 +54,11 @@ type EditResult struct {
 	CommentIDs    []string         `json:"comment_ids,omitempty"`
 	Warnings      []string         `json:"warnings,omitempty"`
 	Preview       string           `json:"-"`
-	Requests      json.RawMessage  `json:"-"`
-	Proposals     []plan.Proposal  `json:"-"`
+	// Requests is the dry run's request list, for tests and debugging;
+	// the person and the model see RequestKinds, never the indices.
+	Requests     json.RawMessage `json:"-"`
+	RequestKinds []string        `json:"request_kinds,omitempty"`
+	Proposals    []plan.Proposal `json:"-"`
 }
 
 type resolvedOps struct {
@@ -115,6 +118,9 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 		if f, err = s.FetchFresh(ctx, req.Document); err != nil {
 			return nil, err
 		}
+		if err := checkRevision(req.ExpectRevision, f.Doc.RevisionID, "editing"); err != nil {
+			return nil, err
+		}
 		result, ro, err = s.planAndApply(ctx, f, req, mode)
 		if errors.Is(err, gapi.ErrConflict) {
 			return nil, Errorf("conflict", "the document changed twice while planning this edit; re-read and try again")
@@ -125,7 +131,7 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	}
 	result.Applied = len(req.Ops)
 	if mode != plan.ModeComment {
-		s.fillNewTables(ctx, req, ro, result)
+		s.fillNewTables(ctx, f, req, ro, result)
 	}
 	after, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
@@ -135,9 +141,44 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	// The caller sees the post-edit handles in the preview, so they are
 	// what later writes must be checked against.
 	s.Remember(after)
+	if blocksShifted(f.Doc, after.Doc) {
+		result.Warnings = append(result.Warnings, "the number of blocks changed, so handles after the edited region now name different blocks; use the handles in the preview or re-read before targeting by handle")
+	}
 	result.RevisionID = after.Doc.RevisionID
 	result.Preview = regionPreview(after.Doc, ro)
 	return result, nil
+}
+
+// blocksShifted reports whether a segment gained or lost top-level blocks
+// somewhere before its last block, which renumbers the handles after
+// that point. A pure append at the end shifts nothing.
+func blocksShifted(before, after *doc.Document) bool {
+	segs := map[string]*doc.Segment{}
+	for _, t := range after.Tabs {
+		for _, seg := range t.Segments() {
+			segs[t.ID+"/"+seg.ID] = seg
+		}
+	}
+	for _, t := range before.Tabs {
+		for _, old := range t.Segments() {
+			cur := segs[t.ID+"/"+old.ID]
+			if cur == nil || len(cur.Blocks) == len(old.Blocks) {
+				continue
+			}
+			n := min(len(old.Blocks), len(cur.Blocks))
+			first := n
+			for i := range n {
+				if doc.Normalize(old.Blocks[i].Text(doc.ViewInline)) != doc.Normalize(cur.Blocks[i].Text(doc.ViewInline)) {
+					first = i
+					break
+				}
+			}
+			if first < len(old.Blocks)-1 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // planAndApply resolves, plans, and (unless dry-running) applies once.
@@ -161,6 +202,9 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 	if req.DryRun {
 		if b, err := json.MarshalIndent(planned.Requests, "", "  "); err == nil && len(planned.Requests) > 0 {
 			result.Requests = b
+		}
+		for _, r := range planned.Requests {
+			result.RequestKinds = append(result.RequestKinds, plan.Kind(r))
 		}
 		result.Preview = regionPreview(f.Doc, ro)
 		return result, ro, nil
@@ -201,7 +245,12 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		if deletesContent(op.Kind) {
 			threads, err := s.comments(ctx, f)
 			if err != nil {
-				s.log.WarnContext(ctx, "comment lookup failed; guard cannot see comment anchors", "err", err)
+				if mode == plan.ModeDirect {
+					// The guard cannot see comment anchors; a direct edit
+					// would then delete them silently.
+					return nil, Errorf("unavailable", "could not check comment anchors before a direct edit: %s; retry, or use mode suggest or comment", messageOf(err))
+				}
+				s.log.WarnContext(ctx, "comment lookup failed; the guard cannot see comment anchors", "err", err)
 			}
 			out.threads = threads
 			break
@@ -231,7 +280,7 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		case plan.OpReplace, plan.OpDelete, plan.OpTextStyle, plan.OpParagraphStyle, plan.OpBullets, plan.OpClearFormatting:
 			err = s.resolveTargetOp(f, op, &p, out)
 		case plan.OpReplaceAll:
-			err = s.resolveReplaceAll(f, op, &p, mode)
+			err = s.resolveReplaceAll(f, op, &p, mode, out.threads)
 		case plan.OpCreateHeader, plan.OpCreateFooter:
 			err = resolveCreateSegment(f, op, &p)
 		case plan.OpDeleteHeader, plan.OpDeleteFooter:
@@ -276,6 +325,7 @@ func (s *Service) resolveDeleteSegment(f *Fetched, op EditOp, p *plan.Op, out *r
 	p.Description = fmt.Sprintf("%s of tab %d", seg.Label(), tab.Number)
 	p.Anchors = anchorsIn(tab, seg, 0, seg.End(), out.threads)
 	p.CommentAnchor = firstParagraphRng(tab, tab.Body, tab.Body.Blocks)
+	out.note(tab.ID, seg.ID, 0)
 	return nil
 }
 
@@ -304,11 +354,7 @@ func (s *Service) resolveInsertOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	if err != nil {
 		return err
 	}
-	p.Seg = ip.bounds()
-	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
-	p.AtEnd, p.Inline, p.NearBullet = ip.atEnd, ip.inline, ip.nearBullet
-	p.Description = ip.description
-	p.CommentAnchor = ip.anchor
+	ip.fill(p, out)
 	if op.Kind == plan.OpInsertObject {
 		if op.Object == nil {
 			return Errorf("invalid", "insert_object needs an object")
@@ -318,7 +364,6 @@ func (s *Service) resolveInsertOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 			return Errorf("unsupported", "images cannot be inserted in footnotes")
 		}
 	}
-	out.note(ip.tab.ID, ip.segment.ID, ip.index)
 	return nil
 }
 
@@ -330,14 +375,27 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	if err != nil {
 		return err
 	}
-	if r.Start == r.End && op.Kind != plan.OpReplace {
-		return Errorf("invalid", "%s is empty", r.Description)
+	if r.Start == r.End {
+		if op.Kind != plan.OpReplace || r.Block == nil {
+			return Errorf("invalid", "%s is empty", r.Description)
+		}
+		// Replacing an empty section body is an insertion after its
+		// heading: a new paragraph, not text glued onto the next heading.
+		ip, err := blockRelative(&TargetRange{Tab: r.Tab, Segment: r.Segment, Blocks: []*doc.Block{r.Block}, Description: r.Description}, "after")
+		if err != nil {
+			return err
+		}
+		p.Kind = plan.OpInsert
+		ip.fill(p, out)
+		p.Description = r.Description
+		return nil
 	}
 	p.Seg = SegmentBounds(r.Tab, r.Segment)
 	rng := r.Rng()
 	p.Target = &rng
 	p.TargetIsBlock = r.IsBlock
 	p.TargetText = r.Text
+	p.TargetAligned = r.Aligned
 	p.Description = r.Description
 	p.NearBullet = hasBullet(r.Block)
 	if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
@@ -347,13 +405,32 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	return nil
 }
 
-func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan.Mode) error {
+func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan.Mode, threads []CommentThread) error {
 	tab, err := tabOf(f.Doc, targetTab(op.Target))
 	if err != nil {
 		return err
 	}
 	p.Seg = SegmentBounds(tab, tab.Body)
 	p.Description = fmt.Sprintf("every %q in tab %d", op.Find, tab.Number)
+	// replaceAllText touches every segment of the tab; the guard sees
+	// what each match would destroy.
+	needle := doc.Normalize(op.Find)
+	seen := map[string]bool{}
+	for _, seg := range tab.Segments() {
+		for _, b := range seg.AllBlocks() {
+			if b.Paragraph == nil {
+				continue
+			}
+			for _, m := range matchParagraph(b.Paragraph, needle, !op.MatchCase) {
+				for _, a := range anchorsIn(tab, seg, m[0], m[1], threads) {
+					if key := a.Kind + ":" + a.ID; !seen[key] {
+						seen[key] = true
+						p.Anchors = append(p.Anchors, a)
+					}
+				}
+			}
+		}
+	}
 	if mode != plan.ModeComment {
 		return nil
 	}
@@ -426,6 +503,16 @@ type insertPoint struct {
 }
 
 func (ip *insertPoint) bounds() plan.Segment { return SegmentBounds(ip.tab, ip.segment) }
+
+// fill records the insertion point on a planner op.
+func (ip *insertPoint) fill(p *plan.Op, out *resolvedOps) {
+	p.Seg = ip.bounds()
+	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
+	p.AtEnd, p.Inline, p.NearBullet = ip.atEnd, ip.inline, ip.nearBullet
+	p.Description = ip.description
+	p.CommentAnchor = ip.anchor
+	out.note(ip.tab.ID, ip.segment.ID, ip.index)
+}
 
 // resolveLocation turns a Location into an insertion index.
 func (s *Service) resolveLocation(f *Fetched, loc Location) (*insertPoint, error) {

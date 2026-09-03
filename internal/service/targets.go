@@ -48,6 +48,7 @@ type TargetRange struct {
 	End         int64
 	IsBlock     bool // covers whole top-level blocks including trailing newlines
 	Text        string
+	Aligned     string       // Text with non-text elements as U+FFFC so offsets match the index space; "" when unavailable
 	Blocks      []*doc.Block // covered top-level blocks when IsBlock
 	Block       *doc.Block   // enclosing block for text matches
 	Description string
@@ -80,7 +81,7 @@ func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
 		if !ok {
 			return nil, Errorf("not_found", "no cell %s; cells are named like tbl1:r2c3", t.Cell)
 		}
-		return cellTarget(tab, seg, c)
+		return cellTarget(c)
 	case t.Text != "":
 		return s.resolveText(f, tab, seg, t)
 	}
@@ -96,15 +97,21 @@ func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
 }
 
 // cellTarget is the writable content range of a cell: everything before
-// its final newline. Cells covered by a merge have no content of their own.
-func cellTarget(tab *doc.Tab, seg *doc.Segment, c *doc.Cell) (*TargetRange, error) {
-	if c.MergedInto != nil {
+// its final newline, in the cell's own tab and segment. Cells covered by
+// a merge have no content of their own.
+func cellTarget(c *doc.Cell) (*TargetRange, error) {
+	if c.Covered() {
 		return nil, Errorf("invalid", "cell %s is merged into %s; use that cell instead", c.Handle, c.MergedInto.Handle)
 	}
 	if len(c.Blocks) == 0 {
 		return nil, Errorf("invalid", "cell %s has no content blocks", c.Handle)
 	}
-	return &TargetRange{Tab: tab, Segment: seg, Start: c.Blocks[0].Start, End: c.ContentEnd(), Text: c.Text(doc.ViewInline), Description: "cell " + c.Handle}, nil
+	seg := c.Blocks[0].Segment
+	r := &TargetRange{Tab: seg.Tab, Segment: seg, Start: c.Blocks[0].Start, End: c.ContentEnd(), Text: c.Text(doc.ViewInline), Description: "cell " + c.Handle}
+	if len(c.Blocks) == 1 && c.Blocks[0].Paragraph != nil {
+		r.Aligned = alignedSlice(c.Blocks[0].Paragraph, r.Start, r.End)
+	}
+	return r, nil
 }
 
 // sectionRange is the range of a resolved section, with or without its
@@ -130,6 +137,9 @@ func blockRange(tab *doc.Tab, seg *doc.Segment, from, to int) *TargetRange {
 		Text: strings.Join(texts, "\n"), Description: handleRange(seg, from, to+1)}
 	if len(blocks) == 1 {
 		r.Block = blocks[0]
+		if r.Block.Paragraph != nil {
+			r.Aligned = alignedSlice(r.Block.Paragraph, r.Start, r.End-1)
+		}
 	}
 	return r
 }
@@ -140,8 +150,14 @@ func blockRange(tab *doc.Tab, seg *doc.Segment, from, to int) *TargetRange {
 func (s *Service) checkedIndex(f *Fetched, seg *doc.Segment, handle string) (int, error) {
 	handle = strings.TrimSpace(handle)
 	mem, hasMem := s.Handles(f.Doc.ID)
+	if !hasMem {
+		return 0, Errorf("unknown", "handle %s: nothing has been read from this document in this session, so handles cannot be checked; read the section with with_handles first, or target exact text", handle)
+	}
 	remembered, known := mem.Text[handle]
-	if hasMem && mem.RevisionID != f.Doc.RevisionID && known {
+	if !known {
+		return 0, Errorf("unknown", "handle %s was not in the last read of this document; re-read the section with with_handles", handle)
+	}
+	if mem.RevisionID != f.Doc.RevisionID {
 		// The document changed since the read that produced this handle.
 		for i, b := range seg.Blocks {
 			if b.Handle == handle && doc.Normalize(b.Text(doc.ViewInline)) == remembered {
@@ -217,7 +233,7 @@ func (s *Service) resolveText(f *Fetched, tab *doc.Tab, seg *doc.Segment, t Targ
 	}
 	h := hits[max(t.Occurrence, 1)-1]
 	text := sliceUTF16(h.block.Paragraph, h.start, h.end)
-	return &TargetRange{Tab: tab, Segment: seg, Start: h.start, End: h.end, Text: text, Block: h.block,
+	return &TargetRange{Tab: tab, Segment: seg, Start: h.start, End: h.end, Text: text, Aligned: alignedSlice(h.block.Paragraph, h.start, h.end), Block: h.block,
 		Description: fmt.Sprintf("%q in %s", doc.Clip(text, 60), h.block.Handle)}, nil
 }
 
@@ -231,12 +247,16 @@ func (s *Service) withinBlocks(f *Fetched, tab *doc.Tab, seg *doc.Segment, withi
 		}
 		return doc.Flatten(seg.Blocks[rs.From:rs.To]), "within section " + strings.TrimPrefix(within, "heading:"), nil
 	}
-	if _, sec, ok := f.Doc.HeadingByID(within); ok {
+	if ht, sec, ok := f.Doc.HeadingByID(within); ok {
+		if ht != tab || seg != tab.Body {
+			return nil, "", Errorf("invalid", "within %s names a section of tab %d's body; set tab and segment to match", within, ht.Number)
+		}
 		return doc.Flatten(seg.Blocks[sec.From:sec.To]), "within section " + within, nil
 	}
 	i, err := s.checkedIndex(f, seg, within)
 	if err != nil {
-		if b, ok := f.Doc.FindHandle(within); ok {
+		// A handle nested in a table of this segment is a valid scope.
+		if b, ok := f.Doc.FindHandle(within); ok && b.Segment == seg {
 			return doc.Flatten([]*doc.Block{b}), "within " + within, nil
 		}
 		return nil, "", err
@@ -328,6 +348,33 @@ func sliceUTF16(p *doc.Paragraph, start, end int64) string {
 		from := max(start, run.Start) - run.Start
 		to := min(end, run.End) - run.Start
 		b.WriteString(run.Text[doc.UTF16ToByte(run.Text, from):doc.UTF16ToByte(run.Text, to)])
+	}
+	return b.String()
+}
+
+// objectPlaceholder stands in for one UTF-16 unit of a non-text element
+// in index-aligned text.
+const objectPlaceholder = '\uFFFC'
+
+// alignedSlice returns the paragraph content between two absolute offsets
+// with every non-text element (chip, image, footnote reference, break)
+// replaced by one placeholder per UTF-16 unit, so string offsets equal
+// index offsets. Chips contribute a placeholder, not their display text.
+func alignedSlice(p *doc.Paragraph, start, end int64) string {
+	var b strings.Builder
+	for _, run := range p.Runs {
+		if run.End <= start || run.Start >= end {
+			continue
+		}
+		from := max(start, run.Start) - run.Start
+		to := min(end, run.End) - run.Start
+		if run.Kind == doc.RunText {
+			b.WriteString(run.Text[doc.UTF16ToByte(run.Text, from):doc.UTF16ToByte(run.Text, to)])
+			continue
+		}
+		for range to - from {
+			b.WriteRune(objectPlaceholder)
+		}
 	}
 	return b.String()
 }

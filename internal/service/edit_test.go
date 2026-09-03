@@ -16,10 +16,16 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/plan"
 )
 
+// writable builds a service whose handle memory holds the fixture, as it
+// would after a read; writes check handles against that memory.
 func writable(t *testing.T, preview bool) (*Service, *fakeAPI) {
 	t.Helper()
 	api := &fakeAPI{raw: doctest.RawFixture(t)}
 	svc := New(api, Options{Preview: preview, DefaultWriteMode: config.WriteDirect, CacheTTL: time.Nanosecond})
+	if _, err := svc.Fetch(context.Background(), fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	api.getCalls = 0
 	return svc, api
 }
 
@@ -119,7 +125,7 @@ func TestResolveTargetText(t *testing.T) {
 		{Target{}, "invalid"},
 		{Target{Text: "x", Handle: "p1"}, "invalid"},
 		{Target{Text: "   "}, "invalid"},
-		{Target{Text: "x", Within: "p99"}, "not_found"},
+		{Target{Text: "x", Within: "p99"}, "unknown"},
 		{Target{Text: "x", Tab: "zzz"}, "not_found"},
 	} {
 		_, err := svc.ResolveTarget(f, tc.target)
@@ -198,7 +204,7 @@ func TestHandleMemoryStaleness(t *testing.T) {
 	if r, err := svc.ResolveTarget(f, Target{Handle: "p3"}); err != nil || r.Block.Handle != "p10" {
 		t.Fatalf("moved text should relocate to p10: %+v %v", r, err)
 	}
-	if _, err := svc.ResolveTarget(f, Target{Handle: "p42"}); !errors.As(err, &se) || se.Class != "not_found" {
+	if _, err := svc.ResolveTarget(f, Target{Handle: "p42"}); !errors.As(err, &se) || se.Class != "unknown" {
 		t.Fatalf("unknown handle: %v", err)
 	}
 }
@@ -229,7 +235,7 @@ func TestResolveLocation(t *testing.T) {
 		{"header end", Location{At: "end", Of: &Target{Segment: "header"}}, 18, true, false, ""},
 		{"bad at", Location{At: "sideways", Of: &Target{Handle: "p5"}}, 0, false, false, "invalid"},
 		{"before needs target", Location{At: "before"}, 0, false, false, "invalid"},
-		{"missing target", Location{At: "after", Of: &Target{Handle: "p99"}}, 0, false, false, "not_found"},
+		{"missing target", Location{At: "after", Of: &Target{Handle: "p99"}}, 0, false, false, "unknown"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -351,11 +357,30 @@ func TestGuardBlocksDirect(t *testing.T) {
 	if !errors.As(err, &se) || se.Class != "blocked" || !strings.Contains(se.Message, "suggestion (s1)") {
 		t.Fatalf("suggestion guard: %v", err)
 	}
-	// Comment lookup failure degrades to a warning in the log, not an error.
+	// A comment lookup failure blinds the guard, so a direct edit is
+	// refused; a suggestion still goes through (nothing is removed).
 	api.listErr = &gapi.APIError{Status: 403, Message: "no"}
-	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p5"}}}}); err != nil {
-		t.Fatalf("comment lookup failure should not block: %v", err)
+	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p5"}}}}); classOf(err) != "unavailable" {
+		t.Fatalf("comment lookup failure should block a direct edit: %v", err)
 	}
+	svc, api = writable(t, true)
+	api.listErr = &gapi.APIError{Status: 403, Message: "no"}
+	api.raw = withoutPreviewComments(t, api.raw)
+	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "suggest", Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p5"}}}}); err != nil {
+		t.Fatalf("suggest mode proceeds without comment anchors: %v", err)
+	}
+}
+
+// withoutPreviewComments strips the preview comment payload so the guard
+// must ask Drive.
+func withoutPreviewComments(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var w map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatal(err)
+	}
+	delete(w, "comments")
+	return mustJSON(w)
 }
 
 func TestCommentMode(t *testing.T) {
@@ -498,7 +523,7 @@ func TestFormatOps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kindsOf(t, api.batches[0].Requests); got != "updateTextStyle[29,36) updateParagraphStyle[158,184) deleteParagraphBullets[115,133) updateTextStyle[213,226)" {
+	if got := kindsOf(t, api.batches[0].Requests); got != "updateTextStyle[29,36) updateParagraphStyle[158,184) updateTextStyle[213,226) deleteParagraphBullets[115,133)" {
 		t.Fatalf("format requests: %s", got)
 	}
 	if res.Applied != 4 {

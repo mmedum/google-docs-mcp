@@ -159,22 +159,34 @@ func TestInsertTablePositionsAndFills(t *testing.T) {
 		t.Fatalf("inline: %v %s", err, res.Requests)
 	}
 
-	// Applied with data: the first batch inserts, then the table is found
-	// at index+1 and filled through set_cells in a second edit. The fake
-	// serves the fixture, so the fill lands in tbl1 at 133 (index 132).
+	// Applied with data: the first batch inserts, then the new table is
+	// found by its predicted handle (tbl1: no table precedes index 132)
+	// and filled through set_cells in a second edit. After the batch the
+	// fake serves the fixture with tbl1's cells emptied.
 	api.batches = nil
+	api.afterBatch = emptiedTable(t, api.raw)
 	svc.Invalidate(fixtureID)
 	req := EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{{Kind: plan.OpInsertTable, Location: &Location{At: "after", Of: &Target{Handle: "p10"}}, Table: &TableOp{Rows: 2, Cols: 2, Data: [][]string{{"A", "B", "extra"}, {"C", "D"}, {"E", "F"}}}}}}
 	res, err = svc.Edit(ctx, req)
 	if err != nil || len(api.batches) != 2 {
 		t.Fatalf("insert with data: %v batches=%d", err, len(api.batches))
 	}
-	if !strings.Contains(string(api.batches[0].Requests[0]), `"index":132`) || !strings.Contains(string(api.batches[1].Requests[len(api.batches[1].Requests)-1]), `"text":"A"`) {
+	var second []string
+	for _, r := range api.batches[1].Requests {
+		second = append(second, string(r))
+	}
+	if !strings.Contains(string(api.batches[0].Requests[0]), `"index":132`) || !strings.Contains(strings.Join(second, " "), `"text":"A"`) {
 		t.Fatalf("batches: %s / %s", api.batches[0].Requests, api.batches[1].Requests)
 	}
 	joined := strings.Join(res.Warnings, "\n")
 	if !strings.Contains(joined, "more rows") || !strings.Contains(joined, "more cells") || !strings.Contains(res.Changes[0].Description, "filled as tbl1") {
 		t.Fatalf("fill result: %+v", res)
+	}
+	// A table that is not empty at the predicted handle is left alone.
+	api.batches, api.afterBatch = nil, nil
+	res, err = svc.Edit(ctx, req)
+	if err != nil || len(api.batches) != 1 || !strings.Contains(strings.Join(res.Warnings, "\n"), "could not be found again") {
+		t.Fatalf("unexpected table at the handle: %v %+v", err, res.Warnings)
 	}
 	// In comment mode the grid is part of the proposal and nothing is filled.
 	api.batches = nil
@@ -249,4 +261,30 @@ func TestInsertObjects(t *testing.T) {
 	if err != nil || !strings.Contains(res.Proposals[0].Content, "people chip for a@b.test") {
 		t.Fatalf("object proposal: %v %+v", err, res)
 	}
+}
+
+// emptiedTable is the fixture with every cell of its table holding only
+// a newline, as a freshly inserted table would (indices are left as they
+// are; the fake never checks them).
+func emptiedTable(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var w gdocs.Document
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatal(err)
+	}
+	for _, se := range w.Tabs[0].DocumentTab.Body.Content {
+		if se.Table == nil {
+			continue
+		}
+		for _, row := range se.Table.TableRows {
+			for _, c := range row.TableCells {
+				for _, cse := range c.Content {
+					if cse.Paragraph != nil {
+						cse.Paragraph.Elements = []*gdocs.ParagraphElement{{StartIndex: cse.StartIndex, EndIndex: cse.EndIndex, TextRun: &gdocs.TextRun{Content: "\n"}}}
+					}
+				}
+			}
+		}
+	}
+	return mustJSON(&w)
 }

@@ -24,6 +24,9 @@ type FragmentOptions struct {
 	// item; inserted non-list paragraphs then explicitly drop the bullet
 	// they would inherit.
 	NearBullet bool
+	// Inline says the insertion point is inside an existing paragraph:
+	// the first fragment paragraph merges into it and keeps its style.
+	Inline bool
 }
 
 // Compiled is a fragment laid out at an insertion point.
@@ -105,24 +108,27 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 	if cursor > contentStart {
 		c.Requests = append(c.Requests, ClearTextStyle(rng(contentStart, cursor)))
 	}
-	for _, p := range pieces {
-		c.Requests = append(c.Requests, pieceRequests(p, o, rng, paraRange)...)
+	for i, p := range pieces {
+		c.Requests = append(c.Requests, pieceRequests(p, o, i == 0 && o.Inline, rng, paraRange)...)
 	}
 	c.Requests = append(c.Requests, listRequests(pieces, rng)...)
 	return c, nil
 }
 
 // pieceRequests styles one laid-out paragraph: named style, bullet
-// removal when inherited, code font, and inline formatting.
-func pieceRequests(p *piece, o FragmentOptions, rng func(int64, int64) Rng, paraRange func(*piece) Rng) []json.RawMessage {
+// removal when inherited, code font, and inline formatting. A piece
+// merged into an existing paragraph keeps that paragraph's style.
+func pieceRequests(p *piece, o FragmentOptions, merged bool, rng func(int64, int64) Rng, paraRange func(*piece) Rng) []json.RawMessage {
 	var reqs []json.RawMessage
-	ps := ParagraphStyleSpec{NamedStyle: "NORMAL_TEXT"}
-	if p.block.Kind == markdown.KindHeading {
-		ps.NamedStyle = fmt.Sprintf("HEADING_%d", min(max(p.block.Level, 1), 6))
-	}
-	reqs = append(reqs, UpdateParagraphStyle(paraRange(p), ps))
-	if o.NearBullet && !p.listItem {
-		reqs = append(reqs, DeleteBullets(paraRange(p)))
+	if !merged {
+		ps := ParagraphStyleSpec{NamedStyle: "NORMAL_TEXT"}
+		if p.block.Kind == markdown.KindHeading {
+			ps.NamedStyle = fmt.Sprintf("HEADING_%d", min(max(p.block.Level, 1), 6))
+		}
+		reqs = append(reqs, UpdateParagraphStyle(paraRange(p), ps))
+		if o.NearBullet && !p.listItem {
+			reqs = append(reqs, DeleteBullets(paraRange(p)))
+		}
 	}
 	if p.block.Kind == markdown.KindCode {
 		if p.end > p.start {

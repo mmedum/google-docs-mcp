@@ -258,8 +258,8 @@ func editText(r *service.EditResult) string {
 			fmt.Fprintf(&b, "- op %d: %s\n", p.Seq, strings.ReplaceAll(p.Content, "\n", " "))
 		}
 	}
-	if r.DryRun && len(r.Requests) > 0 {
-		fmt.Fprintf(&b, "requests:\n%s\n", r.Requests)
+	if r.DryRun && len(r.RequestKinds) > 0 {
+		fmt.Fprintf(&b, "requests: %s\n", strings.Join(r.RequestKinds, ", "))
 	}
 	if r.Preview != "" {
 		label := "region after the edit"

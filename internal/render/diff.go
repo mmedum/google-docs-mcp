@@ -70,7 +70,7 @@ func UnifiedDiff(oldText, newText string, context, maxChars int) DiffResult {
 			hOld--
 			hNew--
 		}
-		var oldCount, newCount int
+		var oldCount, newCount, removed, added int
 		var hunk strings.Builder
 		for j := start; j < end; j++ {
 			l := lines[j]
@@ -80,10 +80,10 @@ func UnifiedDiff(oldText, newText string, context, maxChars int) DiffResult {
 				newCount++
 			case '-':
 				oldCount++
-				res.Stats.Removed++
+				removed++
 			case '+':
 				newCount++
-				res.Stats.Added++
+				added++
 			}
 			hunk.WriteByte(l.op)
 			hunk.WriteString(l.text)
@@ -97,6 +97,8 @@ func UnifiedDiff(oldText, newText string, context, maxChars int) DiffResult {
 		sb.WriteString(header)
 		sb.WriteString(hunk.String())
 		res.Stats.Hunks++
+		res.Stats.Removed += removed
+		res.Stats.Added += added
 		// Advance counters over the hunk body past i.
 		for j := i; j < end; j++ {
 			switch lines[j].op {

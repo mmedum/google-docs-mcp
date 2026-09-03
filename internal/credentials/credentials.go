@@ -97,6 +97,12 @@ func (s *Store) Resolve() (string, Source, error) {
 	if v := s.env(EnvVar); v != "" {
 		return v, SourceEnv, nil
 	}
+	return s.ResolveStored()
+}
+
+// ResolveStored returns the token from the keyring or the file, ignoring
+// the environment override: the token logout can revoke and delete.
+func (s *Store) ResolveStored() (string, Source, error) {
 	var keyringErr error
 	if s.Keyring != nil {
 		tok, err := s.Keyring.Get(ServiceName, s.Profile)

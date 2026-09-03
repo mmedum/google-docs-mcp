@@ -189,8 +189,14 @@ func deleteTabRequest(f *Fetched, req TabRequest, res *TabResult) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	if len(f.Doc.Tabs) == 1 {
-		return nil, Errorf("invalid", "a document keeps at least one tab; delete the content instead")
+	roots := 0
+	for _, t := range f.Doc.Tabs {
+		if t.ParentID == "" {
+			roots++
+		}
+	}
+	if tab.ParentID == "" && roots == 1 {
+		return nil, Errorf("invalid", "a document keeps at least one top-level tab; delete the content instead")
 	}
 	res.TabID, res.Title = tab.ID, tab.Title
 	for _, t := range f.Doc.Tabs {

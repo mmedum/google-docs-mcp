@@ -115,12 +115,28 @@ func previewAnchors(w *gdocs.Document) map[string]*gdocs.Range {
 			return true
 		}
 		for id, a := range t.DocumentTab.CommentAnchors {
-			if len(a.Ranges) > 0 && a.Ranges[0] != nil {
-				r := *a.Ranges[0]
-				if r.TabID == "" && t.TabProperties != nil {
-					r.TabID = t.TabProperties.TabID
+			// A comment may span several ranges; the guard and the marker
+			// cover the union of those in the first range's segment.
+			var span *gdocs.Range
+			for _, r := range a.Ranges {
+				if r == nil {
+					continue
 				}
-				byAnchor[id] = &r
+				if span == nil {
+					c := *r
+					if c.TabID == "" && t.TabProperties != nil {
+						c.TabID = t.TabProperties.TabID
+					}
+					span = &c
+					continue
+				}
+				if r.SegmentID == span.SegmentID && (r.TabID == "" || r.TabID == span.TabID) {
+					span.StartIndex = min(span.StartIndex, r.StartIndex)
+					span.EndIndex = max(span.EndIndex, r.EndIndex)
+				}
+			}
+			if span != nil {
+				byAnchor[id] = span
 			}
 		}
 		return true

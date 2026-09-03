@@ -85,6 +85,7 @@ type profile struct {
 	dir              string
 	clientSecretPath string
 	user             userconfig.Config
+	hasConfig        bool // a config file existed for the profile
 	store            *credentials.Store
 }
 
@@ -106,6 +107,7 @@ func openProfile(cfg config.Config, warn func(string)) (*profile, error) {
 	if err != nil && !errors.Is(err, userconfig.ErrNotFound) {
 		return nil, err
 	}
+	p.hasConfig = err == nil
 	switch {
 	case cfg.ClientSecretPath != "":
 		p.clientSecretPath = cfg.ClientSecretPath
@@ -295,17 +297,24 @@ func cmdLogout(args []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if tok, _, err := p.store.Resolve(); err == nil {
+	// Only the stored token is revoked and removed; an environment
+	// override is outside this command's reach.
+	if tok, _, err := p.store.ResolveStored(); err == nil {
 		if err := auth.Revoke(ctx, nil, tok); err != nil {
 			warnStderr(fmt.Sprintf("could not revoke the token at Google (%v); it is still deleted locally", err))
 		}
 	}
+	if os.Getenv(credentials.EnvVar) != "" {
+		warnStderr(credentials.EnvVar + " is set; logout cannot remove or revoke it")
+	}
 	if err := p.store.Delete(); err != nil {
 		return fail("%v", err)
 	}
-	p.user.AccountEmail, p.user.TokenStore, p.user.Scopes = "", "", nil
-	if err := userconfig.Save(p.cfg.Profile, p.user); err != nil {
-		return fail("save profile: %v", err)
+	if p.hasConfig {
+		p.user.AccountEmail, p.user.TokenStore, p.user.Scopes = "", "", nil
+		if err := userconfig.Save(p.cfg.Profile, p.user); err != nil {
+			return fail("save profile: %v", err)
+		}
 	}
 	fmt.Printf("Logged out of profile %q.\n", p.cfg.Profile)
 	return 0

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 )
@@ -80,7 +81,7 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable
 	addText := func(text string, r *doc.Run) {
 		s := span{text: text, style: r.Style, inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted)}
 		if inTable {
-			s.text = strings.ReplaceAll(strings.ReplaceAll(s.text, "|", `\|`), "\n", "<br>")
+			s.text = tableCellText(s.text)
 		}
 		if n := len(spans); n > 0 && spans[n-1].style == s.style && spans[n-1].inserted == s.inserted && spans[n-1].deleted == s.deleted {
 			spans[n-1].text += s.text
@@ -102,7 +103,7 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable
 				if m.End <= pos || m.End > r.End {
 					continue
 				}
-				cut := min(doc.UTF16ToByte(text, m.End-r.Start), len(text))
+				cut := min(doc.UTF16ToByte(text, m.End-pos), len(text))
 				addText(text[:cut], r)
 				flush()
 				b.WriteString("{>>c:" + m.ID + "<<}")
@@ -114,6 +115,9 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable
 		s := span{text: objectText(r, seg.Tab), inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted)}
 		if s.text == "" {
 			continue
+		}
+		if inTable {
+			s.text = tableCellText(s.text)
 		}
 		flush()
 		b.WriteString(markSuggestion(s.text, s.inserted, s.deleted, o))
@@ -153,7 +157,7 @@ func textWithMarks(p *doc.Paragraph, view doc.View, marks []Mark) string {
 				if m.End <= pos || m.End > r.End {
 					continue
 				}
-				cut := min(doc.UTF16ToByte(text, m.End-r.Start), len(text))
+				cut := min(doc.UTF16ToByte(text, m.End-pos), len(text))
 				b.WriteString(text[:cut] + "{>>c:" + m.ID + "<<}")
 				text, pos = text[cut:], m.End
 			}
@@ -163,6 +167,11 @@ func textWithMarks(p *doc.Paragraph, view doc.View, marks []Mark) string {
 		}
 	}
 	return b.String()
+}
+
+// tableCellText escapes what would break a markdown table cell.
+func tableCellText(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "|", `\|`), "\n", "<br>")
 }
 
 // objectText renders a non-text run: chips, breaks, objects, references.
@@ -227,8 +236,8 @@ func markSpan(s span, o Options) string {
 	if text == "" {
 		return ""
 	}
-	lead := text[:len(text)-len(strings.TrimLeft(text, " \t"))]
-	trail := text[len(strings.TrimRight(text, " \t")):]
+	lead := text[:len(text)-len(strings.TrimLeftFunc(text, unicode.IsSpace))]
+	trail := text[len(strings.TrimRightFunc(text, unicode.IsSpace)):]
 	core := strings.TrimSpace(text)
 	if core == "" {
 		return markSuggestion(text, s.inserted, s.deleted, o)

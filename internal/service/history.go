@@ -182,7 +182,7 @@ func (s *Service) ReadRevision(ctx context.Context, ref, revision, format string
 	if err != nil {
 		return nil, wrapAPI(err, "revision "+revision)
 	}
-	res := &ReadResult{RevisionID: revision, Scope: "revision " + revision + " (" + f + " export; no handles)", Segment: "body"}
+	res := &ReadResult{Revision: revision, Scope: "revision " + revision + " (" + f + " export; no handles, no revision_id)", Segment: "body"}
 	res.Text, res.Truncated = clipUTF8(stripDataURIs(string(data)), maxChars)
 	res.Chars = len(res.Text)
 	return res, nil

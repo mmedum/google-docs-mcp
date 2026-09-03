@@ -257,3 +257,29 @@ func TestPlainCommentMarks(t *testing.T) {
 		t.Fatalf("To on full render: %+v", res)
 	}
 }
+
+func TestMarkerOffsetsAndMergedHeader(t *testing.T) {
+	d, seg := body(t)
+	// Two marks ending inside one run: "Revenue grew a lot" starts at 29.
+	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 36, ID: "c1"}, {TabID: d.Tabs[0].ID, Start: 37, End: 41, ID: "c2"}}
+	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
+	if !strings.Contains(md, "Revenue{>>c:c1<<} grew{>>c:c2<<} a lot") {
+		t.Fatalf("marker offsets:\n%s", md)
+	}
+	if txt := render.Plain(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text; !strings.Contains(txt, "Revenue{>>c:c1<<} grew{>>c:c2<<} a lot") {
+		t.Fatalf("plain marker offsets:\n%s", txt)
+	}
+	// A merged header row keeps the delimiter row in step.
+	var tbl *doc.Table
+	for _, b := range seg.Blocks {
+		if b.Table != nil {
+			tbl = b.Table
+		}
+	}
+	tbl.Cells[0][0].ColSpan = 2
+	tbl.Cells[0][1].MergedInto = tbl.Cells[0][0]
+	md = render.Markdown(seg, 0, len(seg.Blocks), render.Options{}).Text
+	if !strings.Contains(md, "| **Name** |\n| --- |\n| Alpha | 1 |") {
+		t.Fatalf("merged header:\n%s", md)
+	}
+}

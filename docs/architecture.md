@@ -322,8 +322,10 @@ Multi-batch ops (only `insert_table` with data): insert the empty table,
 re-fetch, fill cells. If the fill fails the empty table remains and the
 response says so.
 
-Dry run returns the resolved ranges, the diff hunks, the guard report,
-the exact request list, and a rendered before/after. Nothing is sent.
+Dry run returns the resolved targets, the guard report, the kinds of
+request that would be sent (not the requests themselves: they carry
+UTF-16 indices, which the model never sees), the proposals in comment
+mode, and a rendered view of the region. Nothing is sent.
 
 ### 7.4 Markdown coverage
 

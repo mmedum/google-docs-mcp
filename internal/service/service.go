@@ -133,11 +133,14 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 	}
 	if !fresh {
 		s.mu.Lock()
-		if f := s.cache[id]; f != nil && s.now().Sub(f.FetchedAt) < s.opts.CacheTTL {
-			s.mu.Unlock()
+		f := s.cache[id]
+		s.mu.Unlock()
+		if f != nil && s.now().Sub(f.FetchedAt) < s.opts.CacheTTL {
+			// A write may have refreshed the cache without the caller
+			// seeing it; what a read returns is what handles are checked against.
+			s.Remember(f)
 			return f, nil
 		}
-		s.mu.Unlock()
 	}
 
 	opts := gapi.GetOptions{SuggestionsViewMode: gapi.SuggestionsInline}

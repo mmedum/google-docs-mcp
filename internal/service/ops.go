@@ -170,10 +170,12 @@ type ReadRequest struct {
 	IncludeComments bool
 }
 
-// ReadResult is the read_document result.
+// ReadResult is the read_document result. Revision is set instead of
+// RevisionID when an old revision was read through the export path.
 type ReadResult struct {
 	Text         string
 	RevisionID   string
+	Revision     string
 	TabNumber    int
 	TabID        string
 	TabTitle     string

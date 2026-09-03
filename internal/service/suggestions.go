@@ -145,6 +145,11 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	if len(req.IDs) == 0 && !req.All {
 		return nil, Errorf("invalid", "pass ids or all: true")
 	}
+	id, err := parseRef(req.Document)
+	if err != nil {
+		return nil, err
+	}
+	s.Invalidate(id) // review against the document as it is now, not the cache
 	list, err := s.ListSuggestions(ctx, req.Document)
 	if err != nil {
 		return nil, err
@@ -185,6 +190,7 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	f.Doc.RevisionID = list.RevisionID // guard against the revision the list came from
 	_, revision, err := s.batchUpdate(ctx, f, reqs, "")
 	if err != nil {
+		s.Invalidate(f.Doc.ID)
 		return nil, err
 	}
 	out := &ReviewResult{Action: action, IDs: ids, RevisionID: revision}

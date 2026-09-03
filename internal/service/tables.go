@@ -135,6 +135,10 @@ func (s *Service) resolveTableOp(f *Fetched, op EditOp, p *plan.Op, out *resolve
 			return err
 		}
 		tp.Cell = to.Style
+		if op.Kind == plan.OpMergeCells {
+			// Everything outside the head cell moves or is lost.
+			p.Anchors = mergedAnchors(b, tp, out.threads)
+		}
 	case plan.OpPinHeaderRows:
 		tp.HeaderRows = to.Count
 	default:
@@ -199,6 +203,32 @@ func tableLineAnchors(b *doc.Block, rows bool, indices map[int]bool, threads []C
 	return out
 }
 
+// mergedAnchors lists anchored content in the cells a merge folds into
+// its head cell.
+func mergedAnchors(b *doc.Block, tp *plan.TableParams, threads []CommentThread) []plan.Anchor {
+	all := anchorsIn(b.Segment.Tab, b.Segment, b.Start, b.End, threads)
+	if len(all) == 0 {
+		return nil
+	}
+	var out []plan.Anchor
+	seen := map[string]bool{}
+	for ri := tp.Row; ri < tp.Row+tp.RowSpan && ri < len(b.Table.Cells); ri++ {
+		for ci := tp.Col; ci < tp.Col+tp.ColSpan && ci < len(b.Table.Cells[ri]); ci++ {
+			if ri == tp.Row && ci == tp.Col {
+				continue
+			}
+			c := b.Table.Cells[ri][ci]
+			for _, a := range anchorsWithin(all, c.Start, c.End) {
+				if key := a.Kind + ":" + a.ID; !seen[key] {
+					seen[key] = true
+					out = append(out, a)
+				}
+			}
+		}
+	}
+	return out
+}
+
 // expandSetCells turns a set_cells op into one replace per cell, all
 // sharing the op's sequence number so the result reports them together.
 func (s *Service) expandSetCells(f *Fetched, seq int, op EditOp, out *resolvedOps) ([]plan.Op, error) {
@@ -224,7 +254,7 @@ func (s *Service) expandSetCells(f *Fetched, seq int, op EditOp, out *resolvedOp
 		if err != nil {
 			return nil, err
 		}
-		r, err := cellTarget(tab, seg, cell)
+		r, err := cellTarget(cell)
 		if err != nil {
 			return nil, err
 		}
@@ -237,7 +267,7 @@ func (s *Service) expandSetCells(f *Fetched, seq int, op EditOp, out *resolvedOp
 		}
 		rng := r.Rng()
 		ops = append(ops, plan.Op{Seq: seq, Kind: plan.OpReplace, Seg: bounds, Description: desc, Fragment: frag,
-			Target: &rng, TargetText: r.Text, Anchors: anchorsWithin(all, r.Start, r.End), CommentAnchor: blockRng(tab, seg, cell.Blocks[0])})
+			Target: &rng, TargetText: r.Text, TargetAligned: r.Aligned, Anchors: anchorsWithin(all, r.Start, r.End), CommentAnchor: blockRng(tab, seg, cell.Blocks[0])})
 	}
 	out.note(tab.ID, seg.ID, b.Start)
 	return ops, nil
@@ -326,8 +356,10 @@ func (s *Service) resolveInsertTable(f *Fetched, op EditOp, p *plan.Op, out *res
 
 // fillNewTables writes the data of every insert_table op into the table
 // it created, one edit per table against the document as it is after
-// the first batch. The tables are found by the index the insertion named.
-func (s *Service) fillNewTables(ctx context.Context, req EditRequest, ro *resolvedOps, result *EditResult) {
+// the first batch. Handles number tables by position in their segment,
+// so a new table's handle follows from how many tables precede it once
+// the batch has landed.
+func (s *Service) fillNewTables(ctx context.Context, pre *Fetched, req EditRequest, ro *resolvedOps, result *EditResult) {
 	var fills []plan.Op
 	for _, p := range ro.ops {
 		if p.Kind == plan.OpInsertTable && len(p.Table.Data) > 0 {
@@ -342,28 +374,18 @@ func (s *Service) fillNewTables(ctx context.Context, req EditRequest, ro *resolv
 		result.Warnings = append(result.Warnings, "the table was created but re-reading the document failed, so it was not filled: "+err.Error())
 		return
 	}
-	// Handles of the new tables, before any fill shifts indices.
-	handles := make([]string, len(fills))
-	for i, fl := range fills {
-		if seg := segmentAt(f.Doc, fl.Seg.TabID, fl.Seg.ID); seg != nil {
-			for _, b := range seg.Blocks {
-				if b.Table != nil && b.Start == fl.Insert.Index+1 {
-					handles[i] = b.Handle
-				}
-			}
-		}
-	}
 	s.Remember(f)
 	for i, fl := range fills {
-		if handles[i] == "" {
+		handle := newTableHandle(pre.Doc, ro.ops, fl)
+		if b, ok := f.Doc.FindHandle(handle); !ok || b.Table == nil || b.Table.Rows != fl.Table.Rows || b.Table.Cols != fl.Table.Cols || !emptyTable(b) {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the table was created but could not be found again to fill it; use set_cells", fl.Seq))
 			continue
 		}
 		data := fitGrid(fl.Table.Data, fl.Table.Rows, fl.Table.Cols, fl.Seq, result)
-		sub := EditRequest{Document: req.Document, Mode: req.Mode, Ops: []EditOp{{Kind: plan.OpSetCells, Table: &TableOp{Table: handles[i], Data: data}}}}
+		sub := EditRequest{Document: req.Document, Mode: req.Mode, Ops: []EditOp{{Kind: plan.OpSetCells, Table: &TableOp{Table: handle, Data: data}}}}
 		res, err := s.editFetched(ctx, f, sub)
 		if err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the empty table %s exists but filling it failed: %v", fl.Seq, handles[i], err))
+			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the empty table %s exists but filling it failed: %v", fl.Seq, handle, err))
 			continue
 		}
 		result.RevisionID = res.RevisionID
@@ -371,7 +393,7 @@ func (s *Service) fillNewTables(ctx context.Context, req EditRequest, ro *resolv
 		result.Warnings = append(result.Warnings, res.Warnings...)
 		for j := range result.Changes {
 			if result.Changes[j].Seq == fl.Seq {
-				result.Changes[j].Description += fmt.Sprintf(", filled as %s", handles[i])
+				result.Changes[j].Description += fmt.Sprintf(", filled as %s", handle)
 			}
 		}
 		if i+1 < len(fills) {
@@ -379,8 +401,53 @@ func (s *Service) fillNewTables(ctx context.Context, req EditRequest, ro *resolv
 				result.Warnings = append(result.Warnings, "re-reading the document between table fills failed: "+err.Error())
 				return
 			}
+			s.Remember(f)
 		}
 	}
+}
+
+// newTableHandle predicts the handle of the table an insert_table op
+// creates: the tables before its index in the pre-edit segment, minus
+// those a delete op in the batch removes, plus the batch's other table
+// insertions at lower indices, then one more.
+func newTableHandle(pre *doc.Document, ops []plan.Op, fl plan.Op) string {
+	seg := segmentAt(pre, fl.Seg.TabID, fl.Seg.ID)
+	if seg == nil {
+		return ""
+	}
+	n := 0
+	for _, b := range seg.Blocks {
+		if b.Table == nil || b.Start >= fl.Insert.Index {
+			continue
+		}
+		deleted := false
+		for _, op := range ops {
+			if op.Kind == plan.OpDelete && op.Target != nil && op.Seg == fl.Seg && op.Target.Start <= b.Start && op.Target.End >= b.End {
+				deleted = true
+			}
+		}
+		if !deleted {
+			n++
+		}
+	}
+	for _, op := range ops {
+		if op.Kind == plan.OpInsertTable && op.Seg == fl.Seg && op.Insert.Index < fl.Insert.Index {
+			n++
+		}
+	}
+	return seg.Prefix + "tbl" + strconv.Itoa(n+1)
+}
+
+// emptyTable reports whether every cell of a table holds only its newline.
+func emptyTable(b *doc.Block) bool {
+	for _, row := range b.Table.Cells {
+		for _, c := range row {
+			if strings.TrimSpace(c.Text(doc.ViewInline)) != "" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // fitGrid trims data to the table's size, warning about what was dropped,

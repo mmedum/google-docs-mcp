@@ -223,19 +223,22 @@ func (r *mdRenderer) table(b *doc.Block, depth int) string {
 	var merges []string
 	for ri, row := range t.Cells {
 		sb.WriteString("|")
+		emitted := 0
 		for _, c := range row {
 			if c.Covered() {
 				continue // markdown has no spans
 			}
 			sb.WriteString(" " + r.cell(c) + " |")
+			emitted++
 			if r.o.WithHandles && (c.RowSpan > 1 || c.ColSpan > 1) {
 				merges = append(merges, fmt.Sprintf("%s spans %d×%d", c.Handle, c.RowSpan, c.ColSpan))
 			}
 		}
 		sb.WriteString("\n")
 		if ri == 0 {
+			// GFM needs the delimiter row to match the header's cell count.
 			sb.WriteString("|")
-			for range t.Cols {
+			for range emitted {
 				sb.WriteString(" --- |")
 			}
 			sb.WriteString("\n")

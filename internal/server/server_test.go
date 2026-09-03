@@ -114,6 +114,8 @@ func connect(t *testing.T, api *fakeAPI) *mcp.ClientSession {
 func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSession {
 	t.Helper()
 	svc := service.New(api, service.Options{Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
+	// Seed the handle memory as a read would, so tools may target handles.
+	_, _ = svc.Fetch(context.Background(), fixtureID)
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Version: "test"})
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()
@@ -435,7 +437,7 @@ func TestCommentAndHistoryTools(t *testing.T) {
 		t.Fatalf("diff_revisions: %q", textOf(res))
 	}
 	res = call(t, cs, "read_document", map[string]any{"document": fixtureID, "revision": "1", "max_chars": 12})
-	if res.IsError || !strings.Contains(textOf(res), "revision 1 (md export; no handles)") || !strings.HasSuffix(textOf(res), "# exported\n\n") {
+	if res.IsError || !strings.Contains(textOf(res), "revision 1 (md export; no handles, no revision_id) · truncated -->") || !strings.HasSuffix(textOf(res), "# exported\n\n") {
 		t.Fatalf("read at revision: %q", textOf(res))
 	}
 	// Without the flag the delete tool is unknown to the server.
@@ -452,7 +454,7 @@ func TestStructureToolsEndToEnd(t *testing.T) {
 		{"op": "insert_rows", "table": "tbl1", "row": 2, "count": 1},
 		{"op": "set_cells", "table": "tbl1", "cells": []map[string]any{{"cell": "r2c2", "content": "2"}}},
 	}})
-	if res.IsError || !strings.Contains(textOf(res), "op 0 insert_rows: tbl1 (2×2)") || !strings.Contains(textOf(res), "op 1 replace: 1 cell(s) of tbl1 (minimal diff)") || !strings.Contains(textOf(res), "insertTableRow") {
+	if res.IsError || !strings.Contains(textOf(res), "op 0 insert_rows: tbl1 (2×2)") || !strings.Contains(textOf(res), "op 1 replace: 1 cell(s) of tbl1 (minimal diff)") || !strings.Contains(textOf(res), "requests: deleteContentRange, insertText, insertTableRow") {
 		t.Fatalf("edit_table dry run: %q", textOf(res))
 	}
 	res = call(t, cs, "edit_table", map[string]any{"document": fixtureID, "ops": []map[string]any{{"op": "shuffle", "table": "tbl1"}}})
@@ -460,7 +462,7 @@ func TestStructureToolsEndToEnd(t *testing.T) {
 		t.Fatalf("bad table op: %q", textOf(res))
 	}
 	res = call(t, cs, "insert_object", map[string]any{"document": fixtureID, "kind": "date", "date": "2026-09-03", "date_format": "iso", "location": map[string]any{"at": "after", "of": map[string]any{"text": "Step one"}}, "dry_run": true})
-	if res.IsError || !strings.Contains(textOf(res), "insertDate") || !strings.Contains(textOf(res), "2026-09-03T00:00:00Z") || !strings.Contains(textOf(res), "DATE_FORMAT_ISO8601") {
+	if res.IsError || !strings.Contains(textOf(res), "requests: insertDate") || strings.Contains(textOf(res), "startIndex") {
 		t.Fatalf("insert_object: %q", textOf(res))
 	}
 	res = call(t, cs, "insert_object", map[string]any{"document": fixtureID, "kind": "date", "date": "yesterday", "location": map[string]any{"at": "end"}})
@@ -480,7 +482,7 @@ func TestStructureToolsEndToEnd(t *testing.T) {
 		t.Fatalf("delete_tab: %q", textOf(res))
 	}
 	res = call(t, cs, "edit_document", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{{"op": "delete_header", "target": map[string]any{"segment": "header"}}}})
-	if res.IsError || !strings.Contains(textOf(res), "deleteHeader") || !strings.Contains(textOf(res), `"headerId": "kix.h1"`) {
+	if res.IsError || !strings.Contains(textOf(res), "requests: deleteHeader") {
 		t.Fatalf("delete_header: %q", textOf(res))
 	}
 }

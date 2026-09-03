@@ -92,6 +92,12 @@ type Op struct {
 	TargetIsBlock bool
 	// TargetText is the current text of Target (inline view, no trailing newline).
 	TargetText string
+	// TargetAligned is TargetText with every non-text element (chips,
+	// images, footnote references, breaks) replaced by U+FFFC per UTF-16
+	// unit, so its offsets line up with the index space. Empty when the
+	// service could not build it; the minimal diff then needs TargetText
+	// to be exact.
+	TargetAligned string
 
 	// Insert is the insertion point for insert, append, breaks and footnotes.
 	Insert *Loc
@@ -216,18 +222,39 @@ func Plan(ops []Op, o Options) (*Result, error) {
 	if err := checkOverlaps(ops); err != nil {
 		return nil, err
 	}
-	var formats, content, global []*Op
+	if err := compile(ops, res, add); err != nil {
+		return nil, err
+	}
+	if o.Mode == ModeSuggest {
+		if err := suggestable(ops, res.Requests); err != nil {
+			return nil, err
+		}
+	}
+	return finish(), nil
+}
+
+// compile emits requests in the order the API needs: formatting first
+// (it shifts nothing), content ops highest index first so earlier
+// indices stay valid, lists after the content they would shift, and
+// global replacements last.
+func compile(ops []Op, res *Result, add func(*Op, []json.RawMessage, bool)) error {
+	var formats, bullets, content, global []*Op
 	for i := range ops {
 		op := &ops[i]
 		switch op.Kind {
-		case OpTextStyle, OpParagraphStyle, OpBullets, OpClearFormatting:
+		case OpTextStyle, OpParagraphStyle, OpClearFormatting:
 			formats = append(formats, op)
+		case OpBullets:
+			// createParagraphBullets consumes leading tabs and shifts what
+			// follows, so lists are made after the content ops, highest first.
+			bullets = append(bullets, op)
 		case OpReplaceAll:
 			global = append(global, op)
 		default:
 			content = append(content, op)
 		}
 	}
+	sort.SliceStable(bullets, func(i, j int) bool { return bullets[i].Target.Start > bullets[j].Target.Start })
 	sort.SliceStable(content, func(i, j int) bool {
 		a, b := keyIndex(content[i]), keyIndex(content[j])
 		if a != b {
@@ -247,18 +274,43 @@ func Plan(ops []Op, o Options) (*Result, error) {
 	for _, op := range content {
 		reqs, minimal, err := contentRequests(op)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		add(op, reqs, minimal)
 		if op.NeedsFollowup() {
 			res.Followups = append(res.Followups, Followup{Seq: op.Seq, Kind: op.Kind, Fragment: op.Fragment, TabID: op.Seg.TabID})
 		}
 	}
+	for _, op := range bullets {
+		add(op, formatRequests(op), false)
+	}
 	for _, op := range global {
 		add(op, []json.RawMessage{ReplaceAllText(op.Find, op.Replace, op.MatchCase, op.Seg.TabID)}, false)
 	}
-	return finish(), nil
+	return nil
 }
+
+// suggestable refuses the request kinds the API rejects in SUGGEST mode
+// before a batch is sent, naming the op so the person can pick direct.
+func suggestable(ops []Op, reqs []json.RawMessage) error {
+	for _, r := range reqs {
+		kind := Kind(r)
+		if !SuggestModeUnsupported[kind] {
+			continue
+		}
+		for i := range ops {
+			if opKinds[ops[i].Kind] == kind {
+				return fmt.Errorf("op %d (%s) cannot be made as a suggestion (the API refuses %s in SUGGEST mode); use mode direct", ops[i].Seq, ops[i].Kind, kind)
+			}
+		}
+		return fmt.Errorf("%s cannot be made as a suggestion; use mode direct", kind)
+	}
+	return nil
+}
+
+// opKinds maps the ops that compile to one request kind the API may
+// refuse in SUGGEST mode.
+var opKinds = map[OpKind]string{OpDeleteHeader: "deleteHeader", OpDeleteFooter: "deleteFooter"}
 
 func validate(op *Op) error {
 	needTarget := func() error {
@@ -371,7 +423,7 @@ func guard(ops []Op, o Options, res *Result) error {
 // what the overwrite guard protects.
 func Deletes(k OpKind) bool {
 	switch k {
-	case OpReplace, OpDelete, OpDeleteRows, OpDeleteColumns, OpDeleteHeader, OpDeleteFooter:
+	case OpReplace, OpDelete, OpReplaceAll, OpDeleteRows, OpDeleteColumns, OpMergeCells, OpDeleteHeader, OpDeleteFooter:
 		return true
 	}
 	return false
@@ -475,7 +527,7 @@ func formatRequests(op *Op) []json.RawMessage {
 func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
-		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline, NearBullet: op.NearBullet})
+		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline, Inline: op.Inline, NearBullet: op.NearBullet})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 		}
@@ -525,9 +577,18 @@ func deleteRange(op *Op) Rng {
 
 func replaceRequests(op *Op) ([]json.RawMessage, bool, error) {
 	seg := op.Seg
-	// Minimal diff when both sides are one paragraph of plain text.
-	if newText, ok := op.Fragment.SingleParagraph(); ok && !strings.Contains(op.TargetText, "\n") {
-		edits := MinimalEdits(op.TargetText, newText, op.Target.Start)
+	// Minimal diff when both sides are one paragraph of plain text and the
+	// old text is known to line up with the index space.
+	old := op.TargetAligned
+	if old == "" {
+		old = op.TargetText
+	}
+	span := op.Target.End - op.Target.Start
+	if op.TargetIsBlock {
+		span-- // the block's newline stays
+	}
+	if newText, ok := op.Fragment.SingleParagraph(); ok && !strings.Contains(old, "\n") && doc.UTF16Len(old) == span {
+		edits := MinimalEdits(old, newText, op.Target.Start)
 		if len(edits) == 0 {
 			return nil, true, nil
 		}

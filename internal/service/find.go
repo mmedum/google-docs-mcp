@@ -40,6 +40,8 @@ type FindResult struct {
 	Text       string      `json:"-"`
 }
 
+func dropPlaceholders(s string) string { return strings.ReplaceAll(s, string(objectPlaceholder), "") }
+
 // Find locates text or a regular expression in one tab's segment and
 // returns handles with context, in document order.
 func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error) {
@@ -84,7 +86,9 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 		if b.Paragraph == nil {
 			continue
 		}
-		text := b.Paragraph.Text(doc.ViewInline)
+		// Index-aligned text keeps offsets right past chips, images and
+		// footnote references; placeholders are dropped from the output.
+		text := strings.TrimSuffix(alignedSlice(b.Paragraph, b.Start, b.End), "\n")
 		var spans [][2]int // rune offsets
 		if re != nil {
 			for _, m := range re.FindAllStringIndex(text, -1) {
@@ -110,7 +114,7 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 			if to < len(runes) {
 				ctxText += "…"
 			}
-			res.Matches = append(res.Matches, FindMatch{Handle: b.Handle, Match: string(runes[sp[0]:sp[1]]), Offset: sp[0], Context: ctxText})
+			res.Matches = append(res.Matches, FindMatch{Handle: b.Handle, Match: dropPlaceholders(string(runes[sp[0]:sp[1]])), Offset: sp[0], Context: dropPlaceholders(ctxText)})
 		}
 	}
 	var sb strings.Builder

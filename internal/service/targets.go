@@ -1,0 +1,418 @@
+package service
+
+import (
+	"fmt"
+	"strings"
+	"unicode"
+
+	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/internal/plan"
+)
+
+// Target points at content. Exactly one selector is used: text,
+// heading_id, heading, handle, handles, or cell.
+type Target struct {
+	Text       string
+	Occurrence int
+	Within     string
+
+	HeadingID      string
+	Heading        string
+	HeadingLevel   int
+	IncludeHeading *bool
+
+	Handle  string
+	From    string
+	To      string
+	Cell    string
+	Tab     string
+	Segment string
+}
+
+func (t Target) selectorCount() int {
+	n := 0
+	for _, set := range []bool{t.Text != "", t.HeadingID != "", t.Heading != "", t.Handle != "", t.From != "" || t.To != "", t.Cell != ""} {
+		if set {
+			n++
+		}
+	}
+	return n
+}
+
+// TargetRange is a target turned into a range.
+type TargetRange struct {
+	Tab         *doc.Tab
+	Segment     *doc.Segment
+	Start       int64
+	End         int64
+	IsBlock     bool // covers whole top-level blocks including trailing newlines
+	Text        string
+	Blocks      []*doc.Block // covered top-level blocks when IsBlock
+	Block       *doc.Block   // enclosing block for text matches
+	Description string
+}
+
+// Rng converts to a planner range.
+func (r TargetRange) Rng() plan.Rng {
+	return plan.Rng{Start: r.Start, End: r.End, SegmentID: r.Segment.ID, TabID: r.Tab.ID}
+}
+
+// SegmentBounds describes the segment for the planner.
+func SegmentBounds(tab *doc.Tab, seg *doc.Segment) plan.Segment {
+	b := plan.Segment{ID: seg.ID, TabID: tab.ID}
+	for _, blk := range seg.Blocks {
+		if blk.Kind != doc.KindSectionBreak {
+			b.Start = blk.Start
+			break
+		}
+	}
+	if n := len(seg.Blocks); n > 0 {
+		b.End = seg.Blocks[n-1].End
+	}
+	return b
+}
+
+// ResolveTarget turns a Target into a range on the document, checking
+// handles against the memory of the last read.
+func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
+	d := f.Doc
+	if t.selectorCount() != 1 {
+		return nil, Errorf("invalid", "a target needs exactly one of text, heading_id, heading, handle, from/to, or cell")
+	}
+	tab, ok := d.Tab(t.Tab)
+	if !ok {
+		return nil, Errorf("not_found", "no tab %q; tabs: %s", t.Tab, tabList(d))
+	}
+	seg, err := selectSegment(tab, t.Segment)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case t.HeadingID != "":
+		ht, sec, ok := d.HeadingByID(t.HeadingID)
+		if !ok {
+			return nil, Errorf("not_found", "no heading with id %q; call get_outline for current ids", t.HeadingID)
+		}
+		return sectionRange(ht, sec, t.IncludeHeading), nil
+	case t.Heading != "":
+		rs, err := resolveHeadingText(tab, seg, ReadScope{Heading: t.Heading, HeadingLevel: t.HeadingLevel, Occurrence: t.Occurrence})
+		if err != nil {
+			return nil, err
+		}
+		sec := doc.Section{Heading: seg.Blocks[rs.From], Level: seg.Blocks[rs.From].Paragraph.Level, From: rs.From, To: rs.To}
+		return sectionRange(tab, sec, t.IncludeHeading), nil
+	case t.Handle != "":
+		i, err := s.checkedIndex(f, seg, t.Handle)
+		if err != nil {
+			return nil, err
+		}
+		return blockRange(tab, seg, i, i), nil
+	case t.From != "" || t.To != "":
+		from, to := 0, len(seg.Blocks)-1
+		if t.From != "" {
+			if from, err = s.checkedIndex(f, seg, t.From); err != nil {
+				return nil, err
+			}
+		}
+		if t.To != "" {
+			if to, err = s.checkedIndex(f, seg, t.To); err != nil {
+				return nil, err
+			}
+		}
+		if to < from {
+			return nil, Errorf("invalid", "to handle %s comes before from handle %s", t.To, t.From)
+		}
+		return blockRange(tab, seg, from, to), nil
+	case t.Cell != "":
+		c, ok := d.FindCell(t.Cell)
+		if !ok {
+			return nil, Errorf("not_found", "no cell %s; cells are named like tbl1:r2c3", t.Cell)
+		}
+		if len(c.Blocks) == 0 {
+			return nil, Errorf("invalid", "cell %s has no content blocks", t.Cell)
+		}
+		first, last := c.Blocks[0], c.Blocks[len(c.Blocks)-1]
+		return &TargetRange{Tab: tab, Segment: seg, Start: first.Start, End: last.End - 1, Text: c.Text(doc.ViewInline),
+			Description: "cell " + t.Cell}, nil
+	}
+	return s.resolveText(f, tab, seg, t)
+}
+
+func sectionRange(tab *doc.Tab, sec doc.Section, includeHeading *bool) *TargetRange {
+	seg := tab.Body
+	from := sec.From
+	if includeHeading != nil && !*includeHeading {
+		from++
+	}
+	if from >= sec.To {
+		// Empty section body: a zero-length range right after the heading.
+		h := seg.Blocks[sec.From]
+		return &TargetRange{Tab: tab, Segment: seg, Start: h.End, End: h.End, Block: h, Description: fmt.Sprintf("the empty body of section %q", h.Paragraph.Text(doc.ViewCurrent))}
+	}
+	r := blockRange(tab, seg, from, sec.To-1)
+	r.Description = fmt.Sprintf("section %q (%s)", sec.Heading.Paragraph.Text(doc.ViewCurrent), handleRange(seg, from, sec.To))
+	return r
+}
+
+func blockRange(tab *doc.Tab, seg *doc.Segment, from, to int) *TargetRange {
+	blocks := seg.Blocks[from : to+1]
+	texts := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		texts = append(texts, b.Text(doc.ViewInline))
+	}
+	r := &TargetRange{Tab: tab, Segment: seg, Start: blocks[0].Start, End: blocks[len(blocks)-1].End, IsBlock: true, Blocks: blocks,
+		Text: strings.Join(texts, "\n"), Description: handleRange(seg, from, to+1)}
+	if len(blocks) == 1 {
+		r.Block = blocks[0]
+	}
+	return r
+}
+
+// checkedIndex finds a top-level block by handle after validating it
+// against the handle memory: a handle from an older revision must still
+// name the same text, or be relocatable to exactly one block.
+func (s *Service) checkedIndex(f *Fetched, seg *doc.Segment, handle string) (int, error) {
+	handle = strings.TrimSpace(handle)
+	mem, hasMem := s.Handles(f.Doc.ID)
+	remembered, known := mem.Text[handle]
+	if hasMem && mem.RevisionID != f.Doc.RevisionID && known {
+		// The document changed since the read that produced this handle.
+		for i, b := range seg.Blocks {
+			if b.Handle == handle && doc.Normalize(b.Text(doc.ViewInline)) == remembered {
+				return i, nil
+			}
+		}
+		var hits []int
+		for i, b := range seg.Blocks {
+			if remembered != "" && doc.Normalize(b.Text(doc.ViewInline)) == remembered {
+				hits = append(hits, i)
+			}
+		}
+		switch len(hits) {
+		case 1:
+			return hits[0], nil
+		case 0:
+			return 0, Errorf("stale", "handle %s pointed at %q when read, and that block no longer exists at this revision; re-read the section", handle, clip(remembered, 60))
+		default:
+			return 0, Errorf("ambiguous", "handle %s pointed at %q, which now appears %d times; re-read the section and use the current handle", handle, clip(remembered, 60), len(hits))
+		}
+	}
+	return topLevelIndex(seg, handle)
+}
+
+// resolveText finds an exact (normalised) text match inside paragraphs.
+func (s *Service) resolveText(f *Fetched, tab *doc.Tab, seg *doc.Segment, t Target) (*TargetRange, error) {
+	needle := doc.Normalize(t.Text)
+	if needle == "" {
+		return nil, Errorf("invalid", "text target is empty")
+	}
+	blocks := seg.AllBlocks()
+	scope := "in " + segmentName(tab, seg)
+	if t.Within != "" {
+		var err error
+		blocks, scope, err = s.withinBlocks(f, tab, seg, t.Within)
+		if err != nil {
+			return nil, err
+		}
+	}
+	type hit struct {
+		block      *doc.Block
+		start, end int64
+	}
+	var hits []hit
+	for _, caseFold := range []bool{false, true} {
+		for _, b := range blocks {
+			if b.Paragraph == nil {
+				continue
+			}
+			for _, m := range matchParagraph(b.Paragraph, needle, caseFold) {
+				hits = append(hits, hit{b, m[0], m[1]})
+			}
+		}
+		if len(hits) > 0 {
+			break
+		}
+	}
+	switch {
+	case len(hits) == 0:
+		return nil, Errorf("not_found", "text %q not found %s; use find_in_document to locate it, and quote it exactly", clip(t.Text, 80), scope)
+	case len(hits) > 1 && t.Occurrence <= 0:
+		var where []string
+		for i, h := range hits {
+			if i == 5 {
+				where = append(where, "…")
+				break
+			}
+			where = append(where, h.block.Handle)
+		}
+		return nil, Errorf("ambiguous", "text %q matches %d times %s (%s); add occurrence (1-based) or within", clip(t.Text, 80), len(hits), scope, strings.Join(where, ", "))
+	case t.Occurrence > len(hits):
+		return nil, Errorf("not_found", "text %q matches %d time(s) %s; occurrence %d does not exist", clip(t.Text, 80), len(hits), scope, t.Occurrence)
+	}
+	h := hits[max(t.Occurrence, 1)-1]
+	text := sliceUTF16(h.block.Paragraph, h.start, h.end)
+	return &TargetRange{Tab: tab, Segment: seg, Start: h.start, End: h.end, Text: text, Block: h.block,
+		Description: fmt.Sprintf("%q in %s", clip(text, 60), h.block.Handle)}, nil
+}
+
+// withinBlocks restricts a text search to a block handle or a section.
+func (s *Service) withinBlocks(f *Fetched, tab *doc.Tab, seg *doc.Segment, within string) ([]*doc.Block, string, error) {
+	within = strings.TrimSpace(within)
+	if strings.HasPrefix(within, "heading:") {
+		rs, err := resolveHeadingText(tab, seg, ReadScope{Heading: strings.TrimPrefix(within, "heading:")})
+		if err != nil {
+			return nil, "", err
+		}
+		return flatten(seg.Blocks[rs.From:rs.To]), "within section " + strings.TrimPrefix(within, "heading:"), nil
+	}
+	if _, sec, ok := f.Doc.HeadingByID(within); ok {
+		return flatten(seg.Blocks[sec.From:sec.To]), "within section " + within, nil
+	}
+	i, err := s.checkedIndex(f, seg, within)
+	if err != nil {
+		if b, ok := f.Doc.FindHandle(within); ok {
+			return flatten([]*doc.Block{b}), "within " + within, nil
+		}
+		return nil, "", err
+	}
+	return flatten([]*doc.Block{seg.Blocks[i]}), "within " + within, nil
+}
+
+func flatten(blocks []*doc.Block) []*doc.Block {
+	var out []*doc.Block
+	var walk func([]*doc.Block)
+	walk = func(bs []*doc.Block) {
+		for _, b := range bs {
+			out = append(out, b)
+			if b.Table != nil {
+				for _, row := range b.Table.Cells {
+					for _, c := range row {
+						walk(c.Blocks)
+					}
+				}
+			}
+			if b.TOC != nil {
+				walk(b.TOC.Blocks)
+			}
+		}
+	}
+	walk(blocks)
+	return out
+}
+
+// unit is one comparable character of a paragraph with its UTF-16 span.
+type unit struct {
+	r          rune
+	start, end int64
+}
+
+// units flattens a paragraph's text runs into normalised characters with
+// whitespace runs collapsed, keeping the original offsets so matches map
+// back to API indices.
+func units(p *doc.Paragraph) []unit {
+	var out []unit
+	for _, run := range p.Runs {
+		if run.Kind != doc.RunText {
+			continue
+		}
+		pos := run.Start
+		for _, r := range run.Text {
+			w := int64(utf16Len(r))
+			nr, keep := normalizeRune(r)
+			switch {
+			case !keep:
+			case unicode.IsSpace(nr):
+				if n := len(out); n > 0 && out[n-1].r == ' ' {
+					out[n-1].end = pos + w
+				} else {
+					out = append(out, unit{' ', pos, pos + w})
+				}
+			default:
+				out = append(out, unit{nr, pos, pos + w})
+			}
+			pos += w
+		}
+	}
+	// Trailing whitespace (the paragraph newline) never matches.
+	for len(out) > 0 && out[len(out)-1].r == ' ' {
+		out = out[:len(out)-1]
+	}
+	return out
+}
+
+func utf16Len(r rune) int {
+	if r >= 0x10000 {
+		return 2
+	}
+	return 1
+}
+
+func normalizeRune(r rune) (rune, bool) {
+	switch r {
+	case '\u2018', '\u2019', '\u201a', '\u201b':
+		return '\'', true
+	case '\u201c', '\u201d', '\u201e', '\u201f':
+		return '"', true
+	case '\u2013', '\u2014', '\u2011':
+		return '-', true
+	case '\u200b', '\ufeff':
+		return 0, false
+	}
+	if unicode.IsSpace(r) {
+		return ' ', true
+	}
+	return r, true
+}
+
+// matchParagraph returns every [start, end) UTF-16 span where the
+// normalised needle occurs in the paragraph.
+func matchParagraph(p *doc.Paragraph, needle string, caseFold bool) [][2]int64 {
+	us := units(p)
+	nr := []rune(needle)
+	if len(nr) == 0 || len(us) < len(nr) {
+		return nil
+	}
+	eq := func(a, b rune) bool {
+		if caseFold {
+			return unicode.ToLower(a) == unicode.ToLower(b)
+		}
+		return a == b
+	}
+	var out [][2]int64
+	for i := 0; i+len(nr) <= len(us); i++ {
+		ok := true
+		for j := range nr {
+			if !eq(us[i+j].r, nr[j]) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, [2]int64{us[i].start, us[i+len(nr)-1].end})
+			i += len(nr) - 1
+		}
+	}
+	return out
+}
+
+// sliceUTF16 returns the paragraph text between two absolute offsets.
+func sliceUTF16(p *doc.Paragraph, start, end int64) string {
+	var b strings.Builder
+	for _, run := range p.Runs {
+		if run.Kind != doc.RunText || run.End <= start || run.Start >= end {
+			continue
+		}
+		from := max(start, run.Start) - run.Start
+		to := min(end, run.End) - run.Start
+		b.WriteString(run.Text[doc.UTF16ToByte(run.Text, from):doc.UTF16ToByte(run.Text, to)])
+	}
+	return b.String()
+}
+
+func clip(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
+}

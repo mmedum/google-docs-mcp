@@ -1,0 +1,519 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/mmedum/google-docs-mcp/internal/config"
+	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/internal/plan"
+)
+
+// Location says where an insertion goes.
+type Location struct {
+	At string // start, end, before, after
+	Of *Target
+}
+
+// EditOp is one operation of edit_document or format_document after
+// tool-level validation, before resolution.
+type EditOp struct {
+	Kind          plan.OpKind
+	Target        *Target
+	Location      *Location
+	Content       string
+	ContentFormat string // markdown (default) or text
+	Find          string
+	Replace       string
+	MatchCase     bool
+	Text          plan.TextStyleSpec
+	Para          plan.ParagraphStyleSpec
+	Bullets       string
+}
+
+// EditRequest is a write call.
+type EditRequest struct {
+	Document       string
+	Ops            []EditOp
+	Mode           string
+	DryRun         bool
+	Force          bool
+	ExpectRevision string
+}
+
+// EditResult reports what happened.
+type EditResult struct {
+	RevisionID    string           `json:"revision_id"`
+	Mode          string           `json:"mode"`
+	DryRun        bool             `json:"dry_run"`
+	Applied       int              `json:"ops_applied"`
+	Changes       []plan.OpSummary `json:"changes"`
+	SuggestionIDs []string         `json:"suggestion_ids,omitempty"`
+	CommentIDs    []string         `json:"comment_ids,omitempty"`
+	Warnings      []string         `json:"warnings,omitempty"`
+	Preview       string           `json:"-"`
+	Requests      json.RawMessage  `json:"-"`
+	Proposals     []plan.Proposal  `json:"-"`
+}
+
+type resolvedOps struct {
+	ops     []plan.Op
+	threads []CommentThread
+	// preview locates the edited region for the before/after rendering.
+	previewTab   string
+	previewSeg   string
+	previewIndex int64
+	hasPreview   bool
+}
+
+func (r *resolvedOps) note(tabID, segID string, index int64) {
+	if !r.hasPreview || index < r.previewIndex {
+		r.previewTab, r.previewSeg, r.previewIndex, r.hasPreview = tabID, segID, index, true
+	}
+}
+
+// Edit applies (or previews) a batch of operations.
+func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error) {
+	mode, err := s.mode(req.Mode)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.Ops) == 0 {
+		return nil, Errorf("invalid", "ops is empty")
+	}
+	if len(req.Ops) > 50 {
+		return nil, Errorf("invalid", "at most 50 ops per call")
+	}
+	f, err := s.FetchFresh(ctx, req.Document)
+	if err != nil {
+		return nil, err
+	}
+	if req.ExpectRevision != "" && req.ExpectRevision != f.Doc.RevisionID {
+		return nil, Errorf("conflict", "the document is at revision %s, not %s; re-read before editing", f.Doc.RevisionID, req.ExpectRevision)
+	}
+	var result *EditResult
+	var lastResolved *resolvedOps
+	for attempt := 1; ; attempt++ {
+		ro, err := s.resolveOps(ctx, f, req.Ops, mode)
+		if err != nil {
+			return nil, err
+		}
+		lastResolved = ro
+		planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})
+		if err != nil {
+			if errors.Is(err, plan.ErrBlocked) {
+				return nil, &Error{Class: "blocked", Message: strings.TrimPrefix(err.Error(), "blocked: "), Err: err}
+			}
+			return nil, Errorf("invalid", "%v", err)
+		}
+		result = &EditResult{RevisionID: f.Doc.RevisionID, Mode: string(mode), DryRun: req.DryRun, Changes: planned.Summary, Warnings: planned.Warnings, Proposals: planned.Proposals}
+		if req.DryRun {
+			if b, err := json.MarshalIndent(planned.Requests, "", "  "); err == nil && len(planned.Requests) > 0 {
+				result.Requests = b
+			}
+			result.Preview = regionPreview(f.Doc, ro)
+			return result, nil
+		}
+		err = s.apply(ctx, f, planned, mode, result)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, gapi.ErrConflict) && attempt == 1 {
+			s.log.InfoContext(ctx, "revision conflict; re-planning once", "doc", shortID(f.Doc.ID))
+			if f, err = s.FetchFresh(ctx, req.Document); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if errors.Is(err, gapi.ErrConflict) {
+			return nil, Errorf("conflict", "the document changed twice while planning this edit; re-read and try again")
+		}
+		return nil, err
+	}
+	result.Applied = len(req.Ops)
+	after, err := s.FetchFresh(ctx, req.Document)
+	if err != nil {
+		result.Warnings = append(result.Warnings, "applied, but re-reading the document failed: "+err.Error())
+		return result, nil //nolint:nilerr // the edit was applied; report it with a warning
+	}
+	result.RevisionID = after.Doc.RevisionID
+	result.Preview = regionPreview(after.Doc, lastResolved)
+	return result, nil
+}
+
+func (s *Service) mode(m string) (plan.Mode, error) {
+	m = strings.ToLower(strings.TrimSpace(m))
+	if m == "" {
+		m = string(s.opts.DefaultWriteMode)
+	}
+	if m == "" {
+		m = string(config.WriteDirect)
+	}
+	if s.opts.ReadOnly {
+		return "", Errorf("forbidden", "this server runs read-only (GDOCS_READ_ONLY=true)")
+	}
+	switch plan.Mode(m) {
+	case plan.ModeDirect, plan.ModeComment:
+		return plan.Mode(m), nil
+	case plan.ModeSuggest:
+		if !s.opts.Preview {
+			return "", Errorf("unavailable", "suggestion mode needs Developer Preview enrolment (GDOCS_PREVIEW=true); use mode comment or direct")
+		}
+		return plan.ModeSuggest, nil
+	}
+	return "", Errorf("invalid", "mode %q; use suggest, direct or comment", m)
+}
+
+// resolveOps turns EditOps into planner ops against a fetched document.
+func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode plan.Mode) (*resolvedOps, error) {
+	out := &resolvedOps{}
+	for _, op := range ops {
+		if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
+			threads, err := s.comments(ctx, f)
+			if err != nil {
+				s.log.WarnContext(ctx, "comment lookup failed; guard cannot see comment anchors", "err", err)
+			}
+			out.threads = threads
+			break
+		}
+	}
+	for i, op := range ops {
+		p := plan.Op{Seq: i, Kind: op.Kind, Find: op.Find, Replace: op.Replace, MatchCase: op.MatchCase, Text: op.Text, Para: op.Para, Bullets: op.Bullets}
+		if op.Content != "" || needsContent(op.Kind) {
+			frag, err := parseContent(op.Content, op.ContentFormat)
+			if err != nil {
+				return nil, Errorf("unsupported", "op %d: %v", i, err)
+			}
+			p.Fragment = frag
+		}
+		var err error
+		switch op.Kind {
+		case plan.OpInsert, plan.OpPageBreak, plan.OpFootnote, plan.OpAppend:
+			err = s.resolveInsertOp(f, op, &p, out)
+		case plan.OpReplace, plan.OpDelete, plan.OpTextStyle, plan.OpParagraphStyle, plan.OpBullets, plan.OpClearFormatting:
+			err = s.resolveTargetOp(f, op, &p, out)
+		case plan.OpReplaceAll:
+			err = s.resolveReplaceAll(f, op, &p, mode)
+		case plan.OpCreateHeader, plan.OpCreateFooter:
+			err = resolveCreateSegment(f, op, &p)
+		default:
+			err = Errorf("invalid", "unknown kind %q", op.Kind)
+		}
+		if err != nil {
+			return nil, Errorf(classOf(err), "op %d: %s", i, messageOf(err))
+		}
+		out.ops = append(out.ops, p)
+	}
+	return out, nil
+}
+
+func (s *Service) resolveInsertOp(f *Fetched, op EditOp, p *plan.Op, out *resolvedOps) error {
+	loc := Location{At: "end"}
+	if op.Location != nil {
+		loc = *op.Location
+	} else if op.Kind != plan.OpAppend {
+		return Errorf("invalid", "%s needs a location", op.Kind)
+	}
+	if loc.At == "" && loc.Of == nil {
+		loc.At = "end"
+	}
+	ip, err := s.resolveLocation(f, loc)
+	if err != nil {
+		return err
+	}
+	p.Seg = ip.seg
+	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.seg.ID, TabID: ip.seg.TabID}
+	p.AtEnd, p.Inline, p.NearBullet = ip.atEnd, ip.inline, ip.nearBullet
+	p.Description = ip.description
+	p.CommentAnchor = ip.anchor
+	out.note(ip.seg.TabID, ip.seg.ID, ip.index)
+	return nil
+}
+
+func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolvedOps) error {
+	if op.Target == nil {
+		return Errorf("invalid", "%s needs a target", op.Kind)
+	}
+	r, err := s.ResolveTarget(f, *op.Target)
+	if err != nil {
+		return err
+	}
+	if r.Start == r.End && op.Kind != plan.OpReplace {
+		return Errorf("invalid", "%s is empty", r.Description)
+	}
+	p.Seg = SegmentBounds(r.Tab, r.Segment)
+	rng := r.Rng()
+	p.Target = &rng
+	p.TargetIsBlock = r.IsBlock
+	p.TargetText = r.Text
+	p.Description = r.Description
+	p.NearBullet = r.Block != nil && r.Block.Paragraph != nil && r.Block.Paragraph.Bullet != nil
+	if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
+		p.Anchors = anchorsIn(r.Tab, r.Segment, r.Start, r.End, out.threads)
+	}
+	out.note(r.Tab.ID, r.Segment.ID, r.Start)
+	return nil
+}
+
+func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan.Mode) error {
+	tab, ok := f.Doc.Tab(targetTab(op.Target))
+	if !ok {
+		return Errorf("not_found", "no tab %q", targetTab(op.Target))
+	}
+	p.Seg = SegmentBounds(tab, tab.Body)
+	p.Description = fmt.Sprintf("every %q in tab %d", op.Find, tab.Number)
+	if mode != plan.ModeComment {
+		return nil
+	}
+	r, err := s.ResolveTarget(f, Target{Text: op.Find, Occurrence: 1, Tab: tab.ID})
+	if err != nil {
+		return err
+	}
+	rng := r.Rng()
+	p.CommentAnchor = &rng
+	p.TargetText = r.Text
+	return nil
+}
+
+func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {
+	tab, ok := f.Doc.Tab(targetTab(op.Target))
+	if !ok {
+		return Errorf("not_found", "no tab %q", targetTab(op.Target))
+	}
+	existing := tab.Headers
+	if op.Kind == plan.OpCreateFooter {
+		existing = tab.Footers
+	}
+	kind := strings.TrimPrefix(string(op.Kind), "create_")
+	if len(existing) > 0 {
+		return Errorf("invalid", "tab %d already has a %s; edit it with segment: %s", tab.Number, kind, existing[0].Label())
+	}
+	p.Seg = SegmentBounds(tab, tab.Body)
+	p.Description = fmt.Sprintf("new %s of tab %d", kind, tab.Number)
+	for _, blk := range tab.Body.Blocks {
+		if blk.Kind == doc.KindParagraph {
+			p.CommentAnchor = &plan.Rng{Start: blk.Start, End: blk.End, TabID: tab.ID}
+			break
+		}
+	}
+	return nil
+}
+
+func needsContent(k plan.OpKind) bool {
+	switch k {
+	case plan.OpInsert, plan.OpAppend, plan.OpReplace, plan.OpFootnote, plan.OpCreateHeader, plan.OpCreateFooter:
+		return true
+	}
+	return false
+}
+
+func targetTab(t *Target) string {
+	if t == nil {
+		return ""
+	}
+	return t.Tab
+}
+
+func parseContent(content, format string) (*markdown.Fragment, error) {
+	if strings.EqualFold(strings.TrimSpace(format), "text") {
+		lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+		blocks := make([]*markdown.Block, 0, len(lines))
+		for _, line := range lines {
+			b := &markdown.Block{Kind: markdown.KindParagraph}
+			if line != "" {
+				b.Inlines = []markdown.Inline{{Text: line}}
+			}
+			blocks = append(blocks, b)
+		}
+		return &markdown.Fragment{Blocks: blocks}, nil
+	}
+	return markdown.Parse(content)
+}
+
+type insertPoint struct {
+	seg         plan.Segment
+	index       int64
+	atEnd       bool
+	inline      bool
+	nearBullet  bool
+	description string
+	anchor      *plan.Rng
+}
+
+// resolveLocation turns a Location into an insertion index.
+func (s *Service) resolveLocation(f *Fetched, loc Location) (*insertPoint, error) {
+	at := strings.ToLower(strings.TrimSpace(loc.At))
+	if at == "" {
+		at = "end"
+		if loc.Of != nil {
+			at = "after"
+		}
+	}
+	var t Target
+	if loc.Of != nil {
+		t = *loc.Of
+	}
+	if loc.Of == nil || (at == "start" || at == "end") && t.selectorCount() == 0 {
+		return s.segmentEdge(f, t, at)
+	}
+	r, err := s.ResolveTarget(f, t)
+	if err != nil {
+		return nil, err
+	}
+	if r.IsBlock {
+		return blockRelative(r, at)
+	}
+	return textRelative(r, at)
+}
+
+// segmentEdge is the start or end of a whole segment.
+func (s *Service) segmentEdge(f *Fetched, t Target, at string) (*insertPoint, error) {
+	tab, ok := f.Doc.Tab(t.Tab)
+	if !ok {
+		return nil, Errorf("not_found", "no tab %q; tabs: %s", t.Tab, tabList(f.Doc))
+	}
+	seg, err := selectSegment(tab, t.Segment)
+	if err != nil {
+		return nil, err
+	}
+	content := contentBlocks(seg)
+	if len(content) == 0 {
+		return nil, Errorf("invalid", "%s has no content blocks", segmentName(tab, seg))
+	}
+	ip := &insertPoint{seg: SegmentBounds(tab, seg)}
+	switch at {
+	case "start":
+		first := content[0]
+		if first.Kind == doc.KindTable {
+			return nil, Errorf("invalid", "%s starts with a table; insert after it or before the first paragraph", segmentName(tab, seg))
+		}
+		ip.index, ip.nearBullet, ip.description, ip.anchor = first.Start, hasBullet(first), "start of "+segmentName(tab, seg), blockRng(tab, seg, first)
+	case "end":
+		last := content[len(content)-1]
+		ip.index, ip.atEnd, ip.nearBullet, ip.description, ip.anchor = last.End-1, true, hasBullet(last), "end of "+segmentName(tab, seg), blockRng(tab, seg, last)
+	default:
+		return nil, Errorf("invalid", "location %q needs a target (of) to be before or after", at)
+	}
+	return ip, nil
+}
+
+// blockRelative positions relative to whole blocks.
+func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
+	tab, seg := r.Tab, r.Segment
+	bounds := SegmentBounds(tab, seg)
+	first, last := r.Blocks[0], r.Blocks[len(r.Blocks)-1]
+	ip := &insertPoint{seg: bounds}
+	switch at {
+	case "before":
+		if first.Kind == doc.KindTable {
+			prev := previousParagraph(seg, first)
+			if prev == nil {
+				return nil, Errorf("invalid", "cannot insert before %s: the table is the first block; insert after it instead", first.Handle)
+			}
+			ip.index, ip.atEnd, ip.nearBullet, ip.anchor = prev.End-1, true, hasBullet(prev), blockRng(tab, seg, prev)
+		} else {
+			ip.index, ip.nearBullet, ip.anchor = first.Start, hasBullet(first), blockRng(tab, seg, first)
+		}
+		ip.description = "before " + r.Description
+	case "after", "end":
+		if last.End >= bounds.End {
+			if last.Kind == doc.KindTable {
+				return nil, Errorf("invalid", "cannot insert after %s: it is the last block and a table", last.Handle)
+			}
+			ip.index, ip.atEnd, ip.nearBullet = last.End-1, true, hasBullet(last)
+		} else {
+			ip.index, ip.nearBullet = last.End, hasBullet(nextBlock(seg, last))
+		}
+		ip.anchor, ip.description = blockRng(tab, seg, last), "after "+r.Description
+	case "start":
+		if first.Kind != doc.KindParagraph {
+			return nil, Errorf("invalid", "start of %s is not a paragraph", first.Handle)
+		}
+		ip.index, ip.inline, ip.nearBullet, ip.anchor, ip.description = first.Start, true, hasBullet(first), blockRng(tab, seg, first), "start of "+r.Description
+	default:
+		return nil, Errorf("invalid", "location %q; use start, end, before or after", at)
+	}
+	return ip, nil
+}
+
+// textRelative positions inline next to a text match or cell content.
+func textRelative(r *TargetRange, at string) (*insertPoint, error) {
+	ip := &insertPoint{seg: SegmentBounds(r.Tab, r.Segment), inline: true, nearBullet: hasBullet(r.Block)}
+	switch at {
+	case "before", "start":
+		ip.index = r.Start
+	case "after", "end":
+		ip.index = r.End
+	default:
+		return nil, Errorf("invalid", "location %q; use start, end, before or after", at)
+	}
+	ip.description = at + " " + r.Description
+	if r.Block != nil {
+		ip.anchor = blockRng(r.Tab, r.Segment, r.Block)
+	} else {
+		rng := r.Rng()
+		ip.anchor = &rng
+	}
+	return ip, nil
+}
+
+func hasBullet(b *doc.Block) bool {
+	return b != nil && b.Paragraph != nil && b.Paragraph.Bullet != nil
+}
+
+func blockRng(tab *doc.Tab, seg *doc.Segment, b *doc.Block) *plan.Rng {
+	return &plan.Rng{Start: b.Start, End: b.End, SegmentID: seg.ID, TabID: tab.ID}
+}
+
+func contentBlocks(seg *doc.Segment) []*doc.Block {
+	var out []*doc.Block
+	for _, b := range seg.Blocks {
+		if b.Kind != doc.KindSectionBreak {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+func previousParagraph(seg *doc.Segment, b *doc.Block) *doc.Block {
+	var prev *doc.Block
+	for _, x := range seg.Blocks {
+		if x == b {
+			return prev
+		}
+		if x.Kind == doc.KindParagraph {
+			prev = x
+		}
+	}
+	return nil
+}
+
+func nextBlock(seg *doc.Segment, b *doc.Block) *doc.Block {
+	for i, x := range seg.Blocks {
+		if x == b && i+1 < len(seg.Blocks) {
+			return seg.Blocks[i+1]
+		}
+	}
+	return nil
+}
+
+func classOf(err error) string {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.Class
+	}
+	return "unexpected"
+}
+
+func messageOf(err error) string {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.Message
+	}
+	return err.Error()
+}

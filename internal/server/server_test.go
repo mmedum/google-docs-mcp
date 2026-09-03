@@ -325,6 +325,15 @@ func TestReadAndOutlineTools(t *testing.T) {
 	if res.StructuredContent != nil || !strings.Contains(text, "· revision rev-0001 · 5 block(s) -->") {
 		t.Fatalf("read result: structured=%v header=%s", res.StructuredContent, text[:80])
 	}
+	// Handles come by default, since an edit targets them; false drops them.
+	res = call(t, cs, "read_document", map[string]any{"document": fixtureID, "heading_id": "h.det"})
+	if res.IsError || !strings.Contains(textOf(res), "[p8] ## Details {h.det}") {
+		t.Fatalf("read without with_handles: %s", textOf(res))
+	}
+	res = call(t, cs, "read_document", map[string]any{"document": fixtureID, "heading_id": "h.det", "with_handles": false})
+	if res.IsError || strings.Contains(textOf(res), "[p8]") || !strings.Contains(textOf(res), "## Details") {
+		t.Fatalf("read with with_handles false: %s", textOf(res))
+	}
 	res = call(t, cs, "read_document", map[string]any{"document": fixtureID, "format": "raw", "from_handle": "p2", "to_handle": "p2"})
 	if res.IsError || !strings.HasPrefix(textOf(res), "[{") {
 		t.Fatalf("raw read: %s", textOf(res))
@@ -478,7 +487,10 @@ func TestStructureToolsEndToEnd(t *testing.T) {
 		{"op": "insert_rows", "table": "tbl1", "row": 2, "count": 1},
 		{"op": "set_cells", "table": "tbl1", "cells": []map[string]any{{"cell": "r2c2", "content": "2"}}},
 	}})
-	if res.IsError || !strings.Contains(textOf(res), "op 0 insert_rows: tbl1 (2×2)") || !strings.Contains(textOf(res), "op 1 replace: 1 cell(s) of tbl1 (minimal diff)") || !strings.Contains(textOf(res), "requests: deleteContentRange, insertText, insertTableRow") {
+	// The cells are named in the grid the row insertion leaves, so they
+	// are written in a batch of their own once it exists.
+	if res.IsError || !strings.Contains(textOf(res), "op 0 insert_rows: tbl1 (2×2)") || !strings.Contains(textOf(res), "requests: insertTableRow") ||
+		!strings.Contains(textOf(res), "then op 1: a later batch runs set_cells on tbl1") {
 		t.Fatalf("edit_table dry run: %q", textOf(res))
 	}
 	res = call(t, cs, "edit_table", map[string]any{"document": fixtureID, "ops": []map[string]any{{"op": "shuffle", "table": "tbl1"}}})

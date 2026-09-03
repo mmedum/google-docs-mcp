@@ -48,7 +48,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if err != nil {
 		return nil, err
 	}
-	edit, err := s.editFetched(ctx, f, EditRequest{Document: d.DocumentID, Mode: string(plan.ModeDirect), Ops: []EditOp{{Kind: plan.OpAppend, Content: req.Content, ContentFormat: req.ContentFormat}}})
+	edit, _, err := s.editFetched(ctx, f, EditRequest{Document: d.DocumentID, Mode: string(plan.ModeDirect), Ops: []EditOp{{Kind: plan.OpAppend, Content: req.Content, ContentFormat: req.ContentFormat}}})
 	if err != nil {
 		res.Warnings = append(res.Warnings, "the document was created empty; writing the content failed: "+err.Error())
 		return res, nil //nolint:nilerr // the document exists; the caller gets it with a warning

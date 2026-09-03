@@ -201,10 +201,10 @@ func TestCommentMarks(t *testing.T) {
 	// "Revenue grew " starts at 29; comment on "Revenue grew" and one that
 	// ends at the paragraph's newline, plus one in another tab (ignored).
 	marks := []render.Mark{
-		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 29, End: 41, ID: "c1", Handle: "p3", Author: "Ann", Content: "Source?\nPlease cite.", Replies: 2},
-		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 60, End: 68, ID: "c2", Handle: "p3", Resolved: true, Content: "ok"},
-		{TabID: d.Tabs[1].ID, SegmentID: "", Start: 1, End: 4, ID: "c3", Handle: "tab2/p1", Content: "elsewhere"},
-		{ID: "c5", Content: "unlocated"},
+		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 29, End: 41, Replies: 2, Thread: render.Thread{ID: "c1", Handle: "p3", Author: "Ann", Content: "Source?\nPlease cite."}},
+		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 60, End: 68, Thread: render.Thread{ID: "c2", Handle: "p3", Resolved: true, Content: "ok"}},
+		{TabID: d.Tabs[1].ID, SegmentID: "", Start: 1, End: 4, Thread: render.Thread{ID: "c3", Handle: "tab2/p1", Content: "elsewhere"}},
+		{Thread: render.Thread{ID: "c5", Content: "unlocated"}},
 	}
 	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
 	for _, c := range []string{"Revenue grew{>>c:c1<<} a lot in Q3.{>>c:c2<<}"} {
@@ -233,7 +233,7 @@ func TestCommentMarks(t *testing.T) {
 		t.Errorf("footer without threads:\n%s", md)
 	}
 	// A mark ending inside a styled run splits it without breaking markdown.
-	marks = []render.Mark{{TabID: d.Tabs[0].ID, Start: 41, End: 44, ID: "c4", Handle: "p3"}}
+	marks = []render.Mark{{TabID: d.Tabs[0].ID, Start: 41, End: 44, Thread: render.Thread{ID: "c4", Handle: "p3"}}}
 	md = render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks, Suggestions: true}).Text
 	if !strings.Contains(md, "{--a --}{>>s:s1<<}{>>c:c4<<}") && !strings.Contains(md, "{>>c:c4<<}") {
 		t.Errorf("split mark missing:\n%s", md)
@@ -262,7 +262,7 @@ func TestMergedCellsRender(t *testing.T) {
 
 func TestPlainCommentMarks(t *testing.T) {
 	d, seg := body(t)
-	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 41, ID: "c1", Handle: "p3"}, {TabID: d.Tabs[0].ID, Start: 60, End: 68, ID: "c2", Handle: "p3"}}
+	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 41, Thread: render.Thread{ID: "c1", Handle: "p3"}}, {TabID: d.Tabs[0].ID, Start: 60, End: 68, Thread: render.Thread{ID: "c2", Handle: "p3"}}}
 	text := render.Plain(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
 	if !strings.Contains(text, "Revenue grew{>>c:c1<<} a lot in Q3.{>>c:c2<<}") {
 		t.Fatalf("plain marks:\n%s", text)
@@ -279,7 +279,7 @@ func TestPlainCommentMarks(t *testing.T) {
 func TestMarkerOffsetsAndMergedHeader(t *testing.T) {
 	d, seg := body(t)
 	// Two marks ending inside one run: "Revenue grew a lot" starts at 29.
-	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 36, ID: "c1", Handle: "p3"}, {TabID: d.Tabs[0].ID, Start: 37, End: 41, ID: "c2", Handle: "p3"}}
+	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 36, Thread: render.Thread{ID: "c1", Handle: "p3"}}, {TabID: d.Tabs[0].ID, Start: 37, End: 41, Thread: render.Thread{ID: "c2", Handle: "p3"}}}
 	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
 	if !strings.Contains(md, "Revenue{>>c:c1<<} grew{>>c:c2<<} a lot") {
 		t.Fatalf("marker offsets:\n%s", md)

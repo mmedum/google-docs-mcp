@@ -48,6 +48,7 @@ type Info struct {
 	Stats          doc.Stats    `json:"stats"`
 	Capabilities   Capabilities `json:"capabilities"`
 	Warnings       []string     `json:"warnings,omitempty"`
+	Text           string       `json:"-"`
 }
 
 func (s *Service) capabilities() Capabilities {
@@ -91,30 +92,79 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 		}
 		info.Tabs = append(info.Tabs, ti)
 	}
-	fr := <-fileCh
-	if fr.err != nil {
+	// The document itself was read, so Drive metadata is optional.
+	if fr := <-fileCh; fr.err != nil {
 		info.Warnings = append(info.Warnings, "Drive metadata unavailable: "+wrapAPI(fr.err, "file").Error())
-		return info, nil //nolint:nilerr // the document itself was read; Drive metadata is optional
+	} else {
+		info.fromFile(fr.file)
 	}
-	file := fr.file
+	info.Text = info.text()
+	return info, nil
+}
+
+// fromFile adds what Drive knows about the document.
+func (i *Info) fromFile(file *gapi.File) {
 	if len(file.Owners) > 0 {
-		info.Owner = userLabel(file.Owners[0])
+		i.Owner = userLabel(file.Owners[0])
 	}
-	info.Created = file.CreatedTime
-	info.LastModified = file.ModifiedTime
+	i.Created = file.CreatedTime
+	i.LastModified = file.ModifiedTime
 	if file.LastModifyingUser != nil {
-		info.LastModifiedBy = userLabel(file.LastModifyingUser)
+		i.LastModifiedBy = userLabel(file.LastModifyingUser)
 	}
 	if file.WebViewLink != "" {
-		info.URL = file.WebViewLink
+		i.URL = file.WebViewLink
 	}
 	if c := file.Capabilities; c != nil {
-		info.CanEdit, info.CanComment = &c.CanEdit, &c.CanComment
+		i.CanEdit, i.CanComment = &c.CanEdit, &c.CanComment
 	}
 	if file.Trashed {
-		info.Warnings = append(info.Warnings, "this document is in the trash")
+		i.Warnings = append(i.Warnings, "this document is in the trash")
 	}
-	return info, nil
+}
+
+// text is what get_document shows: the document's identity, what Drive
+// knows about it, the structure counts and this server's capabilities.
+func (i *Info) text() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n%s\nrevision %s\n", i.Title, i.URL, i.RevisionID)
+	if i.Owner != "" {
+		fmt.Fprintf(&b, "owner %s\n", i.Owner)
+	}
+	if i.LastModified != "" {
+		fmt.Fprintf(&b, "last modified %s", i.LastModified)
+		if i.LastModifiedBy != "" {
+			fmt.Fprintf(&b, " by %s", i.LastModifiedBy)
+		}
+		b.WriteString("\n")
+	}
+	st := i.Stats
+	fmt.Fprintf(&b, "%d tab(s), %d paragraphs, %d headings, %d tables, %d inline objects, %d footnotes, %d words",
+		st.Tabs, st.Paragraphs, st.Headings, st.Tables, st.InlineObjects, st.Footnotes, st.Words)
+	if st.Suggestions > 0 {
+		fmt.Fprintf(&b, ", %d pending suggestion(s)", st.Suggestions)
+	}
+	b.WriteString("\n")
+	for _, t := range i.Tabs {
+		fmt.Fprintf(&b, "- tab %d %q", t.Number, t.Title)
+		if t.ID != "" {
+			fmt.Fprintf(&b, " (id %s)", t.ID)
+		}
+		fmt.Fprintf(&b, ": %d headings, %d blocks\n", t.Headings, t.Blocks)
+	}
+	c := i.Capabilities
+	fmt.Fprintf(&b, "server: write modes %s (default %s), preview %t, read-only %t\n", strings.Join(c.WriteModes, "/"), c.DefaultWriteMode, c.Preview, c.ReadOnly)
+	writeWarnings(&b, i.Warnings)
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// writeWarnings ends a result's text with one line per warning. The
+// list_comments and manage_tabs texts append theirs with a leading
+// newline instead, because their builders are not newline-terminated.
+func writeWarnings(b *strings.Builder, warnings []string) {
+	for _, w := range warnings {
+		fmt.Fprintf(b, "warning: %s\n", w)
+	}
 }
 
 func userLabel(u *gapi.User) string {
@@ -258,15 +308,18 @@ func (r *ReadResult) header() string {
 }
 
 // commentMarks turns the live threads into renderer marks: located
-// ones get markers, every one is counted in the footer.
+// ones get markers, every one is counted in the footer. The footer shows
+// the first post and how many replies follow it, so the posts themselves
+// are left for list_comments.
 func commentMarks(threads []CommentThread) []render.Mark {
-	var marks []render.Mark
+	marks := make([]render.Mark, 0, len(threads))
 	for _, t := range threads {
 		if t.Deleted {
 			continue
 		}
-		marks = append(marks, render.Mark{TabID: t.Tab, SegmentID: t.Segment, Start: t.Start, End: t.End, ID: t.ID,
-			Handle: t.Handle, Author: t.Author, Content: t.Content, Resolved: t.Resolved, Replies: len(t.Replies)})
+		marks = append(marks, render.Mark{TabID: t.Tab, SegmentID: t.Segment, Start: t.Start, End: t.End,
+			Thread:  render.Thread{ID: t.ID, Handle: t.Handle, Author: t.Author, Content: t.Content, Resolved: t.Resolved},
+			Replies: len(t.Replies)})
 	}
 	return marks
 }

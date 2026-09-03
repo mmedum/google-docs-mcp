@@ -85,7 +85,7 @@ func TestTableValidationAndOrdering(t *testing.T) {
 	a := tableOp(OpInsertRows, TableParams{Rows: 2, Cols: 2, Row: 0, Count: 1})
 	b := tableOp(OpDeleteColumns, TableParams{Rows: 2, Cols: 2, Indices: []int{0}})
 	b.Seq = 1
-	if _, err := Plan([]Op{a, b}, Options{}); err == nil || !strings.Contains(err.Error(), "separate calls") {
+	if _, err := Plan([]Op{a, b}, Options{}); err == nil || !strings.Contains(err.Error(), "cannot go in one batch") {
 		t.Fatalf("two structural ops: %v", err)
 	}
 	c := tableOp(OpStyleCells, TableParams{Rows: 2, Cols: 2, RowSpan: 1, ColSpan: 1, Cell: CellStyleSpec{Align: "TOP"}})

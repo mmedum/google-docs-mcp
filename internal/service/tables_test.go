@@ -128,10 +128,67 @@ func TestTableOpErrors(t *testing.T) {
 	if _, err := svc.ResolveTarget(fetched(t, svc), Target{Cell: "tbl1:r2c2"}); classOf(err) != "invalid" {
 		t.Fatalf("target merged cell: %v", err)
 	}
-	// Two grid changes on one table are refused.
-	_, err := svc.Edit(ctx, tableEdit(EditOp{Kind: plan.OpInsertRows, Table: &TableOp{Table: "tbl1", Row: 1}}, EditOp{Kind: plan.OpDeleteColumns, Table: &TableOp{Table: "tbl1", ColList: []int{1}}}))
-	if classOf(err) != "invalid" || !strings.Contains(messageOf(err), "separate calls") {
-		t.Fatalf("two structural: %v", err)
+}
+
+// Several grid changes to one table run one batch each, so every one is
+// numbered against the grid the change before it left.
+func TestGridChangesChain(t *testing.T) {
+	svc, api := writable(t, false)
+	ctx := context.Background()
+	ops := []EditOp{
+		{Kind: plan.OpInsertRows, Table: &TableOp{Table: "tbl1", Row: 1}},
+		{Kind: plan.OpDeleteColumns, Table: &TableOp{Table: "tbl1", ColList: []int{1}}},
+		{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r1c1", Content: "x"}}}},
+	}
+	res, err := svc.Edit(ctx, tableEdit(ops...))
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	// The dry run plans what it can and says what waits; it cannot
+	// resolve the held-back ops against a grid that does not exist yet.
+	// The cell write waits too: its r2c1 means the grid after the delete.
+	if len(api.batches) != 0 || len(res.Changes) != 1 || len(res.Followups) != 2 {
+		t.Fatalf("changes %+v followups %v", res.Changes, res.Followups)
+	}
+	if !strings.Contains(res.Followups[0], "op 1: a later batch runs delete_columns on tbl1") ||
+		!strings.Contains(res.Followups[1], "op 2: a later batch runs set_cells on tbl1") {
+		t.Errorf("followups = %v", res.Followups)
+	}
+	req := tableEdit(ops...)
+	req.DryRun = false
+	res, err = svc.Edit(ctx, req)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(api.batches) != 3 || res.Applied != 3 {
+		t.Fatalf("batches %d, applied %d", len(api.batches), res.Applied)
+	}
+	if k := kindsOf(t, api.batches[0].Requests); k != "insertTableRow" {
+		t.Errorf("first batch: %s", k)
+	}
+	if k := kindsOf(t, api.batches[1].Requests); k != "deleteTableColumn" {
+		t.Errorf("second batch: %s", k)
+	}
+	// Every op is reported, under the number the caller gave it.
+	if len(res.Changes) != 3 || res.Changes[1].Seq != 1 || res.Changes[1].Kind != plan.OpDeleteColumns || res.Changes[2].Seq != 2 {
+		t.Errorf("changes = %+v", res.Changes)
+	}
+	// An op held back is still refused up front for what does not depend
+	// on the new grid: an unknown table, or a number below one.
+	_, err = svc.Edit(ctx, tableEdit(
+		EditOp{Kind: plan.OpInsertRows, Table: &TableOp{Table: "tbl1", Row: 1}},
+		EditOp{Kind: plan.OpDeleteRows, Table: &TableOp{Table: "tbl1", RowList: []int{0}}}))
+	if classOf(err) != "invalid" || !strings.Contains(messageOf(err), "op 1: rows and columns are numbered from 1") {
+		t.Errorf("precheck of a held-back op: %v", err)
+	}
+	_, err = svc.Edit(ctx, tableEdit(
+		EditOp{Kind: plan.OpInsertRows, Table: &TableOp{Table: "tbl1", Row: 1}},
+		EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "nonsense", Content: "x"}}}}))
+	if classOf(err) != "invalid" || !strings.Contains(messageOf(err), "op 1: cell \"nonsense\"") {
+		t.Errorf("precheck of a held-back cell name: %v", err)
+	}
+	if len(api.batches) != 3 {
+		t.Errorf("a refused call wrote something: %d batches", len(api.batches))
 	}
 }
 

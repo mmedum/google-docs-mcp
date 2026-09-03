@@ -9,6 +9,7 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/internal/render"
 )
 
 // ListCommentsRequest selects comment threads.
@@ -72,52 +73,28 @@ func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*C
 }
 
 func commentsText(res *CommentsResult, revision string) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "%d comment thread(s) shown (%d open, %d resolved) at revision %s\n", len(res.Threads), res.Open, res.Resolved, revision)
+	head := fmt.Sprintf("%d comment thread(s) shown (%d open, %d resolved) at revision %s",
+		len(res.Threads), res.Open, res.Resolved, revision)
+	threads := make([]render.Thread, 0, len(res.Threads))
 	for _, t := range res.Threads {
-		fmt.Fprintf(&sb, "- %s", t.ID)
-		if t.Handle != "" {
-			fmt.Fprintf(&sb, " [%s]", t.Handle)
-		}
-		if t.Author != "" {
-			fmt.Fprintf(&sb, " by %s", t.Author)
-		}
-		if t.Created != "" {
-			fmt.Fprintf(&sb, " (%s)", t.Created)
-		}
-		switch {
-		case t.Deleted:
-			sb.WriteString(" [deleted]")
-		case t.Resolved:
-			sb.WriteString(" [resolved]")
-		}
-		if t.Quote != "" {
-			fmt.Fprintf(&sb, " on “%s”", doc.Clip(t.Quote, 60))
-		}
-		sb.WriteString(": " + doc.OneLine(t.Content) + "\n")
-		for _, r := range t.Replies {
-			sb.WriteString("    ↳ ")
-			if r.Author != "" {
-				sb.WriteString(r.Author)
-			} else {
-				sb.WriteString("someone")
-			}
-			if r.Action != "" {
-				sb.WriteString(" " + r.Action + "d")
-			}
-			if r.Created != "" {
-				fmt.Fprintf(&sb, " (%s)", r.Created)
-			}
-			if r.Deleted {
-				sb.WriteString(" [deleted]")
-			}
-			if r.Content != "" {
-				sb.WriteString(": " + doc.OneLine(r.Content))
-			}
-			sb.WriteString("\n")
-		}
+		threads = append(threads, t.thread())
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	if body := render.CommentThreads(threads); body != "" {
+		return head + "\n" + body
+	}
+	return head
+}
+
+// thread is the renderer's view of a thread for the full listing, which
+// shows every field. The footer of a read fills in fewer (commentMarks).
+func (t CommentThread) thread() render.Thread {
+	rt := render.Thread{ID: t.ID, Handle: t.Handle, Author: t.Author, Created: t.Created, Quote: t.Quote,
+		Content: t.Content, Resolved: t.Resolved, Deleted: t.Deleted}
+	for _, r := range t.Replies {
+		rt.Replies = append(rt.Replies, render.Reply{Author: r.Author, Content: r.Content,
+			Created: r.Created, Action: r.Action, Deleted: r.Deleted})
+	}
+	return rt
 }
 
 // AddCommentRequest posts a new thread.

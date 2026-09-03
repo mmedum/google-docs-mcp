@@ -247,9 +247,10 @@ longer exists; re-read the section`.
   counts, sizes. Cheap; called first.
 - `read_document` → `scope` (tab / heading_id / heading / handle range /
   whole), `format` (`markdown` default, `text`, `raw`), `with_handles`
-  (default false), `with_styles` (default false: annotates runs whose
-  style deviates from the paragraph default, e.g. `{Arial 11, #c00}`, so
-  other people's formatting is visible before it is changed),
+  (default true; pass false to drop the prefixes), `with_styles`
+  (default false: annotates runs whose style deviates from the paragraph
+  default, e.g. `{Arial 11, #c00}`, so other people's formatting is
+  visible before it is changed),
   `include_suggestions` (CriticMarkup `{++ins++}` / `{--del--}` with
   `{>>s:<id> by author<<}`), `include_comments` (`{>>c:<id><<}` markers
   plus a thread list), `max_chars` (default 20 000), returns
@@ -407,8 +408,9 @@ registers only readOnly rows and requests readonly scopes.
 | `reply_comment` | `action: reply \| resolve \| reopen` | — | 2 |
 | `delete_comment` | Gated; a thread or one reply | destructive | 2 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
-| `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `pin_header_rows`; one grid change per table per call | — | 2 |
-| `insert_object` | `kind: image \| person \| rich_link \| date` at a Location | — | 2 |
+| `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | — | 2, 4 |
+| `insert_object` | `action: insert \| replace \| delete`; insert takes `kind: image \| person \| rich_link \| date` at a Location, replace swaps an image's source, delete removes an object by id (the only way to remove a floating one) | — | 2, 4 |
+| `layout_document` | ops: `page`, `section`, `section_break`, `named_style` | — | 4 |
 | `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | — | 2 |
 | `delete_tab` | Gated; child tabs go with it | destructive | 2 |
 
@@ -703,16 +705,27 @@ apply at once, kept here so they are not forgotten. Done in Phase 2: one
 block-range resolver (`resolveBlocks`) serves `ResolveScope` and
 `ResolveTarget`, so handles are validated against the last read on both
 paths; comment threads are located once per `Fetched` and shared by the
-guard, `read_document include_comments` and `list_comments`. Still open:
+guard, `read_document include_comments` and `list_comments`. Done after
+v0.3.0, and nothing is left open:
 
-- **Several grid changes on one table per call.** The follow-up
-  mechanism could chain them (re-resolving row and column numbers after
-  each), replacing the one-structural-op-per-table rule.
-- **`list_comments` text.** Still formatted in the service: it shows
-  reply threads with authors and times, which the renderer has no model
-  for; the read footer and it agree on the one-line thread summary.
-- **`get_document` text.** Still shaped in the tool layer (`infoText`);
-  every other result's text now comes from the service.
+- **Several grid changes on one table per call.** `chainStructural`
+  splits a call: everything goes in the first batch until an op changes a
+  table's grid, and from then on every op addressed in that table's rows,
+  columns or cells waits for a batch of its own against a fresh read. So
+  `insert_rows` then `set_cells r2c3` writes the cell the caller means,
+  in the grid the insertion left. A dry run lists the held-back ops the
+  way it lists other follow-ups and says it cannot resolve them, since
+  the grid they name does not exist yet; what does not depend on that
+  grid (a number below one, a malformed cell name) is still refused
+  before anything is written. The planner keeps its one-change-per-table
+  check as an assertion that the service split correctly. Comment mode
+  does not split, because every op must reach the proposals.
+- **`list_comments` text.** `render.Thread` is now the renderer's model
+  of a comment thread, and `render.Mark` is a located one; the full
+  listing and the one-line summary under a read come from the same code,
+  and the service adds only the count line above it.
+- **`get_document` text.** `Info.text()` in the service; nothing is
+  shaped in the tool layer any more.
 
 ## 18. Evidence log: conventions checked, changed, or rejected
 
@@ -737,7 +750,7 @@ checked rather than assumed.
 | Env-only configuration (inherited) | Mixed: all three clients pass only `env`; github-mcp-server binds flags and env | Env source of truth plus bound flags. |
 | Server-side read-only mode and destructive gating (inherited) | Confirmed (github-mcp-server; spec: annotations untrusted) | Kept; `requiresUserInteraction` on gated tools. |
 | snake_case verb_noun names (inherited) | Mixed: spec allows more; GitHub mixes styles; Anthropic says measure. Measured in the Phase 3 evals: 13 tasks, 15 tool lookups by name, no call to a tool that does not exist | Kept. |
-| Per-block handle prefix opt-in (§7.2) | Evals: the model asked for `with_handles` on three of four reads and targeted by handle as often as by text | Kept opt-in (the cost is per read, the ask is one flag); revisit with a second client. |
+| Per-block handle prefix opt-in (§7.2) | Evals: the model asked for `with_handles` on three of four reads and targeted by handle as often as by text | Flipped to default on (the owner's call, 2026-09-03): the flag is a per-read cost of about 15%, the round trip it saves is a whole read, and an edit targets handles. `with_handles: false` drops them. |
 | A blank paragraph is one whose text is empty (my first fill rule) | Refuted in review: a paragraph holding only an image, a footnote reference or a page-number field also renders as no text, and filling it would delete that content with no guard (an insertion never populates anchors) | Blank means every run is text and the text is whitespace. |
 | A new footnote starts empty (my assumption) | Refuted live: `createFootnote` yields a paragraph holding one space, so an append after it left a blank line the model then deleted | The follow-up replaces a blank first paragraph. |
 | `[class] message` errors (inherited) | Project choice; spec requires only `isError` | Kept as convention. |

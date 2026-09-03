@@ -112,7 +112,7 @@ for the defaults.
 |---|---|
 | `get_document` | Title, tabs, revision id, owner, last change, counts, and this server's capabilities (available write modes, default). Cheap; call it first. |
 | `get_outline` | Heading tree per tab with stable `heading_id`s, block handles, and section sizes. |
-| `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Options show handles, styles, pending suggestions as `{++inserted++}` / `{--deleted--}`, and comment markers `{>>c:id<<}`. |
+| `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Block handles come with the text unless `with_handles` is false; options add styles, pending suggestions as `{++inserted++}` / `{--deleted--}`, and comment markers `{>>c:id<<}`. |
 | `find_in_document` | Text or regex search returning handles, offsets and context. |
 | `search_documents` | Locate documents by title or content, owner, or modification date. |
 | `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
@@ -162,8 +162,11 @@ comments.
 
 Tables are named by handle (`tbl1`) and cells as `r2c3`; a table that
 gets a data grid is inserted empty and filled in a second batch once it
-exists. Old revisions are read and diffed through Google's export, so they
-have no handles.
+exists. Table ops read in order: once one changes the grid, the ops after
+it on that table are applied in a batch of their own, so their row,
+column and cell numbers mean the grid as it is by then.
+Old revisions are read and diffed through Google's export, so they have
+no handles.
 
 ## Safety model
 

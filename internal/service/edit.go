@@ -23,6 +23,11 @@ type Location struct {
 // EditOp is one operation of edit_document or format_document after
 // tool-level validation, before resolution.
 type EditOp struct {
+	// Seq is the caller's op number, stamped by numbered() on the way in.
+	// It travels with the op so that one held back for a later batch is
+	// still named as the caller sent it. A path that builds EditOps
+	// itself must set it, or every op reports as op 0.
+	Seq           int
 	Kind          plan.OpKind
 	Target        *Target
 	Location      *Location
@@ -90,9 +95,7 @@ func (r *EditResult) text() string {
 	if len(r.CommentIDs) > 0 {
 		fmt.Fprintf(&b, "comment ids: %s\n", strings.Join(r.CommentIDs, ", "))
 	}
-	for _, w := range r.Warnings {
-		fmt.Fprintf(&b, "warning: %s\n", w)
-	}
+	writeWarnings(&b, r.Warnings)
 	if r.DryRun && len(r.Proposals) > 0 {
 		b.WriteString("proposed comments:\n")
 		for _, p := range r.Proposals {
@@ -140,15 +143,26 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 	if err := validateEditRequest(req); err != nil {
 		return nil, err
 	}
+	req.Ops = numbered(req.Ops)
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.editFetched(ctx, f, req)
+	res, _, err := s.editFetched(ctx, f, req)
 	if res != nil {
 		res.Text = res.text()
 	}
 	return res, err
+}
+
+// numbered stamps each op with its place in the call.
+func numbered(ops []EditOp) []EditOp {
+	out := make([]EditOp, len(ops))
+	for i, op := range ops {
+		op.Seq = i
+		out[i] = op
+	}
+	return out
 }
 
 func validateEditRequest(req EditRequest) error {
@@ -162,43 +176,65 @@ func validateEditRequest(req EditRequest) error {
 }
 
 // editFetched plans against a document the caller already holds. A
-// revision conflict is re-planned once against a fresh read.
-func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) (*EditResult, error) {
+// revision conflict is re-planned once against a fresh read. It returns
+// the read taken after the last batch, which a caller chaining batches
+// passes to the next one instead of taking its own.
+func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) (*EditResult, *Fetched, error) {
 	mode, err := s.mode(req.Mode)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := validateEditRequest(req); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := checkRevision(req.ExpectRevision, f.Doc.RevisionID, "editing"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	result, ro, err := s.planAndApply(ctx, f, req, mode)
+	// A grid change renumbers the table's rows and columns, so the second
+	// and later changes of one table wait for a batch of their own. In
+	// comment mode nothing is applied and every op must reach the
+	// proposals, so the ops stay together.
+	batch, later := req, [][]EditOp(nil)
+	if mode != plan.ModeComment {
+		batch.Ops, later = chainStructural(req.Ops)
+		if err := precheckLater(later); err != nil {
+			return nil, nil, err
+		}
+	}
+	result, ro, err := s.planAndApply(ctx, f, batch, mode)
 	if errors.Is(err, gapi.ErrConflict) {
 		s.log.InfoContext(ctx, "revision conflict; re-planning once", "doc", gapi.ShortID(f.Doc.ID))
 		if f, err = s.FetchFresh(ctx, req.Document); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := checkRevision(req.ExpectRevision, f.Doc.RevisionID, "editing"); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		result, ro, err = s.planAndApply(ctx, f, req, mode)
+		result, ro, err = s.planAndApply(ctx, f, batch, mode)
 		if errors.Is(err, gapi.ErrConflict) {
-			return nil, Errorf("conflict", "the document changed twice while planning this edit; re-read and try again")
+			return nil, nil, Errorf("conflict", "the document changed twice while planning this edit; re-read and try again")
 		}
 	}
-	if err != nil || req.DryRun {
-		return result, err
-	}
-	result.Applied = len(req.Ops)
-	if mode != plan.ModeComment && len(ro.planned.Followups) > 0 {
-		s.runFollowups(ctx, f, req, ro, result)
-	}
-	after, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
-		result.Warnings = append(result.Warnings, "applied, but re-reading the document failed: "+err.Error())
-		return result, nil //nolint:nilerr // the edit was applied; report it with a warning
+		return result, nil, err
+	}
+	if req.DryRun {
+		result.Followups = append(result.Followups, describeRounds(later)...)
+		return result, nil, nil
+	}
+	result.Applied = len(batch.Ops)
+	var after *Fetched
+	if mode != plan.ModeComment && len(ro.planned.Followups) > 0 {
+		after = s.runFollowups(ctx, f, req, ro, result)
+	}
+	if len(later) > 0 {
+		after = s.runRounds(ctx, req, later, result, after)
+	}
+	if after == nil {
+		if after, err = s.FetchFresh(ctx, req.Document); err != nil {
+			result.Warnings = append(result.Warnings, "applied, but re-reading the document failed: "+err.Error())
+			return result, nil, nil //nolint:nilerr // the edit was applied; report it with a warning
+		}
 	}
 	// The caller sees the post-edit handles in the preview, so they are
 	// what later writes must be checked against.
@@ -208,7 +244,7 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	}
 	result.RevisionID = after.Doc.RevisionID
 	result.Preview = regionPreview(after.Doc, ro)
-	return result, nil
+	return result, after, nil
 }
 
 // blocksShifted reports whether a segment gained or lost top-level blocks
@@ -324,7 +360,8 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 			break
 		}
 	}
-	for i, op := range ops {
+	for _, op := range ops {
+		i := op.Seq
 		if op.Kind == plan.OpSetCells {
 			expanded, err := s.expandSetCells(f, i, op, out)
 			if err != nil {

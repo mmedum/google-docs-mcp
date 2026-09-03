@@ -95,6 +95,8 @@ show("create", err, text)
 doc = sc.get("id")
 open(OUT + "/last-doc-id.txt", "w").write(doc or "")
 
+err, text, _ = call("read_document", {"document": doc, "with_handles": False})
+show("read without handles (they come by default now)", err, text, 600)
 err, text, _ = call("read_document", {"document": doc, "with_handles": True})
 show("read after create", err, text, 1500)
 
@@ -227,6 +229,12 @@ show("delete row 3 (blocked with preview: it holds a pending suggestion)", err, 
 if err:
     err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "force": True, "ops": [{"op": "delete_rows", "table": tbl, "row_numbers": [3]}]})
     show("delete row 3 forced", err, text, 600)
+err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [
+    {"op": "insert_rows", "table": tbl, "row": 1, "count": 1},
+    {"op": "insert_columns", "table": tbl, "column": 1, "count": 1},
+    {"op": "delete_columns", "table": tbl, "column_numbers": [1]},
+]})
+show("three grid changes on one table: one batch each, renumbered between", err, text, 900)
 err, text, _ = call("read_document", {"document": doc, "with_handles": True, "heading": "Next steps"})
 show("read table after structure ops", err, text, 1000)
 

@@ -7,6 +7,28 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+- `read_document` shows block handles (`[p12]`) and heading ids by
+  default; pass `with_handles: false` to drop them. The evals had the
+  model asking for them on three of four reads, and an edit targets a
+  handle, so the flag cost a round trip more often than it saved tokens.
+- `edit_table` accepts several changes to one table's grid in one call,
+  and its ops now read strictly in order: once an op changes a table's
+  grid, the ops that follow it on that table are applied in a batch of
+  their own against a fresh read, so their row, column and cell numbers
+  mean the grid as it is by then. `insert_rows` followed by
+  `set_cells r2c3` therefore writes the cell in the grid the insertion
+  left, where before the two shared a batch and the cell meant the old
+  grid. A dry run lists the held-back ops under `followups` and says it
+  cannot resolve them yet; a number below one or a malformed cell name
+  in one of them still refuses the call before anything is written.
+  Comment mode is unchanged: nothing is applied, so every op stays in
+  the proposals.
+- Internal, with no change to what a tool returns: every result's text is
+  shaped in one place. `get_document`'s moved out of the tool layer into
+  the service, and the comment listing and the one-line thread summary
+  under a read now come from one renderer model (`render.Thread`).
+
 ## [0.3.0] - 2026-09-03
 
 ### Added

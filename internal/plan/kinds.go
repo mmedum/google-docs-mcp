@@ -174,8 +174,9 @@ func KindList(t Tool) string {
 // what the overwrite guard protects.
 func Deletes(k OpKind) bool { return kindInfos[k].Deletes }
 
-// isStructural reports whether the op changes a table's grid.
-func isStructural(k OpKind) bool { return kindInfos[k].Structural }
+// Structural reports whether the op changes a table's grid, which
+// renumbers the rows or columns that later ops name.
+func Structural(k OpKind) bool { return kindInfos[k].Structural }
 
 // NeedsFollowup reports whether the op creates something whose content
 // is inserted in a second batch: a header, footer or footnote with

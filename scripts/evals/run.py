@@ -382,7 +382,7 @@ TASKS = [
 # ---- measures across tasks ---------------------------------------------------
 
 def measures(traces, known):
-    m = {"read_document calls": 0, "reads with format text": 0, "reads with with_handles": 0, "reads whole body (no scope)": 0, "reads with max_chars set": 0,
+    m = {"read_document calls": 0, "reads with format text": 0, "reads that turned handles off": 0, "reads whole body (no scope)": 0, "reads with max_chars set": 0,
          "targets by text": 0, "targets by handle": 0, "targets by heading": 0, "targets by cell": 0, "dry runs": 0, "tool errors": 0, "unknown tools": 0,
          "get_document first": 0, "tool searches (deferred tool lookups)": 0}
     for name, tr in traces.items():
@@ -398,8 +398,8 @@ def measures(traces, known):
                 m["read_document calls"] += 1
                 if (inp.get("format") or "").lower() == "text":
                     m["reads with format text"] += 1
-                if inp.get("with_handles"):
-                    m["reads with with_handles"] += 1
+                if inp.get("with_handles") is False:
+                    m["reads that turned handles off"] += 1
                 if inp.get("max_chars"):
                     m["reads with max_chars set"] += 1
                 if not any(inp.get(k) for k in ("heading_id", "heading", "from_handle", "tab", "segment", "continue_from")):

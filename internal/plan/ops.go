@@ -455,9 +455,12 @@ func checkOverlaps(ops []Op) error {
 			// The table's first index stands for the whole grid: a delete of
 			// the table block overlaps it, cell edits inside it do not.
 			spans = append(spans, span{op, op.TableAt.Index, op.TableAt.Index + 1})
-			if isStructural(op.Kind) {
+			if Structural(op.Kind) {
+				// The service splits a call so that one batch holds at most
+				// one change to a table's grid; this asserts it did, for a
+				// caller that reaches the planner directly.
 				if prev := structural[*op.TableAt]; prev != nil {
-					return fmt.Errorf("ops %d and %d both change the grid of %s; rows and columns renumber after the first, so split them into separate calls", prev.Seq, op.Seq, op.Description)
+					return fmt.Errorf("ops %d and %d both change the grid of %s; rows and columns renumber after the first, so they cannot go in one batch", prev.Seq, op.Seq, op.Description)
 				}
 				structural[*op.TableAt] = op
 			}

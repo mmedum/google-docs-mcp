@@ -2,8 +2,6 @@ package tools
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -45,7 +43,7 @@ type ReadInput struct {
 	ToHandle           string `json:"to_handle,omitempty" jsonschema:"last block handle of the range, inclusive"`
 	ContinueFrom       string `json:"continue_from,omitempty" jsonschema:"the continue_from handle returned by a truncated read; resumes there"`
 	Format             string `json:"format,omitempty" jsonschema:"markdown (default), text, or raw (Docs API JSON for the scoped blocks)"`
-	WithHandles        bool   `json:"with_handles,omitempty" jsonschema:"prefix every block with its handle like [p12] and headings with {heading_id}; needed before targeting specific blocks; costs about 15% more tokens"`
+	WithHandles        *bool  `json:"with_handles,omitempty" jsonschema:"prefix every block with its handle like [p12] and headings with {heading_id}; on by default because handles are what an edit targets; pass false to save about 15% of the tokens"`
 	WithStyles         bool   `json:"with_styles,omitempty" jsonschema:"annotate fonts, sizes, colours, underline and alignment that markdown cannot express, e.g. {font: Arial 11pt, color: #c00}"`
 	IncludeSuggestions bool   `json:"include_suggestions,omitempty" jsonschema:"show pending suggested edits as CriticMarkup: {++inserted++} and {--deleted--} followed by {>>s:<suggestion id><<}; default shows the committed text without them"`
 	IncludeComments    bool   `json:"include_comments,omitempty" jsonschema:"mark commented passages with {>>c:<comment id><<} right after the text they cover and list those threads below the content"`
@@ -66,7 +64,7 @@ func registerRead(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(infoText(info)), nil, nil
+		return text(info.Text), nil, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -90,10 +88,10 @@ func registerRead(s *mcp.Server, d Deps) {
 			"Scope it to one section with heading_id (from get_outline) or heading text, to a block range with " +
 			"from_handle/to_handle, to another tab with tab, or to a header, footer or footnote with segment; " +
 			"with no scope it reads the whole body of the first tab. Output is budgeted by max_chars (default 20000 " +
-			"characters); when truncated the result carries continue_from to pass back. Set with_handles to see block " +
-			"handles ([p12]) and heading ids before targeting content, with_styles to see formatting markdown cannot " +
-			"show, include_suggestions to see pending suggested edits inline as {++inserted++} / {--deleted--}, and " +
-			"include_comments to see {>>c:id<<} markers after commented passages with the threads listed below. " +
+			"characters); when truncated the result carries continue_from to pass back. Block handles ([p12]) and heading " +
+			"ids come with the text unless with_handles is false; with_styles adds formatting markdown cannot show, " +
+			"include_suggestions shows pending suggested edits inline as {++inserted++} / {--deleted--}, and " +
+			"include_comments marks commented passages with {>>c:id<<} and lists those threads below. " +
 			"Empty paragraphs are kept so structure is faithful. Handles are valid for the revision_id returned.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
@@ -128,7 +126,7 @@ func registerRead(s *mcp.Server, d Deps) {
 				FromHandle: in.FromHandle, ToHandle: in.ToHandle, ContinueFrom: in.ContinueFrom,
 			},
 			Format:          in.Format,
-			Options:         render.Options{WithHandles: in.WithHandles, WithStyles: in.WithStyles, Suggestions: in.IncludeSuggestions, MaxChars: maxChars},
+			Options:         render.Options{WithHandles: in.WithHandles == nil || *in.WithHandles, WithStyles: in.WithStyles, Suggestions: in.IncludeSuggestions, MaxChars: maxChars},
 			IncludeComments: in.IncludeComments,
 		})
 		if err != nil {
@@ -136,39 +134,4 @@ func registerRead(s *mcp.Server, d Deps) {
 		}
 		return text(res.Text), nil, nil
 	})
-}
-
-func infoText(i *service.Info) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n%s\nrevision %s\n", i.Title, i.URL, i.RevisionID)
-	if i.Owner != "" {
-		fmt.Fprintf(&b, "owner %s\n", i.Owner)
-	}
-	if i.LastModified != "" {
-		fmt.Fprintf(&b, "last modified %s", i.LastModified)
-		if i.LastModifiedBy != "" {
-			fmt.Fprintf(&b, " by %s", i.LastModifiedBy)
-		}
-		b.WriteString("\n")
-	}
-	st := i.Stats
-	fmt.Fprintf(&b, "%d tab(s), %d paragraphs, %d headings, %d tables, %d inline objects, %d footnotes, %d words",
-		st.Tabs, st.Paragraphs, st.Headings, st.Tables, st.InlineObjects, st.Footnotes, st.Words)
-	if st.Suggestions > 0 {
-		fmt.Fprintf(&b, ", %d pending suggestion(s)", st.Suggestions)
-	}
-	b.WriteString("\n")
-	for _, t := range i.Tabs {
-		fmt.Fprintf(&b, "- tab %d %q", t.Number, t.Title)
-		if t.ID != "" {
-			fmt.Fprintf(&b, " (id %s)", t.ID)
-		}
-		fmt.Fprintf(&b, ": %d headings, %d blocks\n", t.Headings, t.Blocks)
-	}
-	c := i.Capabilities
-	fmt.Fprintf(&b, "server: write modes %s (default %s), preview %t, read-only %t\n", strings.Join(c.WriteModes, "/"), c.DefaultWriteMode, c.Preview, c.ReadOnly)
-	for _, w := range i.Warnings {
-		fmt.Fprintf(&b, "warning: %s\n", w)
-	}
-	return strings.TrimRight(b.String(), "\n")
 }

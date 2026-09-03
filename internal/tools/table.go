@@ -43,7 +43,7 @@ type TableOpInput struct {
 // TableInput is the edit_table call.
 type TableInput struct {
 	Document       string         `json:"document" jsonschema:"document id or any docs.google.com URL"`
-	Ops            []TableOpInput `json:"ops" jsonschema:"operations applied together; at most one op that changes a table's grid (rows, columns, merges) per table per call"`
+	Ops            []TableOpInput `json:"ops" jsonschema:"operations applied in order; after an op changes a table's grid (rows, columns, merges) the ops that follow it on that table are applied in a batch of their own, so their row, column and cell numbers mean the grid as it is by then"`
 	Mode           string         `json:"mode,omitempty" jsonschema:"suggest, direct or comment; default from get_document capabilities"`
 	DryRun         bool           `json:"dry_run,omitempty"`
 	ExpectRevision string         `json:"expect_revision,omitempty"`

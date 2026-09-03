@@ -32,20 +32,17 @@ type Options struct {
 	CommentFooter bool
 }
 
-// Mark is a comment thread. Located threads name the segment and range
-// they sit on; an unlocated one (no handle) is only counted.
+// Mark is a comment thread where a read found it. A located thread names
+// the segment and range it sits on; an unlocated one (no handle) is only
+// counted. Replies is a count, not the posts: the footer says how many
+// there are, and list_comments is where they are read.
 type Mark struct {
 	TabID     string
 	SegmentID string
 	Start     int64
 	End       int64
-	ID        string
-
-	Handle   string
-	Author   string
-	Content  string
-	Resolved bool
-	Replies  int
+	Thread    Thread
+	Replies   int
 }
 
 func (o Options) view() doc.View {
@@ -67,12 +64,12 @@ func suggestionKey(ids []string) string { return strings.Join(ids, ",") }
 
 // locatedIn reports whether the thread was located in this segment.
 func (m Mark) locatedIn(seg *doc.Segment) bool {
-	return m.Handle != "" && m.SegmentID == seg.ID && m.TabID == seg.Tab.ID
+	return m.Thread.Handle != "" && m.SegmentID == seg.ID && m.TabID == seg.Tab.ID
 }
 
 // marksFor keeps the located marks of one segment, sorted by end offset.
 func marksFor(marks []Mark, seg *doc.Segment) []Mark {
-	var out []Mark
+	out := make([]Mark, 0, len(marks))
 	for _, m := range marks {
 		if m.locatedIn(seg) {
 			out = append(out, m)
@@ -101,14 +98,8 @@ func commentFooter(seg *doc.Segment, from int, res Result, marks []Mark) string 
 			other++
 			continue
 		}
-		fmt.Fprintf(&sb, "\n- c:%s [%s]", m.ID, m.Handle)
-		if m.Author != "" {
-			sb.WriteString(" by " + m.Author)
-		}
-		if m.Resolved {
-			sb.WriteString(" [resolved]")
-		}
-		sb.WriteString(": " + doc.OneLine(m.Content))
+		sb.WriteString("\n")
+		threadLine(&sb, m.Thread, "c:")
 		if n := m.Replies; n > 0 {
 			label := "replies"
 			if n == 1 {
@@ -175,7 +166,7 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable
 				cut := min(doc.UTF16ToByte(text, m.End-pos), len(text))
 				addText(text[:cut], r)
 				flush()
-				b.WriteString("{>>c:" + m.ID + "<<}")
+				b.WriteString("{>>c:" + m.Thread.ID + "<<}")
 				text, pos = text[cut:], m.End
 			}
 			addText(text, r)
@@ -227,7 +218,7 @@ func textWithMarks(p *doc.Paragraph, view doc.View, marks []Mark) string {
 					continue
 				}
 				cut := min(doc.UTF16ToByte(text, m.End-pos), len(text))
-				b.WriteString(text[:cut] + "{>>c:" + m.ID + "<<}")
+				b.WriteString(text[:cut] + "{>>c:" + m.Thread.ID + "<<}")
 				text, pos = text[cut:], m.End
 			}
 			b.WriteString(text)

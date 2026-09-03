@@ -138,8 +138,8 @@ func TestPlanInsertDeleteOrderingAndOverlap(t *testing.T) {
 		{Seq: 0, Kind: OpInsert, Seg: s, Insert: &Loc{Index: 10, TabID: "t.0"}, Fragment: frag(t, "early"), Description: "before p2"},
 		{Seq: 1, Kind: OpDelete, Seg: s, Target: &Rng{Start: 50, End: 60, TabID: "t.0"}, TargetIsBlock: true, Description: "p5"},
 		{Seq: 2, Kind: OpAppend, Seg: s, Insert: &Loc{Index: 99, TabID: "t.0"}, AtEnd: true, Fragment: frag(t, "tail"), Description: "end"},
-		{Seq: 3, Kind: OpTextStyle, Seg: s, Target: &Rng{Start: 5, End: 8, TabID: "t.0"}, Text: TextStyleSpec{Bold: boolp(true)}, Description: "word"},
-		{Seq: 4, Kind: OpReplaceAll, Seg: s, Find: "a", Replace: "b"},
+		{Seq: 3, Kind: OpTextStyle, Seg: s, Target: &Rng{Start: 5, End: 8, TabID: "t.0"}, Params: Params{Text: TextStyleSpec{Bold: new(true)}}, Description: "word"},
+		{Seq: 4, Kind: OpReplaceAll, Seg: s, Params: Params{Find: "a", Replace: "b"}},
 	}
 	res, err := Plan(ops, Options{})
 	if err != nil {
@@ -198,14 +198,11 @@ func TestGuard(t *testing.T) {
 	s := seg()
 	anchors := []Anchor{{Kind: "comment", ID: "c1", Start: 12, End: 20}, {Kind: "suggestion", ID: "s1", Start: 15, End: 18}, {Kind: "suggestion", ID: "s2", Start: 16, End: 17}}
 	op := Op{Seq: 0, Kind: OpDelete, Seg: s, Target: &Rng{Start: 10, End: 30}, TargetIsBlock: true, Description: "p2", Anchors: anchors}
-	res, err := Plan([]Op{op}, Options{Mode: ModeDirect})
+	_, err := Plan([]Op{op}, Options{Mode: ModeDirect})
 	if !errors.Is(err, ErrBlocked) || !strings.Contains(err.Error(), "1 comment (c1) and 2 suggestions (s1, s2)") || !strings.Contains(err.Error(), "force: true") {
 		t.Fatalf("guard: %v", err)
 	}
-	if len(res.Guard) != 1 {
-		t.Fatalf("guard hits = %+v", res.Guard)
-	}
-	res, err = Plan([]Op{op}, Options{Mode: ModeDirect, Force: true})
+	res, err := Plan([]Op{op}, Options{Mode: ModeDirect, Force: true})
 	if err != nil || len(res.Requests) != 1 || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "forced") {
 		t.Fatalf("forced: %+v %v", res, err)
 	}
@@ -226,10 +223,10 @@ func TestCommentModeProposals(t *testing.T) {
 		{Seq: 0, Kind: OpReplace, Seg: s, Target: &Rng{Start: 10, End: 20}, TargetText: "old words", Fragment: frag(t, "new words"), Description: "p2"},
 		{Seq: 1, Kind: OpDelete, Seg: s, Target: &Rng{Start: 30, End: 40}, TargetText: "gone", Description: "p3"},
 		{Seq: 2, Kind: OpInsert, Seg: s, Insert: &Loc{Index: 50}, CommentAnchor: &Rng{Start: 50, End: 60}, Fragment: frag(t, "added"), Description: "after p4"},
-		{Seq: 3, Kind: OpTextStyle, Seg: s, Target: &Rng{Start: 5, End: 8}, TargetText: "word", Text: TextStyleSpec{Bold: boolp(true), Italic: boolp(false), Font: "Arial", SizePt: 11, Foreground: "#ff0000", Link: "https://x"}},
-		{Seq: 4, Kind: OpParagraphStyle, Seg: s, Target: &Rng{Start: 5, End: 8}, TargetText: "para", Para: ParagraphStyleSpec{NamedStyle: "HEADING_2", Alignment: "CENTER", LineSpacing: 150, IndentStartPt: floatp(36), KeepWithNext: boolp(true)}},
-		{Seq: 5, Kind: OpBullets, Seg: s, Target: &Rng{Start: 5, End: 8}, Bullets: "numbered"},
-		{Seq: 6, Kind: OpReplaceAll, Seg: s, Find: "a", Replace: "b", CommentAnchor: &Rng{Start: 1, End: 2}},
+		{Seq: 3, Kind: OpTextStyle, Seg: s, Target: &Rng{Start: 5, End: 8}, TargetText: "word", Params: Params{Text: TextStyleSpec{Bold: new(true), Italic: new(false), Font: "Arial", SizePt: 11, Foreground: "#ff0000", Link: "https://x"}}},
+		{Seq: 4, Kind: OpParagraphStyle, Seg: s, Target: &Rng{Start: 5, End: 8}, TargetText: "para", Params: Params{Para: ParagraphStyleSpec{NamedStyle: "HEADING_2", Alignment: "CENTER", LineSpacing: 150, IndentStartPt: floatp(36), KeepWithNext: new(true)}}},
+		{Seq: 5, Kind: OpBullets, Seg: s, Target: &Rng{Start: 5, End: 8}, Params: Params{Bullets: "numbered"}},
+		{Seq: 6, Kind: OpReplaceAll, Seg: s, Params: Params{Find: "a", Replace: "b"}, CommentAnchor: &Rng{Start: 1, End: 2}},
 		{Seq: 7, Kind: OpClearFormatting, Seg: s, Target: &Rng{Start: 5, End: 8}, TargetText: "x"},
 		{Seq: 8, Kind: OpPageBreak, Seg: s, Insert: &Loc{Index: 9}, CommentAnchor: &Rng{Start: 9, End: 10}, Description: "after p1"},
 		{Seq: 9, Kind: OpCreateHeader, Seg: s, Fragment: frag(t, "Header text"), CommentAnchor: &Rng{Start: 1, End: 2}},
@@ -274,7 +271,7 @@ func TestValidation(t *testing.T) {
 		{Kind: OpReplace, Seg: s, Target: &Rng{}},
 		{Kind: OpTextStyle, Seg: s, Target: &Rng{}},
 		{Kind: OpParagraphStyle, Seg: s, Target: &Rng{}},
-		{Kind: OpBullets, Seg: s, Target: &Rng{}, Bullets: "stars"},
+		{Kind: OpBullets, Seg: s, Target: &Rng{}, Params: Params{Bullets: "stars"}},
 		{Kind: OpReplaceAll, Seg: s},
 		{Kind: OpKind("explode"), Seg: s},
 		{Kind: OpCreateFooter, Seg: s},
@@ -291,10 +288,10 @@ func TestFollowupsAndFormats(t *testing.T) {
 	ops := []Op{
 		{Seq: 0, Kind: OpCreateHeader, Seg: s, Fragment: frag(t, "Draft")},
 		{Seq: 1, Kind: OpFootnote, Seg: s, Insert: &Loc{Index: 20, TabID: "t.0"}, Fragment: frag(t, "Source"), Description: "after word"},
-		{Seq: 2, Kind: OpBullets, Seg: s, Target: &Rng{Start: 30, End: 40}, Bullets: "none"},
-		{Seq: 3, Kind: OpBullets, Seg: s, Target: &Rng{Start: 30, End: 40}, Bullets: "checkbox"},
+		{Seq: 2, Kind: OpBullets, Seg: s, Target: &Rng{Start: 30, End: 40}, Params: Params{Bullets: "none"}},
+		{Seq: 3, Kind: OpBullets, Seg: s, Target: &Rng{Start: 30, End: 40}, Params: Params{Bullets: "checkbox"}},
 		{Seq: 4, Kind: OpClearFormatting, Seg: s, Target: &Rng{Start: 30, End: 40}},
-		{Seq: 5, Kind: OpParagraphStyle, Seg: s, Target: &Rng{Start: 30, End: 40}, Para: ParagraphStyleSpec{NamedStyle: "TITLE"}},
+		{Seq: 5, Kind: OpParagraphStyle, Seg: s, Target: &Rng{Start: 30, End: 40}, Params: Params{Para: ParagraphStyleSpec{NamedStyle: "TITLE"}}},
 		{Seq: 6, Kind: OpPageBreak, Seg: s, Insert: &Loc{Index: 60}},
 	}
 	res, err := Plan(ops, Options{Mode: ModeSuggest})
@@ -308,7 +305,7 @@ func TestFollowupsAndFormats(t *testing.T) {
 	if !strings.HasPrefix(got, "deleteParagraphBullets[30,40) createParagraphBullets[30,40) updateTextStyle[30,40) updateParagraphStyle[30,40) insertPageBreak[0,0) createFootnote[0,0) createHeader[0,0)") {
 		t.Fatalf("order: %s", got)
 	}
-	if !SuggestModeUnsupported["deleteTab"] || LengthOf("🎉") != 2 {
+	if !SuggestModeUnsupported["deleteTab"] {
 		t.Fatal("helpers")
 	}
 }

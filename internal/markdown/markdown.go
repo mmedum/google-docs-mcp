@@ -106,6 +106,21 @@ func (f *Fragment) SingleParagraph() (string, bool) {
 	return f.Blocks[0].Text(), true
 }
 
+// Plain wraps verbatim text as a fragment: one paragraph per line, no
+// formatting.
+func Plain(text string) *Fragment {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	f := &Fragment{Blocks: make([]*Block, 0, len(lines))}
+	for i, line := range lines {
+		b := &Block{Kind: KindParagraph, Line: i + 1}
+		if line != "" {
+			b.Inlines = []Inline{{Text: line}}
+		}
+		f.Blocks = append(f.Blocks, b)
+	}
+	return f
+}
+
 // UnsupportedError names a construct the Docs API cannot take.
 type UnsupportedError struct {
 	Construct string

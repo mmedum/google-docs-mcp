@@ -3,10 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"strings"
 
+	"github.com/mmedum/google-docs-mcp/internal/config"
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/internal/gdocs"
@@ -53,20 +52,32 @@ type Info struct {
 }
 
 func (s *Service) capabilities() Capabilities {
-	c := Capabilities{Preview: s.opts.Preview, DefaultWriteMode: string(s.opts.DefaultWriteMode), ReadOnly: s.opts.ReadOnly}
-	for _, m := range s.opts.WriteModes {
+	c := Capabilities{Preview: s.opts.Preview, DefaultWriteMode: string(s.opts.DefaultWriteMode), ReadOnly: s.opts.ReadOnly, WriteModes: []string{}}
+	for _, m := range (config.Config{Preview: s.opts.Preview}).AvailableWriteModes() {
 		c.WriteModes = append(c.WriteModes, string(m))
-	}
-	if c.WriteModes == nil {
-		c.WriteModes = []string{}
 	}
 	return c
 }
 
-// Info describes a document: structure counts plus Drive metadata.
+// Info describes a document: structure counts plus Drive metadata. The
+// two Google calls need only the id, so they run concurrently.
 func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
-	f, err := s.Fetch(ctx, ref)
+	id, err := doc.ParseID(ref)
 	if err != nil {
+		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", ref)
+	}
+	type fileResult struct {
+		file *gapi.File
+		err  error
+	}
+	fileCh := make(chan fileResult, 1)
+	go func() {
+		file, err := s.api.GetFile(ctx, id)
+		fileCh <- fileResult{file, err}
+	}()
+	f, err := s.Fetch(ctx, id)
+	if err != nil {
+		<-fileCh
 		return nil, err
 	}
 	d := f.Doc
@@ -81,11 +92,12 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 		}
 		info.Tabs = append(info.Tabs, ti)
 	}
-	file, err := s.api.GetFile(ctx, d.ID)
-	if err != nil {
-		info.Warnings = append(info.Warnings, "Drive metadata unavailable: "+wrapAPI(err, "file").Error())
-		return info, nil
+	fr := <-fileCh
+	if fr.err != nil {
+		info.Warnings = append(info.Warnings, "Drive metadata unavailable: "+wrapAPI(fr.err, "file").Error())
+		return info, nil //nolint:nilerr // the document itself was read; Drive metadata is optional
 	}
+	file := fr.file
 	if len(file.Owners) > 0 {
 		info.Owner = userLabel(file.Owners[0])
 	}
@@ -133,11 +145,9 @@ func (s *Service) Outline(ctx context.Context, ref, tab string) (*OutlineResult,
 	}
 	var only *doc.Tab
 	if tab != "" {
-		t, ok := f.Doc.Tab(tab)
-		if !ok {
-			return nil, Errorf("not_found", "no tab %q; tabs: %s", tab, tabList(f.Doc))
+		if only, err = tabOf(f.Doc, tab); err != nil {
+			return nil, err
 		}
-		only = t
 	}
 	tabs := render.OutlineData(f.Doc, only)
 	return &OutlineResult{Text: render.Outline(f.Doc, tabs), RevisionID: f.Doc.RevisionID, Tabs: tabs}, nil
@@ -215,7 +225,7 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error
 func rawJSON(w *gdocs.Document, rs Resolved, maxChars int) (render.Result, error) {
 	elems := wireElements(w, rs.Tab, rs.Segment)
 	if elems == nil {
-		return render.Result{}, errors.New("[unexpected] raw content not found for this segment")
+		return render.Result{}, Errorf("unexpected", "raw content not found for this segment")
 	}
 	var res render.Result
 	var sb strings.Builder
@@ -223,7 +233,7 @@ func rawJSON(w *gdocs.Document, rs Resolved, maxChars int) (render.Result, error
 	for i := rs.From; i < rs.To && i < len(elems); i++ {
 		data, err := json.Marshal(elems[i])
 		if err != nil {
-			return render.Result{}, fmt.Errorf("[unexpected] encode element: %w", err)
+			return render.Result{}, Errorf("unexpected", "encode element: %v", err)
 		}
 		if res.Blocks > 0 && maxChars > 0 && sb.Len()+len(data)+2 > maxChars {
 			res.Truncated = true

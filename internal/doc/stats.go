@@ -1,5 +1,7 @@
 package doc
 
+import "unicode/utf8"
+
 // Stats are document-wide counts, computed over every tab's body.
 type Stats struct {
 	Tabs          int `json:"tabs"`
@@ -35,7 +37,7 @@ func (d *Document) Stats() Stats {
 				}
 				text := b.Paragraph.Text(ViewCurrent)
 				st.Words += WordCount(text)
-				st.Chars += len([]rune(text))
+				st.Chars += utf8.RuneCountInString(text)
 				for _, r := range b.Paragraph.Runs {
 					if r.Kind == RunInlineObject && !r.IsSuggestedInsertion() {
 						st.InlineObjects++

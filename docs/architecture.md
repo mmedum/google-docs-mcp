@@ -617,6 +617,33 @@ headers/footers/footnotes, images and chips.
 None. Everything in §15 is decided; the next step is Phase 0 (§16), which
 begins only on an explicit go.
 
+## 17a. Deferred cleanups
+
+Findings from the Phase 1 review that were judged right but too wide to
+apply before Phase 2, kept here so they are not forgotten:
+
+- **One resolver for reads and writes.** `ResolveScope` (reads) and
+  `ResolveTarget` (writes) implement heading, heading-id, handle and
+  handle-range selection twice with different handle validation. Phase 2
+  adds cell and tab selectors; they go into a single block-range resolver
+  that both call.
+- **A per-fetch anchor index.** Comments are located by quoted text on
+  every edit and suggestions by re-scanning runs; `list_comments`,
+  `read_document include_comments` and `add_comment` need the same index.
+  Build it once per `Fetched` and share it with the guard and the renderer.
+- **Raw view in the renderer.** The `raw` read format lives in the service
+  with its own budget loop because `doc.Block` does not keep its wire
+  element; keep the wire pointer on the block and move it to `render`.
+- **An op-kind table in `plan`.** Which kinds need a target, an insertion
+  point or content is answered by switches in tools, service and plan;
+  a single table should drive validation, grouping and the tool's
+  allowed-op lists.
+- **Result text shaping.** Some results are rendered to text in the
+  service, others in the tools; settle on the tools.
+- **Segment identity on `plan.Op`.** `Seg`, `Target`, `Insert` and
+  `CommentAnchor` each carry the tab and segment ids; the request
+  builders could take a segment once.
+
 ## 18. Evidence log: conventions checked, changed, or rejected
 
 Verified 2026-09-02/03 against primary sources. "Inherited" means the

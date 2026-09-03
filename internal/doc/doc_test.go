@@ -222,7 +222,7 @@ func TestNormalizeAndWords(t *testing.T) {
 	cases := map[string]string{
 		"“Smart”  quotes and ‘apostrophes’": `"Smart" quotes and 'apostrophes'`,
 		"  dash – and — em\t":               "dash - and - em",
-		"a\u200bb\u2026":                    "ab...",
+		"a\u200bb\u2026":                    "ab…",
 	}
 	for in, want := range cases {
 		if got := doc.Normalize(in); got != want {

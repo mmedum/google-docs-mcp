@@ -11,9 +11,6 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/service"
 )
 
-// DefaultMaxChars is the read budget when none is given (about 5k tokens).
-const DefaultMaxChars = 20000
-
 // MaxMaxChars caps a caller's budget.
 const MaxMaxChars = 400000
 
@@ -115,7 +112,7 @@ func registerRead(s *mcp.Server, d Deps) {
 		}
 		maxChars := in.MaxChars
 		if maxChars == 0 {
-			maxChars = DefaultMaxChars
+			maxChars = service.DefaultMaxChars
 		}
 		if maxChars > MaxMaxChars {
 			maxChars = MaxMaxChars

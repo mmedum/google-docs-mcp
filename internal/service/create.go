@@ -27,8 +27,8 @@ type CreateResult struct {
 // Create makes a document and, when content is given, writes it directly
 // (a new document has nothing to suggest against).
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult, error) {
-	if s.opts.ReadOnly {
-		return nil, Errorf("forbidden", "this server runs read-only (GDOCS_READ_ONLY=true)")
+	if err := s.requireWritable(); err != nil {
+		return nil, err
 	}
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
@@ -42,7 +42,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if strings.TrimSpace(req.Content) == "" {
 		return res, nil
 	}
-	edit, err := s.Edit(ctx, EditRequest{Document: d.DocumentID, Mode: string(plan.ModeDirect), Ops: []EditOp{{Kind: plan.OpAppend, Content: req.Content, ContentFormat: req.ContentFormat}}})
+	// The create reply is the whole (empty) document, so the edit plans
+	// against it without another read.
+	f, err := s.adopt(d)
+	if err != nil {
+		return nil, err
+	}
+	edit, err := s.editFetched(ctx, f, EditRequest{Document: d.DocumentID, Mode: string(plan.ModeDirect), Ops: []EditOp{{Kind: plan.OpAppend, Content: req.Content, ContentFormat: req.ContentFormat}}})
 	if err != nil {
 		res.Warnings = append(res.Warnings, "the document was created empty; writing the content failed: "+err.Error())
 		return res, nil //nolint:nilerr // the document exists; the caller gets it with a warning

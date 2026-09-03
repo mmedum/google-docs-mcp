@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/internal/plan"
 )
 
@@ -25,41 +25,26 @@ type CommentThread struct {
 	Segment  string `json:"-"`
 }
 
-// previewComment mirrors the Developer Preview comment thread shape
-// observed live: no range, but the quoted text.
-type previewComment struct {
-	CommentID string `json:"commentId"`
-	AnchorID  string `json:"anchorId"`
-	Status    string `json:"status"`
-	Quote     string `json:"plainTextQuote"`
-	HeadPost  struct {
-		Content    string `json:"content"`
-		CreateTime string `json:"createTime"`
-		Author     struct {
-			DisplayName string `json:"displayName"`
-		} `json:"author"`
-	} `json:"headPost"`
-	Replies []json.RawMessage `json:"replies"`
-}
-
 // comments lists the document's comment threads through the preview
 // payload when present, else the Drive API.
 func (s *Service) comments(ctx context.Context, f *Fetched) ([]CommentThread, error) {
 	var out []CommentThread
-	if s.opts.Preview && f.Preview.Comments != nil {
-		var raw []previewComment
-		if err := json.Unmarshal(f.Preview.Comments, &raw); err == nil {
-			for _, c := range raw {
-				out = append(out, CommentThread{ID: c.CommentID, Author: c.HeadPost.Author.DisplayName, Content: c.HeadPost.Content,
-					Quote: c.Quote, Resolved: c.Status == "RESOLVED", Created: c.HeadPost.CreateTime, Replies: len(c.Replies)})
-			}
-			return s.locateComments(f.Doc, out), nil
+	if s.opts.Preview && f.Wire.Comments != nil {
+		for _, c := range f.Wire.Comments {
+			out = append(out, CommentThread{ID: c.CommentID, Author: c.HeadPost.Author.DisplayName, Content: c.HeadPost.Content,
+				Quote: c.PlainTextQuote, Resolved: c.Status == "RESOLVED", Created: c.HeadPost.CreateTime, Replies: len(c.Replies)})
 		}
+		return locateComments(f.Doc, out), nil
 	}
 	list, err := s.api.ListComments(ctx, f.Doc.ID, false)
 	if err != nil {
 		return nil, wrapAPI(err, "comments")
 	}
+	return locateComments(f.Doc, driveThreads(list)), nil
+}
+
+func driveThreads(list []*gapi.DriveComment) []CommentThread {
+	out := make([]CommentThread, 0, len(list))
 	for _, c := range list {
 		t := CommentThread{ID: c.ID, Content: c.Content, Resolved: c.Resolved, Created: c.CreatedTime, Replies: len(c.Replies)}
 		if c.Author != nil {
@@ -70,33 +55,41 @@ func (s *Service) comments(ctx context.Context, f *Fetched) ([]CommentThread, er
 		}
 		out = append(out, t)
 	}
-	return s.locateComments(f.Doc, out), nil
+	return out
 }
 
 // locateComments finds each thread's quoted text in the document so the
-// guard and the listing can name a block. Quotes that appear more than
-// once or not at all stay unlocated.
-func (s *Service) locateComments(d *doc.Document, threads []CommentThread) []CommentThread {
+// guard and the listing can name a block. Paragraph units are built once
+// and shared across threads. Quotes that appear more than once or not at
+// all stay unlocated.
+func locateComments(d *doc.Document, threads []CommentThread) []CommentThread {
+	type para struct {
+		block *doc.Block
+		units []unit
+	}
+	var paras []para
+	for _, b := range d.AllBlocks() {
+		if b.Paragraph != nil {
+			paras = append(paras, para{b, units(b.Paragraph)})
+		}
+	}
 	for i := range threads {
-		q := doc.Normalize(threads[i].Quote)
-		if q == "" {
+		q := []rune(doc.Normalize(threads[i].Quote))
+		if len(q) == 0 {
 			continue
 		}
-		var hits []CommentThread
-		for _, t := range d.Tabs {
-			for _, seg := range t.Segments() {
-				for _, b := range seg.AllBlocks() {
-					if b.Paragraph == nil {
-						continue
-					}
-					for _, m := range matchParagraph(b.Paragraph, q, false) {
-						hits = append(hits, CommentThread{Handle: b.Handle, Start: m[0], End: m[1], Tab: t.ID, Segment: seg.ID})
-					}
-				}
+		var hit *doc.Block
+		var span [2]int64
+		hits := 0
+		for _, p := range paras {
+			for _, m := range matchUnits(p.units, q, false) {
+				hits++
+				hit, span = p.block, m
 			}
 		}
-		if len(hits) == 1 {
-			threads[i].Handle, threads[i].Start, threads[i].End, threads[i].Tab, threads[i].Segment = hits[0].Handle, hits[0].Start, hits[0].End, hits[0].Tab, hits[0].Segment
+		if hits == 1 {
+			threads[i].Handle, threads[i].Start, threads[i].End = hit.Handle, span[0], span[1]
+			threads[i].Tab, threads[i].Segment = hit.Segment.Tab.ID, hit.Segment.ID
 		}
 	}
 	return threads

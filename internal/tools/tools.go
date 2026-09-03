@@ -47,6 +47,4 @@ func fail(err error) error {
 	return errors.New("[unexpected] " + err.Error())
 }
 
-func boolp(b bool) *bool { return &b }
-
-var readOnly = &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: boolp(false)}
+var readOnly = &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)}

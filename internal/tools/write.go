@@ -100,12 +100,8 @@ type FormatInput struct {
 	ExpectRevision string          `json:"expect_revision,omitempty"`
 }
 
-var namedStyles = map[string]bool{"NORMAL_TEXT": true, "TITLE": true, "SUBTITLE": true, "HEADING_1": true, "HEADING_2": true, "HEADING_3": true, "HEADING_4": true, "HEADING_5": true, "HEADING_6": true}
-var alignments = map[string]bool{"START": true, "CENTER": true, "END": true, "JUSTIFIED": true}
-var baselines = map[string]bool{"SUPERSCRIPT": true, "SUBSCRIPT": true, "NONE": true}
-
 func registerWrite(s *mcp.Server, d Deps) {
-	writeAnn := &mcp.ToolAnnotations{DestructiveHint: boolp(false), OpenWorldHint: boolp(false)}
+	writeAnn := &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "edit_document",
@@ -128,7 +124,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 			default:
 				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use insert, append, replace, delete, replace_all, insert_break, insert_footnote, create_header or create_footer", i, o.Op))
 			}
-			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat, Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}
+			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
+				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}}
 			if o.Location != nil {
 				eo.Location = &service.Location{At: o.Location.At, Of: o.Location.Of.target()}
 			}
@@ -155,28 +152,15 @@ func registerWrite(s *mcp.Server, d Deps) {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
 			t := o.Target
 			eo := service.EditOp{Kind: kind, Target: t.target()}
+			// Enum and colour validation lives in the planner; the tool only
+			// normalises case so people can write heading_2 or center.
 			switch kind {
 			case plan.OpTextStyle:
-				if !plan.ValidColor(o.Color) || !plan.ValidColor(o.Background) {
-					return nil, nil, fail(service.Errorf("invalid", "op %d: colours must be #rrggbb or none", i))
-				}
-				bl := strings.ToUpper(o.Baseline)
-				if bl != "" && !baselines[bl] {
-					return nil, nil, fail(service.Errorf("invalid", "op %d: baseline must be SUPERSCRIPT, SUBSCRIPT or NONE", i))
-				}
 				eo.Text = plan.TextStyleSpec{Bold: o.Bold, Italic: o.Italic, Underline: o.Underline, Strikethrough: o.Strikethrough, SmallCaps: o.SmallCaps,
-					Font: o.Font, SizePt: o.SizePt, Foreground: o.Color, Background: o.Background, Link: o.Link, Baseline: bl}
+					Font: o.Font, SizePt: o.SizePt, Foreground: o.Color, Background: o.Background, Link: o.Link, Baseline: strings.ToUpper(strings.TrimSpace(o.Baseline))}
 			case plan.OpParagraphStyle:
-				ns := strings.ToUpper(strings.TrimSpace(o.NamedStyle))
-				if ns != "" && !namedStyles[ns] {
-					return nil, nil, fail(service.Errorf("invalid", "op %d: named_style must be NORMAL_TEXT, TITLE, SUBTITLE or HEADING_1 to HEADING_6", i))
-				}
-				al := strings.ToUpper(strings.TrimSpace(o.Alignment))
-				if al != "" && !alignments[al] {
-					return nil, nil, fail(service.Errorf("invalid", "op %d: alignment must be START, CENTER, END or JUSTIFIED", i))
-				}
-				eo.Para = plan.ParagraphStyleSpec{NamedStyle: ns, Alignment: al, LineSpacing: o.LineSpacing, SpaceAbovePt: o.SpaceAbovePt, SpaceBelowPt: o.SpaceBelowPt,
-					IndentStartPt: o.IndentPt, IndentFirstLine: o.FirstLineIndentPt, KeepWithNext: o.KeepWithNext}
+				eo.Para = plan.ParagraphStyleSpec{NamedStyle: strings.ToUpper(strings.TrimSpace(o.NamedStyle)), Alignment: strings.ToUpper(strings.TrimSpace(o.Alignment)),
+					LineSpacing: o.LineSpacing, SpaceAbovePt: o.SpaceAbovePt, SpaceBelowPt: o.SpaceBelowPt, IndentStartPt: o.IndentPt, IndentFirstLine: o.FirstLineIndentPt, KeepWithNext: o.KeepWithNext}
 			case plan.OpBullets:
 				eo.Bullets = strings.ToLower(strings.TrimSpace(o.Bullets))
 			case plan.OpClearFormatting:
@@ -197,7 +181,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 		Description: "Create a new Google Doc in the signed-in account's Drive, optionally with initial content written " +
 			"as markdown (headings, formatting, lists). Returns the id and URL. Initial content is written directly " +
 			"because a new document has nothing to suggest against.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolp(false), OpenWorldHint: boolp(false)},
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, *service.CreateResult, error) {
 		res, err := d.Service.Create(ctx, service.CreateRequest{Title: in.Title, Content: in.Content, ContentFormat: in.ContentFormat})
 		if err != nil {
@@ -215,7 +199,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 		Description: "Accept or reject pending suggested edits by id (from list_suggestions) or all of them. Needs " +
 			"Developer Preview. Accepting applies the suggested text; rejecting discards it. Pass expect_revision to " +
 			"refuse if the document changed since the list was read.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolp(false), OpenWorldHint: boolp(false)},
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReviewInput) (*mcp.CallToolResult, *service.ReviewResult, error) {
 		res, err := d.Service.Review(ctx, service.ReviewRequest{Document: in.Document, Action: in.Action, IDs: in.IDs, All: in.All, ExpectRevision: in.ExpectRevision})
 		if err != nil {

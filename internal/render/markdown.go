@@ -19,38 +19,25 @@ type Result struct {
 
 // Markdown renders blocks [from, to) of a segment as markdown.
 func Markdown(seg *doc.Segment, from, to int, o Options) Result {
-	r := &mdRenderer{seg: seg, o: o, view: o.view()}
+	r := &mdRenderer{seg: seg, o: o}
 	return r.render(from, to)
 }
 
 type mdRenderer struct {
 	seg       *doc.Segment
 	o         Options
-	view      doc.View
 	footnotes []string // referenced footnote ids in order
 	seen      map[string]bool
 }
 
 func (r *mdRenderer) render(from, to int) Result {
-	blocks := r.seg.Blocks
-	if from < 0 {
-		from = 0
-	}
-	if to > len(blocks) {
-		to = len(blocks)
-	}
-	var out strings.Builder
-	var res Result
 	var prev *doc.Block
 	prevEmpty := false
-	for i := from; i < to; i++ {
-		b := blocks[i]
+	res := budgeted(r.seg.Blocks, from, to, r.o.MaxChars, func(b *doc.Block) (string, bool) {
 		chunk := r.block(b, 0)
-		if chunk == "" && b.Kind != doc.KindParagraph {
-			// Section breaks and other silent blocks leave no trace
-			// unless handles are on.
-			continue
-		}
+		// Section breaks and other silent blocks leave no trace unless handles are on.
+		return chunk, chunk != "" || b.Kind == doc.KindParagraph
+	}, func(b *doc.Block, chunk string) string {
 		sep := "\n\n"
 		switch {
 		case prev == nil:
@@ -58,24 +45,61 @@ func (r *mdRenderer) render(from, to int) Result {
 		case tightNeighbours(prev, b), prevEmpty:
 			sep = "\n"
 		}
-		if r.o.MaxChars > 0 && res.Blocks > 0 && out.Len()+len(sep)+len(chunk) > r.o.MaxChars {
+		prev, prevEmpty = b, chunk == ""
+		return sep
+	})
+	if defs := r.footnoteDefs(); defs != "" {
+		res.Text += "\n\n" + defs
+		res.Chars = len(res.Text)
+	}
+	return res
+}
+
+// budgeted renders blocks [from, to) chunk by chunk, stopping before the
+// block that would cross the budget and naming it as the continuation.
+// chunk returns the block's text and whether it is emitted at all; sep
+// returns the separator to write before an emitted chunk and may keep
+// state between calls.
+func budgeted(blocks []*doc.Block, from, to, maxChars int, chunk func(*doc.Block) (string, bool), sep func(*doc.Block, string) string) Result {
+	from = max(from, 0)
+	to = min(to, len(blocks))
+	var out strings.Builder
+	var res Result
+	for i := from; i < to; i++ {
+		b := blocks[i]
+		text, emit := chunk(b)
+		if !emit {
+			continue
+		}
+		s := sep(b, text)
+		if maxChars > 0 && res.Blocks > 0 && out.Len()+len(s)+len(text) > maxChars {
 			res.Truncated = true
 			res.ContinueFrom = b.Handle
 			break
 		}
-		out.WriteString(sep)
-		out.WriteString(chunk)
+		out.WriteString(s)
+		out.WriteString(text)
 		res.Blocks++
-		prev = b
-		prevEmpty = chunk == ""
-	}
-	if defs := r.footnoteDefs(); defs != "" {
-		out.WriteString("\n\n")
-		out.WriteString(defs)
 	}
 	res.Text = out.String()
 	res.Chars = len(res.Text)
 	return res
+}
+
+// handlePrefix is the "[p12] " prefix when handles are on.
+func handlePrefix(b *doc.Block, o Options) string {
+	if !o.WithHandles {
+		return ""
+	}
+	return "[" + b.Handle + "] "
+}
+
+// listMarker is "- " or "N. " for a list paragraph.
+func listMarker(seg *doc.Segment, b *doc.Block) string {
+	if b.Paragraph.Bullet.Ordered {
+		return strconv.Itoa(ListNumber(seg, b)) + ". "
+	}
+	return "- "
 }
 
 // tightNeighbours reports whether two blocks belong to the same list run
@@ -84,12 +108,7 @@ func tightNeighbours(a, b *doc.Block) bool {
 	return a.Paragraph != nil && b.Paragraph != nil && a.Paragraph.Bullet != nil && b.Paragraph.Bullet != nil
 }
 
-func (r *mdRenderer) handle(b *doc.Block) string {
-	if !r.o.WithHandles {
-		return ""
-	}
-	return "[" + b.Handle + "] "
-}
+func (r *mdRenderer) handle(b *doc.Block) string { return handlePrefix(b, r.o) }
 
 func (r *mdRenderer) block(b *doc.Block, depth int) string {
 	switch {
@@ -138,11 +157,7 @@ func (r *mdRenderer) paragraph(b *doc.Block) string {
 			line = "*" + content + "*"
 		}
 	case p.Bullet != nil:
-		marker := "- "
-		if p.Bullet.Ordered {
-			marker = strconv.Itoa(ListNumber(r.seg, b)) + ". "
-		}
-		line = strings.Repeat("    ", p.Bullet.Nesting) + marker + content
+		line = strings.Repeat("    ", p.Bullet.Nesting) + listMarker(r.seg, b) + content
 	default:
 		line = content
 	}
@@ -238,7 +253,7 @@ func (r *mdRenderer) cell(c *doc.Cell) string {
 
 func (r *mdRenderer) collectFootnotes(p *doc.Paragraph) {
 	for _, run := range p.Runs {
-		if run.Kind == doc.RunFootnoteRef && run.Visible(r.view) {
+		if run.Kind == doc.RunFootnoteRef && run.Visible(r.o.view()) {
 			if r.seen == nil {
 				r.seen = map[string]bool{}
 			}
@@ -268,7 +283,7 @@ func (r *mdRenderer) footnoteDefs() string {
 		if label == "" {
 			label = id
 		}
-		sub := &mdRenderer{seg: fs, o: Options{Suggestions: r.o.Suggestions, WithStyles: r.o.WithStyles}, view: r.view}
+		sub := &mdRenderer{seg: fs, o: Options{Suggestions: r.o.Suggestions, WithStyles: r.o.WithStyles}}
 		text := strings.ReplaceAll(sub.render(0, len(fs.Blocks)).Text, "\n\n", "\n    ")
 		lines = append(lines, "[^"+label+"]: "+text)
 	}

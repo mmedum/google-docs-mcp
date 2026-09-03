@@ -5,6 +5,8 @@
 // the network.
 package doc
 
+import "strconv"
+
 // Document is a parsed documents.get response.
 type Document struct {
 	ID                  string
@@ -49,7 +51,7 @@ func (t *Tab) Prefix() string {
 	if t.Number <= 1 {
 		return ""
 	}
-	return "tab" + itoa(t.Number) + "/"
+	return "tab" + strconv.Itoa(t.Number) + "/"
 }
 
 // ListInfo describes a list's nesting levels.
@@ -108,15 +110,19 @@ func (s *Segment) Label() string {
 		if s.FootnoteNumber != "" {
 			return "footnote" + s.FootnoteNumber
 		}
-		return "footnote" + itoa(s.Number)
+		return "footnote" + strconv.Itoa(s.Number)
 	default:
-		return string(s.Kind) + itoa(s.Number)
+		return string(s.Kind) + strconv.Itoa(s.Number)
 	}
 }
 
 // AllBlocks flattens the segment in document order, descending into
 // table cells and tables of contents.
-func (s *Segment) AllBlocks() []*Block {
+func (s *Segment) AllBlocks() []*Block { return Flatten(s.Blocks) }
+
+// Flatten lists blocks in document order, descending into table cells
+// and tables of contents.
+func Flatten(blocks []*Block) []*Block {
 	var out []*Block
 	var walk func(bs []*Block)
 	walk = func(bs []*Block) {
@@ -134,8 +140,45 @@ func (s *Segment) AllBlocks() []*Block {
 			}
 		}
 	}
-	walk(s.Blocks)
+	walk(blocks)
 	return out
+}
+
+// ContentStart is the first index content occupies: after the leading
+// section break of a body, 0 elsewhere.
+func (s *Segment) ContentStart() int64 {
+	for _, b := range s.Blocks {
+		if b.Kind != KindSectionBreak {
+			return b.Start
+		}
+	}
+	return 0
+}
+
+// End is one past the segment's final newline.
+func (s *Segment) End() int64 {
+	if n := len(s.Blocks); n > 0 {
+		return s.Blocks[n-1].End
+	}
+	return 0
+}
+
+// ContentBlocks lists the top-level blocks that carry content (no
+// section breaks).
+func (s *Segment) ContentBlocks() []*Block {
+	out := make([]*Block, 0, len(s.Blocks))
+	for _, b := range s.Blocks {
+		if b.Kind != KindSectionBreak {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// IsEmptyParagraph reports whether the block is a paragraph holding only
+// its newline.
+func (b *Block) IsEmptyParagraph() bool {
+	return b.Paragraph != nil && b.End-b.Start == 1
 }
 
 // BlockKind is the structural element type.
@@ -153,7 +196,6 @@ const (
 type Block struct {
 	Kind    BlockKind
 	Handle  string
-	Ordinal int
 	Start   int64
 	End     int64
 	Segment *Segment
@@ -275,12 +317,10 @@ func (s TextStyle) HasLink() bool {
 
 // Table is a grid of cells.
 type Table struct {
-	Handle   string
-	Rows     int
-	Cols     int
-	Cells    [][]*Cell
-	Inserted []string
-	Deleted  []string
+	Handle string
+	Rows   int
+	Cols   int
+	Cells  [][]*Cell
 }
 
 // Cell is one table cell with its nested blocks.
@@ -306,6 +346,17 @@ type SectionBreakInfo struct {
 	Type            string
 	DefaultHeaderID string
 	DefaultFooterID string
+}
+
+// AllBlocks lists every block of every tab and segment in document order.
+func (d *Document) AllBlocks() []*Block {
+	var out []*Block
+	for _, t := range d.Tabs {
+		for _, s := range t.Segments() {
+			out = append(out, s.AllBlocks()...)
+		}
+	}
+	return out
 }
 
 // Tab finds a tab by id, then by title (case-insensitive), then by
@@ -335,13 +386,9 @@ func (d *Document) Tab(ref string) (*Tab, bool) {
 
 // FindHandle looks a handle up across every tab and segment.
 func (d *Document) FindHandle(handle string) (*Block, bool) {
-	for _, t := range d.Tabs {
-		for _, s := range t.Segments() {
-			for _, b := range s.AllBlocks() {
-				if b.Handle == handle {
-					return b, true
-				}
-			}
+	for _, b := range d.AllBlocks() {
+		if b.Handle == handle {
+			return b, true
 		}
 	}
 	return nil, false
@@ -349,21 +396,26 @@ func (d *Document) FindHandle(handle string) (*Block, bool) {
 
 // FindCell looks a cell handle (tbl1:r2c3) up across the document.
 func (d *Document) FindCell(handle string) (*Cell, bool) {
-	for _, t := range d.Tabs {
-		for _, s := range t.Segments() {
-			for _, b := range s.AllBlocks() {
-				if b.Table == nil {
-					continue
-				}
-				for _, row := range b.Table.Cells {
-					for _, c := range row {
-						if c.Handle == handle {
-							return c, true
-						}
-					}
+	for _, b := range d.AllBlocks() {
+		if b.Table == nil {
+			continue
+		}
+		for _, row := range b.Table.Cells {
+			for _, c := range row {
+				if c.Handle == handle {
+					return c, true
 				}
 			}
 		}
 	}
 	return nil, false
+}
+
+// ContentEnd is the index before the cell's final newline, the last
+// position text can occupy.
+func (c *Cell) ContentEnd() int64 {
+	if n := len(c.Blocks); n > 0 {
+		return c.Blocks[n-1].End - 1
+	}
+	return c.End - 1
 }

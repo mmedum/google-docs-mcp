@@ -24,19 +24,10 @@ type GetOptions struct {
 	CommentsViewMode    string
 }
 
-// PreviewFields are documents.get fields that only exist in Developer
-// Preview and are absent from the generated types. They are kept raw
-// until the schema is confirmed against a live enrolled project.
-type PreviewFields struct {
-	Comments    json.RawMessage `json:"comments,omitempty"`
-	Suggestions json.RawMessage `json:"suggestions,omitempty"`
-}
-
-// DocumentResult is a decoded documents.get response plus the raw bytes.
+// DocumentResult is a decoded documents.get response. Comment and
+// suggestion threads (Developer Preview) are on the document itself.
 type DocumentResult struct {
 	Document *gdocs.Document
-	Raw      json.RawMessage
-	Preview  PreviewFields
 }
 
 // GetDocument fetches a document with tabs content.
@@ -58,9 +49,7 @@ func (c *Client) GetDocument(ctx context.Context, id string, o GetOptions) (*Doc
 	if err := json.Unmarshal(body, &d); err != nil {
 		return nil, fmt.Errorf("%w: decode document: %w", ErrUnexpected, err)
 	}
-	var p PreviewFields
-	_ = json.Unmarshal(body, &p)
-	return &DocumentResult{Document: &d, Raw: body, Preview: p}, nil
+	return &DocumentResult{Document: &d}, nil
 }
 
 // WriteControl guards a batchUpdate against concurrent edits and, in

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
 )
 
@@ -48,14 +49,14 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	if !ok {
 		return nil, Errorf("invalid", "format %q; use md, txt, html, pdf, docx, odt, rtf or epub", req.Format)
 	}
-	f, err := s.Fetch(ctx, req.Document)
+	id, err := doc.ParseID(req.Document)
 	if err != nil {
-		return nil, err
+		return nil, Errorf("invalid", "%q is not a Google Docs document id or URL", req.Document)
 	}
 	if !inlineFormats[format] && s.opts.ExportDir == "" {
 		return nil, Errorf("unavailable", "binary exports need GDOCS_EXPORT_DIR to be set to a directory; md, txt and html are returned inline")
 	}
-	data, err := s.api.Export(ctx, f.Doc.ID, mime)
+	data, err := s.api.Export(ctx, id, mime)
 	if err != nil {
 		return nil, wrapAPI(err, "export")
 	}
@@ -65,7 +66,7 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 		text := string(data)
 		limit := req.MaxChars
 		if limit <= 0 {
-			limit = 20000
+			limit = DefaultMaxChars
 		}
 		if len(text) > limit {
 			cut := limit
@@ -78,7 +79,12 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 		res.Text = text
 		return res, nil
 	}
-	name := strings.TrimSpace(unsafeName.ReplaceAllString(f.Doc.Title, " "))
+	// Drive metadata is a small call; the title names the file.
+	title := "document"
+	if file, err := s.api.GetFile(ctx, id); err == nil && file.Name != "" {
+		title = file.Name
+	}
+	name := strings.TrimSpace(unsafeName.ReplaceAllString(title, " "))
 	if name == "" {
 		name = "document"
 	}
@@ -86,7 +92,7 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 		name = name[:80]
 	}
 	dir := filepath.Clean(s.opts.ExportDir)
-	path := filepath.Join(dir, fmt.Sprintf("%s-%s.%s", name, shortID(f.Doc.ID), format))
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.%s", name, gapi.ShortID(id), format))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, Errorf("unexpected", "create export dir: %v", err)
 	}
@@ -94,6 +100,6 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 		return nil, Errorf("unexpected", "write export: %v", err)
 	}
 	res.Path = path
-	res.Text = fmt.Sprintf("exported %q as %s to %s (%d bytes)", f.Doc.Title, format, path, len(data))
+	res.Text = fmt.Sprintf("exported %q as %s to %s (%d bytes)", title, format, path, len(data))
 	return res, nil
 }

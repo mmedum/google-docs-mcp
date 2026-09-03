@@ -183,13 +183,13 @@ func listRequests(pieces []*piece, rng func(int64, int64) Rng) []json.RawMessage
 func inlineSpec(in markdown.Inline) TextStyleSpec {
 	var s TextStyleSpec
 	if in.Bold {
-		s.Bold = boolp(true)
+		s.Bold = new(true)
 	}
 	if in.Italic {
-		s.Italic = boolp(true)
+		s.Italic = new(true)
 	}
 	if in.Strike {
-		s.Strikethrough = boolp(true)
+		s.Strikethrough = new(true)
 	}
 	if in.Code {
 		s.Font = CodeFont
@@ -199,5 +199,3 @@ func inlineSpec(in markdown.Inline) TextStyleSpec {
 	}
 	return s
 }
-
-func boolp(b bool) *bool { return &b }

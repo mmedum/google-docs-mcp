@@ -5,7 +5,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -35,7 +34,6 @@ type Options struct {
 	Preview          bool
 	ReadOnly         bool
 	DefaultWriteMode config.WriteMode
-	WriteModes       []config.WriteMode
 	Logger           *slog.Logger
 	// ExportDir is where binary exports may be written; empty disables them.
 	ExportDir string
@@ -88,12 +86,10 @@ func Errorf(class, format string, args ...any) *Error {
 	return &Error{Class: class, Message: fmt.Sprintf(format, args...)}
 }
 
-// Fetched is a parsed document plus the raw response.
+// Fetched is a parsed document plus the wire form it came from.
 type Fetched struct {
 	Doc       *doc.Document
 	Wire      *gdocs.Document
-	Raw       json.RawMessage
-	Preview   gapi.PreviewFields
 	FetchedAt time.Time
 }
 
@@ -110,7 +106,9 @@ func (s *Service) Fetch(ctx context.Context, ref string) (*Fetched, error) {
 	return s.fetch(ctx, ref, false)
 }
 
-// FetchFresh bypasses the cache; writes always plan against a fresh read.
+// FetchFresh bypasses the cache and leaves the handle memory alone:
+// writes plan against a fresh read but check handles against the read
+// the caller actually saw.
 func (s *Service) FetchFresh(ctx context.Context, ref string) (*Fetched, error) {
 	return s.fetch(ctx, ref, true)
 }
@@ -137,17 +135,43 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 	if err != nil {
 		return nil, wrapAPI(err, "document")
 	}
-	parsed, err := doc.Parse(res.Document)
+	f, err := s.adopt(res.Document)
+	if err != nil {
+		return nil, err
+	}
+	if !fresh {
+		s.Remember(f)
+	}
+	s.log.DebugContext(ctx, "document fetched", "doc", gapi.ShortID(id), "revision", f.Doc.RevisionID, "tabs", len(f.Doc.Tabs))
+	return f, nil
+}
+
+// adopt parses a wire document and caches it, evicting stale entries so
+// a long session does not keep every document it ever touched.
+func (s *Service) adopt(w *gdocs.Document) (*Fetched, error) {
+	parsed, err := doc.Parse(w)
 	if err != nil {
 		return nil, &Error{Class: "unexpected", Message: err.Error(), Err: err}
 	}
-	f := &Fetched{Doc: parsed, Wire: res.Document, Raw: res.Raw, Preview: res.Preview, FetchedAt: s.now()}
+	f := &Fetched{Doc: parsed, Wire: w, FetchedAt: s.now()}
 	s.mu.Lock()
-	s.cache[id] = f
-	s.handles[id] = memory(parsed, f.FetchedAt)
+	for id, c := range s.cache {
+		if s.now().Sub(c.FetchedAt) >= s.opts.CacheTTL {
+			delete(s.cache, id)
+		}
+	}
+	s.cache[parsed.ID] = f
 	s.mu.Unlock()
-	s.log.DebugContext(ctx, "document fetched", "doc", shortID(id), "revision", parsed.RevisionID, "tabs", len(parsed.Tabs))
 	return f, nil
+}
+
+// Remember records what every handle points at in a document the caller
+// has seen, so later writes can detect handles that went stale.
+func (s *Service) Remember(f *Fetched) {
+	m := memory(f.Doc, f.FetchedAt)
+	s.mu.Lock()
+	s.handles[f.Doc.ID] = m
+	s.mu.Unlock()
 }
 
 // Invalidate drops the cached copy of a document (after a write).
@@ -167,15 +191,46 @@ func (s *Service) Handles(id string) (HandleMemory, bool) {
 
 func memory(d *doc.Document, at time.Time) HandleMemory {
 	m := HandleMemory{RevisionID: d.RevisionID, Text: map[string]string{}, At: at}
-	for _, t := range d.Tabs {
-		for _, seg := range t.Segments() {
-			for _, b := range seg.AllBlocks() {
-				m.Text[b.Handle] = doc.Normalize(b.Text(doc.ViewInline))
-			}
-		}
+	for _, b := range d.AllBlocks() {
+		m.Text[b.Handle] = doc.Normalize(b.Text(doc.ViewInline))
 	}
 	return m
 }
+
+// requireWritable refuses writes on a read-only server. Tools are not
+// registered in that mode; this guards direct callers as well.
+func (s *Service) requireWritable() error {
+	if s.opts.ReadOnly {
+		return Errorf("forbidden", "this server runs read-only (GDOCS_READ_ONLY=true)")
+	}
+	return nil
+}
+
+// tabOf finds a tab or explains which exist.
+func tabOf(d *doc.Document, ref string) (*doc.Tab, error) {
+	tab, ok := d.Tab(ref)
+	if !ok {
+		return nil, Errorf("not_found", "no tab %q; tabs: %s", ref, tabList(d))
+	}
+	return tab, nil
+}
+
+// tabSegment resolves a tab and one of its segments.
+func tabSegment(d *doc.Document, tabRef, segRef string) (*doc.Tab, *doc.Segment, error) {
+	tab, err := tabOf(d, tabRef)
+	if err != nil {
+		return nil, nil, err
+	}
+	seg, err := selectSegment(tab, segRef)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tab, seg, nil
+}
+
+// DefaultMaxChars is the output budget when a caller gives none
+// (about 5k tokens).
+const DefaultMaxChars = 20000
 
 // wrapAPI turns a Google API failure into an actionable Error.
 func wrapAPI(err error, what string) error {
@@ -204,11 +259,4 @@ func wrapAPI(err error, what string) error {
 		msg = err.Error()
 	}
 	return &Error{Class: class, Message: msg, Err: err}
-}
-
-func shortID(id string) string {
-	if len(id) > 6 {
-		return id[:6] + "…"
-	}
-	return id
 }

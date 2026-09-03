@@ -3,6 +3,8 @@ package doc
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -77,13 +79,13 @@ func parseTab(t *gdocs.Tab, number int) *Tab {
 	}
 	tab.Body = parseSegment(tab, SegmentBody, "", 0, prefix, body)
 
-	for i, id := range sortedKeys(dt.Headers) {
+	for i, id := range slices.Sorted(maps.Keys(dt.Headers)) {
 		h := dt.Headers[id]
-		tab.Headers = append(tab.Headers, parseSegment(tab, SegmentHeader, id, i+1, prefix+"header"+itoa(i+1)+"/", h.Content))
+		tab.Headers = append(tab.Headers, parseSegment(tab, SegmentHeader, id, i+1, prefix+"header"+strconv.Itoa(i+1)+"/", h.Content))
 	}
-	for i, id := range sortedKeys(dt.Footers) {
+	for i, id := range slices.Sorted(maps.Keys(dt.Footers)) {
 		f := dt.Footers[id]
-		tab.Footers = append(tab.Footers, parseSegment(tab, SegmentFooter, id, i+1, prefix+"footer"+itoa(i+1)+"/", f.Content))
+		tab.Footers = append(tab.Footers, parseSegment(tab, SegmentFooter, id, i+1, prefix+"footer"+strconv.Itoa(i+1)+"/", f.Content))
 	}
 
 	tab.Footnotes = parseFootnotes(tab, dt, prefix)
@@ -104,7 +106,7 @@ func parseFootnotes(tab *Tab, dt *gdocs.DocumentTab, prefix string) []*Segment {
 			}
 		}
 	}
-	ids := sortedKeys(dt.Footnotes)
+	ids := slices.Sorted(maps.Keys(dt.Footnotes))
 	sort.SliceStable(ids, func(i, j int) bool {
 		ni, oki := strconv.Atoi(numbers[ids[i]])
 		nj, okj := strconv.Atoi(numbers[ids[j]])
@@ -123,7 +125,7 @@ func parseFootnotes(tab *Tab, dt *gdocs.DocumentTab, prefix string) []*Segment {
 		fn := dt.Footnotes[id]
 		label := numbers[id]
 		if label == "" {
-			label = itoa(i + 1)
+			label = strconv.Itoa(i + 1)
 		}
 		seg := parseSegment(tab, SegmentFootnote, id, i+1, prefix+"footnote"+label+"/", fn.Content)
 		seg.FootnoteNumber = numbers[id]
@@ -169,8 +171,7 @@ func parseBlocks(seg *Segment, cell *Cell, prefix string, content []*gdocs.Struc
 			continue
 		}
 		counters[b.Kind]++
-		b.Ordinal = counters[b.Kind]
-		b.Handle = prefix + short + itoa(b.Ordinal)
+		b.Handle = prefix + short + strconv.Itoa(counters[b.Kind])
 		switch b.Kind {
 		case KindTable:
 			b.Table = parseTable(seg, se.Table, b.Handle)
@@ -416,17 +417,6 @@ func hexColor(c *gdocs.OptionalColor) string {
 	}
 	return fmt.Sprintf("#%02x%02x%02x", to(rgb.Red), to(rgb.Green), to(rgb.Blue))
 }
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func itoa(n int) string { return strconv.Itoa(n) }
 
 func equalFold(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))

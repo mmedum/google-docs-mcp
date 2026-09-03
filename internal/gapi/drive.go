@@ -196,7 +196,7 @@ func (c *Client) CreateComment(ctx context.Context, fileID, content, quote strin
 		return nil, err
 	}
 	u := c.drive + "/files/" + url.PathEscape(fileID) + "/comments?fields=" + url.QueryEscape(CommentFields)
-	data, err := c.do(ctx, kindWrite, http.MethodPost, u, body)
+	data, err := c.do(ctx, kindDriveWrite, http.MethodPost, u, body)
 	if err != nil {
 		return nil, wrapAmbiguousWrite(err)
 	}

@@ -57,7 +57,11 @@ func (f *fakeAPI) BatchUpdate(_ context.Context, id string, req *gapi.BatchUpdat
 
 func (f *fakeAPI) CreateDocument(_ context.Context, title string) (*gdocs.Document, error) {
 	f.created = append(f.created, title)
-	return &gdocs.Document{DocumentID: fixtureID, Title: title, RevisionID: "rev-new"}, nil
+	// A new document is a section break and one empty paragraph.
+	return &gdocs.Document{DocumentID: fixtureID, Title: title, RevisionID: "rev-new", Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+		{StartIndex: 0, EndIndex: 1, SectionBreak: &gdocs.SectionBreak{}},
+		{StartIndex: 1, EndIndex: 2, Paragraph: &gdocs.Paragraph{Elements: []*gdocs.ParagraphElement{{StartIndex: 1, EndIndex: 2, TextRun: &gdocs.TextRun{Content: "\n"}}}}},
+	}}}, nil
 }
 
 func (f *fakeAPI) SearchFiles(_ context.Context, q string, limit int, pageToken string) (*gapi.FileList, error) {
@@ -99,7 +103,7 @@ func (f *fakeAPI) GetDocument(_ context.Context, id string, o gapi.GetOptions) (
 	if err := json.Unmarshal(f.raw, &d); err != nil {
 		return nil, err
 	}
-	return &gapi.DocumentResult{Document: &d, Raw: f.raw, Preview: gapi.PreviewFields{Comments: json.RawMessage(`[]`)}}, nil
+	return &gapi.DocumentResult{Document: &d}, nil
 }
 
 func (f *fakeAPI) GetFile(_ context.Context, id string) (*gapi.File, error) {
@@ -119,7 +123,7 @@ func (f *fakeAPI) GetFile(_ context.Context, id string) (*gapi.File, error) {
 func newService(t *testing.T) (*Service, *fakeAPI) {
 	t.Helper()
 	api := &fakeAPI{raw: doctest.RawFixture(t)}
-	svc := New(api, Options{Preview: false, DefaultWriteMode: config.WriteDirect, WriteModes: []config.WriteMode{config.WriteDirect, config.WriteComment}})
+	svc := New(api, Options{Preview: false, DefaultWriteMode: config.WriteDirect})
 	return svc, api
 }
 

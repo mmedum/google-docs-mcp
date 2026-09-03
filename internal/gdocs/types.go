@@ -18,6 +18,46 @@ type Document struct {
 	Lists               map[string]List         `json:"lists,omitempty"`
 	InlineObjects       map[string]InlineObject `json:"inlineObjects,omitempty"`
 	Tabs                []*Tab                  `json:"tabs,omitempty"`
+	// Developer Preview fields, populated when commentsViewMode asks for them.
+	Comments    []CommentThread    `json:"comments,omitempty"`
+	Suggestions []SuggestionThread `json:"suggestions,omitempty"`
+}
+
+// Post is a comment or suggestion post (Developer Preview).
+type Post struct {
+	PostID           string     `json:"postId,omitempty"`
+	Content          string     `json:"content,omitempty"`
+	Author           PostAuthor `json:"author,omitempty"`
+	CreateTime       string     `json:"createTime,omitempty"`
+	UpdateTime       string     `json:"updateTime,omitempty"`
+	CommentAction    string     `json:"commentAction,omitempty"`
+	SuggestionAction string     `json:"suggestionAction,omitempty"`
+}
+
+// PostAuthor identifies who wrote a post.
+type PostAuthor struct {
+	DisplayName string `json:"displayName,omitempty"`
+	Me          bool   `json:"me,omitempty"`
+	User        string `json:"user,omitempty"`
+}
+
+// CommentThread is the shape observed live: no range, but the quoted text.
+type CommentThread struct {
+	CommentID      string `json:"commentId,omitempty"`
+	AnchorID       string `json:"anchorId,omitempty"`
+	HeadPost       Post   `json:"headPost,omitempty"`
+	Replies        []Post `json:"replies,omitempty"`
+	Status         string `json:"status,omitempty"`
+	PlainTextQuote string `json:"plainTextQuote,omitempty"`
+}
+
+// SuggestionThread is the shape observed live: id, head post, status, summary.
+type SuggestionThread struct {
+	SuggestionID string `json:"suggestionId,omitempty"`
+	HeadPost     Post   `json:"headPost,omitempty"`
+	Replies      []Post `json:"replies,omitempty"`
+	Status       string `json:"status,omitempty"`
+	SummaryText  string `json:"summaryText,omitempty"`
 }
 
 // Tab is one tab with its content and children.

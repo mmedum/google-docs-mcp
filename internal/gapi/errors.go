@@ -129,8 +129,8 @@ func parseAPIError(status int, method, path string, body []byte) *APIError {
 		}
 	} else {
 		e.Message = strings.TrimSpace(string(body))
-		if len(e.Message) > 300 {
-			e.Message = e.Message[:300] + "…"
+		if r := []rune(e.Message); len(r) > 300 {
+			e.Message = string(r[:300]) + "…"
 		}
 		if e.Message == "" {
 			e.Message = "empty error body"

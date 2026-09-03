@@ -85,6 +85,22 @@ type TextStyleSpec struct {
 // IsZero reports whether the spec changes nothing.
 func (s TextStyleSpec) IsZero() bool { return s == TextStyleSpec{} }
 
+var baselines = map[string]bool{"SUPERSCRIPT": true, "SUBSCRIPT": true, "NONE": true}
+
+// Validate checks enum and colour values.
+func (s TextStyleSpec) Validate() error {
+	if !ValidColor(s.Foreground) || !ValidColor(s.Background) {
+		return fmt.Errorf("colours must be #rrggbb or none")
+	}
+	if s.Baseline != "" && !baselines[s.Baseline] {
+		return fmt.Errorf("baseline must be SUPERSCRIPT, SUBSCRIPT or NONE")
+	}
+	if s.SizePt < 0 || s.SizePt > 400 {
+		return fmt.Errorf("size_pt must be between 0 and 400")
+	}
+	return nil
+}
+
 func (s TextStyleSpec) body() (map[string]any, []string) {
 	style := map[string]any{}
 	var fields []string
@@ -199,6 +215,25 @@ type ParagraphStyleSpec struct {
 // IsZero reports whether the spec changes nothing.
 func (s ParagraphStyleSpec) IsZero() bool { return s == ParagraphStyleSpec{} }
 
+// NamedStyles the API accepts for paragraphs.
+var NamedStyles = map[string]bool{"NORMAL_TEXT": true, "TITLE": true, "SUBTITLE": true, "HEADING_1": true, "HEADING_2": true, "HEADING_3": true, "HEADING_4": true, "HEADING_5": true, "HEADING_6": true}
+
+var alignments = map[string]bool{"START": true, "CENTER": true, "END": true, "JUSTIFIED": true}
+
+// Validate checks enum values.
+func (s ParagraphStyleSpec) Validate() error {
+	if s.NamedStyle != "" && !NamedStyles[s.NamedStyle] {
+		return fmt.Errorf("named_style must be NORMAL_TEXT, TITLE, SUBTITLE or HEADING_1 to HEADING_6")
+	}
+	if s.Alignment != "" && !alignments[s.Alignment] {
+		return fmt.Errorf("alignment must be START, CENTER, END or JUSTIFIED")
+	}
+	if s.LineSpacing < 0 {
+		return fmt.Errorf("line_spacing must be positive")
+	}
+	return nil
+}
+
 func (s ParagraphStyleSpec) body() (map[string]any, []string) {
 	style := map[string]any{}
 	var fields []string
@@ -274,21 +309,17 @@ func InsertPageBreak(at Loc) json.RawMessage {
 }
 
 // CreateHeader creates a default header; the reply carries headerId.
-func CreateHeader(tabID string) json.RawMessage {
-	req := map[string]any{"type": "DEFAULT"}
-	if tabID != "" {
-		req["sectionBreakLocation"] = map[string]any{"index": 0, "tabId": tabID}
-	}
-	return raw(map[string]any{"createHeader": req})
-}
+func CreateHeader(tabID string) json.RawMessage { return createSegment("createHeader", tabID) }
 
 // CreateFooter creates a default footer; the reply carries footerId.
-func CreateFooter(tabID string) json.RawMessage {
+func CreateFooter(tabID string) json.RawMessage { return createSegment("createFooter", tabID) }
+
+func createSegment(kind, tabID string) json.RawMessage {
 	req := map[string]any{"type": "DEFAULT"}
 	if tabID != "" {
 		req["sectionBreakLocation"] = map[string]any{"index": 0, "tabId": tabID}
 	}
-	return raw(map[string]any{"createFooter": req})
+	return raw(map[string]any{kind: req})
 }
 
 // CreateFootnote inserts a footnote reference at a location; the reply

@@ -50,6 +50,9 @@ tool surface, the addressing model, or the write path.
 ## Definition of done
 
 `make check` (gofmt, vet, golangci-lint, race tests with the 80% floor,
-govulncheck, stdio smoke) plus tests for new behaviour, README/docs/
-CHANGELOG updates, and a look at `--dump-schemas` for breaking changes.
-Phases end with a tagged release and wait for an explicit "go".
+govulncheck, stdio smoke, staleness check of README/docs/CHANGELOG
+against the code) plus tests for new behaviour, `/simplify` and
+`/code-review high` on the changed files with findings resolved or
+explained, and a look at `--dump-schemas` for breaking changes. Commit
+at each milestone with a message that says what and why. Phases end
+with a tagged release and wait for an explicit "go".

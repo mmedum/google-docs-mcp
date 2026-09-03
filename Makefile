@@ -61,8 +61,12 @@ schema-diff: build ## Diff tool schemas against the last tag
 smoke: build ## Drive the binary over stdio
 	@bash scripts/stdio-smoke.sh $(BIN)
 
+.PHONY: staleness
+staleness: build ## Docs must match the code
+	@bash scripts/staleness-check.sh $(BIN)
+
 .PHONY: check
-check: fmt vet lint cover vuln smoke ## Everything CI runs
+check: fmt vet lint cover vuln smoke staleness ## Everything CI runs
 
 .PHONY: clean
 clean:

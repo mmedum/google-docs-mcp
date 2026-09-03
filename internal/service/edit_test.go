@@ -19,11 +19,7 @@ import (
 func writable(t *testing.T, preview bool) (*Service, *fakeAPI) {
 	t.Helper()
 	api := &fakeAPI{raw: doctest.RawFixture(t)}
-	modes := []config.WriteMode{config.WriteDirect, config.WriteComment}
-	if preview {
-		modes = append([]config.WriteMode{config.WriteSuggest}, modes...)
-	}
-	svc := New(api, Options{Preview: preview, DefaultWriteMode: config.WriteDirect, WriteModes: modes, CacheTTL: time.Nanosecond})
+	svc := New(api, Options{Preview: preview, DefaultWriteMode: config.WriteDirect, CacheTTL: time.Nanosecond})
 	return svc, api
 }
 
@@ -453,7 +449,7 @@ func TestFollowupsAndValidation(t *testing.T) {
 		{[]EditOp{{Kind: plan.OpReplace, Content: "x"}}, "invalid"},      // no target
 		{[]EditOp{{Kind: plan.OpReplace, Target: &Target{Handle: "p5"}, Content: "> quote"}}, "unsupported"},
 		{[]EditOp{{Kind: plan.OpKind("teleport"), Target: &Target{Handle: "p5"}}}, "invalid"},
-		{[]EditOp{{Kind: plan.OpReplaceAll, Find: "a", Replace: "b", Target: &Target{Tab: "zzz"}}}, "not_found"},
+		{[]EditOp{{Kind: plan.OpReplaceAll, Params: plan.Params{Find: "a", Replace: "b"}, Target: &Target{Tab: "zzz"}}}, "not_found"},
 		{[]EditOp{{Kind: plan.OpDelete, Target: &Target{From: "p5", To: "p7"}}, {Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Handle: "p5"}}, Content: "x"}}, "invalid"},
 	}
 	for _, tc := range cases {
@@ -476,7 +472,7 @@ func TestFollowupsAndValidation(t *testing.T) {
 	api.batches = nil
 	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{
 		{Kind: plan.OpAppend, Content: "# not a heading\nsecond line", ContentFormat: "text"},
-		{Kind: plan.OpReplaceAll, Find: "Q3", Replace: "Q4", MatchCase: true},
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: "Q3", Replace: "Q4", MatchCase: true}},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -494,9 +490,9 @@ func TestFormatOps(t *testing.T) {
 	ctx := context.Background()
 	bold := true
 	res, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{
-		{Kind: plan.OpTextStyle, Target: &Target{Text: "Revenue"}, Text: plan.TextStyleSpec{Bold: &bold, Foreground: "#ff0000"}},
-		{Kind: plan.OpParagraphStyle, Target: &Target{Handle: "p11"}, Para: plan.ParagraphStyleSpec{NamedStyle: "HEADING_3"}},
-		{Kind: plan.OpBullets, Target: &Target{From: "p9", To: "p10"}, Bullets: "none"},
+		{Kind: plan.OpTextStyle, Target: &Target{Text: "Revenue"}, Params: plan.Params{Text: plan.TextStyleSpec{Bold: &bold, Foreground: "#ff0000"}}},
+		{Kind: plan.OpParagraphStyle, Target: &Target{Handle: "p11"}, Params: plan.Params{Para: plan.ParagraphStyleSpec{NamedStyle: "HEADING_3"}}},
+		{Kind: plan.OpBullets, Target: &Target{From: "p9", To: "p10"}, Params: plan.Params{Bullets: "none"}},
 		{Kind: plan.OpClearFormatting, Target: &Target{Handle: "p14"}},
 	}})
 	if err != nil {
@@ -548,6 +544,10 @@ func TestFindSearchCreateExportSuggestions(t *testing.T) {
 	if err != nil || cr.Title != "New Doc" || len(api.created) != 1 || len(api.batches) != 1 || cr.URL == "" {
 		t.Fatalf("create: %+v %v (batches %d)", cr, err, len(api.batches))
 	}
+	// Content goes inline into the first paragraph: no boundary newlines.
+	if !strings.Contains(string(api.batches[0].Requests[0]), `"text":"Hello\nBody"`) {
+		t.Fatalf("create should fill the first paragraph inline: %s", api.batches[0].Requests[0])
+	}
 	if _, err := svc.Create(ctx, CreateRequest{Title: " "}); !errors.As(err, &se) || se.Class != "invalid" {
 		t.Fatalf("empty title: %v", err)
 	}
@@ -596,5 +596,71 @@ func TestFindSearchCreateExportSuggestions(t *testing.T) {
 	plain, _ := writable(t, false)
 	if _, err := plain.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", All: true}); !errors.As(err, &se) || se.Class != "unavailable" {
 		t.Fatalf("review without preview: %v", err)
+	}
+}
+
+// TestStaleHandleOnWrite covers the real path: a read records handles,
+// the document changes underneath, and a write by handle is refused or
+// relocated instead of hitting the wrong block.
+func TestStaleHandleOnWrite(t *testing.T) {
+	svc, api := writable(t, false)
+	ctx := context.Background()
+	if _, err := svc.Fetch(ctx, fixtureID); err != nil { // the read the model saw
+		t.Fatal(err)
+	}
+	// Someone else edits: p5 now says something new, and the revision moved.
+	changed := strings.Replace(string(doctest.RawFixture(t)), `"content": "First point\n"`, `"content": "Changed point\n"`, 1)
+	changed = strings.Replace(changed, `"revisionId": "rev-0001"`, `"revisionId": "rev-0009"`, 1)
+	api.raw = []byte(changed)
+	var se *Error
+	_, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p5"}}}})
+	if !errors.As(err, &se) || se.Class != "stale" || len(api.batches) != 0 {
+		t.Fatalf("stale handle should be refused before any write: %v (batches %d)", err, len(api.batches))
+	}
+	// An unchanged block still resolves at the new revision.
+	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p7"}}}}); err != nil {
+		t.Fatalf("unchanged handle: %v", err)
+	}
+	// After a write the post-edit document is what the caller saw, so its
+	// handles are remembered.
+	if m, ok := svc.Handles(fixtureID); !ok || m.RevisionID != "rev-0009" {
+		t.Fatalf("memory after write = %+v %v", m, ok)
+	}
+}
+
+func TestInsertionEdges(t *testing.T) {
+	svc, api := writable(t, false)
+	ctx := context.Background()
+	// After the paragraph that precedes a table: borrow its newline rather
+	// than insert at the table's start index.
+	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Handle: "p10"}}, Content: "before the table"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := kindsOf(t, api.batches[0].Requests); !strings.HasPrefix(got, "insertText@132") || !strings.Contains(string(api.batches[0].Requests[0]), `"text":"\nbefore the table"`) {
+		t.Fatalf("insert before table: %s\n%s", got, api.batches[0].Requests[0])
+	}
+	// Into an empty paragraph: fill it inline instead of adding a paragraph.
+	api.batches = nil
+	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Handle: "p3"}}, Content: "x"}}}); err != nil {
+		t.Fatal(err)
+	}
+	// After p3 comes p4 (empty): the insertion point is p4's start, and the
+	// planner emits a normal suffix insert there; filling happens only
+	// when the empty paragraph itself is the anchor.
+	api.batches = nil
+	f := fetched(t, svc)
+	ip, err := svc.resolveLocation(f, Location{At: "start", Of: &Target{Handle: "p4"}})
+	if err != nil || ip.index != 68 || !ip.inline {
+		t.Fatalf("start of empty paragraph: %+v %v", ip, err)
+	}
+	// Appending to a new, empty document fills its only paragraph.
+	created, _ := api.CreateDocument(ctx, "empty")
+	ef, err := svc.adopt(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip, err = svc.resolveLocation(ef, Location{At: "end"})
+	if err != nil || ip.atEnd || !ip.inline || ip.index != 1 {
+		t.Fatalf("end of an empty document should fill the paragraph inline: %+v %v", ip, err)
 	}
 }

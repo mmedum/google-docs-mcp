@@ -41,7 +41,7 @@ func TestGetDocumentDecodesAndSendsParams(t *testing.T) {
 	var gotPath, gotQuery, gotAuth string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotQuery, gotAuth = r.URL.Path, r.URL.RawQuery, r.Header.Get("Authorization")
-		_, _ = w.Write([]byte(`{"documentId":"abc","title":"T","revisionId":"r1","tabs":[{"tabProperties":{"tabId":"t.0","title":"Main"}}],"comments":[{"id":"c1"}]}`))
+		_, _ = w.Write([]byte(`{"documentId":"abc","title":"T","revisionId":"r1","tabs":[{"tabProperties":{"tabId":"t.0","title":"Main"}}],"comments":[{"commentId":"c1","plainTextQuote":"q"}]}`))
 	}))
 	res, err := c.GetDocument(context.Background(), "abc", GetOptions{SuggestionsViewMode: SuggestionsInline, CommentsViewMode: CommentsIncluded})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestGetDocumentDecodesAndSendsParams(t *testing.T) {
 			t.Fatalf("query %q lacks %q", gotQuery, want)
 		}
 	}
-	if res.Document.Title != "T" || len(res.Document.Tabs) != 1 || string(res.Preview.Comments) != `[{"id":"c1"}]` || len(res.Raw) == 0 {
+	if res.Document.Title != "T" || len(res.Document.Tabs) != 1 || len(res.Document.Comments) != 1 || res.Document.Comments[0].CommentID != "c1" {
 		t.Fatalf("decode wrong: %+v", res)
 	}
 }
@@ -228,6 +228,9 @@ func TestHelpers(t *testing.T) {
 	if got := redactPath("https://docs.googleapis.com/v1/documents/1AbCdEfGhIjKlMnOp/x?includeTabsContent=true"); got != "/v1/documents/1AbCdE…/x" {
 		t.Fatalf("redactPath = %q", got)
 	}
+	if ShortID("abc") != "abc" || ShortID("abcdefgh") != "abcdef…" {
+		t.Fatal("ShortID")
+	}
 	if got := parseRetryAfter("7"); got != 7*time.Second {
 		t.Fatalf("retry-after seconds = %v", got)
 	}
@@ -238,7 +241,7 @@ func TestHelpers(t *testing.T) {
 		t.Fatal("bad retry-after should be zero")
 	}
 	c := New(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}), Options{})
-	if c.docs != DefaultDocsBaseURL || c.drive != DefaultDriveBaseURL || c.retry.MaxAttempts != 5 || c.HTTPClient() == nil {
+	if c.docs != DefaultDocsBaseURL || c.drive != DefaultDriveBaseURL || c.retry.MaxAttempts != 5 || c.driveWriteLim == nil {
 		t.Fatalf("defaults wrong: %+v", c)
 	}
 	for attempt := 1; attempt <= 6; attempt++ {

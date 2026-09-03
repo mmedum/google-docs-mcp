@@ -68,6 +68,7 @@ jobs:
       - run: go build -o google-docs-mcp ./cmd/google-docs-mcp
       - run: bash scripts/stdio-smoke.sh ./google-docs-mcp
       - run: bash scripts/schema-diff.sh ./google-docs-mcp
+      - run: bash scripts/staleness-check.sh ./google-docs-mcp
       - uses: actions/upload-artifact@v4
         with:
           name: schemas

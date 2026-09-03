@@ -179,18 +179,21 @@ func runServer(args []string) int {
 		ts = gapi.NoCredentials{Reason: err}
 	} else {
 		logger.Info("credentials resolved", "profile", cfg.Profile, "source", string(src), "account", p.user.AccountEmail)
-		if _, err := ts.Token(); err != nil {
-			logger.Warn("credential check failed; tools will return [auth] errors until `google-docs-mcp login` succeeds", "err", err)
-		} else {
-			logger.Info("credential check ok")
-		}
+		// Warm the token off the startup path; the token source is safe
+		// for concurrent use and the first tool call reuses the result.
+		go func() {
+			if _, err := ts.Token(); err != nil {
+				logger.Warn("credential check failed; tools will return [auth] errors until `google-docs-mcp login` succeeds", "err", err)
+			} else {
+				logger.Info("credential check ok")
+			}
+		}()
 	}
 
 	api := gapi.New(ts, gapi.Options{Logger: logger, Timeout: cfg.HTTPTimeout, UserAgent: "google-docs-mcp/" + version.Version})
 	svc := service.New(api, service.Options{
 		Preview: cfg.Preview, ReadOnly: cfg.ReadOnly,
-		DefaultWriteMode: cfg.DefaultWriteMode, WriteModes: cfg.AvailableWriteModes(),
-		ExportDir: cfg.ExportDir, Logger: logger,
+		DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir, Logger: logger,
 	})
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Logger: logger, Version: version.Version})
 	logger.Info("serving MCP over stdio", "version", version.Version, "preview", cfg.Preview, "read_only", cfg.ReadOnly, "default_write_mode", cfg.DefaultWriteMode)
@@ -201,24 +204,44 @@ func runServer(args []string) int {
 	return 0
 }
 
-func cmdLogin(args []string) int {
-	fs := flag.NewFlagSet("google-docs-mcp login", flag.ContinueOnError)
-	var noBrowser bool
-	var timeout time.Duration
-	fs.BoolVar(&noBrowser, "no-browser", false, "print the URL instead of opening a browser")
-	fs.DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for the browser")
+// openCommand parses a subcommand's flags, loads the configuration and
+// opens the profile. A non-nil exit code means the caller should return it.
+func openCommand(name string, args []string, define func(*flag.FlagSet)) (*profile, *flag.FlagSet, *int) {
+	fs := flag.NewFlagSet("google-docs-mcp "+name, flag.ContinueOnError)
+	if define != nil {
+		define(fs)
+	}
 	cfg, err := loadConfig(fs, args)
 	if err != nil {
+		code := 1
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			code = 0
+		} else {
+			fail("%v", err)
 		}
-		return fail("%v", err)
+		return nil, fs, &code
 	}
-	warn := func(msg string) { fmt.Fprintln(os.Stderr, "warning: "+msg) }
-	p, err := openProfile(cfg, warn)
+	p, err := openProfile(cfg, warnStderr)
 	if err != nil {
-		return fail("%v", err)
+		code := fail("%v", err)
+		return nil, fs, &code
 	}
+	return p, fs, nil
+}
+
+func warnStderr(msg string) { fmt.Fprintln(os.Stderr, "warning: "+msg) }
+
+func cmdLogin(args []string) int {
+	var noBrowser bool
+	var timeout time.Duration
+	p, _, code := openCommand("login", args, func(fs *flag.FlagSet) {
+		fs.BoolVar(&noBrowser, "no-browser", false, "print the URL instead of opening a browser")
+		fs.DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for the browser")
+	})
+	if code != nil {
+		return *code
+	}
+	cfg := p.cfg
 	if _, err := os.Stat(p.clientSecretPath); err != nil {
 		return fail("OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", p.clientSecretPath)
 	}
@@ -245,7 +268,7 @@ func cmdLogin(args []string) int {
 	if info, err := auth.Inspect(ctx, nil, tok.AccessToken); err == nil {
 		email = info.Email
 		if missing := auth.HasScopes(info.Scopes, scopes); len(missing) > 0 {
-			warn("Google granted fewer scopes than requested; missing: " + strings.Join(missing, ", ") + ". Re-run login and approve every checkbox.")
+			warnStderr("Google granted fewer scopes than requested; missing: " + strings.Join(missing, ", ") + ". Re-run login and approve every checkbox.")
 		}
 	}
 	if email == "" {
@@ -266,48 +289,32 @@ func cmdLogin(args []string) int {
 }
 
 func cmdLogout(args []string) int {
-	fs := flag.NewFlagSet("google-docs-mcp logout", flag.ContinueOnError)
-	cfg, err := loadConfig(fs, args)
-	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return fail("%v", err)
-	}
-	p, err := openProfile(cfg, func(msg string) { fmt.Fprintln(os.Stderr, "warning: "+msg) })
-	if err != nil {
-		return fail("%v", err)
+	p, _, code := openCommand("logout", args, nil)
+	if code != nil {
+		return *code
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if tok, _, err := p.store.Resolve(); err == nil {
 		if err := auth.Revoke(ctx, nil, tok); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not revoke the token at Google (%v); it is still deleted locally\n", err)
+			warnStderr(fmt.Sprintf("could not revoke the token at Google (%v); it is still deleted locally", err))
 		}
 	}
 	if err := p.store.Delete(); err != nil {
 		return fail("%v", err)
 	}
 	p.user.AccountEmail, p.user.TokenStore, p.user.Scopes = "", "", nil
-	if err := userconfig.Save(cfg.Profile, p.user); err != nil {
+	if err := userconfig.Save(p.cfg.Profile, p.user); err != nil {
 		return fail("save profile: %v", err)
 	}
-	fmt.Printf("Logged out of profile %q.\n", cfg.Profile)
+	fmt.Printf("Logged out of profile %q.\n", p.cfg.Profile)
 	return 0
 }
 
 func cmdStatus(args []string) int {
-	fs := flag.NewFlagSet("google-docs-mcp status", flag.ContinueOnError)
-	cfg, err := loadConfig(fs, args)
-	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return fail("%v", err)
-	}
-	p, err := openProfile(cfg, func(string) {})
-	if err != nil {
-		return fail("%v", err)
+	p, _, code := openCommand("status", args, nil)
+	if code != nil {
+		return *code
 	}
 	printStatus(p)
 	return 0
@@ -340,18 +347,11 @@ func printStatus(p *profile) {
 }
 
 func cmdDoctor(args []string) int {
-	fs := flag.NewFlagSet("google-docs-mcp doctor", flag.ContinueOnError)
-	cfg, err := loadConfig(fs, args)
-	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return fail("%v", err)
+	p, fs, code := openCommand("doctor", args, nil)
+	if code != nil {
+		return *code
 	}
-	p, err := openProfile(cfg, func(msg string) { fmt.Fprintln(os.Stderr, "warning: "+msg) })
-	if err != nil {
-		return fail("%v", err)
-	}
+	cfg := p.cfg
 	printStatus(p)
 	fmt.Println()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

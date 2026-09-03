@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
 )
 
@@ -68,7 +69,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 			h.Owner = userLabel(f.Owners[0])
 		}
 		if h.URL == "" {
-			h.URL = "https://docs.google.com/document/d/" + f.ID + "/edit"
+			h.URL = doc.DocumentURL(f.ID)
 		}
 		res.Hits = append(res.Hits, h)
 	}

@@ -69,8 +69,10 @@ type Client struct {
 	retry    RetryPolicy
 	readLim  *rate.Limiter
 	writeLim *rate.Limiter
-	ua       string
-	sleep    func(context.Context, time.Duration) error
+	// Drive writes (comments) have a far higher quota than Docs batches.
+	driveWriteLim *rate.Limiter
+	ua            string
+	sleep         func(context.Context, time.Duration) error
 }
 
 // New builds a client whose requests carry tokens from ts.
@@ -112,6 +114,7 @@ func New(ts oauth2.TokenSource, o Options) *Client {
 	if c.writeLim == nil {
 		c.writeLim = rate.NewLimiter(rate.Limit(0.8), 5)
 	}
+	c.driveWriteLim = rate.NewLimiter(rate.Limit(5), 10)
 	if c.ua == "" {
 		c.ua = "google-docs-mcp"
 	}
@@ -130,15 +133,12 @@ func New(ts oauth2.TokenSource, o Options) *Client {
 	return c
 }
 
-// HTTPClient exposes the authenticated client for one-off calls
-// (tokeninfo, revoke) made by the CLI.
-func (c *Client) HTTPClient() *http.Client { return c.httpc }
-
 type reqKind int
 
 const (
 	kindRead reqKind = iota
 	kindWrite
+	kindDriveWrite
 )
 
 // do performs one logical request with rate limiting and retries and
@@ -150,8 +150,11 @@ func (c *Client) do(ctx context.Context, k reqKind, method, rawURL string, body 
 // doAccept is do with an explicit Accept header (exports return bytes).
 func (c *Client) doAccept(ctx context.Context, k reqKind, method, rawURL string, body []byte, accept string) ([]byte, error) {
 	lim := c.readLim
-	if k == kindWrite {
+	switch k {
+	case kindWrite:
 		lim = c.writeLim
+	case kindDriveWrite:
+		lim = c.driveWriteLim
 	}
 	if err := lim.Wait(ctx); err != nil {
 		return nil, err
@@ -280,6 +283,14 @@ func parseRetryAfter(v string) time.Duration {
 
 var idInPath = regexp.MustCompile(`/(documents|files)/([^/?]+)`)
 
+// ShortID shortens a document or file id for logs.
+func ShortID(id string) string {
+	if len(id) > 6 {
+		return id[:6] + "…"
+	}
+	return id
+}
+
 // redactPath shortens document and file ids in URLs before they reach logs.
 func redactPath(raw string) string {
 	u, err := url.Parse(raw)
@@ -288,11 +299,7 @@ func redactPath(raw string) string {
 	}
 	return idInPath.ReplaceAllStringFunc(u.Path, func(m string) string {
 		parts := idInPath.FindStringSubmatch(m)
-		id := parts[2]
-		if len(id) > 6 {
-			id = id[:6] + "…"
-		}
-		return "/" + parts[1] + "/" + id
+		return "/" + parts[1] + "/" + ShortID(parts[2])
 	})
 }
 

@@ -37,7 +37,7 @@ func (f *fakeAPI) GetDocument(_ context.Context, id string, _ gapi.GetOptions) (
 	if err := json.Unmarshal(f.raw, &d); err != nil {
 		return nil, err
 	}
-	return &gapi.DocumentResult{Document: &d, Raw: f.raw}, nil
+	return &gapi.DocumentResult{Document: &d}, nil
 }
 
 func (f *fakeAPI) GetFile(_ context.Context, id string) (*gapi.File, error) {
@@ -51,7 +51,10 @@ func (f *fakeAPI) BatchUpdate(_ context.Context, id string, req *gapi.BatchUpdat
 }
 
 func (f *fakeAPI) CreateDocument(_ context.Context, title string) (*gdocs.Document, error) {
-	return &gdocs.Document{DocumentID: fixtureID, Title: title, RevisionID: "rev-new"}, nil
+	return &gdocs.Document{DocumentID: fixtureID, Title: title, RevisionID: "rev-new", Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+		{StartIndex: 0, EndIndex: 1, SectionBreak: &gdocs.SectionBreak{}},
+		{StartIndex: 1, EndIndex: 2, Paragraph: &gdocs.Paragraph{Elements: []*gdocs.ParagraphElement{{StartIndex: 1, EndIndex: 2, TextRun: &gdocs.TextRun{Content: "\n"}}}}},
+	}}}, nil
 }
 
 func (f *fakeAPI) SearchFiles(_ context.Context, q string, limit int, pageToken string) (*gapi.FileList, error) {
@@ -77,7 +80,7 @@ func connect(t *testing.T, api *fakeAPI) *mcp.ClientSession {
 
 func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSession {
 	t.Helper()
-	svc := service.New(api, service.Options{Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, DefaultWriteMode: cfg.DefaultWriteMode, WriteModes: cfg.AvailableWriteModes(), ExportDir: cfg.ExportDir})
+	svc := service.New(api, service.Options{Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Version: "test"})
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()

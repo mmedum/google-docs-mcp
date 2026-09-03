@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 )
@@ -60,11 +61,7 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 	if err != nil {
 		return nil, err
 	}
-	tab, ok := f.Doc.Tab(req.Tab)
-	if !ok {
-		return nil, Errorf("not_found", "no tab %q; tabs: %s", req.Tab, tabList(f.Doc))
-	}
-	seg, err := selectSegment(tab, req.Segment)
+	tab, seg, err := tabSegment(f.Doc, req.Tab, req.Segment)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +88,7 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 		var spans [][2]int // rune offsets
 		if re != nil {
 			for _, m := range re.FindAllStringIndex(text, -1) {
-				spans = append(spans, [2]int{len([]rune(text[:m[0]])), len([]rune(text[:m[1]]))})
+				spans = append(spans, [2]int{utf8.RuneCountInString(text[:m[0]]), utf8.RuneCountInString(text[:m[1]])})
 			}
 		} else {
 			for _, m := range matchParagraph(b.Paragraph, needle, !req.MatchCase) {

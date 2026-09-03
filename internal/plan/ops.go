@@ -64,6 +64,17 @@ type Anchor struct {
 	Text  string
 }
 
+// Params are the caller-supplied arguments an op carries unchanged
+// from the tool layer to the planner.
+type Params struct {
+	Find      string
+	Replace   string
+	MatchCase bool
+	Text      TextStyleSpec
+	Para      ParagraphStyleSpec
+	Bullets   string // bullet, numbered, checkbox, none
+}
+
 // Op is one resolved operation. The service fills in ranges, text and
 // anchors; the planner only does arithmetic.
 type Op struct {
@@ -71,6 +82,7 @@ type Op struct {
 	Kind        OpKind
 	Seg         Segment
 	Description string
+	Params
 
 	// Target is the affected range for replace, delete and formatting.
 	Target *Rng
@@ -90,14 +102,6 @@ type Op struct {
 	NearBullet bool
 
 	Fragment *markdown.Fragment
-
-	Find      string
-	Replace   string
-	MatchCase bool
-
-	Text    TextStyleSpec
-	Para    ParagraphStyleSpec
-	Bullets string // bullet, numbered, checkbox, none
 
 	// CommentAnchor is where a comment-mode proposal attaches. Defaults to Target.
 	CommentAnchor *Rng
@@ -127,10 +131,10 @@ type Followup struct {
 	TabID    string
 }
 
-// GuardHit is an op blocked (or warned about) by the overwrite guard.
-type GuardHit struct {
-	Seq     int
-	Anchors []Anchor
+// NeedsFollowup reports whether the op creates a segment whose content
+// is inserted in a second batch.
+func (op *Op) NeedsFollowup() bool {
+	return op.Kind == OpFootnote || op.Kind == OpCreateHeader || op.Kind == OpCreateFooter
 }
 
 // OpSummary describes what an op compiled to.
@@ -147,7 +151,6 @@ type Result struct {
 	Requests  []json.RawMessage
 	Proposals []Proposal
 	Followups []Followup
-	Guard     []GuardHit
 	Warnings  []string
 	Summary   []OpSummary
 }
@@ -219,13 +222,13 @@ func Plan(ops []Op, o Options) (*Result, error) {
 		add(op, formatRequests(op), false)
 	}
 	for _, op := range content {
-		reqs, followup, minimal, err := contentRequests(op)
+		reqs, minimal, err := contentRequests(op)
 		if err != nil {
 			return nil, err
 		}
 		add(op, reqs, minimal)
-		if followup != nil {
-			res.Followups = append(res.Followups, *followup)
+		if op.NeedsFollowup() {
+			res.Followups = append(res.Followups, Followup{Seq: op.Seq, Kind: op.Kind, Fragment: op.Fragment, TabID: op.Seg.TabID})
 		}
 	}
 	for _, op := range global {
@@ -269,10 +272,16 @@ func validate(op *Op) error {
 		if op.Text.IsZero() {
 			return fmt.Errorf("op %d: text_style changes nothing; set bold, italic, font, color, link or similar", op.Seq)
 		}
+		if err := op.Text.Validate(); err != nil {
+			return fmt.Errorf("op %d: %w", op.Seq, err)
+		}
 		return needTarget()
 	case OpParagraphStyle:
 		if op.Para.IsZero() {
 			return fmt.Errorf("op %d: paragraph_style changes nothing; set named_style, alignment, spacing or indent", op.Seq)
+		}
+		if err := op.Para.Validate(); err != nil {
+			return fmt.Errorf("op %d: %w", op.Seq, err)
 		}
 		return needTarget()
 	case OpBullets:
@@ -314,8 +323,6 @@ func guard(ops []Op, o Options, res *Result) error {
 		if (op.Kind != OpReplace && op.Kind != OpDelete) || len(op.Anchors) == 0 {
 			continue
 		}
-		hit := GuardHit{Seq: op.Seq, Anchors: op.Anchors}
-		res.Guard = append(res.Guard, hit)
 		if o.Mode == ModeSuggest {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("op %d: the range holds %s; as a suggestion nothing is removed until accepted", op.Seq, describeAnchors(op.Anchors)))
 			continue
@@ -375,10 +382,9 @@ func checkOverlaps(ops []Op) error {
 			if a.op.Seg.ID != b.op.Seg.ID || a.op.Seg.TabID != b.op.Seg.TabID {
 				continue
 			}
-			overlap := a.s < b.e && b.s < a.e
-			insideA := a.s == a.e && b.s < a.s && a.s < b.e
-			insideB := b.s == b.e && a.s < b.s && b.s < a.e
-			if overlap || insideA || insideB {
+			// Half-open overlap; it also covers an insertion point that
+			// falls strictly inside another op's range.
+			if a.s < b.e && b.s < a.e {
 				return fmt.Errorf("ops %d and %d overlap (%s and %s); split the call or widen one target", a.op.Seq, b.op.Seq, a.op.Description, b.op.Description)
 			}
 		}
@@ -410,28 +416,28 @@ func formatRequests(op *Op) []json.RawMessage {
 	return nil
 }
 
-func contentRequests(op *Op) ([]json.RawMessage, *Followup, bool, error) {
+func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
 		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline, NearBullet: op.NearBullet})
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
+			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 		}
-		return c.Requests, nil, false, nil
+		return c.Requests, false, nil
 	case OpPageBreak:
-		return []json.RawMessage{InsertPageBreak(*op.Insert)}, nil, false, nil
+		return []json.RawMessage{InsertPageBreak(*op.Insert)}, false, nil
 	case OpDelete:
-		return []json.RawMessage{DeleteRange(deleteRange(op))}, nil, false, nil
+		return []json.RawMessage{DeleteRange(deleteRange(op))}, false, nil
 	case OpReplace:
 		return replaceRequests(op)
 	case OpFootnote:
-		return []json.RawMessage{CreateFootnote(*op.Insert)}, &Followup{Seq: op.Seq, Kind: op.Kind, Fragment: op.Fragment, TabID: op.Seg.TabID}, false, nil
+		return []json.RawMessage{CreateFootnote(*op.Insert)}, false, nil
 	case OpCreateHeader:
-		return []json.RawMessage{CreateHeader(op.Seg.TabID)}, &Followup{Seq: op.Seq, Kind: op.Kind, Fragment: op.Fragment, TabID: op.Seg.TabID}, false, nil
+		return []json.RawMessage{CreateHeader(op.Seg.TabID)}, false, nil
 	case OpCreateFooter:
-		return []json.RawMessage{CreateFooter(op.Seg.TabID)}, &Followup{Seq: op.Seq, Kind: op.Kind, Fragment: op.Fragment, TabID: op.Seg.TabID}, false, nil
+		return []json.RawMessage{CreateFooter(op.Seg.TabID)}, false, nil
 	}
-	return nil, nil, false, fmt.Errorf("op %d: unknown kind %q", op.Seq, op.Kind)
+	return nil, false, fmt.Errorf("op %d: unknown kind %q", op.Seq, op.Kind)
 }
 
 // deleteRange adjusts a block deletion so the segment keeps its final
@@ -450,15 +456,15 @@ func deleteRange(op *Op) Rng {
 	return r
 }
 
-func replaceRequests(op *Op) ([]json.RawMessage, *Followup, bool, error) {
+func replaceRequests(op *Op) ([]json.RawMessage, bool, error) {
 	seg := op.Seg
 	// Minimal diff when both sides are one paragraph of plain text.
 	if newText, ok := op.Fragment.SingleParagraph(); ok && !strings.Contains(op.TargetText, "\n") {
 		edits := MinimalEdits(op.TargetText, newText, op.Target.Start)
 		if len(edits) == 0 {
-			return nil, nil, true, nil
+			return nil, true, nil
 		}
-		return EditRequests(edits, seg), nil, true, nil
+		return EditRequests(edits, seg), true, nil
 	}
 	// Whole-range replacement: delete, then insert at the same spot.
 	var reqs []json.RawMessage
@@ -479,9 +485,9 @@ func replaceRequests(op *Op) ([]json.RawMessage, *Followup, bool, error) {
 	}
 	c, err := CompileFragment(op.Fragment, at, opts)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
+		return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 	}
-	return append(reqs, c.Requests...), nil, false, nil
+	return append(reqs, c.Requests...), false, nil
 }
 
 func proposal(op *Op) (Proposal, error) {
@@ -493,13 +499,7 @@ func proposal(op *Op) (Proposal, error) {
 		return Proposal{}, fmt.Errorf("op %d (%s): nothing to anchor a comment to", op.Seq, op.Kind)
 	}
 	p := Proposal{Seq: op.Seq, Range: *anchor, Quote: op.TargetText}
-	quote := func(s string) string {
-		s = strings.TrimSpace(s)
-		if r := []rune(s); len(r) > 80 {
-			s = string(r[:80]) + "…"
-		}
-		return "“" + s + "”"
-	}
+	quote := func(s string) string { return "“" + doc.Clip(s, 80) + "”" }
 	switch op.Kind {
 	case OpReplace:
 		p.Content = "Proposed change to " + quote(op.TargetText) + ":\n\n" + op.Fragment.PlainText()
@@ -599,11 +599,8 @@ func describePara(s ParagraphStyleSpec) string {
 }
 
 // SuggestModeUnsupported lists request types the API refuses in SUGGEST
-// mode, for callers that build raw requests.
+// mode; later phases that build those requests must check it.
 var SuggestModeUnsupported = map[string]bool{
 	"addDocumentTab": true, "createNamedRange": true, "deleteFooter": true, "deleteHeader": true,
 	"deleteNamedRange": true, "deleteTab": true, "updateDocumentTabProperties": true, "updateTableColumnProperties": true,
 }
-
-// LengthOf is the UTF-16 length helper re-exported for callers.
-func LengthOf(s string) int64 { return doc.UTF16Len(s) }

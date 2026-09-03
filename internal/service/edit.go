@@ -28,12 +28,7 @@ type EditOp struct {
 	Location      *Location
 	Content       string
 	ContentFormat string // markdown (default) or text
-	Find          string
-	Replace       string
-	MatchCase     bool
-	Text          plan.TextStyleSpec
-	Para          plan.ParagraphStyleSpec
-	Bullets       string
+	plan.Params
 }
 
 // EditRequest is a write call.
@@ -79,61 +74,52 @@ func (r *resolvedOps) note(tabID, segID string, index int64) {
 
 // Edit applies (or previews) a batch of operations.
 func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error) {
-	mode, err := s.mode(req.Mode)
-	if err != nil {
+	if err := validateEditRequest(req); err != nil {
 		return nil, err
-	}
-	if len(req.Ops) == 0 {
-		return nil, Errorf("invalid", "ops is empty")
-	}
-	if len(req.Ops) > 50 {
-		return nil, Errorf("invalid", "at most 50 ops per call")
 	}
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
 		return nil, err
 	}
+	return s.editFetched(ctx, f, req)
+}
+
+func validateEditRequest(req EditRequest) error {
+	if len(req.Ops) == 0 {
+		return Errorf("invalid", "ops is empty")
+	}
+	if len(req.Ops) > 50 {
+		return Errorf("invalid", "at most 50 ops per call")
+	}
+	return nil
+}
+
+// editFetched plans against a document the caller already holds. A
+// revision conflict is re-planned once against a fresh read.
+func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) (*EditResult, error) {
+	mode, err := s.mode(req.Mode)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateEditRequest(req); err != nil {
+		return nil, err
+	}
 	if req.ExpectRevision != "" && req.ExpectRevision != f.Doc.RevisionID {
 		return nil, Errorf("conflict", "the document is at revision %s, not %s; re-read before editing", f.Doc.RevisionID, req.ExpectRevision)
 	}
-	var result *EditResult
-	var lastResolved *resolvedOps
-	for attempt := 1; ; attempt++ {
-		ro, err := s.resolveOps(ctx, f, req.Ops, mode)
-		if err != nil {
+	result, ro, err := s.planAndApply(ctx, f, req, mode)
+	if errors.Is(err, gapi.ErrConflict) {
+		s.log.InfoContext(ctx, "revision conflict; re-planning once", "doc", gapi.ShortID(f.Doc.ID))
+		if f, err = s.FetchFresh(ctx, req.Document); err != nil {
 			return nil, err
 		}
-		lastResolved = ro
-		planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})
-		if err != nil {
-			if errors.Is(err, plan.ErrBlocked) {
-				return nil, &Error{Class: "blocked", Message: strings.TrimPrefix(err.Error(), "blocked: "), Err: err}
-			}
-			return nil, Errorf("invalid", "%v", err)
-		}
-		result = &EditResult{RevisionID: f.Doc.RevisionID, Mode: string(mode), DryRun: req.DryRun, Changes: planned.Summary, Warnings: planned.Warnings, Proposals: planned.Proposals}
-		if req.DryRun {
-			if b, err := json.MarshalIndent(planned.Requests, "", "  "); err == nil && len(planned.Requests) > 0 {
-				result.Requests = b
-			}
-			result.Preview = regionPreview(f.Doc, ro)
-			return result, nil
-		}
-		err = s.apply(ctx, f, planned, mode, result)
-		if err == nil {
-			break
-		}
-		if errors.Is(err, gapi.ErrConflict) && attempt == 1 {
-			s.log.InfoContext(ctx, "revision conflict; re-planning once", "doc", shortID(f.Doc.ID))
-			if f, err = s.FetchFresh(ctx, req.Document); err != nil {
-				return nil, err
-			}
-			continue
-		}
+		result, ro, err = s.planAndApply(ctx, f, req, mode)
 		if errors.Is(err, gapi.ErrConflict) {
 			return nil, Errorf("conflict", "the document changed twice while planning this edit; re-read and try again")
 		}
-		return nil, err
+	}
+	if err != nil || req.DryRun {
+		return result, err
 	}
 	result.Applied = len(req.Ops)
 	after, err := s.FetchFresh(ctx, req.Document)
@@ -141,9 +127,39 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 		result.Warnings = append(result.Warnings, "applied, but re-reading the document failed: "+err.Error())
 		return result, nil //nolint:nilerr // the edit was applied; report it with a warning
 	}
+	// The caller sees the post-edit handles in the preview, so they are
+	// what later writes must be checked against.
+	s.Remember(after)
 	result.RevisionID = after.Doc.RevisionID
-	result.Preview = regionPreview(after.Doc, lastResolved)
+	result.Preview = regionPreview(after.Doc, ro)
 	return result, nil
+}
+
+// planAndApply resolves, plans, and (unless dry-running) applies once.
+func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest, mode plan.Mode) (*EditResult, *resolvedOps, error) {
+	ro, err := s.resolveOps(ctx, f, req.Ops, mode)
+	if err != nil {
+		return nil, nil, err
+	}
+	planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})
+	if err != nil {
+		if errors.Is(err, plan.ErrBlocked) {
+			return nil, nil, &Error{Class: "blocked", Message: strings.TrimPrefix(err.Error(), "blocked: "), Err: err}
+		}
+		return nil, nil, Errorf("invalid", "%v", err)
+	}
+	result := &EditResult{RevisionID: f.Doc.RevisionID, Mode: string(mode), DryRun: req.DryRun, Changes: planned.Summary, Warnings: planned.Warnings, Proposals: planned.Proposals}
+	if req.DryRun {
+		if b, err := json.MarshalIndent(planned.Requests, "", "  "); err == nil && len(planned.Requests) > 0 {
+			result.Requests = b
+		}
+		result.Preview = regionPreview(f.Doc, ro)
+		return result, ro, nil
+	}
+	if err := s.apply(ctx, f, planned, mode, result); err != nil {
+		return nil, nil, err
+	}
+	return result, ro, nil
 }
 
 func (s *Service) mode(m string) (plan.Mode, error) {
@@ -154,8 +170,8 @@ func (s *Service) mode(m string) (plan.Mode, error) {
 	if m == "" {
 		m = string(config.WriteDirect)
 	}
-	if s.opts.ReadOnly {
-		return "", Errorf("forbidden", "this server runs read-only (GDOCS_READ_ONLY=true)")
+	if err := s.requireWritable(); err != nil {
+		return "", err
 	}
 	switch plan.Mode(m) {
 	case plan.ModeDirect, plan.ModeComment:
@@ -183,7 +199,7 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		}
 	}
 	for i, op := range ops {
-		p := plan.Op{Seq: i, Kind: op.Kind, Find: op.Find, Replace: op.Replace, MatchCase: op.MatchCase, Text: op.Text, Para: op.Para, Bullets: op.Bullets}
+		p := plan.Op{Seq: i, Kind: op.Kind, Params: op.Params}
 		if op.Content != "" || needsContent(op.Kind) {
 			frag, err := parseContent(op.Content, op.ContentFormat)
 			if err != nil {
@@ -252,7 +268,7 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	p.TargetIsBlock = r.IsBlock
 	p.TargetText = r.Text
 	p.Description = r.Description
-	p.NearBullet = r.Block != nil && r.Block.Paragraph != nil && r.Block.Paragraph.Bullet != nil
+	p.NearBullet = hasBullet(r.Block)
 	if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
 		p.Anchors = anchorsIn(r.Tab, r.Segment, r.Start, r.End, out.threads)
 	}
@@ -261,9 +277,9 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 }
 
 func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan.Mode) error {
-	tab, ok := f.Doc.Tab(targetTab(op.Target))
-	if !ok {
-		return Errorf("not_found", "no tab %q", targetTab(op.Target))
+	tab, err := tabOf(f.Doc, targetTab(op.Target))
+	if err != nil {
+		return err
 	}
 	p.Seg = SegmentBounds(tab, tab.Body)
 	p.Description = fmt.Sprintf("every %q in tab %d", op.Find, tab.Number)
@@ -281,9 +297,9 @@ func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan
 }
 
 func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {
-	tab, ok := f.Doc.Tab(targetTab(op.Target))
-	if !ok {
-		return Errorf("not_found", "no tab %q", targetTab(op.Target))
+	tab, err := tabOf(f.Doc, targetTab(op.Target))
+	if err != nil {
+		return err
 	}
 	existing := tab.Headers
 	if op.Kind == plan.OpCreateFooter {
@@ -297,7 +313,7 @@ func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {
 	p.Description = fmt.Sprintf("new %s of tab %d", kind, tab.Number)
 	for _, blk := range tab.Body.Blocks {
 		if blk.Kind == doc.KindParagraph {
-			p.CommentAnchor = &plan.Rng{Start: blk.Start, End: blk.End, TabID: tab.ID}
+			p.CommentAnchor = blockRng(tab, tab.Body, blk)
 			break
 		}
 	}
@@ -321,16 +337,7 @@ func targetTab(t *Target) string {
 
 func parseContent(content, format string) (*markdown.Fragment, error) {
 	if strings.EqualFold(strings.TrimSpace(format), "text") {
-		lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
-		blocks := make([]*markdown.Block, 0, len(lines))
-		for _, line := range lines {
-			b := &markdown.Block{Kind: markdown.KindParagraph}
-			if line != "" {
-				b.Inlines = []markdown.Inline{{Text: line}}
-			}
-			blocks = append(blocks, b)
-		}
-		return &markdown.Fragment{Blocks: blocks}, nil
+		return markdown.Plain(content), nil
 	}
 	return markdown.Parse(content)
 }
@@ -373,15 +380,11 @@ func (s *Service) resolveLocation(f *Fetched, loc Location) (*insertPoint, error
 
 // segmentEdge is the start or end of a whole segment.
 func (s *Service) segmentEdge(f *Fetched, t Target, at string) (*insertPoint, error) {
-	tab, ok := f.Doc.Tab(t.Tab)
-	if !ok {
-		return nil, Errorf("not_found", "no tab %q; tabs: %s", t.Tab, tabList(f.Doc))
-	}
-	seg, err := selectSegment(tab, t.Segment)
+	tab, seg, err := tabSegment(f.Doc, t.Tab, t.Segment)
 	if err != nil {
 		return nil, err
 	}
-	content := contentBlocks(seg)
+	content := seg.ContentBlocks()
 	if len(content) == 0 {
 		return nil, Errorf("invalid", "%s has no content blocks", segmentName(tab, seg))
 	}
@@ -393,9 +396,17 @@ func (s *Service) segmentEdge(f *Fetched, t Target, at string) (*insertPoint, er
 			return nil, Errorf("invalid", "%s starts with a table; insert after it or before the first paragraph", segmentName(tab, seg))
 		}
 		ip.index, ip.nearBullet, ip.description, ip.anchor = first.Start, hasBullet(first), "start of "+segmentName(tab, seg), blockRng(tab, seg, first)
+		ip.inline = first.IsEmptyParagraph()
 	case "end":
 		last := content[len(content)-1]
-		ip.index, ip.atEnd, ip.nearBullet, ip.description, ip.anchor = last.End-1, true, hasBullet(last), "end of "+segmentName(tab, seg), blockRng(tab, seg, last)
+		ip.description, ip.anchor = "end of "+segmentName(tab, seg), blockRng(tab, seg, last)
+		ip.nearBullet = hasBullet(last)
+		if last.IsEmptyParagraph() {
+			// Fill the empty paragraph instead of leaving it above the content.
+			ip.index, ip.inline = last.Start, true
+		} else {
+			ip.index, ip.atEnd = last.End-1, true
+		}
 	default:
 		return nil, Errorf("invalid", "location %q needs a target (of) to be before or after", at)
 	}
@@ -421,13 +432,17 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 		}
 		ip.description = "before " + r.Description
 	case "after", "end":
-		if last.End >= bounds.End {
+		next := nextBlock(seg, last)
+		switch {
+		case last.End >= bounds.End || (next != nil && next.Kind == doc.KindTable):
+			// No paragraph boundary follows (end of segment, or a table
+			// starts there), so borrow this block's own newline.
 			if last.Kind == doc.KindTable {
-				return nil, Errorf("invalid", "cannot insert after %s: it is the last block and a table", last.Handle)
+				return nil, Errorf("invalid", "cannot insert after %s: a table with no paragraph after it; insert before the next paragraph instead", last.Handle)
 			}
 			ip.index, ip.atEnd, ip.nearBullet = last.End-1, true, hasBullet(last)
-		} else {
-			ip.index, ip.nearBullet = last.End, hasBullet(nextBlock(seg, last))
+		default:
+			ip.index, ip.nearBullet = last.End, hasBullet(next)
 		}
 		ip.anchor, ip.description = blockRng(tab, seg, last), "after "+r.Description
 	case "start":
@@ -468,16 +483,6 @@ func hasBullet(b *doc.Block) bool {
 
 func blockRng(tab *doc.Tab, seg *doc.Segment, b *doc.Block) *plan.Rng {
 	return &plan.Rng{Start: b.Start, End: b.End, SegmentID: seg.ID, TabID: tab.ID}
-}
-
-func contentBlocks(seg *doc.Segment) []*doc.Block {
-	var out []*doc.Block
-	for _, b := range seg.Blocks {
-		if b.Kind != doc.KindSectionBreak {
-			out = append(out, b)
-		}
-	}
-	return out
 }
 
 func previousParagraph(seg *doc.Segment, b *doc.Block) *doc.Block {

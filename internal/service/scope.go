@@ -36,9 +36,9 @@ var segmentRef = regexp.MustCompile(`^(body|header|footer|footnote)\s*(\d*)$`)
 
 // ResolveScope turns a ReadScope into a block range.
 func ResolveScope(d *doc.Document, sc ReadScope) (Resolved, error) {
-	tab, ok := d.Tab(sc.Tab)
-	if !ok {
-		return Resolved{}, Errorf("not_found", "no tab %q; tabs: %s", sc.Tab, tabList(d))
+	tab, err := tabOf(d, sc.Tab)
+	if err != nil {
+		return Resolved{}, err
 	}
 	if sc.HeadingID != "" {
 		ht, sec, ok := d.HeadingByID(sc.HeadingID)

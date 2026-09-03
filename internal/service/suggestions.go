@@ -8,6 +8,7 @@ import (
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 	"github.com/mmedum/google-docs-mcp/internal/plan"
 )
 
@@ -29,18 +30,6 @@ type SuggestionsResult struct {
 	RevisionID  string       `json:"revision_id"`
 	Suggestions []Suggestion `json:"suggestions"`
 	Text        string       `json:"-"`
-}
-
-type previewSuggestion struct {
-	SuggestionID string `json:"suggestionId"`
-	Status       string `json:"status"`
-	SummaryText  string `json:"summaryText"`
-	HeadPost     struct {
-		CreateTime string `json:"createTime"`
-		Author     struct {
-			DisplayName string `json:"displayName"`
-		} `json:"author"`
-	} `json:"headPost"`
 }
 
 // ListSuggestions collects suggestions from the inline view, in document
@@ -65,31 +54,30 @@ func (s *Service) ListSuggestions(ctx context.Context, ref string) (*Suggestions
 			sg.Kind = "structure"
 		}
 	}
-	for _, t := range f.Doc.Tabs {
-		for _, seg := range t.Segments() {
-			for _, b := range seg.AllBlocks() {
-				for _, id := range b.Inserted {
-					note(id, b.Handle, "", "", true)
-				}
-				for _, id := range b.Deleted {
-					note(id, b.Handle, "", "", true)
-				}
-				if b.Paragraph == nil {
-					continue
-				}
-				for _, r := range b.Paragraph.Runs {
-					for _, id := range r.Inserted {
-						note(id, b.Handle, strings.TrimSuffix(r.Text, "\n"), "", false)
-					}
-					for _, id := range r.Deleted {
-						note(id, b.Handle, "", strings.TrimSuffix(r.Text, "\n"), false)
-					}
-				}
+	for _, b := range f.Doc.AllBlocks() {
+		for _, id := range b.Inserted {
+			note(id, b.Handle, "", "", true)
+		}
+		for _, id := range b.Deleted {
+			note(id, b.Handle, "", "", true)
+		}
+		if b.Paragraph == nil {
+			continue
+		}
+		for _, r := range b.Paragraph.Runs {
+			for _, id := range r.Inserted {
+				note(id, b.Handle, strings.TrimSuffix(r.Text, "\n"), "", false)
+			}
+			for _, id := range r.Deleted {
+				note(id, b.Handle, "", strings.TrimSuffix(r.Text, "\n"), false)
 			}
 		}
 	}
 	res := &SuggestionsResult{RevisionID: f.Doc.RevisionID, Suggestions: []Suggestion{}}
-	threads := previewThreads(f)
+	threads := map[string]gdocs.SuggestionThread{}
+	for _, t := range f.Wire.Suggestions {
+		threads[t.SuggestionID] = t
+	}
 	for _, id := range order {
 		sg := byID[id]
 		switch {
@@ -114,29 +102,15 @@ func (s *Service) ListSuggestions(ctx context.Context, ref string) (*Suggestions
 			fmt.Fprintf(&sb, " by %s", sg.Author)
 		}
 		if sg.Deleted != "" {
-			fmt.Fprintf(&sb, " {--%s--}", clip(sg.Deleted, 80))
+			fmt.Fprintf(&sb, " {--%s--}", doc.Clip(sg.Deleted, 80))
 		}
 		if sg.Inserted != "" {
-			fmt.Fprintf(&sb, " {++%s++}", clip(sg.Inserted, 80))
+			fmt.Fprintf(&sb, " {++%s++}", doc.Clip(sg.Inserted, 80))
 		}
 		sb.WriteString("\n")
 	}
 	res.Text = strings.TrimRight(sb.String(), "\n")
 	return res, nil
-}
-
-func previewThreads(f *Fetched) map[string]previewSuggestion {
-	threads := map[string]previewSuggestion{}
-	if f.Preview.Suggestions == nil {
-		return threads
-	}
-	var raw []previewSuggestion
-	if json.Unmarshal(f.Preview.Suggestions, &raw) == nil {
-		for _, t := range raw {
-			threads[t.SuggestionID] = t
-		}
-	}
-	return threads
 }
 
 // ReviewRequest accepts or rejects suggestions.
@@ -159,8 +133,8 @@ type ReviewResult struct {
 
 // Review accepts or rejects suggestions (Developer Preview).
 func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult, error) {
-	if s.opts.ReadOnly {
-		return nil, Errorf("forbidden", "this server runs read-only (GDOCS_READ_ONLY=true)")
+	if err := s.requireWritable(); err != nil {
+		return nil, err
 	}
 	if !s.opts.Preview {
 		return nil, Errorf("unavailable", "accepting or rejecting suggestions needs Developer Preview enrolment (GDOCS_PREVIEW=true)")
@@ -220,6 +194,5 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	}
 	out.Remaining = len(all) - len(ids)
 	out.Text = fmt.Sprintf("%sed %d suggestion(s); %d remain pending (revision %s)", action, len(ids), out.Remaining, out.RevisionID)
-	_ = doc.ViewInline
 	return out, nil
 }

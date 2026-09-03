@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/plan"
@@ -59,17 +60,7 @@ func (r TargetRange) Rng() plan.Rng {
 
 // SegmentBounds describes the segment for the planner.
 func SegmentBounds(tab *doc.Tab, seg *doc.Segment) plan.Segment {
-	b := plan.Segment{ID: seg.ID, TabID: tab.ID}
-	for _, blk := range seg.Blocks {
-		if blk.Kind != doc.KindSectionBreak {
-			b.Start = blk.Start
-			break
-		}
-	}
-	if n := len(seg.Blocks); n > 0 {
-		b.End = seg.Blocks[n-1].End
-	}
-	return b
+	return plan.Segment{ID: seg.ID, TabID: tab.ID, Start: seg.ContentStart(), End: seg.End()}
 }
 
 // ResolveTarget turns a Target into a range on the document, checking
@@ -79,11 +70,7 @@ func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
 	if t.selectorCount() != 1 {
 		return nil, Errorf("invalid", "a target needs exactly one of text, heading_id, heading, handle, from/to, or cell")
 	}
-	tab, ok := d.Tab(t.Tab)
-	if !ok {
-		return nil, Errorf("not_found", "no tab %q; tabs: %s", t.Tab, tabList(d))
-	}
-	seg, err := selectSegment(tab, t.Segment)
+	tab, seg, err := tabSegment(d, t.Tab, t.Segment)
 	if err != nil {
 		return nil, err
 	}
@@ -131,8 +118,7 @@ func (s *Service) ResolveTarget(f *Fetched, t Target) (*TargetRange, error) {
 		if len(c.Blocks) == 0 {
 			return nil, Errorf("invalid", "cell %s has no content blocks", t.Cell)
 		}
-		first, last := c.Blocks[0], c.Blocks[len(c.Blocks)-1]
-		return &TargetRange{Tab: tab, Segment: seg, Start: first.Start, End: last.End - 1, Text: c.Text(doc.ViewInline),
+		return &TargetRange{Tab: tab, Segment: seg, Start: c.Blocks[0].Start, End: c.ContentEnd(), Text: c.Text(doc.ViewInline),
 			Description: "cell " + t.Cell}, nil
 	}
 	return s.resolveText(f, tab, seg, t)
@@ -192,9 +178,9 @@ func (s *Service) checkedIndex(f *Fetched, seg *doc.Segment, handle string) (int
 		case 1:
 			return hits[0], nil
 		case 0:
-			return 0, Errorf("stale", "handle %s pointed at %q when read, and that block no longer exists at this revision; re-read the section", handle, clip(remembered, 60))
+			return 0, Errorf("stale", "handle %s pointed at %q when read, and that block no longer exists at this revision; re-read the section", handle, doc.Clip(remembered, 60))
 		default:
-			return 0, Errorf("ambiguous", "handle %s pointed at %q, which now appears %d times; re-read the section and use the current handle", handle, clip(remembered, 60), len(hits))
+			return 0, Errorf("ambiguous", "handle %s pointed at %q, which now appears %d times; re-read the section and use the current handle", handle, doc.Clip(remembered, 60), len(hits))
 		}
 	}
 	return topLevelIndex(seg, handle)
@@ -235,7 +221,7 @@ func (s *Service) resolveText(f *Fetched, tab *doc.Tab, seg *doc.Segment, t Targ
 	}
 	switch {
 	case len(hits) == 0:
-		return nil, Errorf("not_found", "text %q not found %s; use find_in_document to locate it, and quote it exactly", clip(t.Text, 80), scope)
+		return nil, Errorf("not_found", "text %q not found %s; use find_in_document to locate it, and quote it exactly", doc.Clip(t.Text, 80), scope)
 	case len(hits) > 1 && t.Occurrence <= 0:
 		var where []string
 		for i, h := range hits {
@@ -245,14 +231,14 @@ func (s *Service) resolveText(f *Fetched, tab *doc.Tab, seg *doc.Segment, t Targ
 			}
 			where = append(where, h.block.Handle)
 		}
-		return nil, Errorf("ambiguous", "text %q matches %d times %s (%s); add occurrence (1-based) or within", clip(t.Text, 80), len(hits), scope, strings.Join(where, ", "))
+		return nil, Errorf("ambiguous", "text %q matches %d times %s (%s); add occurrence (1-based) or within", doc.Clip(t.Text, 80), len(hits), scope, strings.Join(where, ", "))
 	case t.Occurrence > len(hits):
-		return nil, Errorf("not_found", "text %q matches %d time(s) %s; occurrence %d does not exist", clip(t.Text, 80), len(hits), scope, t.Occurrence)
+		return nil, Errorf("not_found", "text %q matches %d time(s) %s; occurrence %d does not exist", doc.Clip(t.Text, 80), len(hits), scope, t.Occurrence)
 	}
 	h := hits[max(t.Occurrence, 1)-1]
 	text := sliceUTF16(h.block.Paragraph, h.start, h.end)
 	return &TargetRange{Tab: tab, Segment: seg, Start: h.start, End: h.end, Text: text, Block: h.block,
-		Description: fmt.Sprintf("%q in %s", clip(text, 60), h.block.Handle)}, nil
+		Description: fmt.Sprintf("%q in %s", doc.Clip(text, 60), h.block.Handle)}, nil
 }
 
 // withinBlocks restricts a text search to a block handle or a section.
@@ -263,41 +249,19 @@ func (s *Service) withinBlocks(f *Fetched, tab *doc.Tab, seg *doc.Segment, withi
 		if err != nil {
 			return nil, "", err
 		}
-		return flatten(seg.Blocks[rs.From:rs.To]), "within section " + strings.TrimPrefix(within, "heading:"), nil
+		return doc.Flatten(seg.Blocks[rs.From:rs.To]), "within section " + strings.TrimPrefix(within, "heading:"), nil
 	}
 	if _, sec, ok := f.Doc.HeadingByID(within); ok {
-		return flatten(seg.Blocks[sec.From:sec.To]), "within section " + within, nil
+		return doc.Flatten(seg.Blocks[sec.From:sec.To]), "within section " + within, nil
 	}
 	i, err := s.checkedIndex(f, seg, within)
 	if err != nil {
 		if b, ok := f.Doc.FindHandle(within); ok {
-			return flatten([]*doc.Block{b}), "within " + within, nil
+			return doc.Flatten([]*doc.Block{b}), "within " + within, nil
 		}
 		return nil, "", err
 	}
-	return flatten([]*doc.Block{seg.Blocks[i]}), "within " + within, nil
-}
-
-func flatten(blocks []*doc.Block) []*doc.Block {
-	var out []*doc.Block
-	var walk func([]*doc.Block)
-	walk = func(bs []*doc.Block) {
-		for _, b := range bs {
-			out = append(out, b)
-			if b.Table != nil {
-				for _, row := range b.Table.Cells {
-					for _, c := range row {
-						walk(c.Blocks)
-					}
-				}
-			}
-			if b.TOC != nil {
-				walk(b.TOC.Blocks)
-			}
-		}
-	}
-	walk(blocks)
-	return out
+	return doc.Flatten([]*doc.Block{seg.Blocks[i]}), "within " + within, nil
 }
 
 // unit is one comparable character of a paragraph with its UTF-16 span.
@@ -317,8 +281,8 @@ func units(p *doc.Paragraph) []unit {
 		}
 		pos := run.Start
 		for _, r := range run.Text {
-			w := int64(utf16Len(r))
-			nr, keep := normalizeRune(r)
+			w := int64(utf16.RuneLen(r))
+			nr, keep := doc.NormalizeRune(r)
 			switch {
 			case !keep:
 			case unicode.IsSpace(nr):
@@ -340,35 +304,14 @@ func units(p *doc.Paragraph) []unit {
 	return out
 }
 
-func utf16Len(r rune) int {
-	if r >= 0x10000 {
-		return 2
-	}
-	return 1
-}
-
-func normalizeRune(r rune) (rune, bool) {
-	switch r {
-	case '\u2018', '\u2019', '\u201a', '\u201b':
-		return '\'', true
-	case '\u201c', '\u201d', '\u201e', '\u201f':
-		return '"', true
-	case '\u2013', '\u2014', '\u2011':
-		return '-', true
-	case '\u200b', '\ufeff':
-		return 0, false
-	}
-	if unicode.IsSpace(r) {
-		return ' ', true
-	}
-	return r, true
-}
-
 // matchParagraph returns every [start, end) UTF-16 span where the
 // normalised needle occurs in the paragraph.
 func matchParagraph(p *doc.Paragraph, needle string, caseFold bool) [][2]int64 {
-	us := units(p)
-	nr := []rune(needle)
+	return matchUnits(units(p), []rune(needle), caseFold)
+}
+
+// matchUnits is matchParagraph over precomputed units.
+func matchUnits(us []unit, nr []rune, caseFold bool) [][2]int64 {
 	if len(nr) == 0 || len(us) < len(nr) {
 		return nil
 	}
@@ -407,12 +350,4 @@ func sliceUTF16(p *doc.Paragraph, start, end int64) string {
 		b.WriteString(run.Text[doc.UTF16ToByte(run.Text, from):doc.UTF16ToByte(run.Text, to)])
 	}
 	return b.String()
-}
-
-func clip(s string, n int) string {
-	r := []rune(strings.TrimSpace(s))
-	if len(r) <= n {
-		return string(r)
-	}
-	return string(r[:n]) + "…"
 }

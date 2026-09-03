@@ -152,8 +152,8 @@ func TestRequestBuilders(t *testing.T) {
 	checks := map[string]json.RawMessage{
 		"insertText":             InsertText("x", Loc{Index: 3, TabID: "t"}),
 		"deleteContentRange":     DeleteRange(r),
-		"updateTextStyle":        UpdateTextStyle(r, TextStyleSpec{Bold: boolp(false), Font: "none", Foreground: "#ff0000", Background: "none", Link: "none", SizePt: 12, Baseline: "SUPERSCRIPT"}),
-		"updateParagraphStyle":   UpdateParagraphStyle(r, ParagraphStyleSpec{NamedStyle: "HEADING_2", Alignment: "CENTER", LineSpacing: 115, SpaceAbovePt: floatp(6), KeepWithNext: boolp(true)}),
+		"updateTextStyle":        UpdateTextStyle(r, TextStyleSpec{Bold: new(false), Font: "none", Foreground: "#ff0000", Background: "none", Link: "none", SizePt: 12, Baseline: "SUPERSCRIPT"}),
+		"updateParagraphStyle":   UpdateParagraphStyle(r, ParagraphStyleSpec{NamedStyle: "HEADING_2", Alignment: "CENTER", LineSpacing: 115, SpaceAbovePt: floatp(6), KeepWithNext: new(true)}),
 		"createParagraphBullets": CreateBullets(r, CheckboxPreset),
 		"deleteParagraphBullets": DeleteBullets(r),
 		"replaceAllText":         ReplaceAllText("a", "b", true, "t"),
@@ -188,6 +188,12 @@ func TestRequestBuilders(t *testing.T) {
 	}
 	if !ValidColor("#00ff00") || !ValidColor("none") || !ValidColor("") || ValidColor("red") || ValidColor("#12345") {
 		t.Fatal("ValidColor")
+	}
+	if (TextStyleSpec{Foreground: "red"}).Validate() == nil || (TextStyleSpec{Baseline: "UP"}).Validate() == nil || (TextStyleSpec{Bold: new(true), Baseline: "NONE"}).Validate() != nil {
+		t.Fatal("TextStyleSpec.Validate")
+	}
+	if (ParagraphStyleSpec{NamedStyle: "HUGE"}).Validate() == nil || (ParagraphStyleSpec{Alignment: "LEFT"}).Validate() == nil || (ParagraphStyleSpec{NamedStyle: "HEADING_2", Alignment: "END"}).Validate() != nil {
+		t.Fatal("ParagraphStyleSpec.Validate")
 	}
 	if Kind(json.RawMessage(`nope`)) != "" || Kind(json.RawMessage(`{}`)) != "" {
 		t.Fatal("Kind on bad input")

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Fails when the documentation drifts from the code:
+#  - README's tool table must list exactly the registered tools;
+#  - docs/configuration.md must mention every GDOCS_* variable config.go defines;
+#  - CHANGELOG.md must have content under [Unreleased] when source changed since the last tag;
+#  - docs/architecture.md must not claim "no code yet" once code exists.
+set -euo pipefail
+BIN=${1:-./google-docs-mcp}
+fail=0
+
+tools=$("$BIN" --dump-schemas | python3 -c 'import json,sys; print("\n".join(t["name"] for t in json.load(sys.stdin)["tools"]))')
+readme_tools=$(grep -oE '^\| `[a-z_]+` \|' README.md | tr -d '`| ' | sort)
+if [ "$(echo "$tools" | sort)" != "$readme_tools" ]; then
+  echo "README tool table differs from registered tools:"
+  diff <(echo "$tools" | sort) <(echo "$readme_tools") || true
+  fail=1
+fi
+
+for var in $(grep -oE '"[A-Z_]+"' internal/config/config.go | grep -oE '[A-Z][A-Z_]+' | sort -u); do
+  case "$var" in PT|PROFILE|LOG_LEVEL|LOG_FORMAT|PREVIEW|DEFAULT_WRITE_MODE|READ_ONLY|ENABLE_DESTRUCTIVE|EXPORT_DIR|HTTP_TIMEOUT|CLIENT_SECRET) ;; *) continue ;; esac
+  [ "$var" = PT ] && continue
+  if ! grep -q "GDOCS_$var" docs/configuration.md; then
+    echo "docs/configuration.md does not document GDOCS_$var"
+    fail=1
+  fi
+done
+
+if grep -qi "no code yet" docs/architecture.md; then
+  echo "docs/architecture.md still says 'no code yet'"
+  fail=1
+fi
+
+last=$(git describe --tags --abbrev=0 2>/dev/null || true)
+range=${last:+$last..HEAD}
+if git diff --quiet ${range:-HEAD~1} -- '*.go' 2>/dev/null; then
+  :
+else
+  unreleased=$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | grep -c '^- ' || true)
+  if [ "$unreleased" -eq 0 ]; then
+    echo "source changed since ${last:-the previous commit} but CHANGELOG.md [Unreleased] is empty"
+    fail=1
+  fi
+fi
+
+[ $fail = 0 ] && echo "staleness check ok"
+exit $fail

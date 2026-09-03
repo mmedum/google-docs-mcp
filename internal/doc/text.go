@@ -82,23 +82,50 @@ func (c *Cell) Text(v View) string {
 	return strings.Join(lines, "\n")
 }
 
-var normalizer = strings.NewReplacer(
-	"\u2018", "'", "\u2019", "'", "\u201a", "'", "\u201b", "'",
-	"\u201c", `"`, "\u201d", `"`, "\u201e", `"`, "\u201f", `"`,
-	"\u00a0", " ", "\u2002", " ", "\u2003", " ", "\u2009", " ", "\u200a", " ", "\u202f", " ", "\u3000", " ",
-	"\u2013", "-", "\u2014", "-", "\u2011", "-",
-	"\u2026", "...",
-	"\u200b", "", "\ufeff", "",
-)
+// NormalizeRune maps one character to its comparison form: curly quotes
+// to straight, dashes to hyphens, any space to a plain space, zero-width
+// characters dropped (keep=false). Text matching and Normalize share it
+// so needles and haystacks always agree.
+func NormalizeRune(r rune) (rune, bool) {
+	switch r {
+	case '\u2018', '\u2019', '\u201a', '\u201b':
+		return '\'', true
+	case '\u201c', '\u201d', '\u201e', '\u201f':
+		return '"', true
+	case '\u2013', '\u2014', '\u2011':
+		return '-', true
+	case '\u200b', '\ufeff':
+		return 0, false
+	}
+	if unicode.IsSpace(r) {
+		return ' ', true
+	}
+	return r, true
+}
 
-// Normalize makes prose comparable: curly quotes to straight, dashes to
-// hyphens, exotic spaces to spaces, whitespace runs collapsed, trimmed.
+// Normalize makes prose comparable: NormalizeRune applied to every
+// character, whitespace runs collapsed, trimmed.
 func Normalize(s string) string {
-	s = normalizer.Replace(s)
-	return strings.Join(strings.Fields(s), " ")
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if nr, keep := NormalizeRune(r); keep {
+			b.WriteRune(nr)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// Clip trims s and cuts it to n characters with an ellipsis.
+func Clip(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
 }
 
 // WordCount counts whitespace-separated words.
 func WordCount(s string) int {
-	return len(strings.FieldsFunc(s, unicode.IsSpace))
+	return len(strings.Fields(s))
 }

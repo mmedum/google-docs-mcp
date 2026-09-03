@@ -12,6 +12,18 @@ and new required fields are breaking; the schema diff in CI flags them.
   budget), `gdocs://<id>/outline` and `gdocs://<id>/tabs/<tab>`, for
   clients that attach a document whole; `--dump-schemas` lists the
   resource templates next to the tools.
+- `make bench` and a synthetic large-document generator
+  (`internal/doc/doctest.Large`) for the numbers below.
+
+### Changed
+- Large documents: what several operations need from one fetch is now
+  derived once and shared (handle memory, comment threads, a searchable
+  text index and an anchor index per segment); handles and cells are
+  looked up through maps; list numbers are assigned at parse time;
+  outline and statistics count words without building strings. On a
+  150-page fixture a cached section read went from 14.5 ms to 0.1 ms, a
+  text-targeted dry run from 61 ms to 20 ms, and locating 300 comments by
+  quoted text from 384 ms to 38 ms.
 
 ## [0.2.0] - 2026-09-03
 

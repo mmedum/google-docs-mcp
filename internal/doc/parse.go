@@ -34,6 +34,7 @@ func Parse(d *gdocs.Document) (*Document, error) {
 			},
 		}
 		out.Tabs = append(out.Tabs, parseTab(legacy, 1))
+		out.index()
 		return out, nil
 	}
 	var walk func([]*gdocs.Tab)
@@ -44,7 +45,24 @@ func Parse(d *gdocs.Document) (*Document, error) {
 		}
 	}
 	walk(d.Tabs)
+	out.index()
 	return out, nil
+}
+
+// index fills the per-document lookups once every tab is parsed.
+func (d *Document) index() {
+	d.byHandle, d.byCell = map[string]*Block{}, map[string]*Cell{}
+	for _, b := range d.AllBlocks() {
+		d.byHandle[b.Handle] = b
+		if b.Table == nil {
+			continue
+		}
+		for _, row := range b.Table.Cells {
+			for _, c := range row {
+				d.byCell[c.Handle] = c
+			}
+		}
+	}
 }
 
 func parseTab(t *gdocs.Tab, number int) *Tab {
@@ -137,7 +155,39 @@ func parseFootnotes(tab *Tab, dt *gdocs.DocumentTab, prefix string) []*Segment {
 func parseSegment(tab *Tab, kind SegmentKind, id string, number int, prefix string, content []*gdocs.StructuralElement) *Segment {
 	seg := &Segment{Kind: kind, ID: id, Number: number, Prefix: prefix, Tab: tab}
 	seg.Blocks = parseBlocks(seg, nil, prefix, content)
+	all := Flatten(seg.Blocks)
+	seg.all = all[:len(all):len(all)]
 	return seg
+}
+
+// numberLists gives every list item among sibling blocks its rendered
+// number: the count of preceding items of the same list and level since
+// the last interruption (a non-list block, another list, or a shallower
+// item of the same list).
+func numberLists(blocks []*Block) {
+	counters := map[string][]int{}
+	for _, b := range blocks {
+		if b.Paragraph == nil || b.Paragraph.Bullet == nil {
+			clear(counters)
+			continue
+		}
+		bl := b.Paragraph.Bullet
+		for id := range counters {
+			if id != bl.ListID {
+				delete(counters, id)
+			}
+		}
+		c := counters[bl.ListID]
+		for len(c) <= bl.Nesting {
+			c = append(c, 0)
+		}
+		c[bl.Nesting]++
+		for i := bl.Nesting + 1; i < len(c); i++ {
+			c[i] = 0
+		}
+		counters[bl.ListID] = c
+		bl.Number = c[bl.Nesting]
+	}
 }
 
 func parseBlocks(seg *Segment, cell *Cell, prefix string, content []*gdocs.StructuralElement) []*Block {
@@ -181,6 +231,7 @@ func parseBlocks(seg *Segment, cell *Cell, prefix string, content []*gdocs.Struc
 		}
 		out = append(out, b)
 	}
+	numberLists(out)
 	return out
 }
 

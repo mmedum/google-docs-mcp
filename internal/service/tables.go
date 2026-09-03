@@ -129,7 +129,7 @@ func (s *Service) resolveTableOp(f *Fetched, op EditOp, p *plan.Op, out *resolve
 				tp.Indices = append(tp.Indices, n-1)
 			}
 		}
-		p.Anchors = tableLineAnchors(b, op.Kind == plan.OpDeleteRows, seen, out.threads)
+		p.Anchors = tableLineAnchors(f, b, op.Kind == plan.OpDeleteRows, seen, out.threads)
 	case plan.OpMergeCells, plan.OpUnmergeCells, plan.OpStyleCells:
 		if err := cellRange(b, to, tp); err != nil {
 			return err
@@ -137,7 +137,7 @@ func (s *Service) resolveTableOp(f *Fetched, op EditOp, p *plan.Op, out *resolve
 		tp.Cell = to.Style
 		if op.Kind == plan.OpMergeCells {
 			// Everything outside the head cell moves or is lost.
-			p.Anchors = mergedAnchors(b, tp, out.threads)
+			p.Anchors = mergedAnchors(f, b, tp, out.threads)
 		}
 	case plan.OpPinHeaderRows:
 		tp.HeaderRows = to.Count
@@ -176,8 +176,8 @@ func cellRange(b *doc.Block, to *TableOp, tp *plan.TableParams) error {
 
 // tableLineAnchors lists anchored content inside the rows or columns a
 // deletion removes: one scan of the table, then a filter per cell.
-func tableLineAnchors(b *doc.Block, rows bool, indices map[int]bool, threads []CommentThread) []plan.Anchor {
-	all := anchorsIn(b.Segment.Tab, b.Segment, b.Start, b.End, threads)
+func tableLineAnchors(f *Fetched, b *doc.Block, rows bool, indices map[int]bool, threads []CommentThread) []plan.Anchor {
+	all := f.anchorsIn(b.Segment, b.Start, b.End, threads)
 	if len(all) == 0 {
 		return nil
 	}
@@ -205,8 +205,8 @@ func tableLineAnchors(b *doc.Block, rows bool, indices map[int]bool, threads []C
 
 // mergedAnchors lists anchored content in the cells a merge folds into
 // its head cell.
-func mergedAnchors(b *doc.Block, tp *plan.TableParams, threads []CommentThread) []plan.Anchor {
-	all := anchorsIn(b.Segment.Tab, b.Segment, b.Start, b.End, threads)
+func mergedAnchors(f *Fetched, b *doc.Block, tp *plan.TableParams, threads []CommentThread) []plan.Anchor {
+	all := f.anchorsIn(b.Segment, b.Start, b.End, threads)
 	if len(all) == 0 {
 		return nil
 	}
@@ -246,7 +246,7 @@ func (s *Service) expandSetCells(f *Fetched, seq int, op EditOp, out *resolvedOp
 	}
 	tab, seg := b.Segment.Tab, b.Segment
 	bounds := SegmentBounds(tab, seg)
-	all := anchorsIn(tab, seg, b.Start, b.End, out.threads)
+	all := f.anchorsIn(seg, b.Start, b.End, out.threads)
 	desc := fmt.Sprintf("%d cell(s) of %s", len(cells), b.Handle)
 	ops := make([]plan.Op, 0, len(cells))
 	for _, cc := range cells {

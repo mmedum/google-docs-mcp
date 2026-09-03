@@ -42,6 +42,10 @@ test: ## Unit tests with race detector and coverage
 cover: test ## Enforce the coverage floor on core packages
 	@bash scripts/coverage-check.sh cov.out $(COVER_MIN)
 
+.PHONY: bench
+bench: ## Benchmarks over the synthetic large document (doctest.Large)
+	$(GO) test -run XXX -bench . -benchmem ./internal/doc ./internal/render ./internal/service
+
 .PHONY: vuln
 vuln:
 	govulncheck ./...

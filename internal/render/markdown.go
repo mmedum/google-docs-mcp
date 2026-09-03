@@ -99,9 +99,9 @@ func handlePrefix(b *doc.Block, o Options) string {
 }
 
 // listMarker is "- " or "N. " for a list paragraph.
-func listMarker(seg *doc.Segment, b *doc.Block) string {
+func listMarker(b *doc.Block) string {
 	if b.Paragraph.Bullet.Ordered {
-		return strconv.Itoa(ListNumber(seg, b)) + ". "
+		return strconv.Itoa(b.Paragraph.Bullet.Number) + ". "
 	}
 	return "- "
 }
@@ -161,7 +161,7 @@ func (r *mdRenderer) paragraph(b *doc.Block) string {
 			line = "*" + content + "*"
 		}
 	case p.Bullet != nil:
-		line = strings.Repeat("    ", p.Bullet.Nesting) + listMarker(r.seg, b) + content
+		line = strings.Repeat("    ", p.Bullet.Nesting) + listMarker(b) + content
 	default:
 		line = content
 	}
@@ -172,42 +172,6 @@ func (r *mdRenderer) paragraph(b *doc.Block) string {
 		return strings.TrimSpace(r.handle(b))
 	}
 	return r.handle(b) + line
-}
-
-// ListNumber counts the block's position among preceding siblings in the
-// same list and nesting level, restarting after any interruption.
-func ListNumber(seg *doc.Segment, b *doc.Block) int {
-	siblings := seg.Blocks
-	if b.Cell != nil {
-		siblings = b.Cell.Blocks
-	}
-	n := 0
-	for _, s := range siblings {
-		if s.Paragraph == nil || s.Paragraph.Bullet == nil {
-			if n > 0 && s == b {
-				break
-			}
-			n = 0
-			continue
-		}
-		bl := s.Paragraph.Bullet
-		if bl.ListID != b.Paragraph.Bullet.ListID {
-			n = 0
-			continue
-		}
-		if bl.Nesting == b.Paragraph.Bullet.Nesting {
-			n++
-		} else if bl.Nesting < b.Paragraph.Bullet.Nesting {
-			n = 0
-		}
-		if s == b {
-			break
-		}
-	}
-	if n == 0 {
-		n = 1
-	}
-	return n
 }
 
 func (r *mdRenderer) table(b *doc.Block, depth int) string {

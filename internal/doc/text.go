@@ -106,16 +106,88 @@ func NormalizeRune(r rune) (rune, bool) {
 }
 
 // Normalize makes prose comparable: NormalizeRune applied to every
-// character, whitespace runs collapsed, trimmed.
+// character, whitespace runs collapsed to one space, trimmed.
 func Normalize(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
+	space := false
 	for _, r := range s {
-		if nr, keep := NormalizeRune(r); keep {
+		nr, keep := NormalizeRune(r)
+		switch {
+		case !keep:
+		case nr == ' ':
+			space = b.Len() > 0
+		default:
+			if space {
+				b.WriteByte(' ')
+				space = false
+			}
 			b.WriteRune(nr)
 		}
 	}
-	return strings.Join(strings.Fields(b.String()), " ")
+	return b.String()
+}
+
+// Count returns the words and characters of the paragraph's text in the
+// view, as WordCount and a rune count of Text would, without building
+// the string.
+func (p *Paragraph) Count(v View) (words, chars int) {
+	inWord := false
+	var last rune
+	for _, r := range p.Runs {
+		if !r.Visible(v) {
+			continue
+		}
+		switch r.Kind {
+		case RunText, RunPerson, RunRichLink, RunDate:
+		default:
+			continue
+		}
+		for _, c := range r.Text {
+			chars++
+			last = c
+			if unicode.IsSpace(c) {
+				inWord = false
+			} else if !inWord {
+				inWord = true
+				words++
+			}
+		}
+	}
+	if last == '\n' {
+		chars--
+	}
+	return words, chars
+}
+
+// Words counts the block's words in the view: a paragraph's own, a
+// table's or table of contents' nested paragraphs summed.
+func (b *Block) Words(v View) int {
+	switch {
+	case b.Paragraph != nil:
+		w, _ := b.Paragraph.Count(v)
+		return w
+	case b.Table != nil:
+		n := 0
+		for _, row := range b.Table.Cells {
+			for _, c := range row {
+				if c.Covered() {
+					continue
+				}
+				for _, nb := range c.Blocks {
+					n += nb.Words(v)
+				}
+			}
+		}
+		return n
+	case b.TOC != nil:
+		n := 0
+		for _, nb := range b.TOC.Blocks {
+			n += nb.Words(v)
+		}
+		return n
+	}
+	return 0
 }
 
 // Clip trims s and cuts it to n characters with an ellipsis.

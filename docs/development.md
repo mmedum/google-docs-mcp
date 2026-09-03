@@ -34,6 +34,11 @@ and are preferred by the Makefile; install them with
   `GDOCS_ENABLE_DESTRUCTIVE=true` for the deletion steps.
 - `go vet -tags=integration ./...` (part of `make vet`) keeps the tagged
   tests compiling even though CI never runs them.
+- `make bench` runs the benchmarks over `doctest.Large`, a generated
+  document of about 150 pages (6 400 body blocks, 130 tables, 300
+  comments, 200 suggestions, 100 footnotes). The numbers to hold are in
+  `docs/architecture.md` §11; a change that makes a read or a write
+  scale with document size again should show up there.
 
 ## Commits
 

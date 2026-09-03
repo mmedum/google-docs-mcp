@@ -82,25 +82,43 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 		needle = doc.Normalize(req.Query)
 	}
 	res := &FindResult{Query: req.Query, RevisionID: f.Doc.RevisionID}
-	for _, b := range seg.AllBlocks() {
-		if b.Paragraph == nil {
-			continue
-		}
-		// Index-aligned text keeps offsets right past chips, images and
-		// footnote references; placeholders are dropped from the output.
-		text := strings.TrimSuffix(alignedSlice(b.Paragraph, b.Start, b.End), "\n")
-		var spans [][2]int // rune offsets
-		if re != nil {
-			for _, m := range re.FindAllStringIndex(text, -1) {
-				spans = append(spans, [2]int{utf8.RuneCountInString(text[:m[0]]), utf8.RuneCountInString(text[:m[1]])})
+	// Index-aligned text keeps offsets right past chips, images and
+	// footnote references; placeholders are dropped from the output.
+	aligned := func(b *doc.Block) string { return strings.TrimSuffix(alignedSlice(b.Paragraph, b.Start, b.End), "\n") }
+	type located struct {
+		block *doc.Block
+		text  string
+		spans [][2]int // rune offsets
+	}
+	var found []located
+	if re != nil {
+		for _, b := range seg.AllBlocks() {
+			if b.Paragraph == nil {
+				continue
 			}
-		} else {
-			for _, m := range matchParagraph(b.Paragraph, needle, !req.MatchCase) {
-				spans = append(spans, [2]int{doc.UTF16ToCodePoint(text, m[0]-b.Start), doc.UTF16ToCodePoint(text, m[1]-b.Start)})
+			text := aligned(b)
+			ms := re.FindAllStringIndex(text, -1)
+			if len(ms) == 0 {
+				continue
 			}
+			l := located{block: b, text: text}
+			for _, m := range ms {
+				l.spans = append(l.spans, [2]int{utf8.RuneCountInString(text[:m[0]]), utf8.RuneCountInString(text[:m[1]])})
+			}
+			found = append(found, l)
 		}
-		runes := []rune(text)
-		for _, sp := range spans {
+	} else {
+		for _, h := range f.findText(seg, needle, !req.MatchCase) {
+			if n := len(found); n == 0 || found[n-1].block != h.block {
+				found = append(found, located{block: h.block, text: aligned(h.block)})
+			}
+			l := &found[len(found)-1]
+			l.spans = append(l.spans, [2]int{doc.UTF16ToCodePoint(l.text, h.start-h.block.Start), doc.UTF16ToCodePoint(l.text, h.end-h.block.Start)})
+		}
+	}
+	for _, l := range found {
+		runes := []rune(l.text)
+		for _, sp := range l.spans {
 			res.Total++
 			if len(res.Matches) >= limit {
 				res.Truncated = true
@@ -114,7 +132,7 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 			if to < len(runes) {
 				ctxText += "…"
 			}
-			res.Matches = append(res.Matches, FindMatch{Handle: b.Handle, Match: dropPlaceholders(string(runes[sp[0]:sp[1]])), Offset: sp[0], Context: dropPlaceholders(ctxText)})
+			res.Matches = append(res.Matches, FindMatch{Handle: l.block.Handle, Match: dropPlaceholders(string(runes[sp[0]:sp[1]])), Offset: sp[0], Context: dropPlaceholders(ctxText)})
 		}
 	}
 	var sb strings.Builder

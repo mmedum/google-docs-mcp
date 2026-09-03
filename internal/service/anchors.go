@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"sort"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
@@ -152,125 +151,40 @@ func previewAnchors(w *gdocs.Document) map[string]*gdocs.Range {
 
 // locateComments finds where each thread sits in the document: by the
 // preview's anchor ranges when present, else by its quoted text, which
-// must match exactly once. Paragraph units are built on first use and
-// shared across threads.
+// must match exactly once.
 func locateComments(f *Fetched, threads []CommentThread) []CommentThread {
 	d := f.Doc
 	anchors := previewAnchors(f.Wire)
-	type para struct {
-		block *doc.Block
-		units []unit
-	}
-	var paras []para
-	built := false
 	for i := range threads {
 		t := &threads[i]
 		if r := anchors[t.ID]; r != nil {
-			if b := blockAt(d, r.TabID, r.SegmentID, r.StartIndex); b != nil {
-				t.Handle, t.Start, t.End, t.Tab, t.Segment, t.Anchored = b.Handle, r.StartIndex, r.EndIndex, b.Segment.Tab.ID, b.Segment.ID, true
-				continue
-			}
-		}
-		q := []rune(doc.Normalize(t.Quote))
-		if len(q) == 0 {
-			continue
-		}
-		if !built {
-			built = true
-			for _, b := range d.AllBlocks() {
-				if b.Paragraph != nil {
-					paras = append(paras, para{b, units(b.Paragraph)})
+			if seg := segmentAt(d, r.TabID, r.SegmentID); seg != nil {
+				if b := seg.BlockAt(r.StartIndex); b != nil {
+					t.Handle, t.Start, t.End, t.Tab, t.Segment, t.Anchored = b.Handle, r.StartIndex, r.EndIndex, seg.Tab.ID, seg.ID, true
+					continue
 				}
 			}
 		}
-		var hit *doc.Block
-		var span [2]int64
+		q := doc.Normalize(t.Quote)
+		if q == "" {
+			continue
+		}
+		var hit textHit
 		hits := 0
-		for _, p := range paras {
-			for _, m := range matchUnits(p.units, q, false) {
-				hits++
-				hit, span = p.block, m
+		for _, tab := range d.Tabs {
+			for _, seg := range tab.Segments() {
+				for _, h := range f.findText(seg, q, false) {
+					hits++
+					hit = h
+				}
 			}
 		}
 		if hits == 1 {
-			t.Handle, t.Start, t.End = hit.Handle, span[0], span[1]
-			t.Tab, t.Segment = hit.Segment.Tab.ID, hit.Segment.ID
+			t.Handle, t.Start, t.End = hit.block.Handle, hit.start, hit.end
+			t.Tab, t.Segment = hit.block.Segment.Tab.ID, hit.block.Segment.ID
 		}
 	}
 	return threads
-}
-
-// blockAt finds the innermost paragraph block covering an index of a
-// segment, or the top-level block when no paragraph does.
-func blockAt(d *doc.Document, tabID, segID string, index int64) *doc.Block {
-	seg := segmentAt(d, tabID, segID)
-	if seg == nil {
-		return nil
-	}
-	var best *doc.Block
-	for _, b := range seg.AllBlocks() {
-		if b.Start <= index && index < b.End && (best == nil || b.Paragraph != nil) {
-			best = b
-		}
-	}
-	return best
-}
-
-// anchorsIn lists everything inside [start, end) of a segment that a
-// deletion would destroy: pending suggestions, inline objects, footnote
-// references, and located comment threads.
-func anchorsIn(tab *doc.Tab, seg *doc.Segment, start, end int64, threads []CommentThread) []plan.Anchor {
-	var out []plan.Anchor
-	seen := map[string]bool{}
-	add := func(a plan.Anchor) {
-		key := a.Kind + ":" + a.ID
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		out = append(out, a)
-	}
-	for _, b := range seg.AllBlocks() {
-		if b.End <= start || b.Start >= end {
-			continue
-		}
-		for _, id := range b.Inserted {
-			add(plan.Anchor{Kind: "suggestion", ID: id, Start: b.Start, End: b.End})
-		}
-		for _, id := range b.Deleted {
-			add(plan.Anchor{Kind: "suggestion", ID: id, Start: b.Start, End: b.End})
-		}
-		if b.Paragraph == nil {
-			continue
-		}
-		for _, r := range b.Paragraph.Runs {
-			if r.End <= start || r.Start >= end {
-				continue
-			}
-			for _, id := range r.Inserted {
-				add(plan.Anchor{Kind: "suggestion", ID: id, Start: r.Start, End: r.End, Text: r.Text})
-			}
-			for _, id := range r.Deleted {
-				add(plan.Anchor{Kind: "suggestion", ID: id, Start: r.Start, End: r.End, Text: r.Text})
-			}
-			switch r.Kind {
-			case doc.RunInlineObject:
-				add(plan.Anchor{Kind: "image", ID: r.ObjectID, Start: r.Start, End: r.End})
-			case doc.RunFootnoteRef:
-				add(plan.Anchor{Kind: "footnote", ID: r.FootnoteID, Start: r.Start, End: r.End})
-			}
-		}
-	}
-	for _, t := range threads {
-		if t.Handle == "" || t.Tab != tab.ID || t.Segment != seg.ID || t.Resolved || t.Deleted {
-			continue
-		}
-		if t.End > start && t.Start < end {
-			add(plan.Anchor{Kind: "comment", ID: t.ID, Start: t.Start, End: t.End, Text: t.Quote})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
-	return out
 }
 
 // anchorsWithin filters an anchor list to those overlapping [start, end).

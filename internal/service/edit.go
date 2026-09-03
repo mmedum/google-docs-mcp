@@ -323,7 +323,7 @@ func (s *Service) resolveDeleteSegment(f *Fetched, op EditOp, p *plan.Op, out *r
 	p.Seg = SegmentBounds(tab, seg)
 	p.SegmentRef = seg.ID
 	p.Description = fmt.Sprintf("%s of tab %d", seg.Label(), tab.Number)
-	p.Anchors = anchorsIn(tab, seg, 0, seg.End(), out.threads)
+	p.Anchors = f.anchorsIn(seg, 0, seg.End(), out.threads)
 	p.CommentAnchor = firstParagraphRng(tab, tab.Body, tab.Body.Blocks)
 	out.note(tab.ID, seg.ID, 0)
 	return nil
@@ -399,7 +399,7 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	p.Description = r.Description
 	p.NearBullet = hasBullet(r.Block)
 	if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
-		p.Anchors = anchorsIn(r.Tab, r.Segment, r.Start, r.End, out.threads)
+		p.Anchors = f.anchorsIn(r.Segment, r.Start, r.End, out.threads)
 	}
 	out.note(r.Tab.ID, r.Segment.ID, r.Start)
 	return nil
@@ -417,16 +417,11 @@ func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan
 	needle := doc.Normalize(op.Find)
 	seen := map[string]bool{}
 	for _, seg := range tab.Segments() {
-		for _, b := range seg.AllBlocks() {
-			if b.Paragraph == nil {
-				continue
-			}
-			for _, m := range matchParagraph(b.Paragraph, needle, !op.MatchCase) {
-				for _, a := range anchorsIn(tab, seg, m[0], m[1], threads) {
-					if key := a.Kind + ":" + a.ID; !seen[key] {
-						seen[key] = true
-						p.Anchors = append(p.Anchors, a)
-					}
+		for _, m := range f.findText(seg, needle, !op.MatchCase) {
+			for _, a := range f.anchorsIn(seg, m.start, m.end, threads) {
+				if key := a.Kind + ":" + a.ID; !seen[key] {
+					seen[key] = true
+					p.Anchors = append(p.Anchors, a)
 				}
 			}
 		}

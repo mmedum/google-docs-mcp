@@ -12,7 +12,7 @@ func Plain(seg *doc.Segment, from, to int, o Options) Result {
 	first := true
 	marks := marksFor(o.Marks, seg)
 	return budgeted(seg.Blocks, from, to, o.MaxChars, func(b *doc.Block) (string, bool) {
-		return plainBlock(seg, b, o, marks), true
+		return plainBlock(b, o, marks), true
 	}, func(*doc.Block, string) string {
 		if first {
 			first = false
@@ -22,7 +22,7 @@ func Plain(seg *doc.Segment, from, to int, o Options) Result {
 	})
 }
 
-func plainBlock(seg *doc.Segment, b *doc.Block, o Options, marks []Mark) string {
+func plainBlock(b *doc.Block, o Options, marks []Mark) string {
 	prefix := handlePrefix(b, o)
 	view := o.view()
 	switch {
@@ -30,7 +30,7 @@ func plainBlock(seg *doc.Segment, b *doc.Block, o Options, marks []Mark) string 
 		p := b.Paragraph
 		text := textWithMarks(p, view, marks)
 		if p.Bullet != nil {
-			text = strings.Repeat("  ", p.Bullet.Nesting) + listMarker(seg, b) + text
+			text = strings.Repeat("  ", p.Bullet.Nesting) + listMarker(b) + text
 		}
 		if o.WithHandles && p.HeadingID != "" {
 			text += " {" + p.HeadingID + "}"

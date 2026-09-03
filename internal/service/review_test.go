@@ -167,7 +167,7 @@ func TestMultiRangeCommentAnchors(t *testing.T) {
 	if err != nil || len(threads) != 1 || threads[0].Start != 69 || threads[0].End != 106 {
 		t.Fatalf("union of ranges: %+v %v", threads, err)
 	}
-	if as := anchorsIn(f.Doc.Tabs[0], f.Doc.Tabs[0].Body, 95, 100, threads); len(as) != 1 {
+	if as := f.anchorsIn(f.Doc.Tabs[0].Body, 95, 100, threads); len(as) != 1 {
 		t.Fatalf("second range guarded: %+v", as)
 	}
 }

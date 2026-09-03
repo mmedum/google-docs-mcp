@@ -5,7 +5,10 @@
 // the network.
 package doc
 
-import "strconv"
+import (
+	"sort"
+	"strconv"
+)
 
 // Document is a parsed documents.get response.
 type Document struct {
@@ -15,6 +18,9 @@ type Document struct {
 	SuggestionsViewMode string
 	// Tabs in document order, parents before children.
 	Tabs []*Tab
+
+	byHandle map[string]*Block // every block by handle, filled by Parse
+	byCell   map[string]*Cell  // every table cell by handle, filled by Parse
 }
 
 // Tab is one document tab. Documents without tabs get a single synthetic
@@ -99,6 +105,8 @@ type Segment struct {
 	Prefix         string // handle prefix, e.g. "tab2/header1/"
 	Tab            *Tab
 	Blocks         []*Block
+
+	all []*Block // Blocks flattened, filled by Parse
 }
 
 // Label names the segment for people: body, header1, footnote3.
@@ -116,9 +124,45 @@ func (s *Segment) Label() string {
 	}
 }
 
-// AllBlocks flattens the segment in document order, descending into
-// table cells and tables of contents.
-func (s *Segment) AllBlocks() []*Block { return Flatten(s.Blocks) }
+// AllBlocks lists the segment's blocks in document order, descending
+// into table cells and tables of contents. Parsed segments share one
+// slice across calls; callers must not modify it.
+func (s *Segment) AllBlocks() []*Block {
+	if s.all != nil {
+		return s.all
+	}
+	return Flatten(s.Blocks)
+}
+
+// BlockAt finds the innermost paragraph covering an index of the
+// segment, the enclosing top-level block when no paragraph does, or nil
+// when the index lies outside the segment.
+func (s *Segment) BlockAt(index int64) *Block { return blockAt(s.Blocks, index) }
+
+func blockAt(blocks []*Block, index int64) *Block {
+	i := sort.Search(len(blocks), func(i int) bool { return blocks[i].End > index })
+	if i == len(blocks) || blocks[i].Start > index {
+		return nil
+	}
+	b := blocks[i]
+	var inner []*Block
+	switch {
+	case b.Table != nil:
+		for _, row := range b.Table.Cells {
+			for _, c := range row {
+				if c.Start <= index && index < c.End {
+					inner = c.Blocks
+				}
+			}
+		}
+	case b.TOC != nil:
+		inner = b.TOC.Blocks
+	}
+	if p := blockAt(inner, index); p != nil && p.Paragraph != nil {
+		return p
+	}
+	return b
+}
 
 // Flatten lists blocks in document order, descending into table cells
 // and tables of contents.
@@ -235,6 +279,9 @@ type BulletInfo struct {
 	Nesting int
 	Ordered bool
 	Glyph   string
+	// Number is the item's 1-based position among the preceding siblings
+	// of the same list and level, restarting after any interruption.
+	Number int
 }
 
 // RunKind is the paragraph element type.
@@ -389,6 +436,10 @@ func (d *Document) Tab(ref string) (*Tab, bool) {
 
 // FindHandle looks a handle up across every tab and segment.
 func (d *Document) FindHandle(handle string) (*Block, bool) {
+	if d.byHandle != nil {
+		b, ok := d.byHandle[handle]
+		return b, ok
+	}
 	for _, b := range d.AllBlocks() {
 		if b.Handle == handle {
 			return b, true
@@ -399,6 +450,10 @@ func (d *Document) FindHandle(handle string) (*Block, bool) {
 
 // FindCell looks a cell handle (tbl1:r2c3) up across the document.
 func (d *Document) FindCell(handle string) (*Cell, bool) {
+	if d.byCell != nil {
+		c, ok := d.byCell[handle]
+		return c, ok
+	}
 	for _, b := range d.AllBlocks() {
 		if b.Table == nil {
 			continue

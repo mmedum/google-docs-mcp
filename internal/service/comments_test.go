@@ -68,7 +68,7 @@ func TestPreviewAnchorsLocateComments(t *testing.T) {
 	if err != nil || len(threads) != 1 || threads[0].Handle != "p5" || len(threads[0].Replies) != 0 {
 		t.Fatalf("guard threads: %+v %v", threads, err)
 	}
-	as := anchorsIn(f.Doc.Tabs[0], f.Doc.Tabs[0].Body, 70, 75, threads)
+	as := f.anchorsIn(f.Doc.Tabs[0].Body, 70, 75, threads)
 	if len(as) != 1 || as[0].Kind != "comment" || as[0].ID != "c9" {
 		t.Fatalf("anchors: %+v", as)
 	}

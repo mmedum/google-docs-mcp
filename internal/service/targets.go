@@ -182,33 +182,31 @@ func (s *Service) checkedIndex(f *Fetched, seg *doc.Segment, handle string) (int
 	return topLevelIndex(seg, handle)
 }
 
-// resolveText finds an exact (normalised) text match inside paragraphs.
+// resolveText finds an exact (normalised) text match inside paragraphs:
+// case-sensitively first, case-insensitively when that finds nothing.
 func (s *Service) resolveText(f *Fetched, tab *doc.Tab, seg *doc.Segment, t Target) (*TargetRange, error) {
 	needle := doc.Normalize(t.Text)
 	if needle == "" {
 		return nil, Errorf("invalid", "text target is empty")
 	}
-	blocks := seg.AllBlocks()
 	scope := "in " + segmentName(tab, seg)
+	var allowed map[*doc.Block]bool
 	if t.Within != "" {
-		var err error
-		blocks, scope, err = s.withinBlocks(f, tab, seg, t.Within)
+		blocks, within, err := s.withinBlocks(f, tab, seg, t.Within)
 		if err != nil {
 			return nil, err
 		}
-	}
-	type hit struct {
-		block      *doc.Block
-		start, end int64
-	}
-	var hits []hit
-	for _, caseFold := range []bool{false, true} {
+		scope = within
+		allowed = map[*doc.Block]bool{}
 		for _, b := range blocks {
-			if b.Paragraph == nil {
-				continue
-			}
-			for _, m := range matchParagraph(b.Paragraph, needle, caseFold) {
-				hits = append(hits, hit{b, m[0], m[1]})
+			allowed[b] = true
+		}
+	}
+	var hits []textHit
+	for _, caseFold := range []bool{false, true} {
+		for _, h := range f.findText(seg, needle, caseFold) {
+			if allowed == nil || allowed[h.block] {
+				hits = append(hits, h)
 			}
 		}
 		if len(hits) > 0 {
@@ -270,11 +268,12 @@ type unit struct {
 	start, end int64
 }
 
-// units flattens a paragraph's text runs into normalised characters with
-// whitespace runs collapsed, keeping the original offsets so matches map
-// back to API indices.
-func units(p *doc.Paragraph) []unit {
-	var out []unit
+// appendUnits adds a paragraph's text runs to dst as normalised
+// characters with whitespace runs collapsed, keeping the original
+// offsets so matches map back to API indices. Trailing whitespace (the
+// paragraph newline) is dropped so it never matches.
+func appendUnits(dst []unit, p *doc.Paragraph) []unit {
+	from := len(dst)
 	for _, run := range p.Runs {
 		if run.Kind != doc.RunText {
 			continue
@@ -286,56 +285,21 @@ func units(p *doc.Paragraph) []unit {
 			switch {
 			case !keep:
 			case unicode.IsSpace(nr):
-				if n := len(out); n > 0 && out[n-1].r == ' ' {
-					out[n-1].end = pos + w
+				if n := len(dst); n > from && dst[n-1].r == ' ' {
+					dst[n-1].end = pos + w
 				} else {
-					out = append(out, unit{' ', pos, pos + w})
+					dst = append(dst, unit{' ', pos, pos + w})
 				}
 			default:
-				out = append(out, unit{nr, pos, pos + w})
+				dst = append(dst, unit{nr, pos, pos + w})
 			}
 			pos += w
 		}
 	}
-	// Trailing whitespace (the paragraph newline) never matches.
-	for len(out) > 0 && out[len(out)-1].r == ' ' {
-		out = out[:len(out)-1]
+	for len(dst) > from && dst[len(dst)-1].r == ' ' {
+		dst = dst[:len(dst)-1]
 	}
-	return out
-}
-
-// matchParagraph returns every [start, end) UTF-16 span where the
-// normalised needle occurs in the paragraph.
-func matchParagraph(p *doc.Paragraph, needle string, caseFold bool) [][2]int64 {
-	return matchUnits(units(p), []rune(needle), caseFold)
-}
-
-// matchUnits is matchParagraph over precomputed units.
-func matchUnits(us []unit, nr []rune, caseFold bool) [][2]int64 {
-	if len(nr) == 0 || len(us) < len(nr) {
-		return nil
-	}
-	eq := func(a, b rune) bool {
-		if caseFold {
-			return unicode.ToLower(a) == unicode.ToLower(b)
-		}
-		return a == b
-	}
-	var out [][2]int64
-	for i := 0; i+len(nr) <= len(us); i++ {
-		ok := true
-		for j := range nr {
-			if !eq(us[i+j].r, nr[j]) {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			out = append(out, [2]int64{us[i].start, us[i+len(nr)-1].end})
-			i += len(nr) - 1
-		}
-	}
-	return out
+	return dst
 }
 
 // sliceUTF16 returns the paragraph text between two absolute offsets.

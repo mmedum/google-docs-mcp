@@ -42,24 +42,25 @@ func OutlineData(d *doc.Document, only *doc.Tab) []OutlineTab {
 		}
 		ot := OutlineTab{Number: t.Number, ID: t.ID, Title: t.Title, Nesting: t.Nesting,
 			Headers: len(t.Headers), Footers: len(t.Footers), Footnotes: len(t.Footnotes)}
-		for _, b := range t.Body.Blocks {
+		// words[i] is the word count of blocks [0, i), so a section's
+		// words are one subtraction.
+		words := make([]int, len(t.Body.Blocks)+1)
+		for i, b := range t.Body.Blocks {
+			n := b.Words(doc.ViewCurrent)
+			words[i+1] = words[i] + n
 			switch {
 			case b.Paragraph != nil:
 				ot.Paragraphs++
-				ot.Words += doc.WordCount(b.Paragraph.Text(doc.ViewCurrent))
+				ot.Words += n
 			case b.Table != nil:
 				ot.Tables++
-				ot.Words += doc.WordCount(b.Text(doc.ViewCurrent))
+				ot.Words += n
 			}
 		}
 		ot.Preamble = t.Body.Preamble().To
 		for _, sec := range t.Body.Sections() {
-			h := OutlineHeading{Handle: sec.Heading.Handle, HeadingID: sec.Heading.Paragraph.HeadingID, Level: sec.Level,
-				Text: sec.Heading.Paragraph.Text(doc.ViewCurrent), Blocks: sec.To - sec.From}
-			for i := sec.From; i < sec.To; i++ {
-				h.Words += doc.WordCount(t.Body.Blocks[i].Text(doc.ViewCurrent))
-			}
-			ot.Headings = append(ot.Headings, h)
+			ot.Headings = append(ot.Headings, OutlineHeading{Handle: sec.Heading.Handle, HeadingID: sec.Heading.Paragraph.HeadingID, Level: sec.Level,
+				Text: sec.Heading.Paragraph.Text(doc.ViewCurrent), Blocks: sec.To - sec.From, Words: words[sec.To] - words[sec.From]})
 		}
 		out = append(out, ot)
 	}

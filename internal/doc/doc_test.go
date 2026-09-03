@@ -3,9 +3,11 @@ package doc_test
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 )
 
 func TestParseStructure(t *testing.T) {
@@ -223,6 +225,10 @@ func TestNormalizeAndWords(t *testing.T) {
 		"“Smart”  quotes and ‘apostrophes’": `"Smart" quotes and 'apostrophes'`,
 		"  dash – and — em\t":               "dash - and - em",
 		"a\u200bb\u2026":                    "ab…",
+		"\u200b  lead and trail \t\n":       "lead and trail",
+		"   ":                               "",
+		"":                                  "",
+		"x":                                 "x",
 	}
 	for in, want := range cases {
 		if got := doc.Normalize(in); got != want {
@@ -255,5 +261,70 @@ func TestParseID(t *testing.T) {
 	}
 	if got := doc.DocumentURL(id); !strings.Contains(got, id) {
 		t.Fatal(got)
+	}
+}
+
+func TestBlockAt(t *testing.T) {
+	body := doctest.Fixture(t).Tabs[0].Body
+	cases := map[int64]string{1: "p1", 30: "p3", 136: "tbl1:r1c1/p1", 134: "tbl1", 148: "tbl1:r2c1/p1"}
+	for index, want := range cases {
+		if b := body.BlockAt(index); b == nil || b.Handle != want {
+			t.Errorf("BlockAt(%d) = %v, want %s", index, b, want)
+		}
+	}
+	if b := body.BlockAt(100000); b != nil {
+		t.Errorf("BlockAt past the end = %s", b.Handle)
+	}
+}
+
+func TestListNumbering(t *testing.T) {
+	item := func(list string, nesting int64, text string) *gdocs.StructuralElement {
+		return &gdocs.StructuralElement{Paragraph: &gdocs.Paragraph{Bullet: &gdocs.Bullet{ListID: list, NestingLevel: nesting},
+			Elements: []*gdocs.ParagraphElement{{TextRun: &gdocs.TextRun{Content: text + "\n"}}}}}
+	}
+	plain := &gdocs.StructuralElement{Paragraph: &gdocs.Paragraph{Elements: []*gdocs.ParagraphElement{{TextRun: &gdocs.TextRun{Content: "plain\n"}}}}}
+	w := &gdocs.Document{Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+		item("l", 0, "A"), item("l", 0, "B"), item("l", 1, "C"), item("l", 1, "D"), item("l", 0, "E"), item("l", 1, "I"),
+		plain, item("l", 0, "F"), item("m", 0, "G"), item("l", 0, "H"),
+	}}, Lists: map[string]gdocs.List{
+		"l": {ListProperties: &gdocs.ListProperties{NestingLevels: []*gdocs.NestingLevel{{GlyphType: "DECIMAL"}, {GlyphType: "ALPHA"}}}},
+		"m": {ListProperties: &gdocs.ListProperties{NestingLevels: []*gdocs.NestingLevel{{GlyphType: "DECIMAL"}}}},
+	}}
+	d, err := doc.Parse(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"A": 1, "B": 2, "C": 1, "D": 2, "E": 3, "I": 1, "F": 1, "G": 1, "H": 1}
+	for _, b := range d.Tabs[0].Body.Blocks {
+		if b.Paragraph == nil || b.Paragraph.Bullet == nil {
+			continue
+		}
+		text := b.Paragraph.Text(doc.ViewCurrent)
+		if got := b.Paragraph.Bullet.Number; got != want[text] {
+			t.Errorf("item %s numbered %d, want %d", text, got, want[text])
+		}
+	}
+}
+
+func TestCountMatchesText(t *testing.T) {
+	large, err := doc.Parse(doctest.Large(doctest.LargeSpec{Sections: 2, Subsections: 2, Paragraphs: 3, ListItems: 3, TableEvery: 1, Suggestions: 2, Footnotes: 2}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []*doc.Document{doctest.Fixture(t), large} {
+		for _, b := range d.AllBlocks() {
+			for _, v := range []doc.View{doc.ViewInline, doc.ViewCurrent, doc.ViewAccepted} {
+				text := b.Text(v)
+				if b.Paragraph != nil {
+					words, chars := b.Paragraph.Count(v)
+					if words != doc.WordCount(text) || chars != utf8.RuneCountInString(text) {
+						t.Errorf("%s view %d: Count = %d words %d chars, text %q", b.Handle, v, words, chars, text)
+					}
+				}
+				if got := b.Words(v); got != doc.WordCount(text) {
+					t.Errorf("%s view %d: Words = %d, text has %d", b.Handle, v, got, doc.WordCount(text))
+				}
+			}
+		}
 	}
 }

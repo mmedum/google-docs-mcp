@@ -502,6 +502,21 @@ v1.7.0 leaves `Content` alone in that case and fills
 - Caching: none for correctness; a 5-second coalescing cache keyed by
   (docId, revisionId). Writes always re-fetch.
 - Logging: `slog` to stderr, text or JSON. Stdout carries only JSON-RPC.
+- Performance (Phase 3, measured 2026-09-03 with `make bench` on
+  `doctest.Large`: about 150 pages, 6 400 body blocks, 130 tables, 300
+  comments, 200 suggestions, 100 footnotes). Everything derived from one
+  fetch is derived once: the handle memory, the located comment threads,
+  and per segment a searchable text (every paragraph's normalised
+  characters in one string, so a text target or a quoted comment is one
+  `strings.Index` pass) and a sorted anchor list. Handles and cells are
+  map lookups, list numbers are assigned at parse time, and word counts
+  never build strings. Per operation on that fixture: JSON decode 20 ms
+  and parse 7 ms per fetch; a cached section read 0.1 ms (was 14.5 ms);
+  the outline 3.6 ms (was 15.8 ms); the whole body as markdown 7.4 ms;
+  a text target 0.6 ms warm (was 22 ms); `find_in_document` 3.6 ms warm
+  (was 52 ms); locating 300 quoted comments on a fresh fetch 38 ms (was
+  384 ms); a two-op dry run on a fresh fetch 20 ms (was 61 ms). The
+  remaining cost per write is the fetch itself.
 
 ## 12. Confidentiality, security, safety
 
@@ -658,9 +673,6 @@ block-range resolver (`resolveBlocks`) serves `ResolveScope` and
 paths; comment threads are located once per `Fetched` and shared by the
 guard, `read_document include_comments` and `list_comments`. Still open:
 
-- **Suggestion and object anchors per fetch.** `anchorsIn` still rescans
-  runs per range; an index built at parse time would serve it,
-  `list_suggestions` and `Stats` alike.
 - **One op-kind registry.** Adding `delete_header` touched nine kind
   lists across tools, service and plan (allowed-op strings, resolver
   switch, `deletesContent`, `needsContent`, `validate`, `contentRequests`,
@@ -729,4 +741,5 @@ checked rather than assumed.
 | `revisions.list` is complete for Docs (my assumption) | Refuted: "might be incomplete for files with a large revision history, including frequently edited Google Docs" | `list_revisions` says so in its output and description. |
 | `deleteTab` fails when the tab has children (my assumption) | Refuted: child tabs are deleted with it | `delete_tab` warns; a document keeps at least one tab. |
 | `comments.*` need the `fields` parameter (Drive guide) | Confirmed for comments (an omitted `fields` is an error); the replies pages list no parameters | Sent on every call. |
+| Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalised units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalised string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
 | Resource templates with a shared prefix shadow each other (my worry) | Refuted in go-sdk v1.7.0: a template matches through an anchored RFC 6570 regexp in which `{var}` excludes `/`, so `gdocs://{document}` does not match `gdocs://id/outline`; an unmatched URI is resource-not-found (code -32602 since SEP-2164) | Three templates registered side by side; handlers parse the URI themselves. |

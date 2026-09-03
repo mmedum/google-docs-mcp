@@ -15,6 +15,7 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/internal/plan"
 )
 
 // API is the subset of the Google client the service uses.
@@ -93,9 +94,10 @@ func Errorf(class, format string, args ...any) *Error {
 	return &Error{Class: class, Message: fmt.Sprintf(format, args...)}
 }
 
-// Fetched is a parsed document plus the wire form it came from. Comment
-// threads are looked up once per fetch and shared by the guard, reads
-// and listings.
+// Fetched is a parsed document plus the wire form it came from. What
+// several operations need from one fetch is derived once and shared:
+// the comment threads, the handle memory, and per segment the
+// searchable text and the anchor list.
 type Fetched struct {
 	Doc       *doc.Document
 	Wire      *gdocs.Document
@@ -104,6 +106,13 @@ type Fetched struct {
 	threadsOnce sync.Once
 	threads     []CommentThread
 	threadsErr  error
+
+	memOnce sync.Once
+	mem     HandleMemory
+
+	mu      sync.Mutex
+	texts   map[*doc.Segment]*segText
+	anchors map[*doc.Segment][]plan.Anchor
 }
 
 // HandleMemory records what each handle pointed at in the last read so a
@@ -182,11 +191,12 @@ func (s *Service) adopt(w *gdocs.Document) (*Fetched, error) {
 }
 
 // Remember records what every handle points at in a document the caller
-// has seen, so later writes can detect handles that went stale.
+// has seen, so later writes can detect handles that went stale. The
+// memory is derived once per fetch; a cache hit re-records it for free.
 func (s *Service) Remember(f *Fetched) {
-	m := memory(f.Doc, f.FetchedAt)
+	f.memOnce.Do(func() { f.mem = memory(f.Doc, f.FetchedAt) })
 	s.mu.Lock()
-	s.handles[f.Doc.ID] = m
+	s.handles[f.Doc.ID] = f.mem
 	s.mu.Unlock()
 }
 

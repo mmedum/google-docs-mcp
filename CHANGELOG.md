@@ -16,6 +16,15 @@ and new required fields are breaking; the schema diff in CI flags them.
   (`internal/doc/doctest.Large`) for the numbers below.
 
 ### Changed
+- Dry runs list what a second batch will do (`followups`), and the
+  content of new headers, footers, footnotes and data-filled tables lands
+  through one follow-up edit against the refetched document instead of
+  three separate paths; a segment can be named by its id (`segment:
+  kix.…`) as the raw format shows it.
+- One op-kind registry in the planner drives validation, compile order,
+  the guard, the overlap check and the tools' allowed-op lists; the
+  comment footer and the raw read format are rendered by the renderer;
+  `edit_document`'s result text comes from the service.
 - Large documents: what several operations need from one fetch is now
   derived once and shared (handle memory, comment threads, a searchable
   text index and an anchor index per segment); handles and cells are
@@ -24,6 +33,12 @@ and new required fields are breaking; the schema diff in CI flags them.
   150-page fixture a cached section read went from 14.5 ms to 0.1 ms, a
   text-targeted dry run from 61 ms to 20 ms, and locating 300 comments by
   quoted text from 384 ms to 38 ms.
+
+### Fixed
+- Content written into an empty paragraph (a new header, footer,
+  footnote or tab, or an append into an empty last paragraph) takes the
+  content's own paragraph styles; a heading no longer comes out as normal
+  text there.
 
 ## [0.2.0] - 2026-09-03
 

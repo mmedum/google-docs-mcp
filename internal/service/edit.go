@@ -28,9 +28,13 @@ type EditOp struct {
 	Location      *Location
 	Content       string
 	ContentFormat string // markdown (default) or text
+	// Fragment is content already parsed; set by follow-ups instead of Content.
+	Fragment *markdown.Fragment
 	plan.Params
 	Table  *TableOp
 	Object *plan.ObjectParams
+
+	followup plan.Followup // the first-batch op this op completes, if any
 }
 
 // EditRequest is a write call.
@@ -59,11 +63,65 @@ type EditResult struct {
 	Requests     json.RawMessage `json:"-"`
 	RequestKinds []string        `json:"request_kinds,omitempty"`
 	Proposals    []plan.Proposal `json:"-"`
+	// Followups says what a second batch does after the first has landed
+	// (a dry run lists them; an applied edit has run them).
+	Followups []string `json:"followups,omitempty"`
+	// Text is the result as the model reads it.
+	Text string `json:"-"`
+}
+
+func (r *EditResult) text() string {
+	var b strings.Builder
+	if r.DryRun {
+		fmt.Fprintf(&b, "dry run in %s mode at revision %s: %d op(s) planned, nothing sent\n", r.Mode, r.RevisionID, len(r.Changes))
+	} else {
+		fmt.Fprintf(&b, "applied %d op(s) in %s mode; revision %s\n", r.Applied, r.Mode, r.RevisionID)
+	}
+	for _, c := range r.Changes {
+		fmt.Fprintf(&b, "- op %d %s: %s", c.Seq, c.Kind, c.Description)
+		if c.Minimal {
+			b.WriteString(" (minimal diff)")
+		}
+		b.WriteString("\n")
+	}
+	if len(r.SuggestionIDs) > 0 {
+		fmt.Fprintf(&b, "suggestion ids: %s\n", strings.Join(r.SuggestionIDs, ", "))
+	}
+	if len(r.CommentIDs) > 0 {
+		fmt.Fprintf(&b, "comment ids: %s\n", strings.Join(r.CommentIDs, ", "))
+	}
+	for _, w := range r.Warnings {
+		fmt.Fprintf(&b, "warning: %s\n", w)
+	}
+	if r.DryRun && len(r.Proposals) > 0 {
+		b.WriteString("proposed comments:\n")
+		for _, p := range r.Proposals {
+			fmt.Fprintf(&b, "- op %d: %s\n", p.Seq, strings.ReplaceAll(p.Content, "\n", " "))
+		}
+	}
+	if r.DryRun && len(r.RequestKinds) > 0 {
+		fmt.Fprintf(&b, "requests: %s\n", strings.Join(r.RequestKinds, ", "))
+	}
+	for _, fu := range r.Followups {
+		fmt.Fprintf(&b, "then %s\n", fu)
+	}
+	if r.Preview != "" {
+		label := "region after the edit"
+		if r.DryRun {
+			label = "region as it is now"
+		}
+		fmt.Fprintf(&b, "%s:\n%s\n", label, r.Preview)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 type resolvedOps struct {
 	ops     []plan.Op
 	threads []CommentThread
+	// planned and env are set once the ops are planned and applied, for
+	// the follow-ups.
+	planned *plan.Result
+	env     replyEnvelope
 	// preview locates the edited region for the before/after rendering.
 	previewTab   string
 	previewSeg   string
@@ -86,7 +144,11 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 	if err != nil {
 		return nil, err
 	}
-	return s.editFetched(ctx, f, req)
+	res, err := s.editFetched(ctx, f, req)
+	if res != nil {
+		res.Text = res.text()
+	}
+	return res, err
 }
 
 func validateEditRequest(req EditRequest) error {
@@ -130,8 +192,8 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 		return result, err
 	}
 	result.Applied = len(req.Ops)
-	if mode != plan.ModeComment {
-		s.fillNewTables(ctx, f, req, ro, result)
+	if mode != plan.ModeComment && len(ro.planned.Followups) > 0 {
+		s.runFollowups(ctx, f, req, ro, result)
 	}
 	after, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
@@ -198,7 +260,11 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 		}
 		return nil, nil, Errorf("invalid", "%v", err)
 	}
+	ro.planned = planned
 	result := &EditResult{RevisionID: f.Doc.RevisionID, Mode: string(mode), DryRun: req.DryRun, Changes: planned.Summary, Warnings: planned.Warnings, Proposals: planned.Proposals}
+	if mode != plan.ModeComment {
+		result.Followups = describeFollowups(planned.Followups)
+	}
 	if req.DryRun {
 		if b, err := json.MarshalIndent(planned.Requests, "", "  "); err == nil && len(planned.Requests) > 0 {
 			result.Requests = b
@@ -209,9 +275,11 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 		result.Preview = regionPreview(f.Doc, ro)
 		return result, ro, nil
 	}
-	if err := s.apply(ctx, f, planned, mode, result); err != nil {
+	env, err := s.apply(ctx, f, planned, mode, result)
+	if err != nil {
 		return nil, nil, err
 	}
+	ro.env = env
 	return result, ro, nil
 }
 
@@ -242,7 +310,7 @@ func (s *Service) mode(m string) (plan.Mode, error) {
 func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode plan.Mode) (*resolvedOps, error) {
 	out := &resolvedOps{}
 	for _, op := range ops {
-		if deletesContent(op.Kind) {
+		if plan.Deletes(op.Kind) {
 			threads, err := s.comments(ctx, f)
 			if err != nil {
 				if mode == plan.ModeDirect {
@@ -265,8 +333,15 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 			out.ops = append(out.ops, expanded...)
 			continue
 		}
+		info, ok := plan.Info(op.Kind)
+		if !ok {
+			return nil, Errorf("invalid", "op %d: unknown kind %q", i, op.Kind)
+		}
 		p := plan.Op{Seq: i, Kind: op.Kind, Params: op.Params}
-		if op.Content != "" || needsContent(op.Kind) {
+		switch {
+		case op.Fragment != nil:
+			p.Fragment = op.Fragment
+		case op.Content != "" || info.Content:
 			frag, err := parseContent(op.Content, op.ContentFormat)
 			if err != nil {
 				return nil, Errorf("unsupported", "op %d: %v", i, err)
@@ -274,25 +349,21 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 			p.Fragment = frag
 		}
 		var err error
-		switch op.Kind {
-		case plan.OpInsert, plan.OpPageBreak, plan.OpFootnote, plan.OpAppend, plan.OpInsertObject:
-			err = s.resolveInsertOp(f, op, &p, out)
-		case plan.OpReplace, plan.OpDelete, plan.OpTextStyle, plan.OpParagraphStyle, plan.OpBullets, plan.OpClearFormatting:
-			err = s.resolveTargetOp(f, op, &p, out)
-		case plan.OpReplaceAll:
-			err = s.resolveReplaceAll(f, op, &p, mode, out.threads)
-		case plan.OpCreateHeader, plan.OpCreateFooter:
-			err = resolveCreateSegment(f, op, &p)
-		case plan.OpDeleteHeader, plan.OpDeleteFooter:
-			err = s.resolveDeleteSegment(f, op, &p, out)
-		case plan.OpInsertTable:
+		switch {
+		case op.Kind == plan.OpInsertTable:
 			err = s.resolveInsertTable(f, op, &p, out)
+		case op.Kind == plan.OpReplaceAll:
+			err = s.resolveReplaceAll(f, op, &p, mode, out.threads)
+		case info.Shape == plan.ShapeInsert:
+			err = s.resolveInsertOp(f, op, &p, out)
+		case info.Shape == plan.ShapeTarget:
+			err = s.resolveTargetOp(f, op, &p, out)
+		case info.Shape == plan.ShapeSegment:
+			err = s.resolveDeleteSegment(f, op, &p, out)
+		case info.Shape == plan.ShapeTable:
+			err = s.resolveTableOp(f, op, &p, out)
 		default:
-			if plan.IsTableOp(op.Kind) {
-				err = s.resolveTableOp(f, op, &p, out)
-			} else {
-				err = Errorf("invalid", "unknown kind %q", op.Kind)
-			}
+			err = resolveCreateSegment(f, op, &p)
 		}
 		if err != nil {
 			return nil, Errorf(classOf(err), "op %d: %s", i, messageOf(err))
@@ -458,20 +529,6 @@ func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {
 	return nil
 }
 
-// deletesContent lists the kinds the overwrite guard inspects: the
-// planner's deleting kinds plus set_cells, which expands into replaces.
-func deletesContent(k plan.OpKind) bool {
-	return plan.Deletes(k) || k == plan.OpSetCells
-}
-
-func needsContent(k plan.OpKind) bool {
-	switch k {
-	case plan.OpInsert, plan.OpAppend, plan.OpReplace, plan.OpFootnote, plan.OpCreateHeader, plan.OpCreateFooter:
-		return true
-	}
-	return false
-}
-
 func targetTab(t *Target) string {
 	if t == nil {
 		return ""
@@ -492,6 +549,7 @@ type insertPoint struct {
 	index       int64
 	atEnd       bool
 	inline      bool
+	empty       bool // inline into an empty paragraph, which the content fills
 	nearBullet  bool
 	description string
 	anchor      *plan.Rng
@@ -503,7 +561,7 @@ func (ip *insertPoint) bounds() plan.Segment { return SegmentBounds(ip.tab, ip.s
 func (ip *insertPoint) fill(p *plan.Op, out *resolvedOps) {
 	p.Seg = ip.bounds()
 	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
-	p.AtEnd, p.Inline, p.NearBullet = ip.atEnd, ip.inline, ip.nearBullet
+	p.AtEnd, p.Inline, p.Fills, p.NearBullet = ip.atEnd, ip.inline, ip.empty, ip.nearBullet
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
 	out.note(ip.tab.ID, ip.segment.ID, ip.index)
@@ -553,14 +611,14 @@ func (s *Service) segmentEdge(f *Fetched, t Target, at string) (*insertPoint, er
 			return nil, Errorf("invalid", "%s starts with a table; insert after it or before the first paragraph", segmentName(tab, seg))
 		}
 		ip.index, ip.nearBullet, ip.description, ip.anchor = first.Start, hasBullet(first), "start of "+segmentName(tab, seg), blockRng(tab, seg, first)
-		ip.inline = first.IsEmptyParagraph()
+		ip.inline, ip.empty = first.IsEmptyParagraph(), first.IsEmptyParagraph()
 	case "end":
 		last := content[len(content)-1]
 		ip.description, ip.anchor = "end of "+segmentName(tab, seg), blockRng(tab, seg, last)
 		ip.nearBullet = hasBullet(last)
 		if last.IsEmptyParagraph() {
 			// Fill the empty paragraph instead of leaving it above the content.
-			ip.index, ip.inline = last.Start, true
+			ip.index, ip.inline, ip.empty = last.Start, true, true
 		} else {
 			ip.index, ip.atEnd = last.End-1, true
 		}

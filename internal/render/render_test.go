@@ -201,9 +201,10 @@ func TestCommentMarks(t *testing.T) {
 	// "Revenue grew " starts at 29; comment on "Revenue grew" and one that
 	// ends at the paragraph's newline, plus one in another tab (ignored).
 	marks := []render.Mark{
-		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 29, End: 41, ID: "c1"},
-		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 60, End: 68, ID: "c2"},
-		{TabID: d.Tabs[1].ID, SegmentID: "", Start: 1, End: 4, ID: "c3"},
+		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 29, End: 41, ID: "c1", Handle: "p3", Author: "Ann", Content: "Source?\nPlease cite.", Replies: 2},
+		{TabID: d.Tabs[0].ID, SegmentID: "", Start: 60, End: 68, ID: "c2", Handle: "p3", Resolved: true, Content: "ok"},
+		{TabID: d.Tabs[1].ID, SegmentID: "", Start: 1, End: 4, ID: "c3", Handle: "tab2/p1", Content: "elsewhere"},
+		{ID: "c5", Content: "unlocated"},
 	}
 	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
 	for _, c := range []string{"Revenue grew{>>c:c1<<} a lot in Q3.{>>c:c2<<}"} {
@@ -211,11 +212,28 @@ func TestCommentMarks(t *testing.T) {
 			t.Errorf("markdown lacks %q:\n%s", c, md)
 		}
 	}
-	if strings.Contains(md, "c3") {
-		t.Error("mark from another tab leaked")
+	if strings.Contains(md, "c3") || strings.Contains(md, "comments:") {
+		t.Error("mark from another tab leaked, or a footer appeared unasked")
+	}
+	// The footer lists the threads in the rendered range, one line each,
+	// and counts the rest.
+	md = render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks, CommentFooter: true}).Text
+	want := "\n\ncomments:\n- c:c1 [p3] by Ann: Source? Please cite. (2 replies)\n- c:c2 [p3] [resolved]: ok\n(2 more elsewhere or unlocated; use list_comments)"
+	if !strings.HasSuffix(md, want) {
+		t.Errorf("footer:\n%s", md)
+	}
+	plain := render.Plain(seg, 0, len(seg.Blocks), render.Options{Marks: marks, CommentFooter: true}).Text
+	if !strings.HasSuffix(plain, want) || !strings.Contains(plain, "Revenue grew{>>c:c1<<}") {
+		t.Errorf("plain footer:\n%s", plain)
+	}
+	if md := render.Markdown(seg, 0, 3, render.Options{Marks: marks[2:], CommentFooter: true}).Text; !strings.HasSuffix(md, "\n\ncomments: none in this range\n(2 more elsewhere or unlocated; use list_comments)") {
+		t.Errorf("footer with nothing in range:\n%s", md)
+	}
+	if md := render.Markdown(seg, 0, 3, render.Options{CommentFooter: true}).Text; !strings.HasSuffix(md, "<!-- no comments -->") {
+		t.Errorf("footer without threads:\n%s", md)
 	}
 	// A mark ending inside a styled run splits it without breaking markdown.
-	marks = []render.Mark{{TabID: d.Tabs[0].ID, Start: 41, End: 44, ID: "c4"}}
+	marks = []render.Mark{{TabID: d.Tabs[0].ID, Start: 41, End: 44, ID: "c4", Handle: "p3"}}
 	md = render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks, Suggestions: true}).Text
 	if !strings.Contains(md, "{--a --}{>>s:s1<<}{>>c:c4<<}") && !strings.Contains(md, "{>>c:c4<<}") {
 		t.Errorf("split mark missing:\n%s", md)
@@ -244,7 +262,7 @@ func TestMergedCellsRender(t *testing.T) {
 
 func TestPlainCommentMarks(t *testing.T) {
 	d, seg := body(t)
-	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 41, ID: "c1"}, {TabID: d.Tabs[0].ID, Start: 60, End: 68, ID: "c2"}}
+	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 41, ID: "c1", Handle: "p3"}, {TabID: d.Tabs[0].ID, Start: 60, End: 68, ID: "c2", Handle: "p3"}}
 	text := render.Plain(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
 	if !strings.Contains(text, "Revenue grew{>>c:c1<<} a lot in Q3.{>>c:c2<<}") {
 		t.Fatalf("plain marks:\n%s", text)
@@ -261,7 +279,7 @@ func TestPlainCommentMarks(t *testing.T) {
 func TestMarkerOffsetsAndMergedHeader(t *testing.T) {
 	d, seg := body(t)
 	// Two marks ending inside one run: "Revenue grew a lot" starts at 29.
-	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 36, ID: "c1"}, {TabID: d.Tabs[0].ID, Start: 37, End: 41, ID: "c2"}}
+	marks := []render.Mark{{TabID: d.Tabs[0].ID, Start: 29, End: 36, ID: "c1", Handle: "p3"}, {TabID: d.Tabs[0].ID, Start: 37, End: 41, ID: "c2", Handle: "p3"}}
 	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{Marks: marks}).Text
 	if !strings.Contains(md, "Revenue{>>c:c1<<} grew{>>c:c2<<} a lot") {
 		t.Fatalf("marker offsets:\n%s", md)

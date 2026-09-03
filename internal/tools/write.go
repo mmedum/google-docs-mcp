@@ -125,10 +125,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
-			switch kind {
-			case plan.OpInsert, plan.OpAppend, plan.OpReplace, plan.OpDelete, plan.OpReplaceAll, plan.OpPageBreak, plan.OpFootnote, plan.OpCreateHeader, plan.OpCreateFooter, plan.OpDeleteHeader, plan.OpDeleteFooter:
-			default:
-				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use insert, append, replace, delete, replace_all, insert_break, insert_footnote, create_header, create_footer, delete_header or delete_footer", i, o.Op))
+			if info, ok := plan.Info(kind); !ok || info.Tool != plan.ToolEdit {
+				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolEdit)))
 			}
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
 				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}}
@@ -139,7 +137,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(editText(res)), res, nil
+		return text(res.Text), res, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -169,7 +167,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 				eo.Bullets = strings.ToLower(strings.TrimSpace(o.Bullets))
 			case plan.OpClearFormatting:
 			default:
-				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use text_style, paragraph_style, bullets or clear_formatting", i, o.Op))
+				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolFormat)))
 			}
 			ops = append(ops, eo)
 		}
@@ -177,7 +175,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(editText(res)), res, nil
+		return text(res.Text), res, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -227,46 +225,4 @@ type ReviewInput struct {
 	IDs            []string `json:"ids,omitempty" jsonschema:"suggestion ids from list_suggestions"`
 	All            bool     `json:"all,omitempty" jsonschema:"act on every pending suggestion"`
 	ExpectRevision string   `json:"expect_revision,omitempty"`
-}
-
-func editText(r *service.EditResult) string {
-	var b strings.Builder
-	if r.DryRun {
-		fmt.Fprintf(&b, "dry run in %s mode at revision %s: %d op(s) planned, nothing sent\n", r.Mode, r.RevisionID, len(r.Changes))
-	} else {
-		fmt.Fprintf(&b, "applied %d op(s) in %s mode; revision %s\n", r.Applied, r.Mode, r.RevisionID)
-	}
-	for _, c := range r.Changes {
-		fmt.Fprintf(&b, "- op %d %s: %s", c.Seq, c.Kind, c.Description)
-		if c.Minimal {
-			b.WriteString(" (minimal diff)")
-		}
-		b.WriteString("\n")
-	}
-	if len(r.SuggestionIDs) > 0 {
-		fmt.Fprintf(&b, "suggestion ids: %s\n", strings.Join(r.SuggestionIDs, ", "))
-	}
-	if len(r.CommentIDs) > 0 {
-		fmt.Fprintf(&b, "comment ids: %s\n", strings.Join(r.CommentIDs, ", "))
-	}
-	for _, w := range r.Warnings {
-		fmt.Fprintf(&b, "warning: %s\n", w)
-	}
-	if r.DryRun && len(r.Proposals) > 0 {
-		b.WriteString("proposed comments:\n")
-		for _, p := range r.Proposals {
-			fmt.Fprintf(&b, "- op %d: %s\n", p.Seq, strings.ReplaceAll(p.Content, "\n", " "))
-		}
-	}
-	if r.DryRun && len(r.RequestKinds) > 0 {
-		fmt.Fprintf(&b, "requests: %s\n", strings.Join(r.RequestKinds, ", "))
-	}
-	if r.Preview != "" {
-		label := "region after the edit"
-		if r.DryRun {
-			label = "region as it is now"
-		}
-		fmt.Fprintf(&b, "%s:\n%s\n", label, r.Preview)
-	}
-	return strings.TrimRight(b.String(), "\n")
 }

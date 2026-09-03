@@ -27,6 +27,9 @@ type FragmentOptions struct {
 	// Inline says the insertion point is inside an existing paragraph:
 	// the first fragment paragraph merges into it and keeps its style.
 	Inline bool
+	// Fill says the paragraph at an inline insertion point is empty, so
+	// the first fragment paragraph takes its own style instead.
+	Fill bool
 }
 
 // Compiled is a fragment laid out at an insertion point.
@@ -109,7 +112,7 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 		c.Requests = append(c.Requests, ClearTextStyle(rng(contentStart, cursor)))
 	}
 	for i, p := range pieces {
-		c.Requests = append(c.Requests, pieceRequests(p, o, i == 0 && o.Inline, rng, paraRange)...)
+		c.Requests = append(c.Requests, pieceRequests(p, o, i == 0 && o.Inline && !o.Fill, rng, paraRange)...)
 	}
 	c.Requests = append(c.Requests, listRequests(pieces, rng)...)
 	return c, nil

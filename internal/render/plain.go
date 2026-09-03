@@ -11,7 +11,7 @@ import (
 func Plain(seg *doc.Segment, from, to int, o Options) Result {
 	first := true
 	marks := marksFor(o.Marks, seg)
-	return budgeted(seg.Blocks, from, to, o.MaxChars, func(b *doc.Block) (string, bool) {
+	res := budgeted(seg.Blocks, from, to, o.MaxChars, func(b *doc.Block) (string, bool) {
 		return plainBlock(b, o, marks), true
 	}, func(*doc.Block, string) string {
 		if first {
@@ -20,6 +20,7 @@ func Plain(seg *doc.Segment, from, to int, o Options) Result {
 		}
 		return "\n"
 	})
+	return withFooter(seg, from, res, o)
 }
 
 func plainBlock(b *doc.Block, o Options, marks []Mark) string {

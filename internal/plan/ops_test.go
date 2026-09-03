@@ -311,3 +311,77 @@ func TestFollowupsAndFormats(t *testing.T) {
 		t.Fatal("helpers")
 	}
 }
+
+func TestKindRegistryCoversEveryTool(t *testing.T) {
+	want := map[Tool]string{
+		ToolEdit:   "insert, append, replace, delete, replace_all, insert_break, insert_footnote, create_header, create_footer, delete_header or delete_footer",
+		ToolFormat: "text_style, paragraph_style, bullets or clear_formatting",
+		ToolTable:  "insert_table, set_cells, insert_rows, delete_rows, insert_columns, delete_columns, merge_cells, unmerge_cells, style_cells or pin_header_rows",
+		ToolObject: "insert_object",
+	}
+	total := 0
+	for tool, list := range want {
+		if got := KindList(tool); got != list {
+			t.Errorf("KindList(%s) = %q", tool, got)
+		}
+		for _, k := range KindsOf(tool) {
+			total++
+			info, ok := Info(k)
+			if !ok || info.Tool != tool {
+				t.Errorf("%s: info = %+v, %t", k, info, ok)
+			}
+			if IsTableOp(k) != (tool == ToolTable) {
+				t.Errorf("%s: IsTableOp = %t", k, IsTableOp(k))
+			}
+		}
+	}
+	if total != len(kindTable) {
+		t.Errorf("%d kinds listed by tool, %d in the registry", total, len(kindTable))
+	}
+	if _, ok := Info("bogus"); ok {
+		t.Error("unknown kind found")
+	}
+	deleting := []OpKind{OpReplace, OpDelete, OpReplaceAll, OpSetCells, OpDeleteRows, OpDeleteColumns, OpMergeCells, OpDeleteHeader, OpDeleteFooter}
+	for _, k := range deleting {
+		if !Deletes(k) {
+			t.Errorf("%s should delete", k)
+		}
+	}
+	for _, k := range []OpKind{OpInsert, OpAppend, OpTextStyle, OpInsertTable, OpUnmergeCells, OpInsertObject, OpCreateHeader} {
+		if Deletes(k) {
+			t.Errorf("%s should not delete", k)
+		}
+	}
+	// Validation refuses what the registry says an op must carry.
+	for _, op := range []Op{
+		{Seq: 1, Kind: OpDelete},
+		{Seq: 2, Kind: OpInsert, Fragment: frag(t, "x")},
+		{Seq: 3, Kind: OpInsertRows},
+		{Seq: 4, Kind: OpDeleteHeader},
+		{Seq: 5, Kind: OpReplace, Target: &Rng{Start: 1, End: 2}},
+		{Seq: 6, Kind: "bogus"},
+	} {
+		if err := validate(&op); err == nil {
+			t.Errorf("op %d (%s): validated", op.Seq, op.Kind)
+		}
+	}
+}
+
+func TestFollowupsNeedContentOrData(t *testing.T) {
+	cases := []struct {
+		op   Op
+		want bool
+	}{
+		{Op{Kind: OpCreateHeader, Fragment: frag(t, "x")}, true},
+		{Op{Kind: OpCreateHeader}, false},
+		{Op{Kind: OpFootnote, Fragment: frag(t, "x")}, true},
+		{Op{Kind: OpInsertTable, Table: TableParams{Data: [][]string{{"a"}}}}, true},
+		{Op{Kind: OpInsertTable}, false},
+		{Op{Kind: OpInsert, Fragment: frag(t, "x")}, false},
+	}
+	for _, c := range cases {
+		if got := c.op.NeedsFollowup(); got != c.want {
+			t.Errorf("%s: NeedsFollowup = %t", c.op.Kind, got)
+		}
+	}
+}

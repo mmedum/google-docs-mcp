@@ -60,6 +60,6 @@ func registerObjects(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(editText(res)), res, nil
+		return text(res.Text), res, nil
 	})
 }

@@ -24,18 +24,28 @@ type Options struct {
 	Suggestions bool
 	// MaxChars stops after the block that would cross the budget. 0 = no limit.
 	MaxChars int
-	// Marks are comment anchors to show as {>>c:<id><<} after the text
-	// they cover.
+	// Marks are comment threads to show as {>>c:<id><<} after the text
+	// they cover, and to list below the content when CommentFooter is set.
 	Marks []Mark
+	// CommentFooter appends the list of the threads marked in the
+	// rendered range and counts the ones outside it.
+	CommentFooter bool
 }
 
-// Mark is a comment anchored to a range of one segment.
+// Mark is a comment thread. Located threads name the segment and range
+// they sit on; an unlocated one (no handle) is only counted.
 type Mark struct {
 	TabID     string
 	SegmentID string
 	Start     int64
 	End       int64
 	ID        string
+
+	Handle   string
+	Author   string
+	Content  string
+	Resolved bool
+	Replies  int
 }
 
 func (o Options) view() doc.View {
@@ -55,16 +65,70 @@ type span struct {
 
 func suggestionKey(ids []string) string { return strings.Join(ids, ",") }
 
-// marksFor keeps the marks of one segment, sorted by end offset.
+// marksFor keeps the located marks of one segment, sorted by end offset.
 func marksFor(marks []Mark, seg *doc.Segment) []Mark {
 	var out []Mark
 	for _, m := range marks {
-		if m.SegmentID == seg.ID && m.TabID == seg.Tab.ID {
+		if m.Handle != "" && m.SegmentID == seg.ID && m.TabID == seg.Tab.ID {
 			out = append(out, m)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].End < out[j].End })
 	return out
+}
+
+// commentFooter lists the threads marked in the rendered blocks
+// [from, res.To) of the segment and counts the ones elsewhere or
+// unlocated.
+func commentFooter(seg *doc.Segment, from int, res Result, marks []Mark) string {
+	if len(marks) == 0 {
+		return "\n\n<!-- no comments -->"
+	}
+	var start, end int64
+	if res.To > from && res.To <= len(seg.Blocks) {
+		start, end = seg.Blocks[from].Start, seg.Blocks[res.To-1].End
+	}
+	var sb strings.Builder
+	other := 0
+	for _, m := range marks {
+		inRange := m.Handle != "" && m.TabID == seg.Tab.ID && m.SegmentID == seg.ID && m.End > start && m.Start < end
+		if !inRange {
+			other++
+			continue
+		}
+		fmt.Fprintf(&sb, "\n- c:%s [%s]", m.ID, m.Handle)
+		if m.Author != "" {
+			sb.WriteString(" by " + m.Author)
+		}
+		if m.Resolved {
+			sb.WriteString(" [resolved]")
+		}
+		sb.WriteString(": " + doc.OneLine(m.Content))
+		if n := m.Replies; n > 0 {
+			label := "replies"
+			if n == 1 {
+				label = "reply"
+			}
+			fmt.Fprintf(&sb, " (%d %s)", n, label)
+		}
+	}
+	out := "\n\ncomments:" + sb.String()
+	if sb.Len() == 0 {
+		out = "\n\ncomments: none in this range"
+	}
+	if other > 0 {
+		out += fmt.Sprintf("\n(%d more elsewhere or unlocated; use list_comments)", other)
+	}
+	return out
+}
+
+// withFooter appends the comment footer when asked for.
+func withFooter(seg *doc.Segment, from int, res Result, o Options) Result {
+	if o.CommentFooter {
+		res.Text += commentFooter(seg, from, res, o.Marks)
+		res.Chars = len(res.Text)
+	}
+	return res
 }
 
 // inline renders a paragraph's runs as markdown inline content. marks

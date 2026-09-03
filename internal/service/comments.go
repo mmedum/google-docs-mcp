@@ -94,7 +94,7 @@ func commentsText(res *CommentsResult, revision string) string {
 		if t.Quote != "" {
 			fmt.Fprintf(&sb, " on “%s”", doc.Clip(t.Quote, 60))
 		}
-		sb.WriteString(": " + oneLine(t.Content) + "\n")
+		sb.WriteString(": " + doc.OneLine(t.Content) + "\n")
 		for _, r := range t.Replies {
 			sb.WriteString("    ↳ ")
 			if r.Author != "" {
@@ -112,16 +112,12 @@ func commentsText(res *CommentsResult, revision string) string {
 				sb.WriteString(" [deleted]")
 			}
 			if r.Content != "" {
-				sb.WriteString(": " + oneLine(r.Content))
+				sb.WriteString(": " + doc.OneLine(r.Content))
 			}
 			sb.WriteString("\n")
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
 }
 
 // AddCommentRequest posts a new thread.

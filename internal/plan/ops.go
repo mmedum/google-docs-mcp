@@ -106,6 +106,9 @@ type Op struct {
 	// Inline says the insertion point is inside a paragraph: the first
 	// fragment paragraph merges into it and no boundary newline is added.
 	Inline bool
+	// Fills says that paragraph is empty, so the first fragment paragraph
+	// styles it rather than inheriting its style.
+	Fills bool
 	// NearBullet says the paragraph at the insertion point is a list item.
 	NearBullet bool
 
@@ -137,19 +140,18 @@ type Proposal struct {
 	Quote   string
 }
 
-// Followup is content to insert into a segment that a reply will name
-// (a new header, footer or footnote).
+// Followup is content that lands in a second batch once the first has
+// created its home: a new header, footer or footnote (the reply names
+// the segment) or a table inserted with a data grid (found again by the
+// handle its position predicts).
 type Followup struct {
 	Seq      int
 	Kind     OpKind
 	Fragment *markdown.Fragment
-	TabID    string
-}
-
-// NeedsFollowup reports whether the op creates a segment whose content
-// is inserted in a second batch.
-func (op *Op) NeedsFollowup() bool {
-	return op.Kind == OpFootnote || op.Kind == OpCreateHeader || op.Kind == OpCreateFooter
+	Seg      Segment
+	// Insert and Table describe an insert_table op's place and grid.
+	Insert *Loc
+	Table  TableParams
 }
 
 // OpSummary describes what an op compiled to.
@@ -241,14 +243,14 @@ func compile(ops []Op, res *Result, add func(*Op, []json.RawMessage, bool)) erro
 	var formats, bullets, content, global []*Op
 	for i := range ops {
 		op := &ops[i]
-		switch op.Kind {
-		case OpTextStyle, OpParagraphStyle, OpClearFormatting:
+		switch kindInfos[op.Kind].Group {
+		case GroupFormat:
 			formats = append(formats, op)
-		case OpBullets:
+		case GroupBullets:
 			// createParagraphBullets consumes leading tabs and shifts what
 			// follows, so lists are made after the content ops, highest first.
 			bullets = append(bullets, op)
-		case OpReplaceAll:
+		case GroupGlobal:
 			global = append(global, op)
 		default:
 			content = append(content, op)
@@ -278,7 +280,7 @@ func compile(ops []Op, res *Result, add func(*Op, []json.RawMessage, bool)) erro
 		}
 		add(op, reqs, minimal)
 		if op.NeedsFollowup() {
-			res.Followups = append(res.Followups, Followup{Seq: op.Seq, Kind: op.Kind, Fragment: op.Fragment, TabID: op.Seg.TabID})
+			res.Followups = append(res.Followups, Followup{Seq: op.Seq, Kind: op.Kind, Fragment: op.Fragment, Seg: op.Seg, Insert: op.Insert, Table: op.Table})
 		}
 	}
 	for _, op := range bullets {
@@ -299,7 +301,7 @@ func suggestable(ops []Op, reqs []json.RawMessage) error {
 			continue
 		}
 		for i := range ops {
-			if opKinds[ops[i].Kind] == kind {
+			if kindInfos[ops[i].Kind].SuggestRefused == kind {
 				return fmt.Errorf("op %d (%s) cannot be made as a suggestion (the API refuses %s in SUGGEST mode); use mode direct", ops[i].Seq, ops[i].Kind, kind)
 			}
 		}
@@ -308,36 +310,47 @@ func suggestable(ops []Op, reqs []json.RawMessage) error {
 	return nil
 }
 
-// opKinds maps the ops that compile to one request kind the API may
-// refuse in SUGGEST mode.
-var opKinds = map[OpKind]string{OpDeleteHeader: "deleteHeader", OpDeleteFooter: "deleteFooter"}
-
+// validate checks what the registry says the op must carry, then the
+// kind's own parameters.
 func validate(op *Op) error {
-	needTarget := func() error {
+	info, ok := kindInfos[op.Kind]
+	if !ok {
+		return fmt.Errorf("op %d: unknown kind %q", op.Seq, op.Kind)
+	}
+	if err := validateShape(op, info); err != nil {
+		return err
+	}
+	return validateParams(op, info)
+}
+
+func validateShape(op *Op, info KindInfo) error {
+	var errs []error
+	switch info.Shape {
+	case ShapeTarget:
 		if op.Target == nil {
-			return fmt.Errorf("op %d (%s): no target", op.Seq, op.Kind)
+			errs = append(errs, fmt.Errorf("op %d (%s): no target", op.Seq, op.Kind))
 		}
-		return nil
-	}
-	needInsert := func() error {
+	case ShapeInsert:
 		if op.Insert == nil {
-			return fmt.Errorf("op %d (%s): no insertion point", op.Seq, op.Kind)
+			errs = append(errs, fmt.Errorf("op %d (%s): no insertion point", op.Seq, op.Kind))
 		}
-		return nil
-	}
-	needFragment := func() error {
-		if op.Fragment == nil || len(op.Fragment.Blocks) == 0 {
-			return fmt.Errorf("op %d (%s): content is empty", op.Seq, op.Kind)
+	case ShapeTable:
+		if op.TableAt == nil {
+			errs = append(errs, fmt.Errorf("op %d (%s): no table", op.Seq, op.Kind))
 		}
-		return nil
+	case ShapeSegment:
+		if op.SegmentRef == "" {
+			errs = append(errs, fmt.Errorf("op %d (%s): no segment", op.Seq, op.Kind))
+		}
 	}
+	if info.Content && (op.Fragment == nil || len(op.Fragment.Blocks) == 0) {
+		errs = append(errs, fmt.Errorf("op %d (%s): content is empty", op.Seq, op.Kind))
+	}
+	return errors.Join(errs...)
+}
+
+func validateParams(op *Op, info KindInfo) error {
 	switch op.Kind {
-	case OpInsert, OpAppend:
-		return errors.Join(needInsert(), needFragment())
-	case OpReplace:
-		return errors.Join(needTarget(), needFragment())
-	case OpDelete, OpClearFormatting:
-		return needTarget()
 	case OpTextStyle:
 		if op.Text.IsZero() {
 			return fmt.Errorf("op %d: text_style changes nothing; set bold, italic, font, color, link or similar", op.Seq)
@@ -345,7 +358,6 @@ func validate(op *Op) error {
 		if err := op.Text.Validate(); err != nil {
 			return fmt.Errorf("op %d: %w", op.Seq, err)
 		}
-		return needTarget()
 	case OpParagraphStyle:
 		if op.Para.IsZero() {
 			return fmt.Errorf("op %d: paragraph_style changes nothing; set named_style, alignment, spacing or indent", op.Seq)
@@ -353,37 +365,23 @@ func validate(op *Op) error {
 		if err := op.Para.Validate(); err != nil {
 			return fmt.Errorf("op %d: %w", op.Seq, err)
 		}
-		return needTarget()
 	case OpBullets:
 		switch op.Bullets {
 		case "bullet", "numbered", "checkbox", "none":
 		default:
 			return fmt.Errorf("op %d: bullets must be bullet, numbered, checkbox or none", op.Seq)
 		}
-		return needTarget()
 	case OpReplaceAll:
 		if op.Find == "" {
 			return fmt.Errorf("op %d: replace_all needs find text", op.Seq)
 		}
-		return nil
-	case OpPageBreak:
-		return needInsert()
-	case OpFootnote:
-		return errors.Join(needInsert(), needFragment())
-	case OpCreateHeader, OpCreateFooter:
-		return needFragment()
-	case OpDeleteHeader, OpDeleteFooter:
-		if op.SegmentRef == "" {
-			return fmt.Errorf("op %d (%s): no segment", op.Seq, op.Kind)
-		}
-		return nil
 	case OpInsertObject:
 		return validateObjectOp(op)
 	}
-	if IsTableOp(op.Kind) {
+	if info.Tool == ToolTable {
 		return validateTableOp(op)
 	}
-	return fmt.Errorf("op %d: unknown kind %q", op.Seq, op.Kind)
+	return nil
 }
 
 func keyIndex(op *Op) int64 {
@@ -403,7 +401,7 @@ func keyIndex(op *Op) int64 {
 func guard(ops []Op, o Options, res *Result) error {
 	for i := range ops {
 		op := &ops[i]
-		if !Deletes(op.Kind) || len(op.Anchors) == 0 {
+		if !kindInfos[op.Kind].Deletes || len(op.Anchors) == 0 {
 			continue
 		}
 		if o.Mode == ModeSuggest {
@@ -417,16 +415,6 @@ func guard(ops []Op, o Options, res *Result) error {
 		return fmt.Errorf("%w: op %d (%s of %s) would destroy %s; use mode suggest or comment, narrow the target, or pass force: true", ErrBlocked, op.Seq, op.Kind, op.Description, describeAnchors(op.Anchors))
 	}
 	return nil
-}
-
-// Deletes reports whether the kind removes existing content, which is
-// what the overwrite guard protects.
-func Deletes(k OpKind) bool {
-	switch k {
-	case OpReplace, OpDelete, OpReplaceAll, OpDeleteRows, OpDeleteColumns, OpMergeCells, OpDeleteHeader, OpDeleteFooter:
-		return true
-	}
-	return false
 }
 
 func describeAnchors(as []Anchor) string {
@@ -460,8 +448,7 @@ func checkOverlaps(ops []Op) error {
 	structural := map[Loc]*Op{}
 	for i := range ops {
 		op := &ops[i]
-		switch op.Kind {
-		case OpTextStyle, OpParagraphStyle, OpBullets, OpClearFormatting, OpReplaceAll, OpCreateHeader, OpCreateFooter, OpDeleteHeader, OpDeleteFooter:
+		if kindInfos[op.Kind].Group != GroupContent {
 			continue
 		}
 		switch {
@@ -527,7 +514,7 @@ func formatRequests(op *Op) []json.RawMessage {
 func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
-		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline, Inline: op.Inline, NearBullet: op.NearBullet})
+		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline, Inline: op.Inline, Fill: op.Fills, NearBullet: op.NearBullet})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 		}

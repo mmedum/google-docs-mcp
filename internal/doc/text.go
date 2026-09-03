@@ -190,6 +190,11 @@ func (b *Block) Words(v View) int {
 	return 0
 }
 
+// OneLine collapses whitespace runs, newlines included, to single spaces.
+func OneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // Clip trims s and cuts it to n characters with an ellipsis.
 func Clip(s string, n int) string {
 	r := []rune(strings.TrimSpace(s))

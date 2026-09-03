@@ -54,37 +54,12 @@ type ObjectParams struct {
 	Date     DateSpec
 }
 
-// IsTableOp reports whether the kind belongs to edit_table.
-func IsTableOp(k OpKind) bool {
-	switch k {
-	case OpInsertTable, OpSetCells, OpInsertRows, OpDeleteRows, OpInsertColumns, OpDeleteColumns, OpMergeCells, OpUnmergeCells, OpStyleCells, OpPinHeaderRows:
-		return true
-	}
-	return false
-}
-
-// isStructural reports whether the op changes a table's grid, which
-// renumbers rows or columns; at most one such op per table per batch.
-func isStructural(k OpKind) bool {
-	switch k {
-	case OpInsertRows, OpDeleteRows, OpInsertColumns, OpDeleteColumns, OpMergeCells, OpUnmergeCells:
-		return true
-	}
-	return false
-}
-
 func validateTableOp(op *Op) error {
 	if op.Kind == OpInsertTable {
-		if op.Insert == nil {
-			return fmt.Errorf("op %d (%s): no insertion point", op.Seq, op.Kind)
-		}
 		if op.Table.Rows < 1 || op.Table.Cols < 1 || op.Table.Rows > 200 || op.Table.Cols > 20 {
 			return fmt.Errorf("op %d: insert_table needs rows 1-200 and columns 1-20", op.Seq)
 		}
 		return nil
-	}
-	if op.TableAt == nil {
-		return fmt.Errorf("op %d (%s): no table", op.Seq, op.Kind)
 	}
 	switch op.Kind {
 	case OpInsertRows, OpInsertColumns, OpDeleteRows, OpDeleteColumns:

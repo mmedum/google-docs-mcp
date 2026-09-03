@@ -207,3 +207,29 @@ func TestRequestBuilders(t *testing.T) {
 }
 
 func floatp(f float64) *float64 { return &f }
+
+func TestCompileFragmentFillStylesTheEmptyParagraph(t *testing.T) {
+	at := Loc{Index: 0, SegmentID: "kix.h1"}
+	inline, err := CompileFragment(frag(t, "# Title"), at, FragmentOptions{Inline: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fill, err := CompileFragment(frag(t, "# Title"), at, FragmentOptions{Inline: true, Fill: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(reqs []json.RawMessage, kind string) bool {
+		for _, r := range reqs {
+			if Kind(r) == kind {
+				return true
+			}
+		}
+		return false
+	}
+	if has(inline.Requests, "updateParagraphStyle") {
+		t.Errorf("inline into an existing paragraph must keep its style: %s", inline.Requests)
+	}
+	if !has(fill.Requests, "updateParagraphStyle") || !strings.Contains(string(fill.Requests[2]), "HEADING_1") {
+		t.Errorf("a fill takes the fragment's heading style: %s", fill.Requests)
+	}
+}

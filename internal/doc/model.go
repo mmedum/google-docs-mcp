@@ -8,6 +8,8 @@ package doc
 import (
 	"sort"
 	"strconv"
+
+	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 )
 
 // Document is a parsed documents.get response.
@@ -252,6 +254,10 @@ type Block struct {
 
 	Inserted []string // suggestion ids that insert this block
 	Deleted  []string // suggestion ids that delete this block
+
+	// Wire is the structural element the block was parsed from, for the
+	// raw read format.
+	Wire *gdocs.StructuralElement
 }
 
 // IsHeading reports whether the block is a heading paragraph.

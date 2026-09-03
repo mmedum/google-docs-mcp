@@ -655,9 +655,9 @@ headers/footers/footnotes, images and chips. A table inserted with data is
 filled in a second batch once it exists (found by the index the insertion
 named); the tab that `add` creates gets its content the same way.
 
-**Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Agent evals, resources
-(`gdocs://<id>`, done 2026-09-03), performance on large documents, and
-the §17a cleanups.
+**Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Resources
+(`gdocs://<id>`), performance on large documents and the §17a cleanups
+done 2026-09-03; agent evals next.
 
 ## 17. Open decisions
 
@@ -673,34 +673,15 @@ block-range resolver (`resolveBlocks`) serves `ResolveScope` and
 paths; comment threads are located once per `Fetched` and shared by the
 guard, `read_document include_comments` and `list_comments`. Still open:
 
-- **One op-kind registry.** Adding `delete_header` touched nine kind
-  lists across tools, service and plan (allowed-op strings, resolver
-  switch, `deletesContent`, `needsContent`, `validate`, `contentRequests`,
-  `proposal`, the overlap skip-list, `Deletes`). A `plan` table keyed by
-  kind (tool, shape, deletes, structural, followup) should drive them all.
-- **One follow-up batch mechanism.** Headers, footers and footnotes fill
-  through `plan.Followup`; tables inserted with data and added tabs fill
-  through a recursive edit with its own fetches, guard and numbering, and
-  `dry_run` never shows the fill. A follow-up hook that re-resolves
-  against the refetched document would serve all three, and would let
-  several grid changes on one table land in one call instead of the
-  current one-structural-op-per-table rule.
-- **Comment footer in the renderer.** `include_comments` markers come
-  from `render`, the thread list below them from the service, and
-  `commentsText` formats threads a third way; `Mark` carrying the thread
-  fields would let `render` emit both.
-- **Raw view in the renderer.** The `raw` read format lives in the service
-  with its own budget loop because `doc.Block` does not keep its wire
-  element; keep the wire pointer on the block and move it to `render`.
-- **An op-kind table in `plan`.** Which kinds need a target, an insertion
-  point or content is answered by switches in tools, service and plan;
-  a single table should drive validation, grouping and the tool's
-  allowed-op lists.
-- **Result text shaping.** `edit_document`'s text is built in the tools
-  (`editText`), every other result's in the service; settle on one.
-- **Segment identity on `plan.Op`.** `Seg`, `Target`, `Insert` and
-  `CommentAnchor` each carry the tab and segment ids; the request
-  builders could take a segment once.
+- **Several grid changes on one table per call.** The follow-up
+  mechanism could chain them (re-resolving row and column numbers after
+  each), replacing the one-structural-op-per-table rule.
+- **`list_comments` text.** Still formatted in the service: it shows
+  reply threads with authors and times, which the renderer has no model
+  for; the read footer and it agree on the one-line thread summary.
+- **Read-tool text.** `get_document`'s text and the read header are
+  still shaped in the tool layer; the write tools now take their text
+  from the service.
 
 ## 18. Evidence log: conventions checked, changed, or rejected
 
@@ -741,5 +722,6 @@ checked rather than assumed.
 | `revisions.list` is complete for Docs (my assumption) | Refuted: "might be incomplete for files with a large revision history, including frequently edited Google Docs" | `list_revisions` says so in its output and description. |
 | `deleteTab` fails when the tab has children (my assumption) | Refuted: child tabs are deleted with it | `delete_tab` warns; a document keeps at least one tab. |
 | `comments.*` need the `fields` parameter (Drive guide) | Confirmed for comments (an omitted `fields` is an error); the replies pages list no parameters | Sent on every call. |
+| A fragment inserted into an empty paragraph keeps that paragraph's style (Phase 1 `Inline` rule) | Refuted by the follow-up path: a new header, footer, footnote or tab starts as one empty paragraph, so `# Title` content came out as normal text; an inline insertion into a non-empty paragraph must still keep its style | `FragmentOptions.Fill`: an empty paragraph takes the fragment's style. |
 | Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalised units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalised string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
 | Resource templates with a shared prefix shadow each other (my worry) | Refuted in go-sdk v1.7.0: a template matches through an anchored RFC 6570 regexp in which `{var}` excludes `/`, so `gdocs://{document}` does not match `gdocs://id/outline`; an unmatched URI is resource-not-found (code -32602 since SEP-2164) | Three templates registered side by side; handlers parse the URI themselves. |

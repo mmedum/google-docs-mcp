@@ -76,7 +76,7 @@ func registerTable(s *mcp.Server, d Deps) {
 		for i, o := range in.Ops {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
 			if !plan.IsTableOp(kind) {
-				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use insert_table, set_cells, insert_rows, delete_rows, insert_columns, delete_columns, merge_cells, unmerge_cells, style_cells or pin_header_rows", i, o.Op))
+				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolTable)))
 			}
 			ops = append(ops, service.EditOp{Kind: kind, Table: o.tableOp(), ContentFormat: o.ContentFormat, Location: o.Location.location()})
 		}
@@ -84,6 +84,6 @@ func registerTable(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		return text(editText(res)), res, nil
+		return text(res.Text), res, nil
 	})
 }

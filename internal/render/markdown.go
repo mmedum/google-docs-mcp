@@ -22,7 +22,7 @@ type Result struct {
 // Markdown renders blocks [from, to) of a segment as markdown.
 func Markdown(seg *doc.Segment, from, to int, o Options) Result {
 	r := &mdRenderer{seg: seg, o: o, marks: marksFor(o.Marks, seg)}
-	return r.render(from, to)
+	return withFooter(seg, from, r.render(from, to), o)
 }
 
 type mdRenderer struct {

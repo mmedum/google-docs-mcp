@@ -2,14 +2,11 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/internal/config"
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 	"github.com/mmedum/google-docs-mcp/internal/render"
 )
 
@@ -204,12 +201,12 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error
 	if err != nil {
 		return nil, err
 	}
-	var threads []CommentThread
 	if req.IncludeComments && format != FormatRaw {
-		if threads, err = s.comments(ctx, f); err != nil {
+		threads, err := s.comments(ctx, f)
+		if err != nil {
 			return nil, err
 		}
-		req.Options.Marks = commentMarks(threads)
+		req.Options.Marks, req.Options.CommentFooter = commentMarks(threads), true
 	}
 	var r render.Result
 	switch format {
@@ -218,13 +215,9 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error
 	case FormatText:
 		r = render.Plain(rs.Segment, rs.From, rs.To, req.Options)
 	case FormatRaw:
-		r, err = rawJSON(f.Wire, rs, req.Options.MaxChars)
-		if err != nil {
-			return nil, err
+		if r, err = render.Raw(rs.Segment, rs.From, rs.To, req.Options.MaxChars); err != nil {
+			return nil, &Error{Class: "unexpected", Message: err.Error(), Err: err}
 		}
-	}
-	if req.IncludeComments && format != FormatRaw {
-		r.Text += commentFooter(rs, r, threads)
 	}
 	return &ReadResult{
 		Text: r.Text, RevisionID: f.Doc.RevisionID,
@@ -234,133 +227,16 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error
 	}, nil
 }
 
-// commentMarks turns located, live threads into renderer marks.
+// commentMarks turns the live threads into renderer marks: located
+// ones get markers, every one is counted in the footer.
 func commentMarks(threads []CommentThread) []render.Mark {
 	var marks []render.Mark
-	for _, t := range threads {
-		if t.Handle == "" || t.Deleted {
-			continue
-		}
-		marks = append(marks, render.Mark{TabID: t.Tab, SegmentID: t.Segment, Start: t.Start, End: t.End, ID: t.ID})
-	}
-	return marks
-}
-
-// commentFooter lists the threads marked in the rendered range and
-// counts the ones outside it.
-func commentFooter(rs Resolved, r render.Result, threads []CommentThread) string {
-	if len(threads) == 0 {
-		return "\n\n<!-- no comments -->"
-	}
-	var start, end int64
-	if r.To > rs.From && r.To <= len(rs.Segment.Blocks) {
-		start, end = rs.Segment.Blocks[rs.From].Start, rs.Segment.Blocks[r.To-1].End
-	}
-	var sb strings.Builder
-	other := 0
 	for _, t := range threads {
 		if t.Deleted {
 			continue
 		}
-		inRange := t.Handle != "" && t.Tab == rs.Tab.ID && t.Segment == rs.Segment.ID && t.End > start && t.Start < end
-		if !inRange {
-			other++
-			continue
-		}
-		fmt.Fprintf(&sb, "\n- c:%s [%s]", t.ID, t.Handle)
-		if t.Author != "" {
-			sb.WriteString(" by " + t.Author)
-		}
-		if t.Resolved {
-			sb.WriteString(" [resolved]")
-		}
-		sb.WriteString(": " + oneLine(t.Content))
-		if n := len(t.Replies); n > 0 {
-			label := "replies"
-			if n == 1 {
-				label = "reply"
-			}
-			fmt.Fprintf(&sb, " (%d %s)", n, label)
-		}
+		marks = append(marks, render.Mark{TabID: t.Tab, SegmentID: t.Segment, Start: t.Start, End: t.End, ID: t.ID,
+			Handle: t.Handle, Author: t.Author, Content: t.Content, Resolved: t.Resolved, Replies: len(t.Replies)})
 	}
-	out := "\n\ncomments:" + sb.String()
-	if sb.Len() == 0 {
-		out = "\n\ncomments: none in this range"
-	}
-	if other > 0 {
-		out += fmt.Sprintf("\n(%d more elsewhere or unlocated; use list_comments)", other)
-	}
-	return out
-}
-
-// rawJSON returns the API's structural elements for the range, one JSON
-// array, cut at element boundaries when over budget.
-func rawJSON(w *gdocs.Document, rs Resolved, maxChars int) (render.Result, error) {
-	elems := wireElements(w, rs.Tab, rs.Segment)
-	if elems == nil {
-		return render.Result{}, Errorf("unexpected", "raw content not found for this segment")
-	}
-	var res render.Result
-	var sb strings.Builder
-	sb.WriteString("[")
-	for i := rs.From; i < rs.To && i < len(elems); i++ {
-		data, err := json.Marshal(elems[i])
-		if err != nil {
-			return render.Result{}, Errorf("unexpected", "encode element: %v", err)
-		}
-		if res.Blocks > 0 && maxChars > 0 && sb.Len()+len(data)+2 > maxChars {
-			res.Truncated = true
-			if i < len(rs.Segment.Blocks) {
-				res.ContinueFrom = rs.Segment.Blocks[i].Handle
-			}
-			break
-		}
-		if res.Blocks > 0 {
-			sb.WriteString(",\n")
-		}
-		sb.Write(data)
-		res.Blocks++
-		res.To = i + 1
-	}
-	sb.WriteString("]")
-	res.Text = sb.String()
-	res.Chars = len(res.Text)
-	return res, nil
-}
-
-func wireElements(w *gdocs.Document, tab *doc.Tab, seg *doc.Segment) []*gdocs.StructuralElement {
-	var dt *gdocs.DocumentTab
-	if len(w.Tabs) == 0 {
-		dt = &gdocs.DocumentTab{Body: w.Body, Headers: w.Headers, Footers: w.Footers, Footnotes: w.Footnotes}
-	} else {
-		gdocs.WalkTabs(w.Tabs, func(t *gdocs.Tab) bool {
-			if t.TabProperties != nil && t.TabProperties.TabID == tab.ID {
-				dt = t.DocumentTab
-				return false
-			}
-			return true
-		})
-	}
-	if dt == nil {
-		return nil
-	}
-	switch seg.Kind {
-	case doc.SegmentBody:
-		if dt.Body != nil {
-			return dt.Body.Content
-		}
-	case doc.SegmentHeader:
-		if h, ok := dt.Headers[seg.ID]; ok {
-			return h.Content
-		}
-	case doc.SegmentFooter:
-		if f, ok := dt.Footers[seg.ID]; ok {
-			return f.Content
-		}
-	case doc.SegmentFootnote:
-		if fn, ok := dt.Footnotes[seg.ID]; ok {
-			return fn.Content
-		}
-	}
-	return nil
+	return marks
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/config"
 	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 	"github.com/mmedum/google-docs-mcp/internal/plan"
 )
 
@@ -446,6 +447,15 @@ func TestFollowupsAndValidation(t *testing.T) {
 	svc, api := writable(t, false)
 	ctx := context.Background()
 	api.replies = []string{`{"replies":[{"createHeader":{"headerId":"kix.newh"}}],"writeControl":{"requiredRevisionId":"rev-0002"}}`}
+	// After the first batch the Notes tab has the new, empty header.
+	var after gdocs.Document
+	if err := json.Unmarshal(doctest.RawFixture(t), &after); err != nil {
+		t.Fatal(err)
+	}
+	after.RevisionID = "rev-0002"
+	after.Tabs[1].DocumentTab.Headers = map[string]gdocs.Header{"kix.newh": {HeaderID: "kix.newh", Content: []*gdocs.StructuralElement{{StartIndex: 0, EndIndex: 1,
+		Paragraph: &gdocs.Paragraph{Elements: []*gdocs.ParagraphElement{{StartIndex: 0, EndIndex: 1, TextRun: &gdocs.TextRun{Content: "\n"}}}}}}}}
+	api.afterBatch, _ = json.Marshal(&after)
 	res, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpCreateHeader, Target: &Target{Tab: "Notes"}, Content: "Draft **v2**"}}})
 	if err != nil {
 		t.Fatal(err)

@@ -197,7 +197,7 @@ func parseBlocks(seg *Segment, cell *Cell, prefix string, content []*gdocs.Struc
 		if se == nil {
 			continue
 		}
-		b := &Block{Start: se.StartIndex, End: se.EndIndex, Segment: seg, Cell: cell}
+		b := &Block{Start: se.StartIndex, End: se.EndIndex, Segment: seg, Cell: cell, Wire: se}
 		var short string
 		switch {
 		case se.Paragraph != nil:

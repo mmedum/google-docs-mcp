@@ -88,81 +88,32 @@ func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMe
 	return decodeReplies(res.Raw), revision, nil
 }
 
-// apply sends a plan to Google in the chosen mode and records ids.
-func (s *Service) apply(ctx context.Context, f *Fetched, planned *plan.Result, mode plan.Mode, result *EditResult) error {
+// apply sends a plan to Google in the chosen mode, records ids and
+// returns the replies so the follow-ups can find what was created.
+func (s *Service) apply(ctx context.Context, f *Fetched, planned *plan.Result, mode plan.Mode, result *EditResult) (replyEnvelope, error) {
 	if mode == plan.ModeComment {
-		return s.applyProposals(ctx, f, planned.Proposals, result)
+		return replyEnvelope{}, s.applyProposals(ctx, f, planned.Proposals, result)
 	}
 	if len(planned.Requests) == 0 {
 		result.Warnings = append(result.Warnings, "no changes were needed; the document already matches")
-		return nil
+		return replyEnvelope{}, nil
 	}
 	writeMode := ""
 	if mode == plan.ModeSuggest {
 		writeMode = "SUGGEST"
 	}
-	env, revision, err := s.batchUpdate(ctx, f, planned.Requests, writeMode)
+	env, _, err := s.batchUpdate(ctx, f, planned.Requests, writeMode)
 	if err != nil {
-		return err
+		return replyEnvelope{}, err
 	}
 	result.SuggestionIDs = append(result.SuggestionIDs, env.suggestionIDs()...)
-	if len(planned.Followups) == 0 {
-		return nil
-	}
-	// New headers, footers and footnotes get their content in a second
-	// batch, once the replies have named the new segments.
-	ids := newSegmentIDs(env)
-	var second []json.RawMessage
-	for _, fu := range planned.Followups {
-		id := ids[fu.Kind]
-		if len(id) == 0 {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: %s was created but Google returned no segment id; its content was not inserted", fu.Seq, fu.Kind))
-			continue
-		}
-		ids[fu.Kind] = id[1:]
-		c, err := plan.CompileFragment(fu.Fragment, plan.Loc{Index: 0, SegmentID: id[0], TabID: fu.TabID}, plan.FragmentOptions{})
-		if err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: %v", fu.Seq, err))
-			continue
-		}
-		second = append(second, c.Requests...)
-	}
-	if len(second) == 0 {
-		return nil
-	}
-	f.Doc.RevisionID = revision // the second batch is guarded by the first's outcome
-	env2, _, err := s.batchUpdate(ctx, f, second, writeMode)
-	if err != nil {
-		result.Warnings = append(result.Warnings, "the header/footer/footnote was created but filling it failed: "+err.Error())
-		return nil //nolint:nilerr // the segment exists; the caller gets it with a warning
-	}
-	result.SuggestionIDs = append(result.SuggestionIDs, env2.suggestionIDs()...)
-	return nil
+	return env, nil
 }
 
 func decodeReplies(raw json.RawMessage) replyEnvelope {
 	var env replyEnvelope
 	_ = json.Unmarshal(raw, &env)
 	return env
-}
-
-// newSegmentIDs collects created header, footer and footnote ids from
-// replies, in request order.
-func newSegmentIDs(env replyEnvelope) map[plan.OpKind][]string {
-	out := map[plan.OpKind][]string{}
-	for kind, field := range map[plan.OpKind]string{plan.OpCreateHeader: "createHeader", plan.OpCreateFooter: "createFooter", plan.OpFootnote: "createFootnote"} {
-		env.each(field, func(raw json.RawMessage) {
-			var v map[string]string
-			if json.Unmarshal(raw, &v) == nil {
-				for _, id := range v { // headerId, footerId or footnoteId
-					if id != "" {
-						out[kind] = append(out[kind], id)
-					}
-				}
-			}
-		})
-	}
-	return out
 }
 
 // applyProposals posts comment-mode proposals through the preview API

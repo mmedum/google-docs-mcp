@@ -154,10 +154,17 @@ func resolveHeadingText(tab *doc.Tab, seg *doc.Segment, sel blockSelector) (Reso
 }
 
 func selectSegment(tab *doc.Tab, ref string) (*doc.Segment, error) {
-	ref = strings.ToLower(strings.TrimSpace(ref))
+	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return tab.Body, nil
 	}
+	// A segment id (as the raw format and the API show it) names it directly.
+	for _, seg := range tab.Segments() {
+		if seg.ID != "" && seg.ID == ref {
+			return seg, nil
+		}
+	}
+	ref = strings.ToLower(ref)
 	m := segmentRef.FindStringSubmatch(ref)
 	if m == nil {
 		return nil, Errorf("invalid", "segment %q; use body, header, footer, footnote, optionally numbered (header2, footnote3)", ref)

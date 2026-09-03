@@ -1,0 +1,248 @@
+// Package render turns the document model into text for the model to
+// read: markdown (default), plain text, and an outline. Every renderer
+// works on a block range of one segment so reads can be scoped and
+// budgeted.
+package render
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/mmedum/google-docs-mcp/internal/doc"
+)
+
+// Options tune a render.
+type Options struct {
+	// WithHandles prefixes every block with its handle.
+	WithHandles bool
+	// WithStyles annotates runs whose formatting markdown cannot express.
+	WithStyles bool
+	// Suggestions shows pending suggestions as CriticMarkup. When false
+	// the committed view is rendered (suggested insertions hidden).
+	Suggestions bool
+	// MaxChars stops after the block that would cross the budget. 0 = no limit.
+	MaxChars int
+}
+
+func (o Options) view() doc.View {
+	if o.Suggestions {
+		return doc.ViewInline
+	}
+	return doc.ViewCurrent
+}
+
+// span is a run of text sharing one markdown treatment.
+type span struct {
+	text     string
+	style    doc.TextStyle
+	inserted string
+	deleted  string
+}
+
+func suggestionKey(ids []string) string { return strings.Join(ids, ",") }
+
+// inline renders a paragraph's runs as markdown inline content.
+func inline(p *doc.Paragraph, tab *doc.Tab, o Options, inTable bool) string {
+	var spans []span
+	var b strings.Builder
+	flush := func() {
+		for _, s := range spans {
+			b.WriteString(markSpan(s, o))
+		}
+		spans = nil
+	}
+	for _, r := range p.Runs {
+		if !r.Visible(o.view()) {
+			continue
+		}
+		var s span
+		s.inserted, s.deleted = suggestionKey(r.Inserted), suggestionKey(r.Deleted)
+		switch r.Kind {
+		case doc.RunText:
+			s.text, s.style = strings.TrimSuffix(r.Text, "\n"), r.Style
+			if inTable {
+				s.text = strings.ReplaceAll(strings.ReplaceAll(s.text, "|", `\|`), "\n", "<br>")
+			}
+			if n := len(spans); n > 0 && spans[n-1].style == s.style && spans[n-1].inserted == s.inserted && spans[n-1].deleted == s.deleted {
+				spans[n-1].text += s.text
+			} else {
+				spans = append(spans, s)
+			}
+			continue
+		default:
+			s.text = objectText(r, tab)
+			if s.text == "" {
+				continue
+			}
+		}
+		flush()
+		b.WriteString(markSuggestion(s.text, s.inserted, s.deleted, o))
+	}
+	flush()
+	return b.String()
+}
+
+// objectText renders a non-text run: chips, breaks, objects, references.
+func objectText(r *doc.Run, tab *doc.Tab) string {
+	switch r.Kind {
+	case doc.RunInlineObject:
+		return objectMarkdown(r.ObjectID, tab)
+	case doc.RunFootnoteRef:
+		return "[^" + footnoteLabel(r) + "]"
+	case doc.RunPageBreak:
+		return "<!-- page break -->"
+	case doc.RunColumnBreak:
+		return "<!-- column break -->"
+	case doc.RunHorizontalRule:
+		return "\n---\n"
+	case doc.RunPerson:
+		return "@" + r.Text
+	case doc.RunRichLink:
+		if r.LinkURI != "" {
+			return "[" + r.Text + "](" + r.LinkURI + ")"
+		}
+		return r.Text
+	case doc.RunDate:
+		return r.Text
+	case doc.RunEquation:
+		return "{equation}"
+	case doc.RunAutoText:
+		return "{" + strings.ToLower(strings.ReplaceAll(r.AutoTextType, "_", " ")) + "}"
+	}
+	return ""
+}
+
+func footnoteLabel(r *doc.Run) string {
+	if r.FootnoteNumber != "" {
+		return r.FootnoteNumber
+	}
+	return r.FootnoteID
+}
+
+func objectMarkdown(id string, tab *doc.Tab) string {
+	info := tab.InlineObjects[id]
+	if info == nil {
+		return "![object](" + id + ")"
+	}
+	label := info.Kind
+	if info.Title != "" {
+		label += ": " + info.Title
+	} else if info.Description != "" {
+		label += ": " + info.Description
+	}
+	size := ""
+	if info.WidthPt > 0 || info.HeightPt > 0 {
+		size = fmt.Sprintf(", %.0f×%.0fpt", info.WidthPt, info.HeightPt)
+	}
+	return "![" + label + "](" + id + size + ")"
+}
+
+// markSpan wraps a text span in markdown emphasis, keeping surrounding
+// whitespace outside the markers so the markdown stays valid.
+func markSpan(s span, o Options) string {
+	text := s.text
+	if text == "" {
+		return ""
+	}
+	lead := text[:len(text)-len(strings.TrimLeft(text, " \t"))]
+	trail := text[len(strings.TrimRight(text, " \t")):]
+	core := strings.TrimSpace(text)
+	if core == "" {
+		return markSuggestion(text, s.inserted, s.deleted, o)
+	}
+	st := s.style
+	switch {
+	case st.Monospace():
+		core = "`" + core + "`"
+	default:
+		if st.Bold {
+			core = "**" + core + "**"
+		}
+		if st.Italic {
+			core = "*" + core + "*"
+		}
+		if st.Strikethrough {
+			core = "~~" + core + "~~"
+		}
+	}
+	if st.LinkURL != "" {
+		core = "[" + core + "](" + st.LinkURL + ")"
+	} else if st.LinkHeadingID != "" {
+		core = "[" + core + "](#" + st.LinkHeadingID + ")"
+	}
+	if o.WithStyles {
+		if ann := styleAnnotation(st); ann != "" {
+			core += ann
+		}
+	}
+	return lead + markSuggestion(core, s.inserted, s.deleted, o) + trail
+}
+
+// markSuggestion applies CriticMarkup for suggested insertions and
+// deletions, tagging the suggestion id.
+func markSuggestion(text, inserted, deleted string, o Options) string {
+	if !o.Suggestions {
+		return text
+	}
+	switch {
+	case inserted != "":
+		return "{++" + text + "++}{>>s:" + inserted + "<<}"
+	case deleted != "":
+		return "{--" + text + "--}{>>s:" + deleted + "<<}"
+	}
+	return text
+}
+
+// styleAnnotation names formatting markdown cannot carry.
+func styleAnnotation(st doc.TextStyle) string {
+	var parts []string
+	if st.FontFamily != "" && !st.Monospace() {
+		f := st.FontFamily
+		if st.FontSizePt > 0 {
+			f += fmt.Sprintf(" %gpt", st.FontSizePt)
+		}
+		parts = append(parts, "font: "+f)
+	} else if st.FontSizePt > 0 {
+		parts = append(parts, fmt.Sprintf("size: %gpt", st.FontSizePt))
+	}
+	if st.Foreground != "" {
+		parts = append(parts, "color: "+st.Foreground)
+	}
+	if st.Background != "" {
+		parts = append(parts, "background: "+st.Background)
+	}
+	if st.Underline && !st.HasLink() {
+		parts = append(parts, "underline")
+	}
+	if st.SmallCaps {
+		parts = append(parts, "small caps")
+	}
+	if st.Baseline != "" {
+		parts = append(parts, strings.ToLower(st.Baseline))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// paragraphAnnotation names paragraph formatting markdown cannot carry.
+func paragraphAnnotation(p *doc.Paragraph) string {
+	var parts []string
+	if p.IsTitle {
+		parts = append(parts, "style: TITLE")
+	}
+	if p.IsSubtitle {
+		parts = append(parts, "style: SUBTITLE")
+	}
+	if p.Alignment != "" && p.Alignment != "START" && p.Alignment != "ALIGNMENT_UNSPECIFIED" {
+		parts = append(parts, "align: "+strings.ToLower(p.Alignment))
+	}
+	if p.IndentStartPt > 0 && p.Bullet == nil {
+		parts = append(parts, fmt.Sprintf("indent: %gpt", p.IndentStartPt))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " {" + strings.Join(parts, ", ") + "}"
+}

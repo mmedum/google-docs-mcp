@@ -1,0 +1,85 @@
+{
+  "documentId": "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX",
+  "title": "Quarterly Report",
+  "revisionId": "rev-0001",
+  "suggestionsViewMode": "SUGGESTIONS_INLINE",
+  "tabs": [
+    {
+      "tabProperties": {"tabId": "t.0", "title": "Main", "index": 0},
+      "documentTab": {
+        "body": {"content": [
+          {"startIndex": 0, "endIndex": 1, "sectionBreak": {"sectionStyle": {"sectionType": "CONTINUOUS", "defaultHeaderId": "kix.h1"}}},
+          {"startIndex": 1, "endIndex": 18, "paragraph": {"paragraphStyle": {"namedStyleType": "TITLE"}, "elements": [
+            {"startIndex": 1, "endIndex": 18, "textRun": {"content": "Quarterly Report\n", "textStyle": {}}}]}},
+          {"startIndex": 18, "endIndex": 29, "paragraph": {"paragraphStyle": {"namedStyleType": "HEADING_1", "headingId": "h.bg"}, "elements": [
+            {"startIndex": 18, "endIndex": 29, "textRun": {"content": "Background\n", "textStyle": {}}}]}},
+          {"startIndex": 29, "endIndex": 68, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [
+            {"startIndex": 29, "endIndex": 42, "textRun": {"content": "Revenue grew ", "textStyle": {}}},
+            {"startIndex": 42, "endIndex": 47, "textRun": {"content": "a lot", "textStyle": {}, "suggestedDeletionIds": ["s1"]}},
+            {"startIndex": 47, "endIndex": 60, "textRun": {"content": "substantially", "textStyle": {"bold": true}, "suggestedInsertionIds": ["s1"]}},
+            {"startIndex": 60, "endIndex": 68, "textRun": {"content": " in Q3.\n", "textStyle": {}}}]}},
+          {"startIndex": 68, "endIndex": 69, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [
+            {"startIndex": 68, "endIndex": 69, "textRun": {"content": "\n", "textStyle": {}}}]}},
+          {"startIndex": 69, "endIndex": 81, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "bullet": {"listId": "l1", "nestingLevel": 0}, "elements": [
+            {"startIndex": 69, "endIndex": 81, "textRun": {"content": "First point\n", "textStyle": {}}}]}},
+          {"startIndex": 81, "endIndex": 94, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "bullet": {"listId": "l1", "nestingLevel": 1}, "elements": [
+            {"startIndex": 81, "endIndex": 94, "textRun": {"content": "Nested point\n", "textStyle": {}}}]}},
+          {"startIndex": 94, "endIndex": 107, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "bullet": {"listId": "l1", "nestingLevel": 0}, "elements": [
+            {"startIndex": 94, "endIndex": 107, "textRun": {"content": "Second point\n", "textStyle": {}}}]}},
+          {"startIndex": 107, "endIndex": 115, "paragraph": {"paragraphStyle": {"namedStyleType": "HEADING_2", "headingId": "h.det"}, "elements": [
+            {"startIndex": 107, "endIndex": 115, "textRun": {"content": "Details\n", "textStyle": {}}}]}},
+          {"startIndex": 115, "endIndex": 124, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "bullet": {"listId": "l2", "nestingLevel": 0}, "elements": [
+            {"startIndex": 115, "endIndex": 124, "textRun": {"content": "Step one\n", "textStyle": {}}}]}},
+          {"startIndex": 124, "endIndex": 133, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "bullet": {"listId": "l2", "nestingLevel": 0}, "elements": [
+            {"startIndex": 124, "endIndex": 133, "textRun": {"content": "Step two\n", "textStyle": {}}}]}},
+          {"startIndex": 133, "endIndex": 158, "table": {"rows": 2, "columns": 2, "tableRows": [
+            {"startIndex": 134, "endIndex": 147, "tableCells": [
+              {"startIndex": 134, "endIndex": 140, "content": [{"startIndex": 135, "endIndex": 140, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [{"startIndex": 135, "endIndex": 140, "textRun": {"content": "Name\n", "textStyle": {"bold": true}}}]}}]},
+              {"startIndex": 140, "endIndex": 147, "content": [{"startIndex": 141, "endIndex": 147, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [{"startIndex": 141, "endIndex": 147, "textRun": {"content": "Value\n", "textStyle": {"bold": true}}}]}}]}]},
+            {"startIndex": 147, "endIndex": 157, "tableCells": [
+              {"startIndex": 147, "endIndex": 154, "content": [{"startIndex": 148, "endIndex": 154, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [{"startIndex": 148, "endIndex": 154, "textRun": {"content": "Alpha\n", "textStyle": {}}}]}}]},
+              {"startIndex": 154, "endIndex": 157, "content": [{"startIndex": 155, "endIndex": 157, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [{"startIndex": 155, "endIndex": 157, "textRun": {"content": "1\n", "textStyle": {}}}]}}]}]}]}},
+          {"startIndex": 158, "endIndex": 184, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [
+            {"startIndex": 158, "endIndex": 162, "textRun": {"content": "See ", "textStyle": {}}},
+            {"startIndex": 162, "endIndex": 163, "inlineObjectElement": {"inlineObjectId": "kix.img1", "textStyle": {}}},
+            {"startIndex": 163, "endIndex": 169, "textRun": {"content": " chart", "textStyle": {}}},
+            {"startIndex": 169, "endIndex": 170, "footnoteReference": {"footnoteId": "kix.fn1", "footnoteNumber": "1", "textStyle": {}}},
+            {"startIndex": 170, "endIndex": 175, "textRun": {"content": " and ", "textStyle": {}}},
+            {"startIndex": 175, "endIndex": 183, "textRun": {"content": "the site", "textStyle": {"underline": true, "link": {"url": "https://example.com"}}}},
+            {"startIndex": 183, "endIndex": 184, "textRun": {"content": "\n", "textStyle": {}}}]}},
+          {"startIndex": 184, "endIndex": 192, "paragraph": {"paragraphStyle": {"namedStyleType": "HEADING_1", "headingId": "h.sum"}, "elements": [
+            {"startIndex": 184, "endIndex": 192, "textRun": {"content": "Summary\n", "textStyle": {}}}]}},
+          {"startIndex": 192, "endIndex": 213, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT", "alignment": "CENTER"}, "elements": [
+            {"startIndex": 192, "endIndex": 213, "textRun": {"content": "Done 🎉 and “quoted”\n", "textStyle": {"foregroundColor": {"color": {"rgbColor": {"red": 0.8}}}}}}]}},
+          {"startIndex": 213, "endIndex": 226, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [
+            {"startIndex": 213, "endIndex": 217, "textRun": {"content": "Run ", "textStyle": {}}},
+            {"startIndex": 217, "endIndex": 225, "textRun": {"content": "go build", "textStyle": {"weightedFontFamily": {"fontFamily": "Courier New"}}}},
+            {"startIndex": 225, "endIndex": 226, "textRun": {"content": "\n", "textStyle": {"italic": true, "fontSize": {"magnitude": 9, "unit": "PT"}}}}]}}
+        ]},
+        "headers": {"kix.h1": {"headerId": "kix.h1", "content": [
+          {"startIndex": 0, "endIndex": 19, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [
+            {"startIndex": 0, "endIndex": 19, "textRun": {"content": "Confidential draft\n", "textStyle": {}}}]}}]}},
+        "footnotes": {"kix.fn1": {"footnoteId": "kix.fn1", "content": [
+          {"startIndex": 0, "endIndex": 14, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [
+            {"startIndex": 0, "endIndex": 14, "textRun": {"content": "See appendix.\n", "textStyle": {}}}]}}]}},
+        "lists": {
+          "l1": {"listProperties": {"nestingLevels": [{"glyphSymbol": "●"}, {"glyphSymbol": "○"}, {"glyphSymbol": "■"}]}},
+          "l2": {"listProperties": {"nestingLevels": [{"glyphType": "DECIMAL", "glyphFormat": "%0."}, {"glyphType": "ALPHA", "glyphFormat": "%1."}]}}
+        },
+        "inlineObjects": {"kix.img1": {"objectId": "kix.img1", "inlineObjectProperties": {"embeddedObject": {"title": "Chart", "imageProperties": {"contentUri": "https://lh3.example/img", "sourceUri": ""}, "size": {"width": {"magnitude": 320, "unit": "PT"}, "height": {"magnitude": 200, "unit": "PT"}}}}}}
+      }
+    },
+    {
+      "tabProperties": {"tabId": "t.1", "title": "Notes", "index": 1},
+      "documentTab": {
+        "body": {"content": [
+          {"startIndex": 0, "endIndex": 1, "sectionBreak": {"sectionStyle": {"sectionType": "CONTINUOUS"}}},
+          {"startIndex": 1, "endIndex": 7, "paragraph": {"paragraphStyle": {"namedStyleType": "HEADING_1", "headingId": "h.notes"}, "elements": [
+            {"startIndex": 1, "endIndex": 7, "textRun": {"content": "Notes\n", "textStyle": {}}}]}},
+          {"startIndex": 7, "endIndex": 23, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [
+            {"startIndex": 7, "endIndex": 23, "textRun": {"content": "Second tab text\n", "textStyle": {}}}]}}
+        ]}
+      }
+    }
+  ]
+}

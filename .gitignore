@@ -1,0 +1,9 @@
+/google-docs-mcp
+/google-docs-mcp.exe
+/dist/
+cov.out
+schemas.json
+*.test
+client_secret*.json
+token.json
+.env

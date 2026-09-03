@@ -1,0 +1,197 @@
+package render_test
+
+import (
+	"flag"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/internal/render"
+)
+
+var update = flag.Bool("update", false, "rewrite golden files")
+
+func golden(t *testing.T, name, got string) {
+	t.Helper()
+	path := filepath.Join(filepath.Dir(doctest.FixturePath(t)), "golden", name)
+	if *update {
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("missing golden %s (run with -update): %v", name, err)
+	}
+	if string(want) != got {
+		t.Errorf("%s differs from golden.\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
+	}
+}
+
+func body(t *testing.T) (*doc.Document, *doc.Segment) {
+	d := doctest.Fixture(t)
+	return d, d.Tabs[0].Body
+}
+
+func TestMarkdownGolden(t *testing.T) {
+	_, seg := body(t)
+	all := len(seg.Blocks)
+	golden(t, "body.md", render.Markdown(seg, 0, all, render.Options{}).Text)
+	golden(t, "body_handles.md", render.Markdown(seg, 0, all, render.Options{WithHandles: true}).Text)
+	golden(t, "body_full.md", render.Markdown(seg, 0, all, render.Options{WithHandles: true, WithStyles: true, Suggestions: true}).Text)
+}
+
+func TestPlainGolden(t *testing.T) {
+	_, seg := body(t)
+	golden(t, "body.txt", render.Plain(seg, 0, len(seg.Blocks), render.Options{WithHandles: true}).Text)
+}
+
+func TestOutlineGolden(t *testing.T) {
+	d, _ := body(t)
+	tabs := render.OutlineData(d, nil)
+	golden(t, "outline.md", render.Outline(d, tabs))
+	if len(tabs) != 2 || tabs[0].Headings[0].HeadingID != "h.bg" || tabs[0].Headings[1].Level != 2 || tabs[0].Footnotes != 1 || tabs[0].Preamble != 2 {
+		t.Fatalf("outline data: %+v", tabs[0])
+	}
+	if only := render.OutlineData(d, d.Tabs[1]); len(only) != 1 || only[0].Number != 2 {
+		t.Fatalf("filtered outline: %+v", only)
+	}
+	empty := &doc.Document{Title: "Empty", Tabs: []*doc.Tab{{Number: 1, Title: "", Body: &doc.Segment{Kind: doc.SegmentBody}}}}
+	if out := render.Outline(empty, render.OutlineData(empty, nil)); !strings.Contains(out, "(no headings)") || !strings.Contains(out, "Tab 1: Tab 1") {
+		t.Fatalf("empty outline: %s", out)
+	}
+}
+
+func TestMarkdownDetails(t *testing.T) {
+	_, seg := body(t)
+	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{}).Text
+	checks := []string{
+		"# Quarterly Report",
+		"Revenue grew a lot in Q3.", // committed view hides the suggested insertion
+		"- First point\n    - Nested point\n- Second point",
+		"1. Step one\n2. Step two",
+		"| **Name** | **Value** |\n| --- | --- |\n| Alpha | 1 |",
+		"![image: Chart](kix.img1, 320×200pt)",
+		"chart[^1]",
+		"[the site](https://example.com)",
+		"Run `go build`",
+		"[^1]: See appendix.",
+	}
+	for _, c := range checks {
+		if !strings.Contains(md, c) {
+			t.Errorf("markdown lacks %q:\n%s", c, md)
+		}
+	}
+	if strings.HasPrefix(md, "\n") {
+		t.Error("markdown should not start with blank lines")
+	}
+	if strings.Contains(md, "{h.bg}") || strings.Contains(md, "[p1]") {
+		t.Error("handles leaked into a plain read")
+	}
+	full := render.Markdown(seg, 0, len(seg.Blocks), render.Options{WithHandles: true, WithStyles: true, Suggestions: true}).Text
+	for _, c := range []string{"{--a lot--}{>>s:s1<<}", "{++**substantially**++}{>>s:s1<<}", "[p2] # Background {h.bg}", "{color: #cc0000}", "{align: center}", "{style: TITLE}", "[sb1] <!-- section break: continuous -->", "[tbl1] table 2×2 (cells tbl1:r1c1 … tbl1:r2c2)"} {
+		if !strings.Contains(full, c) {
+			t.Errorf("full markdown lacks %q:\n%s", c, full)
+		}
+	}
+}
+
+func TestBudgetAndContinue(t *testing.T) {
+	_, seg := body(t)
+	r := render.Markdown(seg, 0, len(seg.Blocks), render.Options{MaxChars: 120})
+	if !r.Truncated || r.ContinueFrom == "" || r.Blocks == 0 || r.Chars > 140 {
+		t.Fatalf("budget: %+v", r)
+	}
+	// The continuation starts where the first read stopped and is never empty.
+	var from int
+	for i, b := range seg.Blocks {
+		if b.Handle == r.ContinueFrom {
+			from = i
+		}
+	}
+	rest := render.Markdown(seg, from, len(seg.Blocks), render.Options{})
+	if rest.Blocks == 0 || strings.Contains(rest.Text, "Quarterly Report") {
+		t.Fatalf("continuation wrong: %+v", rest)
+	}
+	// A budget too small for one block still returns that block.
+	one := render.Markdown(seg, 1, len(seg.Blocks), render.Options{MaxChars: 5})
+	if one.Blocks != 1 || !one.Truncated {
+		t.Fatalf("tiny budget: %+v", one)
+	}
+	p := render.Plain(seg, 0, len(seg.Blocks), render.Options{MaxChars: 60})
+	if !p.Truncated || p.ContinueFrom == "" {
+		t.Fatalf("plain budget: %+v", p)
+	}
+	if out := render.Markdown(seg, -5, 999, render.Options{}); out.Blocks != len(seg.Blocks)-1 {
+		t.Fatalf("clamped range rendered %d blocks", out.Blocks)
+	}
+}
+
+func TestPlainDetails(t *testing.T) {
+	_, seg := body(t)
+	p := render.Plain(seg, 0, len(seg.Blocks), render.Options{}).Text
+	for _, c := range []string{"Quarterly Report\n", "- First point\n  - Nested point\n", "1. Step one\n2. Step two\n", "Name\tValue\nAlpha\t1", "Run go build"} {
+		if !strings.Contains(p, c) {
+			t.Errorf("plain lacks %q:\n%s", c, p)
+		}
+	}
+	if strings.Contains(p, "**") || strings.Contains(p, "#") {
+		t.Errorf("plain text contains markdown: %s", p)
+	}
+}
+
+func TestEscapingAndEdgeCases(t *testing.T) {
+	seg := &doc.Segment{Kind: doc.SegmentBody, Tab: &doc.Tab{Number: 1, InlineObjects: map[string]*doc.InlineObjectInfo{}}}
+	para := func(handle, text string, style doc.TextStyle) *doc.Block {
+		return &doc.Block{Kind: doc.KindParagraph, Handle: handle, Segment: seg, Paragraph: &doc.Paragraph{Runs: []*doc.Run{{Kind: doc.RunText, Text: text + "\n", Style: style}}}}
+	}
+	seg.Blocks = []*doc.Block{
+		para("p1", "# not a heading", doc.TextStyle{}),
+		para("p2", "- not a bullet", doc.TextStyle{}),
+		para("p3", "1. not a list", doc.TextStyle{}),
+		para("p4", " padded bold ", doc.TextStyle{Bold: true, Italic: true, Strikethrough: true}),
+		para("p5", "a|b", doc.TextStyle{}),
+		{Kind: doc.KindParagraph, Handle: "p6", Segment: seg, Paragraph: &doc.Paragraph{Runs: []*doc.Run{
+			{Kind: doc.RunPerson, Text: "Ada"}, {Kind: doc.RunText, Text: " on "}, {Kind: doc.RunDate, Text: "2026-09-03"},
+			{Kind: doc.RunRichLink, Text: "Sheet", LinkURI: "https://example.test/s"}, {Kind: doc.RunEquation}, {Kind: doc.RunAutoText, AutoTextType: "PAGE_NUMBER"},
+			{Kind: doc.RunPageBreak}, {Kind: doc.RunInlineObject, ObjectID: "missing"}, {Kind: doc.RunText, Text: "\n"},
+		}}},
+		{Kind: doc.KindParagraph, Handle: "p7", Segment: seg, Paragraph: &doc.Paragraph{IsSubtitle: true, Runs: []*doc.Run{{Kind: doc.RunText, Text: "Sub\n"}}}},
+		{Kind: doc.KindParagraph, Handle: "p8", Segment: seg, Paragraph: &doc.Paragraph{Runs: []*doc.Run{{Kind: doc.RunText, Text: "link\n", Style: doc.TextStyle{LinkHeadingID: "h.x", Underline: true, SmallCaps: true, Baseline: "SUPERSCRIPT", FontFamily: "Arial", FontSizePt: 11, Background: "#ffff00"}}}}},
+	}
+	md := render.Markdown(seg, 0, len(seg.Blocks), render.Options{}).Text
+	for _, c := range []string{"\\# not a heading", "\\- not a bullet", "1\\. not a list", " ~~***padded bold***~~ ", "@Ada on 2026-09-03[Sheet](https://example.test/s){equation}{page number}<!-- page break -->![object](missing)", "*Sub*", "[link](#h.x)"} {
+		if !strings.Contains(md, c) {
+			t.Errorf("markdown lacks %q:\n%s", c, md)
+		}
+	}
+	styled := render.Markdown(seg, 7, 8, render.Options{WithStyles: true}).Text
+	if !strings.Contains(styled, "{font: Arial 11pt, background: #ffff00, small caps, superscript}") {
+		t.Errorf("style annotation wrong: %s", styled)
+	}
+	// Table cells escape pipes and a nested table is summarised.
+	inner := &doc.Table{Handle: "tbl1:r1c1/tbl1", Rows: 1, Cols: 1}
+	tbl := &doc.Table{Handle: "tbl1", Rows: 1, Cols: 2}
+	cellA := &doc.Cell{Table: tbl, Row: 1, Col: 1, Handle: "tbl1:r1c1"}
+	cellA.Blocks = []*doc.Block{para("tbl1:r1c1/p1", "x|y", doc.TextStyle{}), {Kind: doc.KindTable, Handle: inner.Handle, Segment: seg, Cell: cellA, Table: inner}}
+	cellB := &doc.Cell{Table: tbl, Row: 1, Col: 2, Handle: "tbl1:r1c2", Blocks: []*doc.Block{{Kind: doc.KindParagraph, Handle: "tbl1:r1c2/p1", Segment: seg, Paragraph: &doc.Paragraph{Bullet: &doc.BulletInfo{}, Runs: []*doc.Run{{Kind: doc.RunText, Text: "item\n"}}}}}}
+	tbl.Cells = [][]*doc.Cell{{cellA, cellB}}
+	seg.Blocks = []*doc.Block{{Kind: doc.KindTable, Handle: "tbl1", Segment: seg, Table: tbl}}
+	md = render.Markdown(seg, 0, 1, render.Options{}).Text
+	if !strings.Contains(md, `| x\|y<br>[nested table] | • item |`) {
+		t.Errorf("table cell rendering: %s", md)
+	}
+	// A TOC renders its entries; a footnote reference without a number falls back to the id.
+	seg.Blocks = []*doc.Block{
+		{Kind: doc.KindTOC, Handle: "toc1", Segment: seg, TOC: &doc.TOC{Blocks: []*doc.Block{para("toc1/p1", "Entry", doc.TextStyle{})}}},
+		{Kind: doc.KindParagraph, Handle: "p1", Segment: seg, Paragraph: &doc.Paragraph{Runs: []*doc.Run{{Kind: doc.RunFootnoteRef, FootnoteID: "kix.zz"}, {Kind: doc.RunText, Text: "\n"}}}},
+	}
+	md = render.Markdown(seg, 0, 2, render.Options{WithHandles: true}).Text
+	if !strings.Contains(md, "[toc1] <!-- table of contents -->\n[toc1/p1] Entry") || !strings.Contains(md, "[^kix.zz]") {
+		t.Errorf("toc/footnote rendering: %s", md)
+	}
+}

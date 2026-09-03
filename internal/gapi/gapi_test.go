@@ -1,0 +1,340 @@
+package gapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/time/rate"
+)
+
+func newTestClient(t *testing.T, h http.Handler) (*Client, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	c := New(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "tok"}), Options{
+		DocsBaseURL: srv.URL, DriveBaseURL: srv.URL + "/drive/v3",
+		Retry:       RetryPolicy{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 5 * time.Millisecond},
+		ReadLimiter: rate.NewLimiter(rate.Inf, 1), WriteLimiter: rate.NewLimiter(rate.Inf, 1),
+		Sleep:   func(context.Context, time.Duration) error { return nil },
+		Timeout: 5 * time.Second,
+	})
+	return c, srv
+}
+
+func googleError(w http.ResponseWriter, status int, msg, rpc, reason string) {
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+		"code": status, "message": msg, "status": rpc,
+		"details": []map[string]any{{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": reason}},
+	}})
+}
+
+func TestGetDocumentDecodesAndSendsParams(t *testing.T) {
+	var gotPath, gotQuery, gotAuth string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery, gotAuth = r.URL.Path, r.URL.RawQuery, r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"documentId":"abc","title":"T","revisionId":"r1","tabs":[{"tabProperties":{"tabId":"t.0","title":"Main"}}],"comments":[{"id":"c1"}]}`))
+	}))
+	res, err := c.GetDocument(context.Background(), "abc", GetOptions{SuggestionsViewMode: SuggestionsInline, CommentsViewMode: CommentsIncluded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/v1/documents/abc" || gotAuth != "Bearer tok" {
+		t.Fatalf("path %q auth %q", gotPath, gotAuth)
+	}
+	for _, want := range []string{"includeTabsContent=true", "suggestionsViewMode=SUGGESTIONS_INLINE", "commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Fatalf("query %q lacks %q", gotQuery, want)
+		}
+	}
+	if res.Document.Title != "T" || len(res.Document.Tabs) != 1 || string(res.Preview.Comments) != `[{"id":"c1"}]` || len(res.Raw) == 0 {
+		t.Fatalf("decode wrong: %+v", res)
+	}
+}
+
+func TestErrorClassification(t *testing.T) {
+	cases := []struct {
+		status int
+		msg    string
+		reason string
+		want   error
+		class  string
+	}{
+		{401, "bad token", "", ErrUnauthorized, "auth"},
+		{403, "Request had insufficient authentication scopes.", "ACCESS_TOKEN_SCOPE_INSUFFICIENT", ErrMissingScope, "forbidden"},
+		{403, "The caller does not have permission", "", ErrForbidden, "forbidden"},
+		{404, "Requested entity was not found.", "", ErrNotFound, "not_found"},
+		{400, "Invalid requests[0]", "", ErrInvalid, "invalid"},
+		{400, "The provided revision id does not match the current revision", "", ErrConflict, "conflict"},
+		{418, "teapot", "", ErrUnexpected, "unexpected"},
+	}
+	for _, tc := range cases {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			googleError(w, tc.status, tc.msg, "X", tc.reason)
+		}))
+		_, err := c.GetDocument(context.Background(), "abc", GetOptions{})
+		if !errors.Is(err, tc.want) {
+			t.Errorf("status %d: err %v is not %v", tc.status, err, tc.want)
+		}
+		if got := Class(err); got != tc.class {
+			t.Errorf("status %d: class %q, want %q", tc.status, got, tc.class)
+		}
+		var ae *APIError
+		if !errors.As(err, &ae) || ae.Message != tc.msg || ae.Status != tc.status {
+			t.Errorf("status %d: APIError not populated: %v", tc.status, err)
+		}
+	}
+}
+
+func TestNonJSONErrorBody(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(502)
+		_, _ = w.Write([]byte("<html>bad gateway</html>"))
+	}))
+	_, err := c.GetDocument(context.Background(), "abc", GetOptions{})
+	if !errors.Is(err, ErrServer) || !strings.Contains(err.Error(), "bad gateway") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestReadRetriesThenSucceeds(t *testing.T) {
+	var n int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) < 3 {
+			w.Header().Set("Retry-After", "1")
+			googleError(w, 429, "quota", "RESOURCE_EXHAUSTED", "")
+			return
+		}
+		_, _ = w.Write([]byte(`{"user":{"emailAddress":"a@b.test"}}`))
+	}))
+	u, err := c.About(context.Background())
+	if err != nil || u.EmailAddress != "a@b.test" {
+		t.Fatalf("got %v %v", u, err)
+	}
+	if n != 3 {
+		t.Fatalf("attempts = %d", n)
+	}
+}
+
+func TestReadGivesUpAfterMaxAttempts(t *testing.T) {
+	var n int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&n, 1)
+		googleError(w, 503, "unavailable", "UNAVAILABLE", "")
+	}))
+	_, err := c.About(context.Background())
+	if !errors.Is(err, ErrServer) || n != 3 {
+		t.Fatalf("err %v attempts %d", err, n)
+	}
+}
+
+func TestWriteRetriesOnlyOn429And503(t *testing.T) {
+	for _, tc := range []struct {
+		status   int
+		attempts int32
+	}{{429, 2}, {503, 2}, {500, 1}, {502, 1}} {
+		var n int32
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if atomic.AddInt32(&n, 1) == 1 {
+				googleError(w, tc.status, "transient", "X", "")
+				return
+			}
+			_, _ = w.Write([]byte(`{"documentId":"abc","replies":[]}`))
+		}))
+		_, err := c.BatchUpdate(context.Background(), "abc", &BatchUpdateRequest{Requests: []json.RawMessage{json.RawMessage(`{}`)}})
+		if n != tc.attempts {
+			t.Errorf("status %d: attempts %d, want %d (err %v)", tc.status, n, tc.attempts, err)
+		}
+		if tc.attempts == 1 && err == nil {
+			t.Errorf("status %d: expected error", tc.status)
+		}
+	}
+}
+
+func TestWriteNetworkFailureIsAmbiguous(t *testing.T) {
+	c, srv := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv.Close()
+	_, err := c.BatchUpdate(context.Background(), "abc", &BatchUpdateRequest{})
+	if !errors.Is(err, ErrAmbiguous) || Class(err) != "ambiguous" {
+		t.Fatalf("got %v", err)
+	}
+	_, err = c.About(context.Background())
+	if !errors.Is(err, ErrNetwork) {
+		t.Fatalf("read network error should be ErrNetwork: %v", err)
+	}
+}
+
+func TestBatchUpdateBodyAndWriteControl(t *testing.T) {
+	var body map[string]any
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/documents/abc:batchUpdate" || r.Method != http.MethodPost {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"documentId":"abc","replies":[{}],"writeControl":{"requiredRevisionId":"r2"}}`))
+	}))
+	res, err := c.BatchUpdate(context.Background(), "abc", &BatchUpdateRequest{
+		Requests:     []json.RawMessage{json.RawMessage(`{"insertText":{"text":"x","location":{"index":1}}}`)},
+		WriteControl: &WriteControl{RequiredRevisionID: "r1", WriteMode: "SUGGEST"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wc := body["writeControl"].(map[string]any)
+	if wc["requiredRevisionId"] != "r1" || wc["writeMode"] != "SUGGEST" {
+		t.Fatalf("writeControl = %v", wc)
+	}
+	if res.WriteControl.RequiredRevisionID != "r2" || len(res.Replies) != 1 {
+		t.Fatalf("response = %+v", res)
+	}
+}
+
+func TestGetFile(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/drive/v3/files/abc") || !strings.Contains(r.URL.RawQuery, "supportsAllDrives=true") {
+			t.Errorf("unexpected %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		_, _ = w.Write([]byte(`{"id":"abc","name":"Doc","owners":[{"emailAddress":"o@b.test"}],"capabilities":{"canEdit":true},"version":"12"}`))
+	}))
+	f, err := c.GetFile(context.Background(), "abc")
+	if err != nil || f.Name != "Doc" || !f.Capabilities.CanEdit || f.Version != "12" {
+		t.Fatalf("got %+v %v", f, err)
+	}
+}
+
+func TestAuthErrors(t *testing.T) {
+	c := New(NoCredentials{}, Options{DocsBaseURL: "http://127.0.0.1:1", Retry: RetryPolicy{MaxAttempts: 1, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}})
+	_, err := c.GetDocument(context.Background(), "abc", GetOptions{})
+	if !errors.Is(err, ErrUnauthorized) || Class(err) != "auth" || !strings.Contains(err.Error(), "login") {
+		t.Fatalf("got %v", err)
+	}
+	re := &oauth2.RetrieveError{Response: &http.Response{StatusCode: 400}, ErrorCode: "invalid_grant", ErrorDescription: "Token has been expired or revoked."}
+	err = wrapTransportError(re)
+	var ae *AuthError
+	if !errors.As(err, &ae) || ae.Code != "invalid_grant" || !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestHelpers(t *testing.T) {
+	if got := redactPath("https://docs.googleapis.com/v1/documents/1AbCdEfGhIjKlMnOp/x?includeTabsContent=true"); got != "/v1/documents/1AbCdE…/x" {
+		t.Fatalf("redactPath = %q", got)
+	}
+	if got := parseRetryAfter("7"); got != 7*time.Second {
+		t.Fatalf("retry-after seconds = %v", got)
+	}
+	if got := parseRetryAfter(time.Now().Add(30 * time.Second).UTC().Format(http.TimeFormat)); got <= 0 || got > 31*time.Second {
+		t.Fatalf("retry-after date = %v", got)
+	}
+	if parseRetryAfter("garbage") != 0 || parseRetryAfter("") != 0 {
+		t.Fatal("bad retry-after should be zero")
+	}
+	c := New(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}), Options{})
+	if c.docs != DefaultDocsBaseURL || c.drive != DefaultDriveBaseURL || c.retry.MaxAttempts != 5 || c.HTTPClient() == nil {
+		t.Fatalf("defaults wrong: %+v", c)
+	}
+	for attempt := 1; attempt <= 6; attempt++ {
+		if d := c.backoff(attempt, 0); d <= 0 || d > c.retry.MaxDelay+c.retry.MaxDelay/4 {
+			t.Fatalf("backoff(%d) = %v", attempt, d)
+		}
+	}
+	if d := c.backoff(1, time.Minute); d != c.retry.MaxDelay {
+		t.Fatalf("retry-after should be capped: %v", d)
+	}
+}
+
+func TestContextCancellation(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := c.About(ctx)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestSearchExportComments(t *testing.T) {
+	var seen []string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		switch {
+		case r.URL.Path == "/drive/v3/files":
+			q := r.URL.Query()
+			if q.Get("pageToken") == "" && (q.Get("q") != "name contains 'x'" || q.Get("corpora") != "allDrives" || q.Get("pageSize") != "5") {
+				t.Errorf("search query wrong: %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"files":[{"id":"a","name":"A"}],"nextPageToken":"n2"}`))
+		case strings.HasSuffix(r.URL.Path, "/export"):
+			if r.Header.Get("Accept") != "*/*" || r.URL.Query().Get("mimeType") != "text/markdown" {
+				t.Errorf("export headers wrong: %v %s", r.Header, r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte("# md"))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments"):
+			var in map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in["content"] != "hello" || in["quotedFileContent"].(map[string]any)["value"] != "quoted" {
+				t.Errorf("comment body wrong: %v", in)
+			}
+			_, _ = w.Write([]byte(`{"id":"c1","content":"hello","quotedFileContent":{"value":"quoted"}}`))
+		case strings.HasSuffix(r.URL.Path, "/comments"):
+			if r.URL.Query().Get("pageToken") == "" {
+				_, _ = w.Write([]byte(`{"comments":[{"id":"c1","resolved":true}],"nextPageToken":"p2"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"comments":[{"id":"c2","replies":[{"id":"r1","action":"resolve"}]}]}`))
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	ctx := context.Background()
+	fl, err := c.SearchFiles(ctx, "name contains 'x'", 5, "")
+	if err != nil || len(fl.Files) != 1 || fl.NextPageToken != "n2" {
+		t.Fatalf("search: %+v %v", fl, err)
+	}
+	if _, err := c.SearchFiles(ctx, "q", 0, "tok"); err != nil || !strings.Contains(seen[len(seen)-1], "pageToken=tok") || !strings.Contains(seen[len(seen)-1], "pageSize=20") {
+		t.Fatalf("search defaults: %v %v", seen, err)
+	}
+	data, err := c.Export(ctx, "abc", "text/markdown")
+	if err != nil || string(data) != "# md" {
+		t.Fatalf("export: %q %v", data, err)
+	}
+	cm, err := c.CreateComment(ctx, "abc", "hello", "quoted")
+	if err != nil || cm.ID != "c1" || cm.QuotedFileContent.Value != "quoted" {
+		t.Fatalf("create comment: %+v %v", cm, err)
+	}
+	all, err := c.ListComments(ctx, "abc", true)
+	if err != nil || len(all) != 2 || !all[0].Resolved || all[1].Replies[0].Action != "resolve" {
+		t.Fatalf("list comments: %+v %v", all, err)
+	}
+	if got := QuoteDriveValue(`it's a \ test`); got != `'it\'s a \\ test'` {
+		t.Fatalf("quote = %s", got)
+	}
+	if ExportMimeTypes["pdf"] != "application/pdf" || DocumentMimeType == "" {
+		t.Fatal("mime tables")
+	}
+}
+
+func TestCreateDocument(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/documents" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var in map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		_, _ = w.Write([]byte(`{"documentId":"new1","title":"` + in["title"] + `","revisionId":"r1"}`))
+	}))
+	d, err := c.CreateDocument(context.Background(), "T")
+	if err != nil || d.DocumentID != "new1" || d.Title != "T" {
+		t.Fatalf("create: %+v %v", d, err)
+	}
+}

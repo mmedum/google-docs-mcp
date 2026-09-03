@@ -1,0 +1,69 @@
+# Common dev tasks. CI runs the same gates from .github/workflows/ci.yml.
+
+GO       ?= go
+BIN      ?= ./google-docs-mcp
+VERSION  ?= dev
+PKG       = github.com/mmedum/google-docs-mcp
+LDFLAGS   = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
+COVER_MIN ?= 80
+GOBIN    := $(shell $(GO) env GOPATH)/bin
+# Prefer tools installed with the current Go (go install ...@latest) over distro packages.
+export PATH := $(GOBIN):$(PATH)
+
+.PHONY: all
+all: check
+
+.PHONY: build
+build: ## Build the binary
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/google-docs-mcp
+
+.PHONY: install
+install: ## go install the binary
+	CGO_ENABLED=0 $(GO) install -trimpath -ldflags="$(LDFLAGS)" ./cmd/google-docs-mcp
+
+.PHONY: fmt
+fmt: ## Fail if gofmt would change anything
+	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt issues:"; echo "$$out"; exit 1; fi
+
+.PHONY: vet
+vet:
+	$(GO) vet ./...
+
+.PHONY: lint
+lint:
+	golangci-lint run
+
+.PHONY: test
+test: ## Unit tests with race detector and coverage
+	$(GO) test -race -coverpkg=./internal/... -coverprofile=cov.out -covermode=atomic ./...
+
+.PHONY: cover
+cover: test ## Enforce the coverage floor on core packages
+	@bash scripts/coverage-check.sh cov.out $(COVER_MIN)
+
+.PHONY: vuln
+vuln:
+	govulncheck ./...
+
+.PHONY: licenses
+licenses:
+	go-licenses check ./... --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
+
+.PHONY: schemas
+schemas: build ## Dump tool schemas
+	$(BIN) --dump-schemas > schemas.json
+
+.PHONY: schema-diff
+schema-diff: build ## Diff tool schemas against the last tag
+	@bash scripts/schema-diff.sh $(BIN)
+
+.PHONY: smoke
+smoke: build ## Drive the binary over stdio
+	@bash scripts/stdio-smoke.sh $(BIN)
+
+.PHONY: check
+check: fmt vet lint cover vuln smoke ## Everything CI runs
+
+.PHONY: clean
+clean:
+	$(RM) $(BIN) cov.out schemas.json

@@ -1,0 +1,27 @@
+# Nothing deployer-specific may enter this repository: no OAuth client ids
+# or secrets, no refresh tokens, no real document ids. gitleaks runs in
+# pre-commit and CI with these rules on top of its defaults.
+title = "google-docs-mcp"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "google-oauth-client-id"
+description = "Google OAuth client id"
+regex = '''[0-9]{8,}-[a-z0-9]{20,}\.apps\.googleusercontent\.com'''
+
+[[rules]]
+id = "google-oauth-client-secret"
+description = "Google OAuth client secret"
+regex = '''GOCSPX-[A-Za-z0-9_-]{20,}'''
+
+[[rules]]
+id = "google-refresh-token"
+description = "Google OAuth refresh token"
+regex = '''1//0[A-Za-z0-9_-]{30,}'''
+
+[allowlist]
+paths = [
+  '''go\.sum$''',
+]

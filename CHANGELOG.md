@@ -20,6 +20,16 @@ and new required fields are breaking; the schema diff in CI flags them.
   change nor confirm it afterwards; the `export_document format: html`
   workaround in docs/development.md is no longer the only way.
 
+### Fixed
+- `manage_tabs action: move` with a `position` later than the tab's
+  current one moved it a place short, and moving a tab to the very next
+  position did nothing while reporting success. Google inserts the tab at
+  the given index while it still occupies its old slot and removes it
+  afterwards, so the index needs raising by one when a tab moves later
+  within the same parent; moving it earlier, or under a different parent,
+  was already right. Found by the end-to-end live driver, whose Phase 4
+  section had been addressing the wrong tab as a result.
+
 ### Changed
 - `doc.Paragraph` now carries its whole paragraph style (alignment, line
   spacing, space above and below, both indents, keep-with-next,

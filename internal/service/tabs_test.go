@@ -35,9 +35,23 @@ func TestManageTabs(t *testing.T) {
 	if err != nil || !strings.Contains(string(api.batches[2].Requests[0]), `"index":0`) || strings.Contains(string(api.batches[2].Requests[0]), "title") {
 		t.Fatalf("move: %+v %v %s", res, err, api.batches[2].Requests[0])
 	}
+	// Moving a tab later in the same list needs an index one higher than
+	// the position asks for, because Google removes the tab from its old
+	// slot only after inserting it: "Main" to position 2 of two tabs is
+	// index 2, not 1, which would have left it where it was.
+	if _, err := svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "move", Tab: "Main", Position: 2}); err != nil ||
+		!strings.Contains(string(api.batches[3].Requests[0]), `"index":2`) {
+		t.Fatalf("move later: %v %s", err, api.batches[3].Requests[0])
+	}
 	res, err = svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "move", Tab: "Notes", Parent: "Main"})
-	if err != nil || !strings.Contains(string(api.batches[3].Requests[0]), `"parentTabId":"t.0"`) {
-		t.Fatalf("nest: %+v %v %s", res, err, api.batches[3].Requests[0])
+	if err != nil || !strings.Contains(string(api.batches[4].Requests[0]), `"parentTabId":"t.0"`) {
+		t.Fatalf("nest: %+v %v %s", res, err, api.batches[4].Requests[0])
+	}
+	// Moving into another parent leaves the index alone: the tab is
+	// removed from a different list, so nothing shifts under it.
+	if _, err := svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "move", Tab: "Notes", Parent: "Main", Position: 1}); err != nil ||
+		!strings.Contains(string(api.batches[5].Requests[0]), `"index":0`) {
+		t.Fatalf("nest with a position: %v %s", err, api.batches[5].Requests[0])
 	}
 	for _, tc := range []struct {
 		req   TabRequest

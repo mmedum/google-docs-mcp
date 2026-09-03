@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/plan"
 )
 
@@ -153,8 +154,34 @@ func moveTabRequest(f *Fetched, req TabRequest, res *TabResult) (json.RawMessage
 	if props.ParentID == tab.ID {
 		return nil, Errorf("invalid", "a tab cannot be its own parent")
 	}
+	// Google inserts at the index with the tab still in its old slot and
+	// removes it afterwards, so moving one later in the same list lands
+	// it one place short — and moving it to the very next position does
+	// nothing at all. Raise the index by one for those; moving a tab
+	// earlier, or under a different parent, needs no adjustment. Verified
+	// live (§18 of docs/architecture.md).
+	if props.Index != nil && (props.ParentID == "" || props.ParentID == tab.ParentID) {
+		if siblingIndex(f.Doc, tab) <= *props.Index {
+			*props.Index++
+		}
+	}
 	res.TabID, res.Title = tab.ID, tab.Title
 	return plan.UpdateDocumentTabProperties(tab.ID, props), nil
+}
+
+// siblingIndex is a tab's 0-based position among the tabs that share its
+// parent, in document order.
+func siblingIndex(d *doc.Document, tab *doc.Tab) int {
+	i := 0
+	for _, t := range d.Tabs {
+		if t.ID == tab.ID {
+			break
+		}
+		if t.ParentID == tab.ParentID {
+			i++
+		}
+	}
+	return i
 }
 
 // placeTab fills the position and parent of an add or move. "none" as

@@ -273,6 +273,11 @@ err, text, _ = call("get_document", {"document": doc})
 show("tabs after moves", err, text, 900)
 err, text, _ = call("read_document", {"document": doc, "tab": "Appendix A", "with_handles": True})
 show("read nested tab", err, text, 600)
+# Moving Parent first made the empty tab number 1, and every later op that
+# names no tab addresses the first one. Put it back at the end so the rest
+# of the run drives the tab that has the content.
+err, text, _ = call("manage_tabs", {"document": doc, "action": "move", "tab": "Parent", "position": 2})
+show("move parent tab back to the end (later steps address the original tab)", err, text)
 
 err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "create_header", "content": "Live test header"}, {"op": "create_footer", "content": "Live test footer"}]})
 show("create header and footer", err, text, 400)
@@ -323,6 +328,11 @@ show("page setup in comment mode (expected: refused, nothing to comment on)", er
 err, text, _ = call("layout_document", {"document": doc, "mode": "suggest", "ops": [{"op": "page", "landscape": True}]})
 show("page setup in suggest mode (the API decides whether it can)", err, text, 400)
 
+# A handle is valid for the revision it came from, and many edits have
+# landed since the table was read, so re-read before naming it again.
+err, text, _ = call("read_document", {"document": doc, "with_handles": True, "heading": "Next steps"})
+m = re.search(r"\[((?:tab\d+/)?tbl\d+)\]", text)
+tbl = m.group(1) if m else tbl
 err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [
     {"op": "style_columns", "table": tbl, "column_numbers": [1], "width_pt": 140},
     {"op": "style_rows", "table": tbl, "row_numbers": [1], "min_height_pt": 28, "prevent_overflow": True},

@@ -16,7 +16,11 @@
   disk; it is never logged or copied.
 - The refresh token is stored in the OS keyring. When the keyring is
   unavailable (no Secret Service on Linux, headless), it is written to a
-  0600 file under the profile directory and a warning is printed. The
+  file under the profile directory and a warning is printed. The server
+  asks for mode 0600, which Unix enforces; Windows has no POSIX
+  permission bits, so there the file is protected by the ACL it inherits
+  from the user's profile directory and nothing narrows it further —
+  prefer the keyring (Credential Manager) on that platform. The
   `GDOCS_REFRESH_TOKEN` variable overrides both for automation.
 - Scopes: `documents` and `drive` (or their read-only variants with
   `GDOCS_READ_ONLY`). `drive` is required to reach documents the app did

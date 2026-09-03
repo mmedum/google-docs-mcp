@@ -153,7 +153,7 @@ func TestRequestBuilders(t *testing.T) {
 		"insertText":             InsertText("x", Loc{Index: 3, TabID: "t"}),
 		"deleteContentRange":     DeleteRange(r),
 		"updateTextStyle":        UpdateTextStyle(r, TextStyleSpec{Bold: new(false), Font: "none", Foreground: "#ff0000", Background: "none", Link: "none", SizePt: 12, Baseline: "SUPERSCRIPT"}),
-		"updateParagraphStyle":   UpdateParagraphStyle(r, ParagraphStyleSpec{NamedStyle: "HEADING_2", Alignment: "CENTER", LineSpacing: 115, SpaceAbovePt: floatp(6), KeepWithNext: new(true)}),
+		"updateParagraphStyle":   UpdateParagraphStyle(r, ParagraphStyleSpec{NamedStyle: "HEADING_2", Alignment: "CENTER", LineSpacing: 115, SpaceAbovePt: floatp(6), KeepWithNext: new(true), PageBreakBefore: new(true)}),
 		"createParagraphBullets": CreateBullets(r, CheckboxPreset),
 		"deleteParagraphBullets": DeleteBullets(r),
 		"replaceAllText":         ReplaceAllText("a", "b", true, "t"),
@@ -179,7 +179,7 @@ func TestRequestBuilders(t *testing.T) {
 		t.Fatalf("colour = %v", fg)
 	}
 	ps := view(t, checks["updateParagraphStyle"])
-	if ps.body["fields"] != "namedStyleType,alignment,lineSpacing,spaceAbove,keepWithNext" {
+	if ps.body["fields"] != "namedStyleType,alignment,lineSpacing,spaceAbove,keepWithNext,pageBreakBefore" {
 		t.Fatalf("paragraph fields = %v", ps.body["fields"])
 	}
 	ra := view(t, checks["replaceAllText"])

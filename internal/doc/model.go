@@ -75,9 +75,7 @@ type ParagraphStyle struct {
 	IndentStartPt     float64
 	IndentFirstLinePt float64
 	KeepWithNext      bool
-	// PageBreakBefore is read only: it is worth knowing that every
-	// HEADING_1 starts a page, but no write op sets it.
-	PageBreakBefore bool
+	PageBreakBefore   bool
 }
 
 // NamedStyleDef is what one named style means in a tab: the formatting

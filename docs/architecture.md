@@ -255,9 +255,14 @@ longer exists; re-read the section`.
 - `read_document` → `scope` (tab / heading_id / heading / handle range /
   whole), `format` (`markdown` default, `text`, `raw`), `with_handles`
   (default true; pass false to drop the prefixes), `with_styles`
-  (default false: annotates runs whose style deviates from the paragraph
-  default, e.g. `{Arial 11, #c00}`, so other people's formatting is
-  visible before it is changed),
+  (default false: annotates what a run sets on itself, e.g.
+  `{font: Arial 11pt, color: #c00}`, so other people's formatting is
+  visible before it is changed. Google reports only explicitly set run
+  properties, so this is exactly the deviation from what the paragraph
+  inherits — and the corollary is that inherited formatting is invisible
+  in a read: a heading whose `HEADING_2` definition is blue and centred
+  reads as plain markdown, which is what `get_document`'s named style
+  lines are for, once per tab instead of once per heading. Verified live),
   `include_suggestions` (CriticMarkup `{++ins++}` / `{--del--}` with
   `{>>s:<id> by author<<}`), `include_comments` (`{>>c:<id><<}` markers
   plus a thread list), `max_chars` (default 20 000), returns
@@ -759,6 +764,19 @@ What was added:
   equivalents of the comment edits were refused in favour of the Drive
   path, per the existing rule that thread operations use one backend.
 
+**What "everything" means here.** The completeness claim is about the
+`Request` union, not every field of every request. Text style is
+complete: bold, italic, underline, strikethrough, small caps, baseline,
+size, family, both colours and links. Paragraph style carries the named
+style, alignment, line spacing, space above and below, both indents,
+keep-with-next and page-break-before, on `format_document` and on
+`named_style` alike; it does not carry borders, shading, tab stops, end
+indent, content direction, keep-lines-together or widow and orphan
+control. Those are compound or rarely asked for, and each would need a
+field in the model, a line in the renderer and a schema field to be worth
+having. A field the server can read but not write is the asymmetry to
+avoid — `pageBreakBefore` was one for a day.
+
 v1.0.0 waits for use in anger and a second eval round with another
 client.
 
@@ -859,4 +877,5 @@ checked rather than assumed.
 | A fragment inserted into an empty paragraph keeps that paragraph's style (Phase 1 `Inline` rule) | Refuted by the follow-up path: a new header, footer, footnote or tab starts as one empty paragraph, so `# Title` content came out as normal text; an inline insertion into a non-empty paragraph must still keep its style | `FragmentOptions.Fill`: an empty paragraph takes the fragment's style. |
 | Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalised units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalised string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
 | `TabProperties.index` is the tab's 0-based position among its siblings, so a requested 1-based position converts with `-1` (the API reference, applied to both add and move) | **Refuted for `move`, live 2026-09-03.** For `add` the index is 0-based as documented, but a move inserts the tab at that index with the tab *still in its old slot* and removes it afterwards, so moving one later lands it a place short, and moving it to the very next position does nothing while reporting success. Four probes: 3→1 gave 1; 1→3 gave 2; 2→3 gave 2; 4→2 gave 2 | `moveTabRequest` raises the index by one when the tab is moving later within the same parent (`siblingIndex`). Moving earlier, and moving under a different parent, are unchanged. The bug hid because every earlier test moved a tab to position 1, where the two readings agree. |
+| `read_document with_styles` shows a run's formatting | Confirmed, and sharpened live 2026-09-03: Google returns only the properties a run sets itself, so the annotation already *is* the deviation from what the run inherits. A read of a document whose `HEADING_2` had just been redefined blue, centred and single-spaced annotated nothing at all | No per-run comparison to build (an earlier plan of mine, dropped). Inherited formatting is reported once per tab by `get_document` instead of once per paragraph. |
 | Resource templates with a shared prefix shadow each other (my worry) | Refuted in go-sdk v1.7.0: a template matches through an anchored RFC 6570 regexp in which `{var}` excludes `/`, so `gdocs://{document}` does not match `gdocs://id/outline`; an unmatched URI is resource-not-found (code -32602 since SEP-2164) | Three templates registered side by side; handlers parse the URI themselves. |

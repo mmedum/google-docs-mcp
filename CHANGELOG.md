@@ -20,6 +20,11 @@ and new required fields are breaking; the schema diff in CI flags them.
   change nor confirm it afterwards; the `export_document format: html`
   workaround in docs/development.md is no longer the only way.
 
+- `page_break_before` on `format_document`'s `paragraph_style` op and on
+  `layout_document`'s `named_style` op, so every paragraph property the
+  server reports can also be written. `get_document` reported it from the
+  day named styles were read; nothing could set it.
+
 ### Fixed
 - `manage_tabs action: move` with a `position` later than the tab's
   current one moved it a place short, and moving a tab to the very next

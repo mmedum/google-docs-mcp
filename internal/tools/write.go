@@ -99,6 +99,7 @@ type FormatOpInput struct {
 	IndentPt          *float64    `json:"indent_pt,omitempty" jsonschema:"paragraph_style: left indent in points"`
 	FirstLineIndentPt *float64    `json:"first_line_indent_pt,omitempty"`
 	KeepWithNext      *bool       `json:"keep_with_next,omitempty"`
+	PageBreakBefore   *bool       `json:"page_break_before,omitempty" jsonschema:"paragraph_style: start this paragraph on a new page"`
 	Bullets           string      `json:"bullets,omitempty" jsonschema:"bullets op: bullet, numbered, checkbox, or none to remove list formatting"`
 }
 
@@ -171,7 +172,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 					Font: o.Font, SizePt: o.SizePt, Foreground: o.Color, Background: o.Background, Link: o.Link, Baseline: strings.ToUpper(strings.TrimSpace(o.Baseline))}
 			case plan.OpParagraphStyle:
 				eo.Para = plan.ParagraphStyleSpec{NamedStyle: strings.ToUpper(strings.TrimSpace(o.NamedStyle)), Alignment: strings.ToUpper(strings.TrimSpace(o.Alignment)),
-					LineSpacing: o.LineSpacing, SpaceAbovePt: o.SpaceAbovePt, SpaceBelowPt: o.SpaceBelowPt, IndentStartPt: o.IndentPt, IndentFirstLine: o.FirstLineIndentPt, KeepWithNext: o.KeepWithNext}
+					LineSpacing: o.LineSpacing, SpaceAbovePt: o.SpaceAbovePt, SpaceBelowPt: o.SpaceBelowPt, IndentStartPt: o.IndentPt, IndentFirstLine: o.FirstLineIndentPt, KeepWithNext: o.KeepWithNext,
+					PageBreakBefore: o.PageBreakBefore}
 			case plan.OpBullets:
 				eo.Bullets = strings.ToLower(strings.TrimSpace(o.Bullets))
 			case plan.OpClearFormatting:

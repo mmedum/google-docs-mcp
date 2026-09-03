@@ -135,6 +135,11 @@ err, text, _ = call("format_document", {"document": doc, "mode": "direct", "ops"
     {"op": "paragraph_style", "target": {"text": "Appended paragraph at the very end."}, "alignment": "CENTER"},
 ]})
 show("format", err, text)
+# with_styles annotates only what a run sets itself: Google reports no
+# inherited formatting, so the blue "Closing line" is annotated and the
+# text around it is not.
+err, text, _ = call("read_document", {"document": doc, "with_styles": True})
+show("read with styles", err, text, 900)
 
 err, text, _ = call("find_in_document", {"document": doc, "query": "point"})
 show("find", err, text)
@@ -312,6 +317,14 @@ show("page setup (A4) and a redefined HEADING_2", err, text, 700)
 err, text, _ = call("get_document", {"document": doc})
 show("read the redefined HEADING_2 back (named style lines)", err, text, 1200)
 err, text, _ = call("layout_document", {"document": doc, "mode": "direct", "ops": [
+    # heading_2 is carried by a paragraph here, so the read below shows
+    # the change; a style nothing uses is not reported.
+    {"op": "named_style", "style": "heading_2", "page_break_before": True},
+]})
+show("named style that starts a page", err, text, 500)
+err, text, _ = call("get_document", {"document": doc})
+show("read page-break-before back", err, text, 1200)
+err, text, _ = call("layout_document", {"document": doc, "mode": "direct", "ops": [
     {"op": "section_break", "location": {"at": "before", "of": {"text": "Token BETA marks the replace_all step."}}, "section_type": "next_page"},
 ]})
 show("section break", err, text, 500)
@@ -402,6 +415,48 @@ if DESTRUCTIVE:
         show("delete parent tab (child goes with it)", err, text)
 else:
     print("=== deletion steps skipped (set GDOCS_ENABLE_DESTRUCTIVE=true) ===")
+
+# ---- which tools each configuration registers ---------------------------
+# Read-only mode and the destructive gate are claims about what exists at
+# all, so ask a server started that way rather than trusting the flag.
+WRITE_TOOLS = {"create_document", "edit_document", "format_document", "edit_table", "insert_object",
+               "layout_document", "manage_tabs", "add_comment", "reply_comment", "review_suggestion"}
+GATED_TOOLS = {"delete_comment", "delete_tab"}
+
+def tools_of(**overrides):
+    """Tool names a freshly started server registers under this configuration."""
+    q = subprocess.Popen(["./google-docs-mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True, bufsize=1, env=dict(env, **overrides))
+    def rpc2(msg_id, method, params=None):
+        msg = {"jsonrpc": "2.0", "id": msg_id, "method": method}
+        if params is not None:
+            msg["params"] = params
+        q.stdin.write(json.dumps(msg) + "\n"); q.stdin.flush()
+        while True:
+            m = json.loads(q.stdout.readline())
+            if m.get("id") == msg_id:
+                return m
+    rpc2(1, "initialize", {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "config", "version": "0"}})
+    q.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"); q.stdin.flush()
+    m = rpc2(2, "tools/list")
+    q.stdin.close(); q.wait(timeout=10)
+    return {t["name"] for t in (m.get("result") or {}).get("tools", [])}
+
+gated_off = tools_of(GDOCS_ENABLE_DESTRUCTIVE="false")
+gated_on = tools_of(GDOCS_ENABLE_DESTRUCTIVE="true")
+read_only = tools_of(GDOCS_READ_ONLY="true", GDOCS_ENABLE_DESTRUCTIVE="true")
+print("=== tools by configuration ===")
+for label, names, forbidden in [
+    ("destructive off", gated_off, GATED_TOOLS),
+    ("destructive on", gated_on, set()),
+    ("read-only (with destructive on)", read_only, WRITE_TOOLS | GATED_TOOLS),
+]:
+    bad = sorted(names & forbidden)
+    print(f"{label}: {len(names)} tools" + (f" -- UNEXPECTED, registers {bad}" if bad else " (nothing it should not register)"))
+if not GATED_TOOLS <= gated_on:
+    print(f"UNEXPECTED: destructive on is missing {sorted(GATED_TOOLS - gated_on)}")
+if not read_only < gated_off:
+    print("UNEXPECTED: read-only does not register a strict subset of the default configuration")
 
 err, text, _ = call("get_document", {"document": doc})
 show("final get_document", err, text, 1200)

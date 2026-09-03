@@ -211,6 +211,7 @@ type ParagraphStyleSpec struct {
 	IndentStartPt   *float64
 	IndentFirstLine *float64
 	KeepWithNext    *bool
+	PageBreakBefore *bool
 }
 
 // IsZero reports whether the spec changes nothing.
@@ -263,6 +264,9 @@ func (s ParagraphStyleSpec) body() (map[string]any, []string) {
 	}
 	if s.KeepWithNext != nil {
 		set("keepWithNext", *s.KeepWithNext)
+	}
+	if s.PageBreakBefore != nil {
+		set("pageBreakBefore", *s.PageBreakBefore)
 	}
 	return style, fields
 }

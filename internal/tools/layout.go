@@ -55,6 +55,7 @@ type LayoutOpInput struct {
 	IndentPt          *float64 `json:"indent_pt,omitempty"`
 	FirstLineIndentPt *float64 `json:"first_line_indent_pt,omitempty"`
 	KeepWithNext      *bool    `json:"keep_with_next,omitempty"`
+	PageBreakBefore   *bool    `json:"page_break_before,omitempty" jsonschema:"named_style: start every paragraph of this style on a new page"`
 }
 
 // LayoutInput is the layout_document call.
@@ -109,7 +110,8 @@ func (o LayoutOpInput) editOp(kind plan.OpKind) service.EditOp {
 				SmallCaps: o.SmallCaps, Font: o.Font, SizePt: o.SizePt, Foreground: o.Color, Background: o.TextBackground},
 			Para: plan.ParagraphStyleSpec{Alignment: up(o.Alignment), LineSpacing: o.LineSpacing,
 				SpaceAbovePt: o.SpaceAbovePt, SpaceBelowPt: o.SpaceBelowPt, IndentStartPt: o.IndentPt,
-				IndentFirstLine: o.FirstLineIndentPt, KeepWithNext: o.KeepWithNext},
+				IndentFirstLine: o.FirstLineIndentPt, KeepWithNext: o.KeepWithNext,
+				PageBreakBefore: o.PageBreakBefore},
 		}
 	}
 	target := o.Target.target()

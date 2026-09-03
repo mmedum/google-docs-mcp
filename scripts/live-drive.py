@@ -49,8 +49,25 @@ def call(name, args):
 rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "phase1", "version": "0"}})
 p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"); p.stdin.flush()
 
+def thread_ids(text):
+    """Comment ids out of list_comments' text (read tools return text only)."""
+    return re.findall(r"^- (\S+)", text, re.M)
+
+
+def anchored_flags(text):
+    """Handles named in list_comments' text, one per thread ([] when unlocated)."""
+    return [re.search(r"^- \S+ \[(\S+)\]", line).group(1) if re.search(r"^- \S+ \[(\S+)\]", line) else ""
+            for line in text.splitlines() if line.startswith("- ")]
+
+
+def revision_ids(text):
+    """Revision ids out of list_revisions' text, newest first as listed."""
+    return re.findall(r"^- (\S+)", text, re.M)
+
+
 def show(label, err, text, limit=900):
     text = re.sub(r"/document/d/[A-Za-z0-9_-]+", "/document/d/<scratch>", text)
+    text = re.sub(r"gdocs://[A-Za-z0-9_-]{20,}", "gdocs://<scratch>", text)
     text = re.sub(r"revision [A-Za-z0-9_-]{20,}", "revision <rev>", text)
     print(f"=== {label} (isError={err}) ===")
     print(text[:limit])
@@ -141,16 +158,15 @@ err, text, _ = call("format_document", {"document": doc, "mode": "direct", "ops"
 ]})
 show("bullets and clear_formatting", err, text, 500)
 
-err, text, sc = call("list_comments", {"document": doc})
+err, text, _ = call("list_comments", {"document": doc})
 show("list comments", err, text, 1500)
-threads = sc.get("threads", [])
-print("anchored flags:", [t.get("anchored") for t in threads], "handles:", [t.get("handle") for t in threads])
+print("handles listed per thread:", anchored_flags(text))
 
 err, text, sc = call("add_comment", {"document": doc, "target": {"text": "Nested point"}, "content": "Live test: comment on the nested bullet."})
 show("add comment", err, text)
 new_comment = sc.get("id")
-err, text, sc = call("list_comments", {"document": doc})
-ids = [t.get("id") for t in sc.get("threads", [])]
+err, text, _ = call("list_comments", {"document": doc})
+ids = thread_ids(text)
 print("new comment id listed through Drive:", new_comment in ids, "(id", new_comment, ")")
 if new_comment:
     err, text, _ = call("reply_comment", {"document": doc, "comment_id": new_comment, "content": "Reply from the live test."})
@@ -164,13 +180,13 @@ show("document-level comment", err, text)
 err, text, _ = call("read_document", {"document": doc, "with_handles": True, "include_comments": True, "heading": "Background"})
 show("read with comments", err, text, 1500)
 
-err, text, sc = call("list_revisions", {"document": doc, "limit": 5})
+err, text, _ = call("list_revisions", {"document": doc, "limit": 5})
 show("list revisions", err, text)
-revs = sc.get("revisions", [])
+revs = revision_ids(text)
 if len(revs) >= 2:
-    err, text, _ = call("diff_revisions", {"document": doc, "from": revs[-1]["id"], "to": revs[0]["id"]})
+    err, text, _ = call("diff_revisions", {"document": doc, "from": revs[-1], "to": revs[0]})
     show("diff revisions", err, text, 1500)
-    err, text, _ = call("read_document", {"document": doc, "revision": revs[-1]["id"], "max_chars": 600})
+    err, text, _ = call("read_document", {"document": doc, "revision": revs[-1], "max_chars": 600})
     show("read old revision", err, text, 800)
 
 err, text, sc = call("edit_table", {"document": doc, "mode": "direct", "ops": [
@@ -213,12 +229,13 @@ err, text, _ = call("insert_object", {"document": doc, "kind": "date", "date": "
 show("insert date chip", err, text, 600)
 err, text, _ = call("insert_object", {"document": doc, "kind": "image", "url": "https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png", "width_pt": 48, "location": {"at": "after", "of": {"text": "Closing line"}}, "mode": "direct"})
 show("insert image", err, text, 600)
-err, text, sc = call("get_document", {"document": doc})
-owner = re.search(r"<([^>]+@[^>]+)>", sc.get("owner", "") or "")
+err, info_text, _ = call("get_document", {"document": doc})
+owner = re.search(r"^owner .*<([^>]+@[^>]+)>", info_text, re.M)
+doc_url = re.search(r"^(https://\S+)", info_text, re.M)
 if owner:
     err, text, _ = call("insert_object", {"document": doc, "kind": "person", "email": owner.group(1), "location": {"at": "end", "of": {"text": "Review the numbers"}}, "mode": "direct"})
     show("insert person chip", err, text, 600)
-err, text, _ = call("insert_object", {"document": doc, "kind": "rich_link", "url": sc.get("url", ""), "location": {"at": "end", "of": {"text": "Send the summary"}}, "mode": "direct"})
+err, text, _ = call("insert_object", {"document": doc, "kind": "rich_link", "url": doc_url.group(1) if doc_url else "", "location": {"at": "end", "of": {"text": "Send the summary"}}, "mode": "direct"})
 show("insert rich link chip", err, text, 600)
 
 err, text, sc = call("manage_tabs", {"document": doc, "action": "add", "title": "Appendix", "content": "# Appendix\n\nAdded by the live test."})
@@ -242,10 +259,26 @@ err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": 
 show("create header and footer", err, text, 400)
 err, text, _ = call("read_document", {"document": doc, "segment": "header"})
 show("read header", err, text, 300)
+err, text, _ = call("read_document", {"document": doc, "tab": "Tab 1", "format": "raw", "max_chars": 700})
+show("raw read cut by the budget", err, (text or "")[-160:], 160)
 err, text, _ = call("edit_document", {"document": doc, "mode": "suggest", "ops": [{"op": "delete_footer"}]})
 show("delete footer in suggest mode (refused up front)", err, text, 300)
 err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "delete_header"}, {"op": "delete_footer"}]})
 show("delete header and footer", err, text, 400)
+
+# ---- resources -----------------------------------------------------------
+m = rpc("resources/templates/list")
+print("=== resource templates ===")
+print([t.get("uriTemplate") for t in (m.get("result") or {}).get("resourceTemplates", [])])
+for uri in (f"gdocs://{doc}", f"gdocs://{doc}/outline", f"gdocs://{doc}/tabs/Appendix%20A", f"gdocs://{doc}/tabs/Appendix A"):
+    m = rpc("resources/read", {"uri": uri})
+    r = m.get("result") or {}
+    body = "".join(c.get("text", "") for c in r.get("contents", []))
+    label = re.sub(r"gdocs://[A-Za-z0-9_-]+", "gdocs://<scratch>", uri)
+    show("resource " + label, "error" in m, body or json.dumps(m.get("error"))[:160], 500)
+m = rpc("resources/read", {"uri": "gdocs://1NoSuchDocumentIdXXXXXXXXXXXXXXXXXXXXXXXXXXX/outline"})
+print("=== unknown document resource ===")
+print(json.dumps(m.get("error", m.get("result")))[:200])
 
 if DESTRUCTIVE:
     if new_comment:

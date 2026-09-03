@@ -127,17 +127,31 @@ err, text, _ = call("read_document", {"document": doc, "with_handles": True, "in
 show("read after phase 1 steps", err, text, 2000)
 
 # ---- Phase 2 -------------------------------------------------------------
+PREVIEW = env.get("GDOCS_PREVIEW", "true").lower() in ("1", "true", "yes", "on")
+if not PREVIEW:
+    print("=== preview off: suggest-mode steps are expected to fail with [unavailable]; comments go through Drive ===")
+
+if len(suggestion_ids) > 1:
+    err, text, _ = call("review_suggestion", {"document": doc, "action": "accept", "ids": [suggestion_ids[0]]})
+    show("accept first suggestion", err, text)
+
+err, text, _ = call("format_document", {"document": doc, "mode": "direct", "ops": [
+    {"op": "bullets", "target": {"text": "Review the numbers"}, "bullets": "checkbox"},
+    {"op": "clear_formatting", "target": {"text": "Closing line"}},
+]})
+show("bullets and clear_formatting", err, text, 500)
+
 err, text, sc = call("list_comments", {"document": doc})
 show("list comments", err, text, 1500)
 threads = sc.get("threads", [])
 print("anchored flags:", [t.get("anchored") for t in threads], "handles:", [t.get("handle") for t in threads])
 
-err, text, sc = call("add_comment", {"document": doc, "target": {"text": "Nested point"}, "content": "Live test: anchored comment on the nested bullet."})
+err, text, sc = call("add_comment", {"document": doc, "target": {"text": "Nested point"}, "content": "Live test: comment on the nested bullet."})
 show("add comment", err, text)
 new_comment = sc.get("id")
 err, text, sc = call("list_comments", {"document": doc})
 ids = [t.get("id") for t in sc.get("threads", [])]
-print("new comment id listed through Drive:", new_comment in ids, "(preview id", new_comment, ")")
+print("new comment id listed through Drive:", new_comment in ids, "(id", new_comment, ")")
 if new_comment:
     err, text, _ = call("reply_comment", {"document": doc, "comment_id": new_comment, "content": "Reply from the live test."})
     show("reply", err, text)
@@ -145,6 +159,8 @@ if new_comment:
     show("resolve", err, text)
     err, text, _ = call("reply_comment", {"document": doc, "comment_id": new_comment, "action": "reopen", "content": "Reopened."})
     show("reopen", err, text)
+err, text, _ = call("add_comment", {"document": doc, "content": "Live test: a comment on the document as a whole."})
+show("document-level comment", err, text)
 err, text, _ = call("read_document", {"document": doc, "with_handles": True, "include_comments": True, "heading": "Background"})
 show("read with comments", err, text, 1500)
 
@@ -175,32 +191,69 @@ show("table ops", err, text, 900)
 err, text, _ = call("edit_table", {"document": doc, "mode": "suggest", "ops": [{"op": "set_cells", "table": tbl, "cells": [{"cell": "r3c1", "content": "Suggested cell text"}]}]})
 show("suggested cell edit", err, text, 600)
 err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [{"op": "merge_cells", "table": tbl, "from_cell": "r3c1", "to_cell": "r3c3"}]})
-show("merge cells", err, text, 600)
+show("merge cells (the suggestion sits in the head cell, so nothing is lost)", err, text, 500)
+err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [{"op": "unmerge_cells", "table": tbl, "from_cell": "r3c1", "to_cell": "r3c3"}]})
+show("unmerge cells", err, text, 400)
+err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [{"op": "insert_columns", "table": tbl, "column": 3, "count": 1}]})
+show("insert column", err, text, 400)
+err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [
+    {"op": "set_cells", "table": tbl, "cells": [{"cell": "r1c4", "content": "Notes"}, {"cell": "r2c4", "content": "none"}]},
+    {"op": "delete_columns", "table": tbl, "column_numbers": [2]},
+]})
+show("set cells in the new column and delete column 2", err, text, 700)
+err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "ops": [{"op": "delete_rows", "table": tbl, "row_numbers": [3]}]})
+show("delete row 3 (blocked with preview: it holds a pending suggestion)", err, text, 500)
+if err:
+    err, text, _ = call("edit_table", {"document": doc, "mode": "direct", "force": True, "ops": [{"op": "delete_rows", "table": tbl, "row_numbers": [3]}]})
+    show("delete row 3 forced", err, text, 600)
+err, text, _ = call("read_document", {"document": doc, "with_handles": True, "heading": "Next steps"})
+show("read table after structure ops", err, text, 1000)
 
 err, text, _ = call("insert_object", {"document": doc, "kind": "date", "date": "2026-09-03", "date_format": "iso", "location": {"at": "end", "of": {"text": "Appended paragraph at the very end."}}, "mode": "direct"})
 show("insert date chip", err, text, 600)
 err, text, _ = call("insert_object", {"document": doc, "kind": "image", "url": "https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png", "width_pt": 48, "location": {"at": "after", "of": {"text": "Closing line"}}, "mode": "direct"})
 show("insert image", err, text, 600)
+err, text, sc = call("get_document", {"document": doc})
+owner = re.search(r"<([^>]+@[^>]+)>", sc.get("owner", "") or "")
+if owner:
+    err, text, _ = call("insert_object", {"document": doc, "kind": "person", "email": owner.group(1), "location": {"at": "end", "of": {"text": "Review the numbers"}}, "mode": "direct"})
+    show("insert person chip", err, text, 600)
+err, text, _ = call("insert_object", {"document": doc, "kind": "rich_link", "url": sc.get("url", ""), "location": {"at": "end", "of": {"text": "Send the summary"}}, "mode": "direct"})
+show("insert rich link chip", err, text, 600)
 
 err, text, sc = call("manage_tabs", {"document": doc, "action": "add", "title": "Appendix", "content": "# Appendix\n\nAdded by the live test."})
 show("add tab", err, text)
 new_tab = sc.get("tab_id")
 err, text, _ = call("manage_tabs", {"document": doc, "action": "rename", "tab": "Appendix", "title": "Appendix A"})
 show("rename tab", err, text)
+err, text, sc = call("manage_tabs", {"document": doc, "action": "add", "title": "Parent"})
+show("add parent tab", err, text)
+parent_tab = sc.get("tab_id")
+err, text, _ = call("manage_tabs", {"document": doc, "action": "move", "tab": "Appendix A", "parent": "Parent"})
+show("nest tab under parent", err, text)
+err, text, _ = call("manage_tabs", {"document": doc, "action": "move", "tab": "Parent", "position": 1})
+show("move parent tab first", err, text)
+err, text, _ = call("get_document", {"document": doc})
+show("tabs after moves", err, text, 900)
 err, text, _ = call("read_document", {"document": doc, "tab": "Appendix A", "with_handles": True})
-show("read new tab", err, text, 600)
-err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "create_footer", "content": "Live test footer"}]})
-show("create footer", err, text, 400)
-err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "dry_run": True, "ops": [{"op": "delete_footer"}]})
-show("delete footer dry run", err, text, 400)
+show("read nested tab", err, text, 600)
+
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "create_header", "content": "Live test header"}, {"op": "create_footer", "content": "Live test footer"}]})
+show("create header and footer", err, text, 400)
+err, text, _ = call("read_document", {"document": doc, "segment": "header"})
+show("read header", err, text, 300)
+err, text, _ = call("edit_document", {"document": doc, "mode": "suggest", "ops": [{"op": "delete_footer"}]})
+show("delete footer in suggest mode (refused up front)", err, text, 300)
+err, text, _ = call("edit_document", {"document": doc, "mode": "direct", "ops": [{"op": "delete_header"}, {"op": "delete_footer"}]})
+show("delete header and footer", err, text, 400)
 
 if DESTRUCTIVE:
     if new_comment:
         err, text, _ = call("delete_comment", {"document": doc, "comment_id": new_comment})
         show("delete comment", err, text)
-    if new_tab:
-        err, text, _ = call("delete_tab", {"document": doc, "tab": new_tab})
-        show("delete tab", err, text)
+    if parent_tab:
+        err, text, _ = call("delete_tab", {"document": doc, "tab": parent_tab})
+        show("delete parent tab (child goes with it)", err, text)
 else:
     print("=== deletion steps skipped (set GDOCS_ENABLE_DESTRUCTIVE=true) ===")
 

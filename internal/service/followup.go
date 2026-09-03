@@ -19,44 +19,51 @@ import (
 // the same resolution, guard and numbering as anything else.
 
 // describeFollowups words the plan's follow-ups for a dry run.
-func describeFollowups(fus []plan.Followup) []string {
+func describeFollowups(fus []*plan.Op) []string {
 	var out []string
 	for _, fu := range fus {
-		switch fu.Kind {
-		case plan.OpInsertTable:
+		if fu.Kind == plan.OpInsertTable {
 			cells := 0
 			for _, row := range fu.Table.Data {
 				cells += len(row)
 			}
 			out = append(out, fmt.Sprintf("op %d: a second batch fills the new %d×%d table with %d cell(s)", fu.Seq, fu.Table.Rows, fu.Table.Cols, cells))
-		default:
-			out = append(out, fmt.Sprintf("op %d: a second batch writes the %s content", fu.Seq, strings.TrimPrefix(strings.TrimPrefix(string(fu.Kind), "create_"), "insert_")))
+			continue
 		}
+		out = append(out, fmt.Sprintf("op %d: a second batch writes the %s content", fu.Seq, plan.Noun(fu.Kind)))
 	}
 	return out
+}
+
+// pending is one follow-up edit: the op that will write the content and
+// the first-batch op it completes.
+type pending struct {
+	op EditOp
+	fu *plan.Op
 }
 
 // followupOps turns the plan's follow-ups into the ops of the second
 // edit. Table handles are predicted from the pre-edit document and the
 // batch; segment ids come from the replies.
-func followupOps(pre *doc.Document, ro *resolvedOps, result *EditResult) []EditOp {
+func followupOps(pre *doc.Document, ro *resolvedOps, result *EditResult) []pending {
 	ids := newSegmentIDs(ro.env)
-	var ops []EditOp
+	var ops []pending
 	for _, fu := range ro.planned.Followups {
-		switch fu.Kind {
-		case plan.OpInsertTable:
+		if fu.Kind == plan.OpInsertTable {
 			handle := newTableHandle(pre, ro.ops, fu)
 			data := fitGrid(fu.Table.Data, fu.Table.Rows, fu.Table.Cols, fu.Seq, result)
-			ops = append(ops, EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: handle, Data: data}, followup: fu})
-		default:
-			id := ids[fu.Kind]
-			if len(id) == 0 {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: %s was created but Google returned no segment id; its content was not inserted", fu.Seq, fu.Kind))
-				continue
-			}
-			ids[fu.Kind] = id[1:]
-			ops = append(ops, EditOp{Kind: plan.OpAppend, Fragment: fu.Fragment, Location: &Location{At: "end", Of: &Target{Tab: fu.Seg.TabID, Segment: id[0]}}, followup: fu})
+			ops = append(ops, pending{EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: handle, Data: data}}, fu})
+			continue
 		}
+		id := ids[fu.Kind]
+		if len(id) == 0 {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: %s was created but Google returned no segment id; its content was not inserted", fu.Seq, fu.Kind))
+			continue
+		}
+		ids[fu.Kind] = id[1:]
+		// The content appends into the new segment, whose sole paragraph
+		// is blank; the insertion point fills it (see insertPoint.atBlank).
+		ops = append(ops, pending{EditOp{Kind: plan.OpAppend, Fragment: fu.Fragment, Location: &Location{At: "end", Of: &Target{Tab: fu.Seg.TabID, Segment: id[0]}}}, fu})
 	}
 	return ops
 }
@@ -74,26 +81,23 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 		s.Remember(f)
 		batch := ops[:min(len(ops), 50)]
 		ops = ops[len(batch):]
-		var ready []EditOp
-		for _, op := range batch {
-			fu := op.followup
-			if fu.Kind == plan.OpInsertTable {
-				handle := op.Table.Table
-				if b, ok := f.Doc.FindHandle(handle); !ok || b.Table == nil || b.Table.Rows != fu.Table.Rows || b.Table.Cols != fu.Table.Cols || !emptyTable(b) {
-					result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the table was created but could not be found again to fill it; use set_cells", fu.Seq))
+		var ready []pending
+		var ops []EditOp
+		for _, p := range batch {
+			if p.fu.Kind == plan.OpInsertTable {
+				handle := p.op.Table.Table
+				if b, ok := f.Doc.FindHandle(handle); !ok || b.Table == nil || b.Table.Rows != p.fu.Table.Rows || b.Table.Cols != p.fu.Table.Cols || !emptyTable(b) {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the table was created but could not be found again to fill it; use set_cells", p.fu.Seq))
 					continue
 				}
-			} else if b := blankFirstParagraph(f.Doc, op.Location.Of); b != nil {
-				// A new footnote starts with a paragraph holding one space;
-				// appending would leave it as a blank line. Replace it instead.
-				op = EditOp{Kind: plan.OpReplace, Fragment: op.Fragment, Target: &Target{Tab: op.Location.Of.Tab, Segment: op.Location.Of.Segment, Handle: b.Handle}, followup: fu}
 			}
-			ready = append(ready, op)
+			ready = append(ready, p)
+			ops = append(ops, p.op)
 		}
 		if len(ready) == 0 {
 			continue
 		}
-		res, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: ready})
+		res, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: ops})
 		if err != nil {
 			result.Warnings = append(result.Warnings, "the edit was applied but writing the follow-up content failed: "+messageOf(err))
 			continue
@@ -101,13 +105,13 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 		result.RevisionID = res.RevisionID
 		result.SuggestionIDs = append(result.SuggestionIDs, res.SuggestionIDs...)
 		result.Warnings = append(result.Warnings, res.Warnings...)
-		for _, op := range ready {
+		for _, p := range ready {
 			note := ", content written"
-			if op.followup.Kind == plan.OpInsertTable {
-				note = ", filled as " + op.Table.Table
+			if p.fu.Kind == plan.OpInsertTable {
+				note = ", filled as " + p.op.Table.Table
 			}
 			for j := range result.Changes {
-				if result.Changes[j].Seq == op.followup.Seq {
+				if result.Changes[j].Seq == p.fu.Seq {
 					result.Changes[j].Description += note
 				}
 			}
@@ -115,29 +119,13 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 	}
 }
 
-// blankFirstParagraph returns the only paragraph of a segment when it
-// holds nothing but whitespace (and more than its newline), nil otherwise.
-func blankFirstParagraph(d *doc.Document, t *Target) *doc.Block {
-	tab, seg, err := tabSegment(d, t.Tab, t.Segment)
-	if err != nil || tab == nil {
-		return nil
-	}
-	content := seg.ContentBlocks()
-	if len(content) != 1 || content[0].Paragraph == nil || content[0].IsEmptyParagraph() {
-		return nil
-	}
-	if strings.TrimSpace(content[0].Paragraph.Text(doc.ViewInline)) != "" {
-		return nil
-	}
-	return content[0]
-}
-
 // newSegmentIDs collects created header, footer and footnote ids from
 // replies, in request order.
 func newSegmentIDs(env replyEnvelope) map[plan.OpKind][]string {
 	out := map[plan.OpKind][]string{}
-	for kind, field := range map[plan.OpKind]string{plan.OpCreateHeader: "createHeader", plan.OpCreateFooter: "createFooter", plan.OpFootnote: "createFootnote"} {
-		env.each(field, func(raw json.RawMessage) {
+	for _, r := range plan.SegmentReplies() {
+		kind := r.Kind
+		env.each(r.Reply, func(raw json.RawMessage) {
 			var v map[string]string
 			if json.Unmarshal(raw, &v) == nil {
 				for _, id := range v { // headerId, footerId or footnoteId
@@ -155,7 +143,7 @@ func newSegmentIDs(env replyEnvelope) map[plan.OpKind][]string {
 // creates: the tables before its index in the pre-edit segment, minus
 // those a delete op in the batch removes, plus the batch's other table
 // insertions at lower indices, then one more.
-func newTableHandle(pre *doc.Document, ops []plan.Op, fu plan.Followup) string {
+func newTableHandle(pre *doc.Document, ops []plan.Op, fu *plan.Op) string {
 	seg := segmentAt(pre, fu.Seg.TabID, fu.Seg.ID)
 	if seg == nil {
 		return ""

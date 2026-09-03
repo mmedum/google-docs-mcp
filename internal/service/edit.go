@@ -33,8 +33,6 @@ type EditOp struct {
 	plan.Params
 	Table  *TableOp
 	Object *plan.ObjectParams
-
-	followup plan.Followup // the first-batch op this op completes, if any
 }
 
 // EditRequest is a write call.
@@ -98,7 +96,7 @@ func (r *EditResult) text() string {
 	if r.DryRun && len(r.Proposals) > 0 {
 		b.WriteString("proposed comments:\n")
 		for _, p := range r.Proposals {
-			fmt.Fprintf(&b, "- op %d: %s\n", p.Seq, strings.ReplaceAll(p.Content, "\n", " "))
+			fmt.Fprintf(&b, "- op %d: %s\n", p.Seq, doc.OneLine(p.Content))
 		}
 	}
 	if r.DryRun && len(r.RequestKinds) > 0 {
@@ -364,8 +362,10 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 			err = s.resolveDeleteSegment(f, op, &p, out)
 		case info.Shape == plan.ShapeTable:
 			err = s.resolveTableOp(f, op, &p, out)
-		default:
+		case info.Shape == plan.ShapeNone:
 			err = resolveCreateSegment(f, op, &p)
+		default:
+			err = Errorf("invalid", "unknown kind %q", op.Kind)
 		}
 		if err != nil {
 			return nil, Errorf(classOf(err), "op %d: %s", i, messageOf(err))
@@ -382,7 +382,7 @@ func (s *Service) resolveDeleteSegment(f *Fetched, op EditOp, p *plan.Op, out *r
 	if op.Target != nil {
 		t = *op.Target
 	}
-	kind := strings.TrimPrefix(string(op.Kind), "delete_")
+	kind := plan.Noun(op.Kind)
 	if t.Segment == "" {
 		t.Segment = kind
 	}
@@ -491,12 +491,7 @@ func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan
 	seen := map[string]bool{}
 	for _, seg := range tab.Segments() {
 		for _, m := range f.findText(seg, needle, !op.MatchCase) {
-			for _, a := range f.anchorsIn(seg, m.start, m.end, threads) {
-				if key := a.Kind + ":" + a.ID; !seen[key] {
-					seen[key] = true
-					p.Anchors = append(p.Anchors, a)
-				}
-			}
+			p.Anchors = appendUnique(seen, p.Anchors, f.anchorsIn(seg, m.start, m.end, threads)...)
 		}
 	}
 	if mode != plan.ModeComment {
@@ -521,7 +516,7 @@ func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {
 	if op.Kind == plan.OpCreateFooter {
 		existing = tab.Footers
 	}
-	kind := strings.TrimPrefix(string(op.Kind), "create_")
+	kind := plan.Noun(op.Kind)
 	if len(existing) > 0 {
 		return Errorf("invalid", "tab %d already has a %s; edit it with segment: %s", tab.Number, kind, existing[0].Label())
 	}
@@ -551,7 +546,8 @@ type insertPoint struct {
 	index       int64
 	atEnd       bool
 	inline      bool
-	empty       bool // inline into an empty paragraph, which the content fills
+	fills       bool  // the paragraph is blank, so the content styles it
+	clearTo     int64 // whitespace in that paragraph the content replaces
 	nearBullet  bool
 	description string
 	anchor      *plan.Rng
@@ -559,11 +555,18 @@ type insertPoint struct {
 
 func (ip *insertPoint) bounds() plan.Segment { return SegmentBounds(ip.tab, ip.segment) }
 
+// atBlank points the insertion at a blank paragraph: the content merges
+// into it, takes its own paragraph style, and replaces the whitespace
+// that paragraph holds.
+func (ip *insertPoint) atBlank(b *doc.Block) {
+	ip.index, ip.inline, ip.fills, ip.clearTo = b.Start, true, true, b.End-1
+}
+
 // fill records the insertion point on a planner op.
 func (ip *insertPoint) fill(p *plan.Op, out *resolvedOps) {
 	p.Seg = ip.bounds()
 	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
-	p.AtEnd, p.Inline, p.Fills, p.NearBullet = ip.atEnd, ip.inline, ip.empty, ip.nearBullet
+	p.AtEnd, p.Inline, p.Fill, p.ClearTo, p.NearBullet = ip.atEnd, ip.inline, ip.fills, ip.clearTo, ip.nearBullet
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
 	out.note(ip.tab.ID, ip.segment.ID, ip.index)
@@ -613,14 +616,16 @@ func (s *Service) segmentEdge(f *Fetched, t Target, at string) (*insertPoint, er
 			return nil, Errorf("invalid", "%s starts with a table; insert after it or before the first paragraph", segmentName(tab, seg))
 		}
 		ip.index, ip.nearBullet, ip.description, ip.anchor = first.Start, hasBullet(first), "start of "+segmentName(tab, seg), blockRng(tab, seg, first)
-		ip.inline, ip.empty = first.IsEmptyParagraph(), first.IsEmptyParagraph()
+		if first.IsBlankParagraph() {
+			ip.atBlank(first)
+		}
 	case "end":
 		last := content[len(content)-1]
 		ip.description, ip.anchor = "end of "+segmentName(tab, seg), blockRng(tab, seg, last)
 		ip.nearBullet = hasBullet(last)
-		if last.IsEmptyParagraph() {
-			// Fill the empty paragraph instead of leaving it above the content.
-			ip.index, ip.inline, ip.empty = last.Start, true, true
+		if last.IsBlankParagraph() {
+			// Fill the blank paragraph instead of leaving it above the content.
+			ip.atBlank(last)
 		} else {
 			ip.index, ip.atEnd = last.End-1, true
 		}
@@ -667,6 +672,9 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 			return nil, Errorf("invalid", "start of %s is not a paragraph", first.Handle)
 		}
 		ip.index, ip.inline, ip.nearBullet, ip.anchor, ip.description = first.Start, true, hasBullet(first), blockRng(tab, seg, first), "start of "+r.Description
+		if first.IsBlankParagraph() {
+			ip.atBlank(first)
+		}
 	default:
 		return nil, Errorf("invalid", "location %q; use start, end, before or after", at)
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/internal/config"
@@ -167,8 +168,11 @@ type ReadRequest struct {
 	IncludeComments bool
 }
 
-// ReadResult is the read_document result. Revision is set instead of
-// RevisionID when an old revision was read through the export path.
+// ReadResult is the read_document result. Text carries the header
+// comment naming the scope, the revision and the continuation, because
+// a client may show the model only a result's text. Revision is set
+// instead of RevisionID when an old revision was read through the
+// export path.
 type ReadResult struct {
 	Text         string
 	RevisionID   string
@@ -219,12 +223,34 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error
 			return nil, &Error{Class: "unexpected", Message: err.Error(), Err: err}
 		}
 	}
-	return &ReadResult{
+	res := &ReadResult{
 		Text: r.Text, RevisionID: f.Doc.RevisionID,
 		TabNumber: rs.Tab.Number, TabID: rs.Tab.ID, TabTitle: rs.Tab.Title,
 		Segment: rs.Segment.Label(), Scope: rs.Description,
 		Blocks: r.Blocks, Chars: r.Chars, Truncated: r.Truncated, ContinueFrom: r.ContinueFrom,
-	}, nil
+	}
+	if format != FormatRaw {
+		res.Text = res.header() + res.Text
+	}
+	return res, nil
+}
+
+// header is the comment above a read: what was read, at which revision,
+// and where to continue.
+func (r *ReadResult) header() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<!-- %s", r.Scope)
+	if r.RevisionID != "" {
+		fmt.Fprintf(&b, " · revision %s · %d block(s)", r.RevisionID, r.Blocks)
+	}
+	if r.Truncated {
+		b.WriteString(" · truncated")
+		if r.ContinueFrom != "" {
+			fmt.Fprintf(&b, ", continue_from %s", r.ContinueFrom)
+		}
+	}
+	b.WriteString(" -->\n")
+	return b.String()
 }
 
 // commentMarks turns the live threads into renderer marks: located

@@ -185,5 +185,6 @@ func (s *Service) ReadRevision(ctx context.Context, ref, revision, format string
 	res := &ReadResult{Revision: revision, Scope: "revision " + revision + " (" + f + " export; no handles, no revision_id)", Segment: "body"}
 	res.Text, res.Truncated = clipUTF8(stripDataURIs(string(data)), maxChars)
 	res.Chars = len(res.Text)
+	res.Text = res.header() + res.Text
 	return res, nil
 }

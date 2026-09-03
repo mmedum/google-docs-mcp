@@ -60,7 +60,7 @@ func TestSegmentByID(t *testing.T) {
 	}
 }
 
-func TestFootnoteFollowupReplacesTheBlankParagraph(t *testing.T) {
+func TestFootnoteFollowupFillsTheBlankParagraph(t *testing.T) {
 	svc, api := writable(t, false)
 	ctx := context.Background()
 	api.replies = []string{`{"replies":[{"createFootnote":{"footnoteId":"kix.newfn"}}],"writeControl":{"requiredRevisionId":"rev-0002"}}`}
@@ -93,5 +93,28 @@ func TestFootnoteFollowupReplacesTheBlankParagraph(t *testing.T) {
 	}
 	if !strings.Contains(res.Changes[0].Description, "content written") {
 		t.Fatalf("changes: %+v", res.Changes)
+	}
+}
+
+// A blank paragraph is filled wherever an insertion lands in one, not
+// only on the follow-up path: appending into a segment whose only
+// paragraph holds a space replaces that space and takes the content's
+// own paragraph style.
+func TestAppendIntoABlankParagraphFillsIt(t *testing.T) {
+	svc, api := writable(t, false)
+	var w gdocs.Document
+	if err := json.Unmarshal(doctest.RawFixture(t), &w); err != nil {
+		t.Fatal(err)
+	}
+	w.Tabs[0].DocumentTab.Headers["kix.h1"] = gdocs.Header{HeaderID: "kix.h1", Content: []*gdocs.StructuralElement{{StartIndex: 0, EndIndex: 2,
+		Paragraph: &gdocs.Paragraph{Elements: []*gdocs.ParagraphElement{{StartIndex: 0, EndIndex: 2, TextRun: &gdocs.TextRun{Content: " \n"}}}}}}}
+	api.raw, _ = json.Marshal(&w)
+	res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", DryRun: true,
+		Ops: []EditOp{{Kind: plan.OpAppend, Content: "# Draft", Target: nil, Location: &Location{At: "end", Of: &Target{Segment: "header1"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(res.RequestKinds, " "); got != "deleteContentRange insertText updateTextStyle updateParagraphStyle" {
+		t.Fatalf("requests = %s", got)
 	}
 }

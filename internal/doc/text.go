@@ -30,17 +30,23 @@ func (r *Run) Visible(v View) bool {
 	return true
 }
 
+// ContributesText reports whether the run puts characters in the
+// paragraph's plain text: text and the chips that show their label.
+func (r *Run) ContributesText() bool {
+	switch r.Kind {
+	case RunText, RunPerson, RunRichLink, RunDate:
+		return true
+	}
+	return false
+}
+
 // Text returns the paragraph's plain text in the view, without the
 // trailing newline. Chips contribute their display text; objects and
 // breaks contribute nothing.
 func (p *Paragraph) Text(v View) string {
 	var b strings.Builder
 	for _, r := range p.Runs {
-		if !r.Visible(v) {
-			continue
-		}
-		switch r.Kind {
-		case RunText, RunPerson, RunRichLink, RunDate:
+		if r.Visible(v) && r.ContributesText() {
 			b.WriteString(r.Text)
 		}
 	}
@@ -135,12 +141,7 @@ func (p *Paragraph) Count(v View) (words, chars int) {
 	inWord := false
 	var last rune
 	for _, r := range p.Runs {
-		if !r.Visible(v) {
-			continue
-		}
-		switch r.Kind {
-		case RunText, RunPerson, RunRichLink, RunDate:
-		default:
+		if !r.Visible(v) || !r.ContributesText() {
 			continue
 		}
 		for _, c := range r.Text {

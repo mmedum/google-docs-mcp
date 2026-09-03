@@ -34,7 +34,7 @@ func BenchmarkParseLarge(b *testing.B) {
 }
 
 func BenchmarkStatsLarge(b *testing.B) {
-	d, _ := doc.Parse(doctest.Large(doctest.DefaultLarge))
+	d := doctest.LargeDoc(b, doctest.DefaultLarge)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -43,7 +43,7 @@ func BenchmarkStatsLarge(b *testing.B) {
 }
 
 func BenchmarkSectionsLarge(b *testing.B) {
-	d, _ := doc.Parse(doctest.Large(doctest.DefaultLarge))
+	d := doctest.LargeDoc(b, doctest.DefaultLarge)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -52,7 +52,7 @@ func BenchmarkSectionsLarge(b *testing.B) {
 }
 
 func BenchmarkHeadingByIDLarge(b *testing.B) {
-	d, _ := doc.Parse(doctest.Large(doctest.DefaultLarge))
+	d := doctest.LargeDoc(b, doctest.DefaultLarge)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -63,7 +63,7 @@ func BenchmarkHeadingByIDLarge(b *testing.B) {
 }
 
 func BenchmarkAllBlocksLarge(b *testing.B) {
-	d, _ := doc.Parse(doctest.Large(doctest.DefaultLarge))
+	d := doctest.LargeDoc(b, doctest.DefaultLarge)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

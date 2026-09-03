@@ -125,7 +125,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
-			if info, ok := plan.Info(kind); !ok || info.Tool != plan.ToolEdit {
+			if !plan.ToolEdit.Has(kind) {
 				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolEdit)))
 			}
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,

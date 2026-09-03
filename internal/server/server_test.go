@@ -376,6 +376,29 @@ func TestAuthFailureSurfacesAsAuthClass(t *testing.T) {
 	}
 }
 
+// Read tools must not declare an output schema: a client that shows the
+// model only structuredContent would then hide the content itself.
+func TestReadToolsAreTextOnly(t *testing.T) {
+	cs := connect(t, &fakeAPI{raw: doctest.RawFixture(t)})
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readOnly := 0
+	for _, tool := range res.Tools {
+		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+			continue
+		}
+		readOnly++
+		if tool.OutputSchema != nil {
+			t.Errorf("%s is read-only but declares an output schema", tool.Name)
+		}
+	}
+	if readOnly < 8 {
+		t.Fatalf("only %d read-only tools found", readOnly)
+	}
+}
+
 func TestDumpSchemas(t *testing.T) {
 	srv := server.New(server.Deps{Config: config.Config{}, Version: "test"})
 	var buf bytes.Buffer

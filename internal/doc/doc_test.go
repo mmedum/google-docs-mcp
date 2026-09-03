@@ -307,10 +307,7 @@ func TestListNumbering(t *testing.T) {
 }
 
 func TestCountMatchesText(t *testing.T) {
-	large, err := doc.Parse(doctest.Large(doctest.LargeSpec{Sections: 2, Subsections: 2, Paragraphs: 3, ListItems: 3, TableEvery: 1, Suggestions: 2, Footnotes: 2}))
-	if err != nil {
-		t.Fatal(err)
-	}
+	large := doctest.LargeDoc(t, doctest.LargeSpec{Sections: 2, Subsections: 2, Paragraphs: 3, ListItems: 3, TableEvery: 1, Suggestions: 2, Footnotes: 2})
 	for _, d := range []*doc.Document{doctest.Fixture(t), large} {
 		for _, b := range d.AllBlocks() {
 			for _, v := range []doc.View{doc.ViewInline, doc.ViewCurrent, doc.ViewAccepted} {

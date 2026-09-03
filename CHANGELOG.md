@@ -19,13 +19,18 @@ and new required fields are breaking; the schema diff in CI flags them.
   the tool-call trace; the design document records the run.
 
 ### Changed
+- Content written where a paragraph holds only whitespace fills that
+  paragraph wherever the insertion lands, not just on the follow-up
+  path: appending into a fresh header, footer or footnote replaces the
+  blank line and takes the content's own paragraph style.
 - Read tools (`get_document`, `get_outline`, `read_document`,
   `find_in_document`, `search_documents`, `export_document`,
   `list_suggestions`, `list_comments`, `list_revisions`, `diff_revisions`)
   return a text block only: Claude Code shows the model only a result's
   structured form when one is present, which made every read look like
-  metadata. Write results keep both forms and their JSON now carries the
-  rendered `preview`.
+  metadata. The scope, revision, block count and continuation now come
+  in a header comment the service builds. Write results keep both forms
+  and their JSON now carries the rendered `preview`.
 - Dry runs list what a second batch will do (`followups`), and the
   content of new headers, footers, footnotes and data-filled tables lands
   through one follow-up edit against the refetched document instead of

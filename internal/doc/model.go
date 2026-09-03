@@ -8,6 +8,7 @@ package doc
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 )
@@ -225,6 +226,13 @@ func (s *Segment) ContentBlocks() []*Block {
 // its newline.
 func (b *Block) IsEmptyParagraph() bool {
 	return b.Paragraph != nil && b.End-b.Start == 1
+}
+
+// IsBlankParagraph reports whether the block is a paragraph with nothing
+// but whitespace in it: empty, or holding only spaces (as a footnote
+// Google has just created does). Content written there fills it.
+func (b *Block) IsBlankParagraph() bool {
+	return b.Paragraph != nil && strings.TrimSpace(b.Paragraph.Text(ViewInline)) == ""
 }
 
 // BlockKind is the structural element type.

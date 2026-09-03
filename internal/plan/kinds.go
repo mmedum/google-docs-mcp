@@ -56,6 +56,12 @@ type KindInfo struct {
 	// SuggestRefused names the request kind the API refuses in SUGGEST
 	// mode, when the op compiles to one.
 	SuggestRefused string
+	// Reply names the batchUpdate reply an op that creates a segment
+	// comes back in; the reply carries the new segment's id.
+	Reply string
+	// Noun is what the op works on, for messages: "header", "footer",
+	// "footnote", "table".
+	Noun string
 }
 
 type kindEntry struct {
@@ -71,18 +77,18 @@ var kindTable = []kindEntry{
 	{OpDelete, KindInfo{Tool: ToolEdit, Shape: ShapeTarget, Deletes: true}},
 	{OpReplaceAll, KindInfo{Tool: ToolEdit, Shape: ShapeNone, Deletes: true, Group: GroupGlobal}},
 	{OpPageBreak, KindInfo{Tool: ToolEdit, Shape: ShapeInsert}},
-	{OpFootnote, KindInfo{Tool: ToolEdit, Shape: ShapeInsert, Content: true, Followup: true}},
-	{OpCreateHeader, KindInfo{Tool: ToolEdit, Shape: ShapeNone, Content: true, Group: GroupSegment, Followup: true}},
-	{OpCreateFooter, KindInfo{Tool: ToolEdit, Shape: ShapeNone, Content: true, Group: GroupSegment, Followup: true}},
-	{OpDeleteHeader, KindInfo{Tool: ToolEdit, Shape: ShapeSegment, Deletes: true, Group: GroupSegment, SuggestRefused: "deleteHeader"}},
-	{OpDeleteFooter, KindInfo{Tool: ToolEdit, Shape: ShapeSegment, Deletes: true, Group: GroupSegment, SuggestRefused: "deleteFooter"}},
+	{OpFootnote, KindInfo{Tool: ToolEdit, Shape: ShapeInsert, Content: true, Followup: true, Reply: "createFootnote", Noun: "footnote"}},
+	{OpCreateHeader, KindInfo{Tool: ToolEdit, Shape: ShapeNone, Content: true, Group: GroupSegment, Followup: true, Reply: "createHeader", Noun: "header"}},
+	{OpCreateFooter, KindInfo{Tool: ToolEdit, Shape: ShapeNone, Content: true, Group: GroupSegment, Followup: true, Reply: "createFooter", Noun: "footer"}},
+	{OpDeleteHeader, KindInfo{Tool: ToolEdit, Shape: ShapeSegment, Deletes: true, Group: GroupSegment, SuggestRefused: "deleteHeader", Noun: "header"}},
+	{OpDeleteFooter, KindInfo{Tool: ToolEdit, Shape: ShapeSegment, Deletes: true, Group: GroupSegment, SuggestRefused: "deleteFooter", Noun: "footer"}},
 
 	{OpTextStyle, KindInfo{Tool: ToolFormat, Shape: ShapeTarget, Group: GroupFormat}},
 	{OpParagraphStyle, KindInfo{Tool: ToolFormat, Shape: ShapeTarget, Group: GroupFormat}},
 	{OpBullets, KindInfo{Tool: ToolFormat, Shape: ShapeTarget, Group: GroupBullets}},
 	{OpClearFormatting, KindInfo{Tool: ToolFormat, Shape: ShapeTarget, Group: GroupFormat}},
 
-	{OpInsertTable, KindInfo{Tool: ToolTable, Shape: ShapeInsert, Followup: true}},
+	{OpInsertTable, KindInfo{Tool: ToolTable, Shape: ShapeInsert, Followup: true, Noun: "table"}},
 	// set_cells is expanded by the service into replace ops on cells and
 	// never reaches the planner; it deletes what those replaces delete.
 	{OpSetCells, KindInfo{Tool: ToolTable, Shape: ShapeTable, Deletes: true}},
@@ -113,6 +119,33 @@ func Info(k OpKind) (info KindInfo, ok bool) {
 	return info, ok
 }
 
+// Noun is what the kind works on, for messages.
+func Noun(k OpKind) string { return kindInfos[k].Noun }
+
+// Has reports whether the kind belongs to this tool.
+func (t Tool) Has(k OpKind) bool { return kindInfos[k].Tool == t }
+
+// SegmentReplies lists the kinds whose reply names a new segment, with
+// the reply key, in registry order.
+func SegmentReplies() []struct {
+	Kind  OpKind
+	Reply string
+} {
+	var out []struct {
+		Kind  OpKind
+		Reply string
+	}
+	for _, e := range kindTable {
+		if e.info.Reply != "" {
+			out = append(out, struct {
+				Kind  OpKind
+				Reply string
+			}{e.kind, e.info.Reply})
+		}
+	}
+	return out
+}
+
 // KindsOf lists a tool's op kinds in registry order.
 func KindsOf(t Tool) []OpKind {
 	var out []OpKind
@@ -140,9 +173,6 @@ func KindList(t Tool) string {
 // Deletes reports whether the kind removes existing content, which is
 // what the overwrite guard protects.
 func Deletes(k OpKind) bool { return kindInfos[k].Deletes }
-
-// IsTableOp reports whether the kind belongs to edit_table.
-func IsTableOp(k OpKind) bool { return kindInfos[k].Tool == ToolTable }
 
 // isStructural reports whether the op changes a table's grid.
 func isStructural(k OpKind) bool { return kindInfos[k].Structural }

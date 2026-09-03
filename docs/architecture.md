@@ -508,21 +508,30 @@ preview included. Measured in the Phase 3 evals (§14).
 - Caching: none for correctness; a 5-second coalescing cache keyed by
   (docId, revisionId). Writes always re-fetch.
 - Logging: `slog` to stderr, text or JSON. Stdout carries only JSON-RPC.
-- Performance (Phase 3, measured 2026-09-03 with `make bench` on
-  `doctest.Large`: about 150 pages, 6 400 body blocks, 130 tables, 300
-  comments, 200 suggestions, 100 footnotes). Everything derived from one
-  fetch is derived once: the handle memory, the located comment threads,
-  and per segment a searchable text (every paragraph's normalised
-  characters in one string, so a text target or a quoted comment is one
-  `strings.Index` pass) and a sorted anchor list. Handles and cells are
-  map lookups, list numbers are assigned at parse time, and word counts
-  never build strings. Per operation on that fixture: JSON decode 20 ms
-  and parse 7 ms per fetch; a cached section read 0.1 ms (was 14.5 ms);
-  the outline 3.6 ms (was 15.8 ms); the whole body as markdown 7.4 ms;
-  a text target 0.6 ms warm (was 22 ms); `find_in_document` 3.6 ms warm
-  (was 52 ms); locating 300 quoted comments on a fresh fetch 38 ms (was
-  384 ms); a two-op dry run on a fresh fetch 20 ms (was 61 ms). The
-  remaining cost per write is the fetch itself.
+- Performance (Phase 3). Everything derived from one fetch is derived
+  once: the handle memory, the located comment threads, and per segment
+  a searchable text (every paragraph's normalised characters in one
+  string, so a text target or a quoted comment is one `strings.Index`
+  pass; a match maps back to indices through a byte offset per
+  paragraph, not per rune) and a sorted anchor list. Handles and cells
+  are map lookups, list numbers are assigned at parse time, and word
+  counts never build strings. `make bench` over `doctest.Large` (about
+  150 pages: 6 400 body blocks, 130 tables, 300 comments, 200
+  suggestions, 100 footnotes), one machine, 2026-09-03:
+
+  | per fetch | | per call, document cached | |
+  |---|---|---|---|
+  | JSON decode | 43 ms | section read | 0.10 ms |
+  | parse | 11 ms | text target | 0.07 ms |
+  | locate 300 quoted comments | 43 ms | `find_in_document` | 3.3 ms |
+  | locate 300 anchored comments | 6.8 ms | outline | 4.2 ms |
+  | two-op dry run | 22 ms | whole body as markdown | 8.0 ms |
+  | handle memory | 0.00002 ms | budgeted read (20 k chars) | 0.19 ms |
+
+  Measured against the same fixture before the work, in one session: a
+  cached section read was 145× slower, the outline 4×, a text target
+  40×, `find_in_document` 15×, locating quoted comments 10×, a dry run
+  3×. What remains per write is the fetch itself.
 
 ## 12. Confidentiality, security, safety
 
@@ -702,9 +711,8 @@ guard, `read_document include_comments` and `list_comments`. Still open:
 - **`list_comments` text.** Still formatted in the service: it shows
   reply threads with authors and times, which the renderer has no model
   for; the read footer and it agree on the one-line thread summary.
-- **Read-tool text.** `get_document`'s text and the read header are
-  still shaped in the tool layer; the write tools now take their text
-  from the service.
+- **`get_document` text.** Still shaped in the tool layer (`infoText`);
+  every other result's text now comes from the service.
 
 ## 18. Evidence log: conventions checked, changed, or rejected
 

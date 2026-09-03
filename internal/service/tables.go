@@ -191,12 +191,7 @@ func tableLineAnchors(f *Fetched, b *doc.Block, rows bool, indices map[int]bool,
 			if !indices[line] {
 				continue
 			}
-			for _, a := range anchorsWithin(all, c.Start, c.End) {
-				if key := a.Kind + ":" + a.ID; !seen[key] {
-					seen[key] = true
-					out = append(out, a)
-				}
-			}
+			out = appendUnique(seen, out, anchorsWithin(all, c.Start, c.End)...)
 		}
 	}
 	return out
@@ -217,12 +212,7 @@ func mergedAnchors(f *Fetched, b *doc.Block, tp *plan.TableParams, threads []Com
 				continue
 			}
 			c := b.Table.Cells[ri][ci]
-			for _, a := range anchorsWithin(all, c.Start, c.End) {
-				if key := a.Kind + ":" + a.ID; !seen[key] {
-					seen[key] = true
-					out = append(out, a)
-				}
-			}
+			out = appendUnique(seen, out, anchorsWithin(all, c.Start, c.End)...)
 		}
 	}
 	return out

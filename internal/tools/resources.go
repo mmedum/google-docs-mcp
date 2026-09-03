@@ -84,8 +84,7 @@ func registerResources(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, resourceError(req.Params.URI, err)
 		}
-		return markdownResource(req.Params.URI, readHeader(&ReadOutput{RevisionID: res.RevisionID, Scope: res.Scope, Blocks: res.Blocks,
-			Truncated: res.Truncated, ContinueFrom: res.ContinueFrom}, service.FormatMarkdown)+res.Text), nil
+		return markdownResource(req.Params.URI, res.Text), nil
 	})
 }
 

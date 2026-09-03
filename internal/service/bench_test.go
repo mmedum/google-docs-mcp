@@ -31,7 +31,7 @@ func largeService(b *testing.B, spec doctest.LargeSpec) (*Service, *Fetched) {
 	svc := New(&largeAPI{wire: doctest.Large(spec)}, Options{Preview: true})
 	fixed := time.Unix(1000, 0)
 	svc.now = func() time.Time { return fixed }
-	f, err := svc.Fetch(context.Background(), doctest.Large(doctest.LargeSpec{}).DocumentID)
+	f, err := svc.Fetch(context.Background(), doctest.LargeID)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func BenchmarkLocateCommentsQuotedLarge(b *testing.B) {
 
 func benchLocate(b *testing.B, svc *Service) {
 	b.Helper()
-	id := doctest.Large(doctest.LargeSpec{}).DocumentID
+	id := doctest.LargeID
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

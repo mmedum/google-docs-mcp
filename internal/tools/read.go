@@ -28,13 +28,9 @@ type OutlineInput struct {
 // Read tools return text only. A client may show the model either a
 // result's text or its structured form (Claude Code shows only the
 // structured form when both are present), so a tool whose substance is
-// prose carries it in the one form every client shows.
-
-// OutlineOutput is the structured outline.
-type OutlineOutput struct {
-	RevisionID string              `json:"revision_id"`
-	Tabs       []render.OutlineTab `json:"tabs"`
-}
+// prose carries it in the one form every client shows; the service puts
+// the revision, block count and continuation in a header comment above
+// the content.
 
 // ReadInput scopes a read.
 type ReadInput struct {
@@ -55,23 +51,6 @@ type ReadInput struct {
 	IncludeComments    bool   `json:"include_comments,omitempty" jsonschema:"mark commented passages with {>>c:<comment id><<} right after the text they cover and list those threads below the content"`
 	MaxChars           int    `json:"max_chars,omitempty" jsonschema:"output budget in characters, cut at a block boundary; default 20000, maximum 400000"`
 	Revision           string `json:"revision,omitempty" jsonschema:"read an old revision by its id from list_revisions: Google's markdown or text export of the whole document at that time, with no handles or scoping"`
-}
-
-// ReadOutput describes what was read. Revision is a Drive revision id
-// when an old revision was read; revision_id is then empty because that
-// content has no concurrency token.
-type ReadOutput struct {
-	RevisionID   string `json:"revision_id,omitempty"`
-	Revision     string `json:"revision,omitempty"`
-	Tab          int    `json:"tab"`
-	TabID        string `json:"tab_id,omitempty"`
-	TabTitle     string `json:"tab_title,omitempty"`
-	Segment      string `json:"segment"`
-	Scope        string `json:"scope"`
-	Blocks       int    `json:"blocks"`
-	Chars        int    `json:"chars"`
-	Truncated    bool   `json:"truncated"`
-	ContinueFrom string `json:"continue_from,omitempty"`
 }
 
 func registerRead(s *mcp.Server, d Deps) {
@@ -139,8 +118,7 @@ func registerRead(s *mcp.Server, d Deps) {
 			if err != nil {
 				return nil, nil, fail(err)
 			}
-			out := &ReadOutput{Revision: res.Revision, Segment: res.Segment, Scope: res.Scope, Chars: res.Chars, Truncated: res.Truncated}
-			return text(readHeader(out, in.Format) + res.Text), nil, nil
+			return text(res.Text), nil, nil
 		}
 		res, err := d.Service.Read(ctx, service.ReadRequest{
 			Document: in.Document,
@@ -156,29 +134,8 @@ func registerRead(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		out := &ReadOutput{RevisionID: res.RevisionID, Tab: res.TabNumber, TabID: res.TabID, TabTitle: res.TabTitle,
-			Segment: res.Segment, Scope: res.Scope, Blocks: res.Blocks, Chars: res.Chars, Truncated: res.Truncated, ContinueFrom: res.ContinueFrom}
-		return text(readHeader(out, in.Format) + res.Text), nil, nil
+		return text(res.Text), nil, nil
 	})
-}
-
-func readHeader(o *ReadOutput, format string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "<!-- %s", o.Scope)
-	if o.RevisionID != "" {
-		fmt.Fprintf(&b, " · revision %s · %d block(s)", o.RevisionID, o.Blocks)
-	}
-	if o.Truncated {
-		b.WriteString(" · truncated")
-		if o.ContinueFrom != "" {
-			fmt.Fprintf(&b, ", continue_from %s", o.ContinueFrom)
-		}
-	}
-	b.WriteString(" -->\n")
-	if strings.EqualFold(format, service.FormatRaw) {
-		return ""
-	}
-	return b.String()
 }
 
 func infoText(i *service.Info) string {

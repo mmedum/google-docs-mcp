@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
 	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 )
@@ -14,10 +13,7 @@ import (
 // counts match the spec.
 func TestLargeFixtureIsConsistent(t *testing.T) {
 	spec := doctest.LargeSpec{Sections: 3, Subsections: 2, Paragraphs: 4, ListItems: 4, TableEvery: 2, Comments: 5, Anchored: true, Suggestions: 3, Footnotes: 2, Tabs: 2}
-	d, err := doc.Parse(doctest.Large(spec))
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := doctest.LargeDoc(t, spec)
 	if len(d.Tabs) != 2 {
 		t.Fatalf("tabs = %d", len(d.Tabs))
 	}

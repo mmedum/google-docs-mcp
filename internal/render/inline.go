@@ -65,11 +65,16 @@ type span struct {
 
 func suggestionKey(ids []string) string { return strings.Join(ids, ",") }
 
+// locatedIn reports whether the thread was located in this segment.
+func (m Mark) locatedIn(seg *doc.Segment) bool {
+	return m.Handle != "" && m.SegmentID == seg.ID && m.TabID == seg.Tab.ID
+}
+
 // marksFor keeps the located marks of one segment, sorted by end offset.
 func marksFor(marks []Mark, seg *doc.Segment) []Mark {
 	var out []Mark
 	for _, m := range marks {
-		if m.Handle != "" && m.SegmentID == seg.ID && m.TabID == seg.Tab.ID {
+		if m.locatedIn(seg) {
 			out = append(out, m)
 		}
 	}
@@ -91,7 +96,7 @@ func commentFooter(seg *doc.Segment, from int, res Result, marks []Mark) string 
 	var sb strings.Builder
 	other := 0
 	for _, m := range marks {
-		inRange := m.Handle != "" && m.TabID == seg.Tab.ID && m.SegmentID == seg.ID && m.End > start && m.Start < end
+		inRange := m.locatedIn(seg) && m.End > start && m.Start < end
 		if !inRange {
 			other++
 			continue

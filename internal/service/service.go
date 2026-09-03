@@ -295,8 +295,13 @@ func segmentAt(d *doc.Document, tabID, segID string) *doc.Segment {
 	if !ok {
 		return nil
 	}
+	return segmentByID(tab, segID)
+}
+
+// segmentByID finds one of a tab's segments by its API id.
+func segmentByID(tab *doc.Tab, id string) *doc.Segment {
 	for _, seg := range tab.Segments() {
-		if seg.ID == segID {
+		if seg.ID == id {
 			return seg
 		}
 	}

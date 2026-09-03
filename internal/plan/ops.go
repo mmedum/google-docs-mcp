@@ -64,6 +64,9 @@ type Anchor struct {
 	Text  string
 }
 
+// Key identifies the anchored thing, for de-duplicating across ranges.
+func (a Anchor) Key() string { return a.Kind + ":" + a.ID }
+
 // Params are the caller-supplied arguments an op carries unchanged
 // from the tool layer to the planner.
 type Params struct {
@@ -106,9 +109,11 @@ type Op struct {
 	// Inline says the insertion point is inside a paragraph: the first
 	// fragment paragraph merges into it and no boundary newline is added.
 	Inline bool
-	// Fills says that paragraph is empty, so the first fragment paragraph
-	// styles it rather than inheriting its style.
-	Fills bool
+	// Fill says that paragraph is blank, so the first fragment paragraph
+	// styles it rather than inheriting its style. ClearTo, when greater
+	// than the insertion point, is the whitespace the fill replaces.
+	Fill    bool
+	ClearTo int64
 	// NearBullet says the paragraph at the insertion point is a list item.
 	NearBullet bool
 
@@ -140,20 +145,6 @@ type Proposal struct {
 	Quote   string
 }
 
-// Followup is content that lands in a second batch once the first has
-// created its home: a new header, footer or footnote (the reply names
-// the segment) or a table inserted with a data grid (found again by the
-// handle its position predicts).
-type Followup struct {
-	Seq      int
-	Kind     OpKind
-	Fragment *markdown.Fragment
-	Seg      Segment
-	// Insert and Table describe an insert_table op's place and grid.
-	Insert *Loc
-	Table  TableParams
-}
-
 // OpSummary describes what an op compiled to.
 type OpSummary struct {
 	Seq         int    `json:"op"`
@@ -167,7 +158,11 @@ type OpSummary struct {
 type Result struct {
 	Requests  []json.RawMessage
 	Proposals []Proposal
-	Followups []Followup
+	// Followups are the ops whose content lands in a second batch once
+	// the first has created its home: a new header, footer or footnote
+	// (the reply names the segment) or a table inserted with a data grid
+	// (found again by the handle its position predicts).
+	Followups []*Op
 	Warnings  []string
 	Summary   []OpSummary
 }
@@ -280,7 +275,7 @@ func compile(ops []Op, res *Result, add func(*Op, []json.RawMessage, bool)) erro
 		}
 		add(op, reqs, minimal)
 		if op.NeedsFollowup() {
-			res.Followups = append(res.Followups, Followup{Seq: op.Seq, Kind: op.Kind, Fragment: op.Fragment, Seg: op.Seg, Insert: op.Insert, Table: op.Table})
+			res.Followups = append(res.Followups, op)
 		}
 	}
 	for _, op := range bullets {
@@ -514,9 +509,14 @@ func formatRequests(op *Op) []json.RawMessage {
 func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
-		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline, Inline: op.Inline, Fill: op.Fills, NearBullet: op.NearBullet})
+		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline, Inline: op.Inline, Fill: op.Fill, NearBullet: op.NearBullet})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
+		}
+		if op.ClearTo > op.Insert.Index {
+			// The paragraph being filled holds whitespace; clear it first
+			// so the later requests see the indices they were built for.
+			return append([]json.RawMessage{DeleteRange(Rng{Start: op.Insert.Index, End: op.ClearTo, SegmentID: op.Seg.ID, TabID: op.Seg.TabID})}, c.Requests...), false, nil
 		}
 		return c.Requests, false, nil
 	case OpPageBreak:
@@ -539,7 +539,7 @@ func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
 		reqs, err := objectRequests(op)
 		return reqs, false, err
 	}
-	if IsTableOp(op.Kind) {
+	if ToolTable.Has(op.Kind) {
 		reqs, err := tableRequests(op)
 		return reqs, false, err
 	}
@@ -647,7 +647,7 @@ func proposal(op *Op) (Proposal, error) {
 	case OpInsertObject:
 		p.Content = objectProposal(op)
 	default:
-		if IsTableOp(op.Kind) {
+		if ToolTable.Has(op.Kind) {
 			p.Content = tableProposal(op)
 		}
 	}

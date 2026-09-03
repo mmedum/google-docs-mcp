@@ -159,10 +159,8 @@ func selectSegment(tab *doc.Tab, ref string) (*doc.Segment, error) {
 		return tab.Body, nil
 	}
 	// A segment id (as the raw format and the API show it) names it directly.
-	for _, seg := range tab.Segments() {
-		if seg.ID != "" && seg.ID == ref {
-			return seg, nil
-		}
+	if seg := segmentByID(tab, ref); seg != nil {
+		return seg, nil
 	}
 	ref = strings.ToLower(ref)
 	m := segmentRef.FindStringSubmatch(ref)

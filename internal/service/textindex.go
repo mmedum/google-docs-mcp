@@ -19,18 +19,21 @@ import (
 // and segment, on first use.
 type segText struct {
 	units []unit     // normalised characters; a '\n' unit separates paragraphs
-	text  string     // the units' runes
-	pos   []int      // byte offset in text of each unit, plus the end
+	text  string     // the units' runes, one rune per unit
 	paras []textPara // paragraph blocks in order with their unit ranges
 
 	foldOnce sync.Once
-	fold     string // text lower-cased rune by rune
-	foldPos  []int
+	fold     string // text lower-cased rune by rune, still one rune per unit
 }
 
 type textPara struct {
 	block    *doc.Block
 	from, to int // unit range
+	// byteAt is where the paragraph's first unit starts in text, foldAt
+	// the same in fold; lower-casing keeps one rune per unit but may
+	// change how many bytes it takes.
+	byteAt int
+	foldAt int
 }
 
 // textHit is one match: the paragraph and the UTF-16 span.
@@ -56,7 +59,7 @@ func buildSegText(seg *doc.Segment) *segText {
 			}
 		}
 	}
-	x := &segText{units: make([]unit, 0, runes+paras), pos: make([]int, 0, runes+paras+1), paras: make([]textPara, 0, paras)}
+	x := &segText{units: make([]unit, 0, runes+paras), paras: make([]textPara, 0, paras)}
 	var sb strings.Builder
 	sb.Grow(bytes + paras)
 	for _, b := range blocks {
@@ -64,32 +67,34 @@ func buildSegText(seg *doc.Segment) *segText {
 			continue
 		}
 		if len(x.units) > 0 {
-			x.pos = append(x.pos, sb.Len())
 			x.units = append(x.units, unit{r: '\n'})
 			sb.WriteByte('\n')
 		}
-		from := len(x.units)
+		from, byteAt := len(x.units), sb.Len()
 		x.units = appendUnits(x.units, b.Paragraph)
 		for _, u := range x.units[from:] {
-			x.pos = append(x.pos, sb.Len())
 			sb.WriteRune(u.r)
 		}
-		x.paras = append(x.paras, textPara{b, from, len(x.units)})
+		x.paras = append(x.paras, textPara{block: b, from: from, to: len(x.units), byteAt: byteAt})
 	}
-	x.pos = append(x.pos, sb.Len())
 	x.text = sb.String()
 	return x
 }
 
+// buildFold lower-cases rune by rune, so the fold keeps one rune per
+// unit even where the byte length changes, and records where each
+// paragraph starts in it.
 func (x *segText) buildFold() {
 	var sb strings.Builder
 	sb.Grow(len(x.text))
-	x.foldPos = make([]int, 0, len(x.pos))
-	for _, u := range x.units {
-		x.foldPos = append(x.foldPos, sb.Len())
+	next := 0
+	for i, u := range x.units {
+		if next < len(x.paras) && x.paras[next].from == i {
+			x.paras[next].foldAt = sb.Len()
+			next++
+		}
 		sb.WriteRune(unicode.ToLower(u.r))
 	}
-	x.foldPos = append(x.foldPos, sb.Len())
 	x.fold = sb.String()
 }
 
@@ -103,29 +108,39 @@ func (x *segText) find(needle string, caseFold bool) []textHit {
 	if needle == "" {
 		return nil
 	}
-	hay, pos := x.text, x.pos
+	hay := x.text
 	if caseFold {
 		x.foldOnce.Do(x.buildFold)
-		hay, pos = x.fold, x.foldPos
+		hay = x.fold
 		needle = foldString(needle)
 	}
+	// A needle never holds the newline that separates paragraphs, so a
+	// match lies inside one paragraph: find it by its byte offset, then
+	// count runes from its start to reach the unit index.
+	byteAt := func(k int) int {
+		if caseFold {
+			return x.paras[k].foldAt
+		}
+		return x.paras[k].byteAt
+	}
 	var hits []textHit
+	needleRunes := utf8.RuneCountInString(needle)
 	for off := 0; ; {
 		i := strings.Index(hay[off:], needle)
 		if i < 0 {
 			return hits
 		}
 		start := off + i
-		end := start + len(needle)
-		// Matches start and end on rune boundaries, which are unit
-		// boundaries, so both offsets are in pos.
-		ui := sort.SearchInts(pos, start)
-		uj := sort.SearchInts(pos, end)
-		p := sort.Search(len(x.paras), func(k int) bool { return x.paras[k].to > ui })
-		if p < len(x.paras) && x.paras[p].from <= ui && uj > ui {
+		off = start + len(needle)
+		p := sort.Search(len(x.paras), func(k int) bool { return byteAt(k) > start }) - 1
+		if p < 0 {
+			continue
+		}
+		ui := x.paras[p].from + utf8.RuneCountInString(hay[byteAt(p):start])
+		uj := ui + needleRunes
+		if ui >= x.paras[p].from && uj <= x.paras[p].to {
 			hits = append(hits, textHit{x.paras[p].block, x.units[ui].start, x.units[uj-1].end})
 		}
-		off = end
 	}
 }
 
@@ -204,21 +219,29 @@ func (f *Fetched) anchorsIn(seg *doc.Segment, start, end int64, threads []Commen
 		if a.Start >= end {
 			break
 		}
-		if a.End <= start || seen[a.Kind+":"+a.ID] {
-			continue
+		if a.End > start {
+			out = appendUnique(seen, out, a)
 		}
-		seen[a.Kind+":"+a.ID] = true
-		out = append(out, a)
 	}
 	for _, t := range threads {
 		if t.Handle == "" || t.Tab != seg.Tab.ID || t.Segment != seg.ID || t.Resolved || t.Deleted {
 			continue
 		}
-		if t.End > start && t.Start < end && !seen["comment:"+t.ID] {
-			seen["comment:"+t.ID] = true
-			out = append(out, plan.Anchor{Kind: "comment", ID: t.ID, Start: t.Start, End: t.End, Text: t.Quote})
+		if t.End > start && t.Start < end {
+			out = appendUnique(seen, out, plan.Anchor{Kind: "comment", ID: t.ID, Start: t.Start, End: t.End, Text: t.Quote})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Start < out[j].Start })
 	return out
+}
+
+// appendUnique adds the anchors dst does not already hold.
+func appendUnique(seen map[string]bool, dst []plan.Anchor, as ...plan.Anchor) []plan.Anchor {
+	for _, a := range as {
+		if !seen[a.Key()] {
+			seen[a.Key()] = true
+			dst = append(dst, a)
+		}
+	}
+	return dst
 }

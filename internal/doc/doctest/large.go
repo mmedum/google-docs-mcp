@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"testing"
 
 	"github.com/mmedum/google-docs-mcp/internal/doc"
 	"github.com/mmedum/google-docs-mcp/internal/gdocs"
 )
+
+// LargeID is the synthetic large document's id.
+const LargeID = "1LargeSyntheticDocumentIdXXXXXXXXXXXXXXXXXXXXX"
 
 // LargeSpec sizes a synthetic document.
 type LargeSpec struct {
@@ -35,7 +39,7 @@ func Large(spec LargeSpec) *gdocs.Document {
 	if spec.Tabs < 1 {
 		spec.Tabs = 1
 	}
-	d := &gdocs.Document{DocumentID: "1LargeSyntheticDocumentIdXXXXXXXXXXXXXXXXXXXXX", Title: "Large synthetic document", RevisionID: "rev-large"}
+	d := &gdocs.Document{DocumentID: LargeID, Title: "Large synthetic document", RevisionID: "rev-large"}
 	for tab := 1; tab <= spec.Tabs; tab++ {
 		b := &largeBuilder{spec: spec, tab: tab, footnotes: map[string]gdocs.Footnote{}}
 		b.build()
@@ -55,6 +59,17 @@ func Large(spec LargeSpec) *gdocs.Document {
 			TabProperties: &gdocs.TabProperties{TabID: "t." + strconv.Itoa(tab), Title: "Tab " + strconv.Itoa(tab), Index: int64(tab - 1)},
 			DocumentTab:   dt,
 		})
+	}
+	return d
+}
+
+// LargeDoc parses a synthetic large document, as Fixture does for the
+// small one.
+func LargeDoc(tb testing.TB, spec LargeSpec) *doc.Document {
+	tb.Helper()
+	d, err := doc.Parse(Large(spec))
+	if err != nil {
+		tb.Fatalf("parse large fixture: %v", err)
 	}
 	return d
 }

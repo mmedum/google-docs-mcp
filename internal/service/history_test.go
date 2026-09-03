@@ -81,7 +81,7 @@ func TestDiffRevisionsAndReadRevision(t *testing.T) {
 		}
 	}
 	rr, err := svc.ReadRevision(ctx, fixtureID, "2", "", 12)
-	if err != nil || rr.Text != "# Title\n\nnew" || !rr.Truncated || rr.Revision != "2" || rr.RevisionID != "" || !strings.Contains(rr.Scope, "no handles") {
+	if err != nil || !strings.HasSuffix(rr.Text, "-->\n# Title\n\nnew") || !rr.Truncated || rr.Revision != "2" || rr.RevisionID != "" || !strings.Contains(rr.Scope, "no handles") {
 		t.Fatalf("read revision: %+v %v", rr, err)
 	}
 	if _, err := svc.ReadRevision(ctx, fixtureID, "2", "raw", 0); classOf(err) != "invalid" {

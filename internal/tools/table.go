@@ -75,7 +75,7 @@ func registerTable(s *mcp.Server, d Deps) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
-			if !plan.IsTableOp(kind) {
+			if !plan.ToolTable.Has(kind) {
 				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolTable)))
 			}
 			ops = append(ops, service.EditOp{Kind: kind, Table: o.tableOp(), ContentFormat: o.ContentFormat, Location: o.Location.location()})

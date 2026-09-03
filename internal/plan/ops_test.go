@@ -330,16 +330,35 @@ func TestKindRegistryCoversEveryTool(t *testing.T) {
 			if !ok || info.Tool != tool {
 				t.Errorf("%s: info = %+v, %t", k, info, ok)
 			}
-			if IsTableOp(k) != (tool == ToolTable) {
-				t.Errorf("%s: IsTableOp = %t", k, IsTableOp(k))
+			if ToolTable.Has(k) != (tool == ToolTable) {
+				t.Errorf("%s: ToolTable.Has = %t", k, ToolTable.Has(k))
 			}
 		}
 	}
 	if total != len(kindTable) {
 		t.Errorf("%d kinds listed by tool, %d in the registry", total, len(kindTable))
 	}
-	if _, ok := Info("bogus"); ok {
+	if _, ok := Info("bogus"); ok || ToolEdit.Has("bogus") || Noun("bogus") != "" {
 		t.Error("unknown kind found")
+	}
+	// Every kind that creates a segment names the reply it comes back in.
+	replies := map[OpKind]string{}
+	for _, r := range SegmentReplies() {
+		replies[r.Kind] = r.Reply
+	}
+	wantReplies := map[OpKind]string{OpFootnote: "createFootnote", OpCreateHeader: "createHeader", OpCreateFooter: "createFooter"}
+	if len(replies) != len(wantReplies) {
+		t.Errorf("segment replies = %v", replies)
+	}
+	for k, v := range wantReplies {
+		if replies[k] != v {
+			t.Errorf("%s reply = %q, want %q", k, replies[k], v)
+		}
+	}
+	for _, k := range []OpKind{OpCreateHeader, OpDeleteHeader} {
+		if Noun(k) != "header" {
+			t.Errorf("%s noun = %q", k, Noun(k))
+		}
 	}
 	deleting := []OpKind{OpReplace, OpDelete, OpReplaceAll, OpSetCells, OpDeleteRows, OpDeleteColumns, OpMergeCells, OpDeleteHeader, OpDeleteFooter}
 	for _, k := range deleting {

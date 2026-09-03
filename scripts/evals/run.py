@@ -100,8 +100,8 @@ Numbers go here.
 Closing line with a [link](https://example.com)."""
 
 
-def seed(server, name, content=SEED):
-    text, sc = server.must("create_document", {"title": f"google-docs-mcp eval {name} (safe to delete)", "content": content})
+def seed(server, name):
+    text, sc = server.must("create_document", {"title": f"google-docs-mcp eval {name} (safe to delete)", "content": SEED})
     doc = sc.get("id")
     if not doc:
         raise SystemExit("create_document returned no id: " + text)
@@ -112,17 +112,27 @@ def read(server, doc, **args):
     return server.must("read_document", dict({"document": doc, "with_handles": True}, **args))[0]
 
 
+def scraped(pattern, text, what):
+    """One number out of a tool's text. The wording is the model's
+    contract, not ours, so a miss is a harness failure, not a task one."""
+    m = re.search(pattern, text, re.M)
+    if not m:
+        raise SystemExit(f"cannot read {what} from the tool text; the wording changed:\n{text[:400]}")
+    return int(m.group(1))
+
+
 def pending_suggestions(server, doc):
     text, _ = server.must("list_suggestions", {"document": doc})
-    m = re.match(r"(\d+) pending suggestion", text)
-    return int(m.group(1)) if m else -1
+    return scraped(r"^(\d+) pending suggestion", text, "the suggestion count")
 
 
 def info(server, doc):
     """get_document's text as numbers: footnotes and tab titles."""
     text, _ = server.must("get_document", {"document": doc})
-    m = re.search(r"(\d+) footnotes", text)
-    return {"footnotes": int(m.group(1)) if m else -1, "tabs": re.findall(r'^- tab \d+ "(.*?)"', text, re.M)}
+    tabs = re.findall(r'^- tab \d+ "(.*?)"', text, re.M)
+    if not tabs:
+        raise SystemExit(f"cannot read the tab list from get_document; the wording changed:\n{text[:400]}")
+    return {"footnotes": scraped(r"(\d+) footnotes", text, "the footnote count"), "tabs": tabs}
 
 
 def threads(server, doc):
@@ -188,15 +198,6 @@ def calls_to(trace, name):
     return [c for c in trace["calls"] if tool(c) == name]
 
 
-def ops_of(trace, *tools):
-    out = []
-    for c in trace["calls"]:
-        if tool(c) in tools:
-            for op in (c.get("input") or {}).get("ops") or []:
-                out.append((c, op))
-    return out
-
-
 def writes(trace):
     return [c for c in trace["calls"] if tool(c) in WRITE_TOOLS]
 
@@ -212,7 +213,7 @@ def t_replace_suggest(server, doc, trace):
     md = read(server, doc, include_suggestions=True)
     return [
         ("one pending suggestion", pending == 1, f"{pending} pending"),
-        ("suggestion inserts 'substantially'", "{++substantially" in md or "substantially" in md and "{--a lot--}" in md, md[:300]),
+        ("suggestion inserts 'substantially'", "{++substantially" in md or ("substantially" in md and "{--a lot--}" in md), md[:300]),
         ("committed text still says 'a lot'", "a lot" in read(server, doc), ""),
         ("used mode suggest", all((c["input"] or {}).get("mode") == "suggest" for c in writes(trace)) and bool(writes(trace)), str([(tool(c), (c["input"] or {}).get("mode")) for c in writes(trace)])),
     ]

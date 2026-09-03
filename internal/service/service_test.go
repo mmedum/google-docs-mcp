@@ -397,11 +397,14 @@ func TestRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(res.Text, "[p8] ## Details {h.det}") || res.Blocks != 5 || res.Segment != "body" || res.TabNumber != 1 || res.Truncated {
+	// The text carries the header, because a client may show the model
+	// nothing else.
+	if !strings.HasPrefix(res.Text, "<!-- tab 1 body, section \"Details\" (p8…p11) · revision rev-0001 · 5 block(s) -->\n[p8] ## Details {h.det}") ||
+		res.Blocks != 5 || res.Segment != "body" || res.TabNumber != 1 || res.Truncated {
 		t.Fatalf("read section: %+v", res)
 	}
 	res, err = svc.Read(ctx, ReadRequest{Document: fixtureID, Format: "text", Scope: ReadScope{Segment: "header"}})
-	if err != nil || res.Text != "Confidential draft" || res.Segment != "header1" {
+	if err != nil || !strings.HasSuffix(res.Text, "\nConfidential draft") || res.Segment != "header1" {
 		t.Fatalf("read header text: %+v %v", res, err)
 	}
 	res, err = svc.Read(ctx, ReadRequest{Document: fixtureID, Format: "raw", Scope: ReadScope{FromHandle: "p2", ToHandle: "p3"}})

@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-03
+
 ### Added
 - The rest of the writable style surface, so nothing the API accepts is
   missing: paragraph borders on all five edges with their padding,

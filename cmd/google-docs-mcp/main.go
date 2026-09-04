@@ -161,8 +161,8 @@ func runServer(args []string) int {
 	slog.SetDefault(logger)
 
 	if dumpSchemas {
-		srv := server.New(server.Deps{Config: cfg, Logger: logger, Version: version.Version})
-		if err := server.DumpSchemas(context.Background(), srv, os.Stdout, version.Version); err != nil {
+		srv := server.New(server.Deps{Config: cfg, Logger: logger, Version: version.String()})
+		if err := server.DumpSchemas(context.Background(), srv, os.Stdout, version.String()); err != nil {
 			return fail("dump schemas: %v", err)
 		}
 		return 0
@@ -192,13 +192,13 @@ func runServer(args []string) int {
 		}()
 	}
 
-	api := gapi.New(ts, gapi.Options{Logger: logger, Timeout: cfg.HTTPTimeout, UserAgent: "google-docs-mcp/" + version.Version})
+	api := gapi.New(ts, gapi.Options{Logger: logger, Timeout: cfg.HTTPTimeout, UserAgent: "google-docs-mcp/" + version.String()})
 	svc := service.New(api, service.Options{
 		Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive,
 		DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir, Logger: logger,
 	})
-	srv := server.New(server.Deps{Service: svc, Config: cfg, Logger: logger, Version: version.Version})
-	logger.Info("serving MCP over stdio", "version", version.Version, "preview", cfg.Preview, "read_only", cfg.ReadOnly, "default_write_mode", cfg.DefaultWriteMode)
+	srv := server.New(server.Deps{Service: svc, Config: cfg, Logger: logger, Version: version.String()})
+	logger.Info("serving MCP over stdio", "version", version.String(), "preview", cfg.Preview, "read_only", cfg.ReadOnly, "default_write_mode", cfg.DefaultWriteMode)
 	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
 		return fail("server: %v", err)
 	}
@@ -395,7 +395,7 @@ func cmdDoctor(args []string) int {
 		check("granted scopes", nil, fmt.Sprintf(" (%d scopes, token valid %s)", len(info.Scopes), info.ExpiresIn.Round(time.Second)))
 	}
 
-	api := gapi.New(ts, gapi.Options{Timeout: cfg.HTTPTimeout, UserAgent: "google-docs-mcp/" + version.Version})
+	api := gapi.New(ts, gapi.Options{Timeout: cfg.HTTPTimeout, UserAgent: "google-docs-mcp/" + version.String()})
 	if u, err := api.About(ctx); err != nil {
 		check("Drive API (about.get)", err, "")
 	} else {

@@ -7,6 +7,18 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+- A binary installed with `go install`, which is what the README tells
+  people to run, reported its version as `dev` forever: the release
+  version arrives through ldflags, and `go install` applies none. It now
+  falls back to the module version Go records in the build info, so
+  `--version`, the MCP handshake and the User-Agent all name the release.
+
+### Changed
+- README: the install section leads with `go install`, says where the
+  binary lands, and shows how to verify a release archive against
+  `checksums.txt`.
+
 ## [0.6.1] - 2026-09-04
 
 ### Fixed

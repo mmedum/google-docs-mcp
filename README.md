@@ -34,11 +34,23 @@ evidence are in [docs/architecture.md](docs/architecture.md).
 
 ## Install
 
-Download a binary from the releases page, or:
-
 ```
 go install github.com/mmedum/google-docs-mcp/cmd/google-docs-mcp@latest
 ```
+
+That puts `google-docs-mcp` in `$(go env GOPATH)/bin`, which is the path
+to give your MCP client. Or take a binary from the
+[releases page](https://github.com/mmedum/google-docs-mcp/releases):
+each tag publishes archives for linux, darwin and windows on amd64 and
+arm64, with a `checksums.txt` to verify against.
+
+```
+tar xzf google-docs-mcp_*_linux_amd64.tar.gz
+sha256sum -c --ignore-missing checksums.txt
+install -m 0755 google-docs-mcp ~/.local/bin/
+```
+
+`google-docs-mcp --version` reports the release it came from either way.
 
 ## Set up Google (once per person)
 

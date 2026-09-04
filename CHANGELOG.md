@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-04
+
 ### Fixed
 - A binary installed with `go install`, which is what the README tells
   people to run, reported its version as `dev` forever: the release

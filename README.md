@@ -22,6 +22,17 @@ tools expose and which they deliberately do not. See
 [docs/architecture.md](docs/architecture.md) for the design and what the
 evals found.
 
+## Reporting a problem
+
+`google-docs-mcp doctor` checks credentials, scopes and API reachability
+and names what is missing; most first-run trouble is an API that was
+never enabled or a consent screen without you on it. If that does not
+explain it, open an issue — the bug form asks for the `doctor` output and
+the version. Never paste a document id or URL, document content, a
+`client_secret.json` or a token into an issue; describe the shape of the
+document instead. Security problems go through
+[SECURITY.md](SECURITY.md), privately.
+
 ## Why another Google Docs MCP
 
 Existing servers hand the model raw UTF-16 indices, convert markdown in

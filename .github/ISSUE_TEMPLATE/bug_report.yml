@@ -1,0 +1,84 @@
+name: Bug report
+description: Something the server did wrong, or refused to do.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste anything private.** No document ids or URLs, no
+        document content, no account email, and never a client secret,
+        refresh token or `client_secret.json`. `doctor` output is safe:
+        it redacts ids and prints no credentials. If a problem only
+        reproduces on one document, describe its shape — a table of N
+        columns, a heading with a footnote — rather than sharing it.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you asked for, what the server did, and what you expected instead.
+      placeholder: |
+        I asked Claude Code to add a section after "Background" as a suggestion.
+        It answered with [invalid] ... and nothing changed in the document.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `google-docs-mcp doctor`
+      description: Run it with no arguments, or with a document id or URL if the problem is document-specific. It checks credentials, scopes and API reachability.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: From `google-docs-mcp --version`.
+      placeholder: google-docs-mcp v0.7.0 (go1.27.0 linux/amd64)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you installed it
+      options:
+        - go install
+        - a release archive
+        - built from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client
+      options:
+        - Claude Code
+        - Claude Desktop
+        - Cursor
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: preview
+    attributes:
+      label: Developer Preview
+      description: Whether GDOCS_PREVIEW=true and your Cloud project is enrolled. Suggestion mode and anchored comments need it.
+      options:
+        - "enrolled, GDOCS_PREVIEW=true"
+        - "not enrolled (direct and comment modes only)"
+        - "not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: Optional. Run the server with GDOCS_LOG_LEVEL=debug and paste the stderr around the failure. Check it for document ids before pasting.
+      render: text

@@ -7,6 +7,15 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- Releases are verifiable, not just downloadable: build provenance
+  attestations tie every archive to the workflow, commit and runner that
+  produced it (`gh attestation verify`), `checksums.txt` is signed with a
+  keyless Sigstore certificate (`cosign verify-blob`), and each archive
+  ships an SBOM. Builds stamp the commit's timestamp rather than the
+  build's, so rebuilding a tag gives byte-identical binaries. The README
+  shows the verification commands.
+
 ## [0.6.2] - 2026-09-04
 
 ### Fixed

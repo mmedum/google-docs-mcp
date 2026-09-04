@@ -10,6 +10,10 @@ on:
 
 permissions:
   contents: write
+  # Keyless signing and build provenance both prove who built the
+  # artifacts, and both need an OIDC token to do it.
+  id-token: write
+  attestations: write
 
 jobs:
   goreleaser:
@@ -22,9 +26,16 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Provenance ties every published archive to this workflow, this
+      # commit and this runner, checkable with `gh attestation verify`.
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: "dist/*.tar.gz,dist/*.zip,dist/checksums.txt"

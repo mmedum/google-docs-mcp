@@ -50,6 +50,22 @@ sha256sum -c --ignore-missing checksums.txt
 install -m 0755 google-docs-mcp ~/.local/bin/
 ```
 
+Every release is built by GitHub Actions from the tag and carries proof
+of it. To check that an archive came from this repository's workflow
+rather than from someone's laptop:
+
+```
+gh attestation verify google-docs-mcp_*_linux_amd64.tar.gz --repo mmedum/google-docs-mcp
+cosign verify-blob checksums.txt --signature checksums.txt.sig \
+  --certificate checksums.txt.pem \
+  --certificate-identity-regexp 'https://github.com/mmedum/google-docs-mcp/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Each archive also ships an SBOM (`.sbom.json`) listing what went into
+the binary. `go install` needs none of this: the module proxy and
+`sum.golang.org` verify the source before it is built.
+
 `google-docs-mcp --version` reports the release it came from either way.
 
 ## Set up Google (once per person)

@@ -14,6 +14,9 @@ builds:
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     flags: [-trimpath]
+    # Stamp the commit's time rather than the build's, so rebuilding the
+    # same tag produces byte-identical binaries.
+    mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w -X github.com/mmedum/google-docs-mcp/internal/version.Version={{.Version}}
 
@@ -26,6 +29,25 @@ archives:
 
 checksum:
   name_template: checksums.txt
+
+# One SBOM per archive, so a deployer can see what is inside a binary
+# they did not build.
+sboms:
+  - artifacts: archive
+
+# Sign the checksum file with a keyless Sigstore certificate tied to the
+# workflow's OIDC identity: no private key to hold or leak.
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
 
 changelog:
   use: github

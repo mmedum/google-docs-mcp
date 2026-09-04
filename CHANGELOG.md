@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-04
+
 ### Added
 - Releases are verifiable, not just downloadable: build provenance
   attestations tie every archive to the workflow, commit and runner that

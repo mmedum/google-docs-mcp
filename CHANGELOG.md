@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-04
+
 ### Fixed
 - The test suite passes on Windows and macOS, not just Linux. CI's first
   run ever caught three Linux-only assumptions: an export directory

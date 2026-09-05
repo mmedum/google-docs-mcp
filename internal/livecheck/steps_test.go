@@ -117,6 +117,14 @@ func TestLive(t *testing.T) {
 	liveComments(t, d, doc)
 	liveHistory(t, d, doc)
 	liveTables(t, d, doc)
+
+	// After the tables exist, so every tool that takes dry_run has
+	// something real to plan. A dry run must send nothing, and only the
+	// document's own revision can show that — a fake accepts the batch
+	// either way.
+	handleRead := d.ok("read for a table handle", "read_document", map[string]any{"document": doc, "with_handles": true})
+	liveDryRuns(t, d, doc, first(tableHandle, handleRead))
+
 	liveObjects(t, d, doc)
 	liveTabs(t, d, doc)
 	liveLayout(t, d, doc)

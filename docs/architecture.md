@@ -441,10 +441,17 @@ registers only readOnly rows and requests readonly scopes.
 | `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | — | 2 |
 | `delete_tab` | Gated; child tabs go with it | destructive | 2 |
 
-\* `edit_document` changes text by design; it is not gated. The write
-mode chosen by the person, the overwrite guard, `dry_run`, per-call
-approval in Claude Code and read-only mode are the safety layers. `replace_all` always carries
-explicit `tabsCriteria`.
+\* `edit_document` changes text by design; it is not gated. The layers
+this server controls are the write mode the person chose, the overwrite
+guard, `dry_run`, read-only mode, and not registering the destructive
+tools at all. Client-side approval is **not** one of them: whether a call
+is put to the person is the client's decision and its permission mode, so
+a host running in an auto-approve mode may invoke any registered tool
+without asking. `_meta["anthropic/requiresUserInteraction"]` is a signal
+a client may act on, not a control — the spec says clients treat tool
+annotations as untrusted, and a server cannot make its own hint binding.
+Design as though every registered tool can be called unattended.
+`replace_all` always carries explicit `tabsCriteria`.
 
 **Resources** (Phase 3). Three templates, all `text/markdown`, for
 clients that attach a document as context instead of calling a tool:
@@ -855,6 +862,7 @@ checked rather than assumed.
 | 7-day refresh tokens only for sensitive scopes (my claim) | Refuted: any External app in Testing | Internal consent screen. |
 | Env-only configuration (inherited) | Mixed: all three clients pass only `env`; github-mcp-server binds flags and env | Env source of truth plus bound flags. |
 | Server-side read-only mode and destructive gating (inherited) | Confirmed (github-mcp-server; spec: annotations untrusted) | Kept; `requiresUserInteraction` on gated tools. |
+| `requiresUserInteraction` makes a client prompt before running a gated tool, so it counts as a safety layer (implied by listing "per-call approval" among the layers) | Refuted: the hint is advisory. The spec already says clients treat tool annotations as untrusted, and a host in an auto-approve permission mode runs a registered tool without prompting — which is the only way the hint could have been load-bearing | §9 no longer lists client approval as a layer. What the server controls is what it registers and what it refuses, so a tool that must not run unattended must be unregistered, not annotated. |
 | snake_case verb_noun names (inherited) | Mixed: spec allows more; GitHub mixes styles; Anthropic says measure. Measured in the Phase 3 evals: 13 tasks, 15 tool lookups by name, no call to a tool that does not exist | Kept. |
 | Per-block handle prefix opt-in (§7.2) | Evals: the model asked for `with_handles` on three of four reads and targeted by handle as often as by text | Flipped to default on (the owner's call, 2026-09-03): the flag is a per-read cost of about 15%, the round trip it saves is a whole read, and an edit targets handles. `with_handles: false` drops them. |
 | A blank paragraph is one whose text is empty (my first fill rule) | Refuted in review: a paragraph holding only an image, a footnote reference or a page-number field also renders as no text, and filling it would delete that content with no guard (an insertion never populates anchors) | Blank means every run is text and the text is whitespace. |
@@ -888,6 +896,7 @@ checked rather than assumed.
 | Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalised units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalised string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
 | `TabProperties.index` is the tab's 0-based position among its siblings, so a requested 1-based position converts with `-1` (the API reference, applied to both add and move) | **Refuted for `move`, live 2026-09-03.** For `add` the index is 0-based as documented, but a move inserts the tab at that index with the tab *still in its old slot* and removes it afterwards, so moving one later lands it a place short, and moving it to the very next position does nothing while reporting success. Four probes: 3→1 gave 1; 1→3 gave 2; 2→3 gave 2; 4→2 gave 2 | `moveTabRequest` raises the index by one when the tab is moving later within the same parent (`siblingIndex`). Moving earlier, and moving under a different parent, are unchanged. The bug hid because every earlier test moved a tab to position 1, where the two readings agree. |
 | `read_document with_styles` shows a run's formatting | Confirmed, and sharpened live 2026-09-03: Google returns only the properties a run sets itself, so the annotation already *is* the deviation from what the run inherits. A read of a document whose `HEADING_2` had just been redefined blue, centred and single-spaced annotated nothing at all | No per-run comparison to build (an earlier plan of mine, dropped). Inherited formatting is reported once per tab by `get_document` instead of once per paragraph. |
+| `errors.Is(err, io.EOF)` catches the end of a stdio session | Refuted, reproduced 2026-09-05: the SDK reports a closed connection as JSON-RPC **-32004** with the EOF only as message text (`server is closing: EOF`), so `errors.Is` never matched and the process exited **1** on an ordinary client disconnect — which a host reports as a crash. The smoke test could not see it because it slept before closing stdin, and with the sleep the exit is 0 | `clientWentAway` matches `jsonrpc.Error` codes -32004 and -32003; `jsonrpc.Error` is a public alias of the SDK's internal wire type, so the code is comparable without sniffing message text. The smoke test closes stdin abruptly as a second case, and fails against the previous binary. |
 | Pinning actions to a major tag (`@v7`) is enough | Refuted by GitHub's hardening guide, verified 2026-09-05: "Pinning an action to a full-length commit SHA is currently the only way to use an action as an immutable release" — a tag is mutable by anyone who can write to that repository ([Security hardening for GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions)) | Every action is pinned to a full SHA with the version in a trailing comment, which is also what OpenSSF Scorecard's Pinned-Dependencies check scores. Dependabot updates SHAs and keeps the comment in step. |
 | Declaring `permissions` once at the top of a workflow is least privilege | Refined, same sources: Scorecard's Token-Permissions wants the top level read-only and write raised per job ([Scorecard checks](https://github.com/ossf/scorecard/blob/main/docs/checks.md)) | `release.yml` is `contents: read` at the top; the one job that publishes raises `contents: write`, `id-token: write` and `attestations: write`. CI was already read-only. |
 | A checkout leaves its token on disk for later steps, harmlessly | Rejected: nothing in these workflows pushes with it, and GitHub's guide treats persisted credentials as avoidable exposure | `persist-credentials: false` on every checkout. |

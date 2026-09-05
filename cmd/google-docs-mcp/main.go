@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
 
@@ -199,12 +200,37 @@ func runServer(args []string) int {
 	})
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Logger: logger, Version: version.String()})
 	logger.Info("serving MCP over stdio", "version", version.String(), "preview", cfg.Preview, "read_only", cfg.ReadOnly, "default_write_mode", cfg.DefaultWriteMode)
-	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
+	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && !clientWentAway(err) {
 		return fail("server: %v", err)
 	}
 	logger.Info("client disconnected; exiting")
 	return 0
 }
+
+// clientWentAway reports whether the server stopped because the client
+// closed the connection, which is how every session ends. The SDK wraps
+// the reason as JSON-RPC error -32004 ("server is closing") with the EOF
+// only as text, so errors.Is(err, io.EOF) does not match it and the
+// process would exit non-zero on an ordinary shutdown — which a host
+// then reports as a crash.
+func clientWentAway(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+		return true
+	}
+	var wire *jsonrpc.Error
+	if errors.As(err, &wire) {
+		return wire.Code == closingCode || wire.Code == clientClosingCode
+	}
+	return false
+}
+
+// The SDK's closing codes. They live in an internal package, but
+// jsonrpc.Error is the same type, so the codes can be compared directly
+// rather than sniffed out of the message text.
+const (
+	closingCode       = -32004 // server is closing
+	clientClosingCode = -32003 // client is closing
+)
 
 // openCommand parses a subcommand's flags, loads the configuration and
 // opens the profile. A non-nil exit code means the caller should return it.

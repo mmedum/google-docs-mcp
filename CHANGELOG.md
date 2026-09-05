@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-09-05
 ### Added
 - Per-call debug logging: with `GDOCS_LOG_LEVEL=debug` the server records
   which method and tool ran, whether it failed, and how long it took. It

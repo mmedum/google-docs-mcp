@@ -17,6 +17,23 @@ people who run it against their own documents.
 - **Schemas stay boring**: flat structs, `omitempty` for optional fields,
   no unions, no dots in tool names.
 
+## Branches and pull requests
+
+`main` is released code: every version on the releases page was built
+from a tag on it. Changes reach it through a pull request, never a direct
+push — including the maintainer's own, and including release commits.
+
+```
+git switch -c short-topic-branch
+# work, with make check green
+git push -u origin short-topic-branch
+gh pr create --fill
+```
+
+Merge once CI is green on all three platforms. CI is the gate that
+matters: the test suite runs on Linux, macOS and Windows, and it has
+already caught defects that never appear on one machine.
+
 ## Definition of done
 
 ```

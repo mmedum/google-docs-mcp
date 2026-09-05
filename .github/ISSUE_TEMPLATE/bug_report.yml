@@ -80,5 +80,5 @@ body:
     id: logs
     attributes:
       label: Server log
-      description: Optional. Run the server with GDOCS_LOG_LEVEL=debug and paste the stderr around the failure. Check it for document ids before pasting.
+      description: Optional. Run the server with GDOCS_LOG_LEVEL=debug and paste the stderr around the failure. It is safe to paste: logs record which tool ran and how it went, never document ids, titles or text.
       render: text

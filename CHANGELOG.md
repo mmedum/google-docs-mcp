@@ -15,6 +15,12 @@ and new required fields are breaking; the schema diff in CI flags them.
   if a log line ever carries document data. The bug form says so instead
   of asking reporters to audit their own logs.
 
+### Changed
+- The repository's gates no longer need Python. `make check` shelled out
+  to `python3` twice — to list tool names and to diff two schema dumps —
+  which made an interpreter an undeclared prerequisite of a Go project's
+  own definition of done. Both now run `go run ./internal/devcheck`.
+
 ## [0.7.0] - 2026-09-04
 
 ### Added

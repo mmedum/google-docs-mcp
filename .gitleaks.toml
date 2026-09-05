@@ -25,3 +25,13 @@ regex = '''1//0[A-Za-z0-9_-]{30,}'''
 paths = [
   '''go\.sum$''',
 ]
+# The identifier scan in internal/leakcheck has to contain an example of
+# every shape it catches, or nobody can tell whether its rules match
+# anything. This is that example — twelve counting digits and the
+# alphabet — and it is allowed as a literal string rather than by path,
+# so a real client id in the same file is still a finding. An inline
+# `gitleaks:allow` does not serve here: this job scans the pull request's
+# commits, and the comment can only clear the commit that carries it.
+regexes = [
+  '''123456789012-abcdefghijklmnopqrstuvwxyz012345\.apps\.googleusercontent\.com''',
+]

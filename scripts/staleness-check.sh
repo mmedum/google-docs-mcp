@@ -6,9 +6,12 @@
 #  - docs/architecture.md must not claim "no code yet" once code exists.
 set -euo pipefail
 BIN=${1:-./google-docs-mcp}
+SCHEMAS=$(mktemp)
+trap 'rm -f "$SCHEMAS"' EXIT
 fail=0
 
-tools=$("$BIN" --dump-schemas | python3 -c 'import json,sys; print("\n".join(t["name"] for t in json.load(sys.stdin)["tools"]))')
+"$BIN" --dump-schemas > "$SCHEMAS"
+tools=$(go run ./internal/devcheck tool-names "$SCHEMAS")
 readme_tools=$(grep -oE '^\| `[a-z_]+` \|' README.md | tr -d '`| ' | sort)
 if [ "$(echo "$tools" | sort)" != "$readme_tools" ]; then
   echo "README tool table differs from registered tools:"

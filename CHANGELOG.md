@@ -6,6 +6,25 @@ follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
+### Added
+- Per-call debug logging: with `GDOCS_LOG_LEVEL=debug` the server records
+  which method and tool ran, whether it failed, and how long it took. It
+  records nothing about the document — no ids, titles or text — so a
+  debug log is safe to attach to a bug report, and a test fails the build
+  if a log line ever carries document data. The bug form says so instead
+  of asking reporters to audit their own logs.
+
+### Changed
+
+- The live driver is Go: `go test -tags=live ./internal/livecheck` drives
+  the binary over stdio through the MCP SDK's own client, replacing
+  `scripts/live-drive.py`. Steps that must be refused now assert their
+  refusal instead of printing it for a human to read, so a green run means
+  the guards fired as well as the writes.
+- The repository's gates no longer need Python. `make check` shelled out
+  to `python3` twice — to list tool names and to diff two schema dumps —
+  which made an interpreter an undeclared prerequisite of a Go project's
+  own definition of done. Both now run `go run ./internal/devcheck`.
 
 ### Fixed
 - The server exited non-zero when a client disconnected, which is how

@@ -73,6 +73,10 @@ func TestErrorClassification(t *testing.T) {
 		{401, "bad token", "", ErrUnauthorized, "auth"},
 		{403, "Request had insufficient authentication scopes.", "ACCESS_TOKEN_SCOPE_INSUFFICIENT", ErrMissingScope, "forbidden"},
 		{403, "The caller does not have permission", "", ErrForbidden, "forbidden"},
+		// Drive reports throttling as 403, not 429, so the reason decides.
+		{403, "Rate Limit Exceeded", "userRateLimitExceeded", ErrRateLimited, "rate_limited"},
+		{403, "Daily Limit Exceeded", "dailyLimitExceeded", ErrRateLimited, "rate_limited"},
+		{403, "The user's Drive storage quota has been exceeded.", "storageQuotaExceeded", ErrForbidden, "forbidden"},
 		{404, "Requested entity was not found.", "", ErrNotFound, "not_found"},
 		{400, "Invalid requests[0]", "", ErrInvalid, "invalid"},
 		{400, "The provided revision id does not match the current revision", "", ErrConflict, "conflict"},
@@ -123,6 +127,111 @@ func TestReadRetriesThenSucceeds(t *testing.T) {
 	}
 	if n != 3 {
 		t.Fatalf("attempts = %d", n)
+	}
+}
+
+// A throttling 403 backs off like a 429, and the reason reaches the
+// message so a refusal that is not about permissions does not read as one.
+func TestThrottling403RetriesOnRead(t *testing.T) {
+	var n int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) < 3 {
+			googleError(w, 403, "Rate Limit Exceeded", "PERMISSION_DENIED", "userRateLimitExceeded")
+			return
+		}
+		_, _ = w.Write([]byte(`{"user":{"emailAddress":"a@b.test"}}`))
+	}))
+	u, err := c.About(context.Background())
+	if err != nil || u.EmailAddress != "a@b.test" || n != 3 {
+		t.Fatalf("got %v %v after %d attempts", u, err, n)
+	}
+}
+
+// The daily project quota is a quota, but no amount of backing off frees
+// it, so it classifies as rate limited without being retried.
+func TestDailyLimitIsNotRetried(t *testing.T) {
+	var n int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&n, 1)
+		googleError(w, 403, "Daily Limit Exceeded", "PERMISSION_DENIED", "dailyLimitExceeded")
+	}))
+	_, err := c.About(context.Background())
+	if !errors.Is(err, ErrRateLimited) || n != 1 {
+		t.Fatalf("err %v after %d attempts", err, n)
+	}
+}
+
+// A write is not repeated on a throttling 403: only 429 and 503 prove
+// nothing was applied, and that rule is older than this classification.
+func TestThrottling403DoesNotRetryWrites(t *testing.T) {
+	var n int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&n, 1)
+		googleError(w, 403, "Rate Limit Exceeded", "PERMISSION_DENIED", "rateLimitExceeded")
+	}))
+	_, err := c.BatchUpdate(context.Background(), "abc", &BatchUpdateRequest{Requests: []json.RawMessage{json.RawMessage(`{}`)}})
+	if !errors.Is(err, ErrRateLimited) || n != 1 {
+		t.Fatalf("err %v after %d attempts", err, n)
+	}
+}
+
+// A Drive comment is a create, so the write rule covers it too: only 429
+// and 503 prove nothing was posted. Retrying a throttling 403 or a 500
+// here would post the comment twice.
+func TestDriveWriteRetriesOnlyOn429And503(t *testing.T) {
+	for _, tc := range []struct {
+		label    string
+		status   int
+		reason   string
+		attempts int32
+	}{
+		{"throttling 403", 403, "userRateLimitExceeded", 1},
+		{"server error", 500, "", 1},
+		{"service unavailable", 503, "", 2},
+		{"too many requests", 429, "", 2},
+	} {
+		var n int32
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if atomic.AddInt32(&n, 1) == 1 {
+				googleError(w, tc.status, "transient", "X", tc.reason)
+				return
+			}
+			_, _ = w.Write([]byte(`{"id":"c1","content":"hi"}`))
+		}))
+		_, err := c.CreateComment(context.Background(), "abc", "hi", "")
+		if n != tc.attempts {
+			t.Errorf("%s: attempts %d, want %d (err %v)", tc.label, n, tc.attempts, err)
+		}
+		if tc.attempts == 1 && err == nil {
+			t.Errorf("%s: expected an error", tc.label)
+		}
+	}
+}
+
+// The same condition reaches us camelCase from Drive's legacy envelope and
+// UPPER_SNAKE from a google.rpc.ErrorInfo detail, which parseAPIError
+// prefers. Both must classify as a quota, not a permission.
+func TestThrottlingReasonSpellings(t *testing.T) {
+	for _, reason := range []string{"userRateLimitExceeded", "USER_RATE_LIMIT_EXCEEDED", "RATE_LIMIT_EXCEEDED"} {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			googleError(w, 403, "Rate Limit Exceeded", "PERMISSION_DENIED", reason)
+		}))
+		_, err := c.About(context.Background())
+		if !errors.Is(err, ErrRateLimited) {
+			t.Errorf("reason %q: %v is not rate limited", reason, err)
+		}
+	}
+}
+
+// Google's reason is what separates "cannot" from "may not", so it is in
+// the text the model reads, not only in the field the classifier uses.
+func TestErrorMessageCarriesTheReason(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		googleError(w, 403, "This revision cannot be downloaded by the authenticated user.", "PERMISSION_DENIED", "downloadRestrictedForRevision")
+	}))
+	_, err := c.About(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "PERMISSION_DENIED (downloadRestrictedForRevision)") {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -449,8 +558,19 @@ func TestExportRevision(t *testing.T) {
 	if err != nil || string(data) != "# old" || polls != 2 {
 		t.Fatalf("export revision: %q %v polls=%d", data, err, polls)
 	}
-	if !googleHost("docs.googleapis.com") || !googleHost("docs.google.com") || googleHost("evil.example") || googleHost("googleapis.com.evil.example") || googleHost("docs.google.com.evil.example") {
-		t.Fatal("googleHost")
+	// A host carrying a port must not match: the allowlist sees
+	// url.URL.Host, and a redirect or a response-body URL pointing at
+	// googleapis.com:8443 is not the API.
+	for _, host := range []string{"docs.googleapis.com", "docs.google.com", "googleapis.com", "lh3.googleusercontent.com", "DOCS.GOOGLE.COM"} {
+		if !googleHost(host) {
+			t.Errorf("googleHost(%q) should be allowed", host)
+		}
+	}
+	for _, host := range []string{"evil.example", "googleapis.com.evil.example", "docs.google.com.evil.example",
+		"docs.googleapis.com:8443", "docs.google.com:443", "googleapis.com:80"} {
+		if googleHost(host) {
+			t.Errorf("googleHost(%q) should be refused", host)
+		}
 	}
 }
 

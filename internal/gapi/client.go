@@ -240,7 +240,10 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 		return res, nil
 	}
 	apiErr := parseAPIError(resp.StatusCode, method, redactPath(rawURL), data)
-	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+	// A throttling 403 is transient like a 429. On a write it still is not
+	// retried: retryable only repeats a write on 429 or 503, and this keeps
+	// that rule rather than reasoning about what a quota refusal applied.
+	if resp.StatusCode == 429 || resp.StatusCode >= 500 || retryableThrottle(apiErr) {
 		return nil, &transientError{err: apiErr, after: parseRetryAfter(resp.Header.Get("Retry-After"))}
 	}
 	return nil, apiErr
@@ -249,12 +252,14 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 // retryable decides whether an attempt may be repeated. Reads retry on
 // any transient failure. Writes retry only when Google answered 429 or
 // 503, which proves nothing was applied; a network failure on a write is
-// reported as ambiguous instead.
+// reported as ambiguous instead. That covers Drive writes as well as
+// document batches: creating a comment is not idempotent either, and a
+// repeat after a 500 posts it twice.
 func retryable(k reqKind, err error) (bool, time.Duration) {
 	var te *transientError
 	if errors.As(err, &te) {
 		var ae *APIError
-		if k == kindWrite && errors.As(te.err, &ae) && ae.Status != 429 && ae.Status != 503 {
+		if k != kindRead && errors.As(te.err, &ae) && ae.Status != 429 && ae.Status != 503 {
 			return false, 0
 		}
 		return true, te.after

@@ -251,6 +251,11 @@ func TestFetchErrors(t *testing.T) {
 		{&gapi.APIError{Status: 401, Message: "x"}, "auth", "login"},
 		{&gapi.APIError{Status: 403, Reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT", Message: "x"}, "forbidden", "scope"},
 		{&gapi.APIError{Status: 403, Message: "x"}, "forbidden", "access"},
+		// Where Google said why, its reason reaches the model instead of
+		// our guess: a full Drive is not a sharing problem.
+		{&gapi.APIError{Status: 403, Reason: "storageQuotaExceeded", Message: "x"}, "forbidden", "storage is full"},
+		{&gapi.APIError{Status: 403, Reason: "userRateLimitExceeded", Message: "x"}, "rate_limited", "userRateLimitExceeded"},
+		{&gapi.APIError{Status: 403, Reason: "dailyLimitExceeded", Message: "x"}, "rate_limited", "will not clear it"},
 		{&gapi.APIError{Status: 429, Message: "x"}, "rate_limited", "retry"},
 		{&gapi.APIError{Status: 500, Message: "x"}, "server", "retry"},
 		{gapi.ErrNetwork, "network", "reach"},

@@ -26,6 +26,15 @@ and are preferred by the Makefile; install them with
   loaded through `internal/doc/doctest`. Renderer goldens live in
   `testdata/golden/`; regenerate with `go test ./internal/render -update`
   and review the diff.
+- **A fake's error responses are copied from Google's documentation,
+  reason strings and all.** The reason is what the code branches on —
+  `userRateLimitExceeded` is a 403 that means "slow down", `storageQuotaExceeded`
+  a 403 that means "your Drive is full" — so a plausible-looking invention
+  in a test double tests the invention. A fake that refuses without a
+  reason agrees with a bug by omission: it cannot fail on the branch that
+  is missing. Quote the reason from the [Drive error
+  guide](https://developers.google.com/workspace/drive/api/guides/handle-errors)
+  or the Docs reference, and put the link next to the table.
 - Integration tests are tagged and need a login:
   `GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestPreviewSpike -v`
   creates a scratch document and checks the Developer Preview features.
@@ -58,6 +67,12 @@ and are preferred by the Makefile; install them with
   rows, which makes it the quickest end-to-end check of a layout change.
 - `go vet -tags=integration ./...` (part of `make vet`) keeps the tagged
   tests compiling even though CI never runs them.
+- **Adding a tool or an op costs three entries, and each one fails loudly
+  if you skip it**: a step in `internal/livecheck` (or `TestCoverage`
+  fails), a row in `server.toolArgs` (or `TestEveryToolHasArgs` fails),
+  and the README's tool table (or the staleness gate fails). The first
+  two exist because a guarantee tested through the tools someone
+  remembered is a guarantee that quietly shrinks.
 - The agent evals score whether a model can do the job through these
   tools. Each task seeds a scratch document through the server, runs
   `claude -p` with only this server's tools, and checks the end state and

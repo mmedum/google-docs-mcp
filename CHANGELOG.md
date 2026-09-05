@@ -7,6 +7,89 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- The identifier scan hard rule 1 always needed: `internal/leakcheck` is
+  a test over every tracked file that fails on an address at a domain
+  somebody could own, a 21-digit account id, an OAuth client id, a
+  user-content URL with an id in its path, and a Drive id that does not
+  look invented. gitleaks cannot do this — none of those are secrets, so
+  every rule passes them — and the rule had been enforced by remembering.
+  Each rule is an allow-list: a deny-list naming the domain to watch for
+  would itself be the disclosure.
+- The live driver's coverage rule is a check. "Every registered tool is
+  driven by a step, every op kind appears as an `op`" had been a comment
+  since the Python driver, and it went unenforced through the port —
+  which is how `style_columns`, `style_rows` and the named-range ops once
+  spent months never running. `TestCoverage` reads the package's own
+  source and fails when a tool or op has no step.
+- Three eval tasks that score what a model does with a refusal
+  (`not-found`, `preview-off-suggest`, `read-only`). Every other task
+  scores a success, so the wording of an error was the one model-facing
+  surface with no evidence behind it. Tasks can now set the server's
+  environment, which is what puts the model in front of a refusal.
+
+### Changed
+- The debug-logging guarantee now drives every registered tool instead of
+  two, and a new table of per-tool arguments is asserted complete, so a
+  tool added tomorrow cannot quietly fall outside it.
+- The coverage floor derives its package list from `go list ./internal/...`
+  with a written-down exemption list. A package added under `internal/`
+  used to be under no floor at all until someone remembered to edit the
+  script. `internal/userconfig` was the package this caught: 75.4%, now
+  93.0%, with its error paths tested.
+
+### Fixed
+- OAuth token refresh had no timeout. The context carried no HTTP client,
+  so the oauth2 library used `http.DefaultClient`, which has none: a
+  token endpoint that accepts the connection and never answers would hang
+  the first tool call for as long as the process ran. The per-request
+  timeout on the API client does not cover a refresh, because the refresh
+  happens inside the token source. `GDOCS_HTTP_TIMEOUT` now bounds it,
+  and the code exchange during `login` too.
+- The release pinned `goreleaser-action` by commit SHA and then asked it
+  for `~> v2`, so the tool that decides what the artifacts are floated
+  within a major version. Pinned exactly, the same fix as
+  `cosign-release` and `syft-version`: a SHA pins the action, never what
+  the action installs.
+- A throttled call was reported to the model as a permission error and
+  never retried. Drive answers its per-user, per-project and sharing
+  rate limits with **403**, not 429, and the reason string is the only
+  thing that distinguishes them from "you may not" — which the mapping
+  read after the status, so `userRateLimitExceeded` came out as
+  `[forbidden]`, a class that tells a model to go looking for
+  permissions to change. Those reasons now classify as `[rate_limited]`
+  and back off on reads exactly like a 429; a write is still never
+  repeated on them, since only 429 and 503 prove nothing was applied.
+  The daily project quota classifies the same way but is not retried,
+  because backing off does not free it. Both spellings of a reason are
+  recognised — Drive's camelCase `userRateLimitExceeded` and the
+  UPPER_SNAKE form a `google.rpc.ErrorInfo` detail would carry.
+- A comment could be posted twice. The rule that a write is repeated only
+  on 429 or 503 — the answers that prove nothing was applied — was written
+  for document batches and tested through them, but the check named that
+  one request kind, so Drive writes (adding a comment or a reply, editing
+  one, resolving a thread) fell through it and were retried on any 5xx.
+  A 500 after Drive had already created the comment left two. Drive
+  writes now follow the same rule.
+- Google's error reason now reaches the message. It was parsed, stored
+  and dropped, so `storageQuotaExceeded` ("your Drive is full") and
+  `downloadRestrictedForRevision` ("this revision cannot be downloaded")
+  both arrived as a bare `[forbidden]` with nothing to act on.
+- The live driver and the agent evals ran for the first time since they
+  were ported to Go, and the driver held three faults of its own: it
+  scrubbed document ids out of a result before parsing it, so the
+  rich-link chip step sent Google a redacted URL and the chip was
+  refused; it named an object with `object_id`, a key the tool's schema
+  does not have; and it deleted the tab tree before the resource reads
+  that address the tab nested inside it. Scrubbing now happens where the
+  transcript is written rather than where a step reads a result, and the
+  tab tree is deleted in a cleanup, which runs after the reads and also
+  runs when a step in between gives up. The replace step swaps in a
+  different image, cropped, so a replace that quietly did nothing can no
+  longer pass. Both harnesses are green — 91 steps with the preview on
+  and 88 with it off, every failure an intended refusal, and 13 of 13
+  eval tasks.
+
 ## [0.8.1] - 2026-09-05
 
 ### Fixed

@@ -33,5 +33,5 @@ paths = [
 # `gitleaks:allow` does not serve here: this job scans the pull request's
 # commits, and the comment can only clear the commit that carries it.
 regexes = [
-  '''123456789012-abcdefghijklmnopqrstuvwxyz012345\.apps\.googleusercontent\.com''',
+  '''123456789012-abcdefghijklmnopqrstuvwxyz012345\.apps\.googleusercontent\.com''', # leakcheck:allow
 ]

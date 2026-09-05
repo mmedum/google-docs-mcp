@@ -6,6 +6,17 @@ follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-09-05
+
+### Fixed
+- The staleness gate blocked its own release pull request. It failed when
+  `[Unreleased]` was empty, which is exactly what a release commit
+  produces, and under the pull-request flow CI runs before the tag the
+  commit is preparing can exist — so no release could ever go green.
+  Entries under a version heading with no tag yet now count as
+  documented. An undocumented change, or a heading whose tag already
+  exists, is still refused.
 ### Added
 - Per-call debug logging: with `GDOCS_LOG_LEVEL=debug` the server records
   which method and tool ran, whether it failed, and how long it took. It

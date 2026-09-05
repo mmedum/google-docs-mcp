@@ -95,12 +95,14 @@ A tag is the whole release process; nothing is published by hand.
    `CHANGELOG.md`, above the previous release and below `[Unreleased]`.
 2. Commit that as `Release N.N.N`.
 3. Tag it: `git tag -a vN.N.N -m "vN.N.N — what this release is"`.
-4. `make check`. The staleness gate fails *between* steps 2 and 3 —
-   "source changed since vX but [Unreleased] is empty" — so run it after
-   the tag, not before.
+4. `make check`. The staleness gate accepts a release commit: entries
+   filed under a version heading that has no tag yet count as documented,
+   which is what a release commit is. It still refuses a source change
+   documented nowhere, and a version heading whose tag already exists.
 5. Open the release commit as a pull request, let CI go green on all
    three platforms, and merge it. Direct pushes to `main` are not the
-   process, releases included.
+   process, releases included — which is why the gate had to change: CI
+   runs on the pull request, before the tag it is preparing can exist.
 6. Push the tag once the commit is on `main`. Tags are not covered by the
    branch rules, so this step is a direct push and the release workflow
    takes it from there.

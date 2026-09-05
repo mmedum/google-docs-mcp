@@ -39,8 +39,19 @@ if git diff --quiet ${range:-HEAD~1} -- '*.go' 2>/dev/null; then
   :
 else
   unreleased=$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | grep -c '^- ' || true)
-  if [ "$unreleased" -eq 0 ]; then
-    echo "source changed since ${last:-the previous commit} but CHANGELOG.md [Unreleased] is empty"
+  # A release commit moves the entries from [Unreleased] under the version
+  # about to be tagged, so [Unreleased] is legitimately empty. That
+  # section counts as documentation until its tag exists — without this,
+  # a release pull request can never go green, because CI runs before the
+  # tag it is preparing.
+  pending_version=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | tr -d '#[] ' || true)
+  pending=0
+  if [ -n "$pending_version" ] && ! git rev-parse -q --verify "refs/tags/v$pending_version" >/dev/null; then
+    pending=$(awk -v v="## [$pending_version]" 'index($0, v)==1{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | grep -c '^- ' || true)
+  fi
+  if [ "$unreleased" -eq 0 ] && [ "$pending" -eq 0 ]; then
+    echo "source changed since ${last:-the previous commit} but CHANGELOG.md documents nothing new"
+    echo "put the entries under [Unreleased], or under the version heading this release is about to tag"
     fail=1
   fi
 fi

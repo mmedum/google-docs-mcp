@@ -22,6 +22,11 @@
   from the user's profile directory and nothing narrows it further —
   prefer the keyring (Credential Manager) on that platform. The
   `GDOCS_REFRESH_TOKEN` variable overrides both for automation.
+- **Logs carry no document data at any level.** The server's own lines
+  are startup and shutdown facts; per-call debug logging records the
+  method, the tool name, the outcome and the duration. Document ids,
+  titles and text never reach a log, so a debug log is safe to attach to
+  a bug report. A test fails the build if that stops being true.
 - Scopes: `documents` and `drive` (or their read-only variants with
   `GDOCS_READ_ONLY`). `drive` is required to reach documents the app did
   not create; the narrower `drive.file` cannot.

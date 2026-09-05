@@ -299,7 +299,10 @@ func parseRetryAfter(v string) time.Duration {
 
 var idInPath = regexp.MustCompile(`/(documents|files)/([^/?]+)`)
 
-// ShortID shortens a document or file id for logs.
+// ShortID shortens a document or file id. It is for a filename a person
+// has to recognise, never for a log: §12 promises a log carries nothing
+// about the document, and six characters of an id is still six
+// characters of an id.
 func ShortID(id string) string {
 	if len(id) > 6 {
 		return id[:6] + "…"
@@ -307,7 +310,11 @@ func ShortID(id string) string {
 	return id
 }
 
-// redactPath shortens document and file ids in URLs before they reach logs.
+// redactPath removes document and file ids from URLs before they reach
+// logs, keeping the shape of the path so a line still says which method
+// ran. It used to leave the first six characters, which made the
+// promise that a debug log is safe to paste into a bug report a promise
+// the reporter had to check.
 func redactPath(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -315,7 +322,7 @@ func redactPath(raw string) string {
 	}
 	return idInPath.ReplaceAllStringFunc(u.Path, func(m string) string {
 		parts := idInPath.FindStringSubmatch(m)
-		return "/" + parts[1] + "/" + ShortID(parts[2])
+		return "/" + parts[1] + "/…"
 	})
 }
 

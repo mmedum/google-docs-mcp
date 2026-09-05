@@ -31,12 +31,39 @@ func newTestClient(t *testing.T, h http.Handler) (*Client, *httptest.Server) {
 	return c, srv
 }
 
+// googleError writes an error body shaped like Google's. When a reason
+// is given it appears in **both** envelopes and in the two spellings
+// Google actually uses — camelCase in the legacy `errors[]`, UPPER_SNAKE
+// in the `ErrorInfo` detail — because a fake that sends one spelling in
+// both places cannot catch a parser that prefers the wrong envelope. A
+// sibling server had exactly that bug, live, with a green suite.
 func googleError(w http.ResponseWriter, status int, msg, rpc, reason string) {
+	body := map[string]any{"code": status, "message": msg, "status": rpc}
+	if reason != "" {
+		body["details"] = []map[string]any{{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": upperSnake(reason)}}
+		body["errors"] = []map[string]any{{"domain": "global", "reason": reason, "message": msg}}
+	}
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
-		"code": status, "message": msg, "status": rpc,
-		"details": []map[string]any{{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": reason}},
-	}})
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": body})
+}
+
+// upperSnake spells a camelCase reason the way an ErrorInfo detail does.
+func upperSnake(reason string) string {
+	var b strings.Builder
+	for i, r := range reason {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(r)
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r - 'a' + 'A')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func TestGetDocumentDecodesAndSendsParams(t *testing.T) {
@@ -230,7 +257,10 @@ func TestErrorMessageCarriesTheReason(t *testing.T) {
 		googleError(w, 403, "This revision cannot be downloaded by the authenticated user.", "PERMISSION_DENIED", "downloadRestrictedForRevision")
 	}))
 	_, err := c.About(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "PERMISSION_DENIED (downloadRestrictedForRevision)") {
+	// Either spelling satisfies the contract, which is that Google's
+	// reason reaches the message — asserting one of them would pin the
+	// parser's preference between the two envelopes instead.
+	if err == nil || !strings.Contains(reasonKey(err.Error()), reasonKey("downloadRestrictedForRevision")) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -336,8 +366,14 @@ func TestAuthErrors(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	if got := redactPath("https://docs.googleapis.com/v1/documents/1AbCdEfGhIjKlMnOp/x?includeTabsContent=true"); got != "/v1/documents/1AbCdE…/x" {
+	// The path keeps its shape and loses the id entirely: six characters
+	// of an id is still six characters of an id, and §12 promises a log
+	// carries nothing about the document.
+	if got := redactPath("https://docs.googleapis.com/v1/documents/1AbCdEfGhIjKlMnOp/x?includeTabsContent=true"); got != "/v1/documents/…/x" {
 		t.Fatalf("redactPath = %q", got)
+	}
+	if got := redactPath("https://www.googleapis.com/drive/v3/files/1AbCdEfGhIjKlMnOp/comments"); strings.Contains(got, "1AbCdE") {
+		t.Fatalf("redactPath left part of the id: %q", got)
 	}
 	if ShortID("abc") != "abc" || ShortID("abcdefgh") != "abcdef…" {
 		t.Fatal("ShortID")

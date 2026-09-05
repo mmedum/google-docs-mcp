@@ -216,7 +216,7 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	}
 	result, ro, err := s.planAndApply(ctx, f, batch, mode)
 	if errors.Is(err, gapi.ErrConflict) {
-		s.log.InfoContext(ctx, "revision conflict; re-planning once", "doc", gapi.ShortID(f.Doc.ID))
+		s.log.InfoContext(ctx, "revision conflict; re-planning once")
 		if f, err = s.FetchFresh(ctx, req.Document); err != nil {
 			return nil, nil, err
 		}

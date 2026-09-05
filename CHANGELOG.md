@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-05
+
 ### Added
 - The identifier scan hard rule 1 always needed: `internal/leakcheck` is
   a test over every tracked file that fails on an address at a domain

@@ -7,6 +7,26 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+- A delete now has to name what it deletes twice. `delete_tab` takes
+  `confirm_tab` and `delete_comment` takes `confirm_comment_id`, each
+  repeating the target exactly, and the call is refused otherwise. Both
+  tools were already unregistered unless `GDOCS_ENABLE_DESTRUCTIVE=true`;
+  a registration gate is a deployer's decision made once, and this is the
+  one a model has to make each time. Retyping an id is a different act
+  from setting a boolean, which is as easy to supply as to omit. The
+  field is optional in the schema and enforced by the server, because a
+  required field would break every existing caller while a refusal cannot
+  be skipped by a client in an auto-approve mode.
+- `make check` runs `licenses` and `schema-diff` too. Both were available
+  and neither was in the gate a person actually runs — the licence check
+  matters for a binary other people install, and the schema diff only
+  fails on breaking changes, so it costs nothing between releases. The
+  whole set now takes about fifteen seconds.
+- CI cancels a superseded run on the same ref, and every job in every
+  workflow has a `timeout-minutes`. The default is six hours, which is
+  not a bound.
+
 ## [0.9.3] - 2026-09-05
 
 ### Added

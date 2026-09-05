@@ -37,7 +37,7 @@ func liveComments(t *testing.T, d *driver, doc string) {
 		"document": doc, "with_handles": true, "include_comments": true, "heading": "Background"})
 
 	if d.destructive && comment != "" {
-		d.ok("delete comment", "delete_comment", map[string]any{"document": doc, "comment_id": comment})
+		d.ok("delete comment", "delete_comment", map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment})
 	}
 }
 

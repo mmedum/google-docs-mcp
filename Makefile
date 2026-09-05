@@ -73,7 +73,7 @@ staleness: build ## Docs must match the code
 	@bash scripts/staleness-check.sh $(BIN)
 
 .PHONY: check
-check: fmt vet lint cover vuln smoke staleness ## Everything CI runs
+check: fmt vet lint cover vuln licenses schema-diff smoke staleness ## Everything CI runs
 
 .PHONY: clean
 clean:

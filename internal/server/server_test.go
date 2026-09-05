@@ -473,7 +473,7 @@ func TestCommentAndHistoryTools(t *testing.T) {
 	if !res.IsError || !strings.HasPrefix(textOf(res), "[invalid]") {
 		t.Fatalf("reply without content: %q", textOf(res))
 	}
-	res = call(t, cs, "delete_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "reply_id": "r1"})
+	res = call(t, cs, "delete_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c1", "reply_id": "r1"})
 	if res.IsError || textOf(res) != "deleted reply r1 of comment c1" || len(api.deleted) != 1 || api.deleted[0] != "c1/r1" {
 		t.Fatalf("delete_comment: %q %v", textOf(res), api.deleted)
 	}
@@ -632,7 +632,7 @@ func TestStructureToolsEndToEnd(t *testing.T) {
 	if !res.IsError || !strings.Contains(textOf(res), "delete_tab") {
 		t.Fatalf("delete through manage_tabs: %q", textOf(res))
 	}
-	res = call(t, cs, "delete_tab", map[string]any{"document": fixtureID, "tab": "Notes"})
+	res = call(t, cs, "delete_tab", map[string]any{"document": fixtureID, "tab": "Notes", "confirm_tab": "Notes"})
 	if res.IsError || !strings.HasPrefix(textOf(res), "deleted tab t.1") {
 		t.Fatalf("delete_tab: %q", textOf(res))
 	}
@@ -713,8 +713,8 @@ func TestResources(t *testing.T) {
 var toolArgs = map[string]map[string]any{
 	"add_comment":       {"document": fixtureID, "content": "a note", "target": map[string]any{"text": "Revenue"}},
 	"create_document":   {"title": "scratch"},
-	"delete_comment":    {"document": fixtureID, "comment_id": "c1"},
-	"delete_tab":        {"document": fixtureID, "tab": "Tab 1"},
+	"delete_comment":    {"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c1"},
+	"delete_tab":        {"document": fixtureID, "tab": "Tab 1", "confirm_tab": "Tab 1"},
 	"diff_revisions":    {"document": fixtureID, "from": "1"},
 	"edit_document":     {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "append", "content": leakCanary}}},
 	"edit_table":        {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "set_cells", "table": "tbl1", "cells": map[string]any{"r1c1": leakCanary}}}},
@@ -836,6 +836,42 @@ func TestGoogleErrorsReachTheModel(t *testing.T) {
 				if strings.Contains(strings.ToLower(got), unwanted) {
 					t.Errorf("should not say %q: %s", unwanted, got)
 				}
+			}
+		})
+	}
+}
+
+// A delete has to name what it deletes twice. The confirmation is
+// refused in the server rather than required in the schema, because a
+// client can be in an auto-approve mode and a required field is a
+// breaking change — what a model cannot skip is a refusal.
+func TestDeletesNeedTheTargetRepeated(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"tab, no confirmation", map[string]any{"document": fixtureID, "tab": "Notes"}, "repeat the tab"},
+		{"tab, wrong confirmation", map[string]any{"document": fixtureID, "tab": "Notes", "confirm_tab": "notes"}, "they must match"},
+		{"comment, no confirmation", map[string]any{"document": fixtureID, "comment_id": "c1"}, "repeat the comment_id"},
+		{"comment, wrong confirmation", map[string]any{"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c2"}, "they must match"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeAPI{raw: doctest.RawFixture(t)}
+			cs := connectWith(t, api, config.Config{DefaultWriteMode: config.WriteDirect, EnableDestructive: true})
+			tool := "delete_tab"
+			if _, ok := tc.args["comment_id"]; ok {
+				tool = "delete_comment"
+			}
+			res := call(t, cs, tool, tc.args)
+			if !res.IsError {
+				t.Fatalf("%s should have been refused: %s", tool, textOf(res))
+			}
+			if got := textOf(res); !strings.Contains(got, tc.want) {
+				t.Errorf("refusal should say %q: %s", tc.want, got)
+			}
+			if len(api.deleted) > 0 || len(api.batches) > 0 {
+				t.Errorf("a refused delete still called Google: %v %d batches", api.deleted, len(api.batches))
 			}
 		})
 	}

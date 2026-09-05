@@ -55,6 +55,24 @@ func fail(err error) error {
 	return errors.New("[unexpected] " + err.Error())
 }
 
+// confirmTarget refuses a destructive call whose confirmation does not
+// repeat the target. Retyping the id is a different act from setting a
+// boolean, which a model can supply as easily as omit — and the refusal
+// lives here rather than in the schema on purpose: a required field
+// would be a breaking schema change, while a server-side refusal is the
+// half a client cannot skip. §12 makes the same point about annotations.
+func confirmTarget(what, target, confirm string) error {
+	switch {
+	case confirm == "":
+		return service.Errorf("invalid", "this deletes the %s and cannot be undone through this server; "+
+			"repeat the %s in confirm_%s to go ahead, after asking the person", what, what, what)
+	case confirm != target:
+		return service.Errorf("invalid", "confirm_%s is %q but the %s is %q; they must match, so that the "+
+			"deletion names what it deletes twice", what, confirm, what, target)
+	}
+	return nil
+}
+
 var (
 	readOnly = &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)}
 	// writeSafe marks tools that change the document but never delete

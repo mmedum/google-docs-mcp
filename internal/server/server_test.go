@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -691,6 +692,53 @@ func TestResources(t *testing.T) {
 			t.Errorf("%s: expected an error", uri)
 		} else if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "Resource not found") {
 			t.Errorf("%s: %v", uri, err)
+		}
+	}
+}
+
+// TestDebugLogsCarryNoDocumentData is the guarantee a person needs
+// before pasting a log into a bug report: at the loudest level the
+// server offers, the log says a call happened and how it went, and
+// nothing about the document it touched. The SDK would log whole
+// JSON-RPC frames if it were handed a logger, which is why it is not.
+func TestDebugLogsCarryNoDocumentData(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t)}
+	svc := service.New(api, service.Options{DefaultWriteMode: config.WriteDirect})
+	_, _ = svc.Fetch(context.Background(), fixtureID)
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	srv := server.New(server.Deps{Service: svc, Config: config.Config{DefaultWriteMode: config.WriteDirect}, Logger: logger, Version: "test"})
+	ct, st := mcp.NewInMemoryTransports()
+	ctx := context.Background()
+	ss, err := srv.Connect(ctx, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ss.Close() }()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	secret := "Revenue grew substantially in Q3."
+	if res := call(t, cs, "read_document", map[string]any{"document": fixtureID}); res.IsError {
+		t.Fatalf("read: %s", textOf(res))
+	}
+	if res := call(t, cs, "edit_document", map[string]any{"document": fixtureID, "mode": "direct",
+		"ops": []any{map[string]any{"op": "append", "content": secret}}}); res.IsError {
+		t.Fatalf("edit: %s", textOf(res))
+	}
+
+	got := logs.String()
+	if !strings.Contains(got, "mcp call") || !strings.Contains(got, "tool=read_document") {
+		t.Fatalf("debug logging should record that a call happened:\n%s", got)
+	}
+	// The document's id, its title, its text, and the text we sent.
+	for _, leak := range []string{fixtureID, "Quarterly Report", "Revenue grew", secret, "h.bg"} {
+		if strings.Contains(got, leak) {
+			t.Errorf("debug log leaked %q:\n%s", leak, got)
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -42,13 +43,52 @@ type Deps struct {
 
 // New builds the MCP server with every tool registered.
 func New(d Deps) *mcp.Server {
+	// The SDK logs transport errors and one handler warning, never a
+	// JSON-RPC frame (checked in v1.7.0, §18). Attach it at debug, where
+	// its session chatter belongs; at info it would put two lines per
+	// session into every client's log file for nothing.
 	opts := &mcp.ServerOptions{Instructions: instructions}
 	if d.Logger != nil && d.Logger.Enabled(context.Background(), slog.LevelDebug) {
 		opts.Logger = d.Logger
 	}
 	s := mcp.NewServer(&mcp.Implementation{Name: Name, Version: d.Version}, opts)
+	if d.Logger != nil {
+		s.AddReceivingMiddleware(logCalls(d.Logger))
+	}
 	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config, Logger: d.Logger})
 	return s
+}
+
+// logCalls records that a call happened and how it went, and nothing
+// about what it carried. Until now the server logged nothing per call,
+// so a bug report could say only what the person saw. The fields are the
+// method, the tool name, the outcome and the duration: params and
+// results are the person's document — ids, titles, the text itself — and
+// a log they are asked to paste into a bug report should be safe to
+// paste by construction rather than by their vigilance.
+func logCalls(logger *slog.Logger) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if !logger.Enabled(ctx, slog.LevelDebug) {
+				return next(ctx, method, req)
+			}
+			start := time.Now()
+			res, err := next(ctx, method, req)
+			attrs := []any{"method", method, "ms", time.Since(start).Milliseconds()}
+			// The tool name is the one part of a request that is ours,
+			// not the person's: it comes from this server's schema.
+			if ct, ok := req.(*mcp.CallToolRequest); ok && ct.Params != nil {
+				attrs = append(attrs, "tool", ct.Params.Name)
+			}
+			if err != nil {
+				attrs = append(attrs, "failed", true)
+			} else if ctr, ok := res.(*mcp.CallToolResult); ok && ctr != nil {
+				attrs = append(attrs, "tool_error", ctr.IsError)
+			}
+			logger.Debug("mcp call", attrs...)
+			return res, err
+		}
+	}
 }
 
 // DumpSchemas writes the tool list and the resource templates as the wire

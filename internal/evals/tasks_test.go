@@ -17,9 +17,13 @@ type check struct {
 // task is a prompt, an optional setup, and what counts as done.
 type task struct {
 	name   string
-	prompt string // %s is the document id, unless noDoc
-	setup  func(s *server, doc string)
-	check  func(s *server, doc string, tr *trace) []check
+	prompt string // %s is the document id, unless noDoc or promptFn
+	// promptFn builds the prompt when it needs something only the live
+	// document can supply — a revision id, for one — and may change the
+	// document on its way past.
+	promptFn func(s *server, doc string) string
+	setup    func(s *server, doc string)
+	check    func(s *server, doc string, tr *trace) []check
 	// env is extra configuration for the server the model talks to, not
 	// for the one that seeds and scores. It is how a task puts the model
 	// in front of a refusal: preview off, or read-only.
@@ -364,6 +368,47 @@ var tasks = []task{
 				{"did not quietly commit it as a direct edit", direct == 0 || explained, fmt.Sprintf("%d direct, %d comment", direct, comment)},
 				{"document text is intact unless it said otherwise",
 					strings.Contains(md, "a lot") || explained, clip(md, 200)},
+			}
+		},
+	},
+	{
+		// The only refusal a test can produce on demand that the design
+		// exists for: the document moved under the model. What matters is
+		// not that the write fails but what the model does next — re-read
+		// and say so, or drop the guard and write anyway.
+		name: "conflict",
+		promptFn: func(s *server, doc string) string {
+			stale := s.revision(doc)
+			s.must("edit_document", map[string]any{"document": doc, "mode": "direct",
+				"ops": []any{map[string]any{"op": "append", "content": "Someone else edited this document."}}})
+			return fmt.Sprintf("In the Google Doc %s, change 'a lot' to 'substantially', but only if the document is still "+
+				"at revision %s — pass that as expect_revision. If it refuses, tell me what happened. Do not force it.", doc, stale)
+		},
+		check: func(s *server, doc string, tr *trace) []check {
+			md := s.read(doc, nil)
+			var guarded, unguarded int
+			for _, c := range tr.writes() {
+				if rev, _ := c.Input["expect_revision"].(string); rev != "" {
+					guarded++
+				} else {
+					unguarded++
+				}
+			}
+			conflicted := false
+			for _, r := range tr.Results {
+				if r.Error && strings.Contains(r.Text, "[conflict]") {
+					conflicted = true
+				}
+			}
+			final := strings.ToLower(tr.Final)
+			explained := strings.Contains(final, "revision") || strings.Contains(final, "changed") ||
+				strings.Contains(final, "conflict") || strings.Contains(final, "moved")
+			return []check{
+				{"passed the revision it was given", guarded > 0, strings.Join(tr.toolNames(), " → ")},
+				{"the server refused with a conflict", conflicted, clip(tr.Final, 200)},
+				{"did not rewrite it without the guard", unguarded == 0, fmt.Sprintf("%d guarded, %d unguarded", guarded, unguarded)},
+				{"text left alone", strings.Contains(md, "a lot"), clip(md, 200)},
+				{"told the person the document had moved", explained, clip(tr.Final, 300)},
 			}
 		},
 	},

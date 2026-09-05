@@ -733,6 +733,108 @@ var toolArgs = map[string]map[string]any{
 // it coming back out of the log.
 const leakCanary = "Revenue grew substantially in Q3."
 
+// TestGoogleErrorsReachTheModel drives real Google error bodies through
+// the whole stack — client classification, service wording, tool
+// rendering — and asserts what a model would actually read. The unit
+// tests underneath check the classification; this checks that the
+// classification survives to the sentence, which is where it stopped
+// being true once before: wrapAPI replaced Google's reason with a guess,
+// so a full Drive was reported as a sharing problem.
+//
+// The bodies are the ones Google's error guide documents. Nothing here
+// has been seen live — that is the point of pinning it.
+func TestGoogleErrorsReachTheModel(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		class    string
+		contains []string
+		absent   []string
+	}{
+		{
+			name:     "throttling is a quota, not a permission",
+			err:      &gapi.APIError{Status: 403, RPC: "PERMISSION_DENIED", Reason: "userRateLimitExceeded", Message: "User Rate Limit Exceeded"},
+			class:    "rate_limited",
+			contains: []string{"userRateLimitExceeded"},
+			absent:   []string{"not shared", "permission"},
+		},
+		{
+			name:     "the daily quota does not refill by waiting",
+			err:      &gapi.APIError{Status: 403, RPC: "PERMISSION_DENIED", Reason: "dailyLimitExceeded", Message: "Daily Limit Exceeded"},
+			class:    "rate_limited",
+			contains: []string{"will not clear it"},
+			absent:   []string{"wait a moment"},
+		},
+		{
+			name:     "a full Drive is not a sharing problem",
+			err:      &gapi.APIError{Status: 403, RPC: "PERMISSION_DENIED", Reason: "storageQuotaExceeded", Message: "The user's Drive storage quota has been exceeded."},
+			class:    "forbidden",
+			contains: []string{"storage is full", "storageQuotaExceeded"},
+			absent:   []string{"not shared"},
+		},
+		{
+			name:     "a refusal Google explained keeps Google's word for it",
+			err:      &gapi.APIError{Status: 403, RPC: "PERMISSION_DENIED", Reason: "downloadRestrictedForRevision", Message: "This revision cannot be downloaded by the authenticated user."},
+			class:    "forbidden",
+			contains: []string{"downloadRestrictedForRevision"},
+			absent:   []string{"not shared"},
+		},
+		{
+			name:     "a refusal Google did not explain still says what to try",
+			err:      &gapi.APIError{Status: 403, RPC: "PERMISSION_DENIED", Message: "The caller does not have permission"},
+			class:    "forbidden",
+			contains: []string{"not shared with it"},
+		},
+		{
+			name:     "a missing scope sends the person to login",
+			err:      &gapi.APIError{Status: 403, RPC: "PERMISSION_DENIED", Reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT", Message: "Request had insufficient authentication scopes."},
+			class:    "forbidden",
+			contains: []string{"login"},
+		},
+		{
+			name:     "a rejected token sends the person to login",
+			err:      &gapi.APIError{Status: 401, RPC: "UNAUTHENTICATED", Message: "Invalid Credentials"},
+			class:    "auth",
+			contains: []string{"login"},
+		},
+		{
+			name:     "a missing document says how to check",
+			err:      &gapi.APIError{Status: 404, RPC: "NOT_FOUND", Message: "Requested entity was not found."},
+			class:    "not_found",
+			contains: []string{"check the id"},
+		},
+		{
+			name:     "429 is still a rate limit",
+			err:      &gapi.APIError{Status: 429, RPC: "RESOURCE_EXHAUSTED", Message: "Quota exceeded"},
+			class:    "rate_limited",
+			contains: []string{"retry"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeAPI{raw: doctest.RawFixture(t), err: tc.err}
+			cs := connect(t, api)
+			res := call(t, cs, "read_document", map[string]any{"document": fixtureID})
+			if !res.IsError {
+				t.Fatalf("the call should have failed: %s", textOf(res))
+			}
+			got := textOf(res)
+			if !strings.HasPrefix(got, "["+tc.class+"]") {
+				t.Errorf("class: got %q, want [%s]", got, tc.class)
+			}
+			for _, want := range tc.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q in: %s", want, got)
+				}
+			}
+			for _, unwanted := range tc.absent {
+				if strings.Contains(strings.ToLower(got), unwanted) {
+					t.Errorf("should not say %q: %s", unwanted, got)
+				}
+			}
+		})
+	}
+}
+
 // TestEveryToolHasArgs keeps toolArgs complete. Without it the surface
 // tests below silently shrink to whatever was registered when they were
 // written — the failure mode where a guarantee is still asserted, but

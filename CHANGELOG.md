@@ -7,6 +7,23 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- The error path is tested end to end. Google's documented error bodies
+  now go through the whole stack — classification, wording, tool
+  rendering — and the test asserts the sentence a model actually reads,
+  not the class an internal function returned. Three of its cases fail
+  against the code as it stood this morning.
+- The identifier scan can read the whole history
+  (`LEAKCHECK_HISTORY=1`), not just the files as they stand. A tree scan
+  cannot see an identifier that was committed and edited out later,
+  which is exactly the accident this repository has already had once.
+  First run: 600 text blobs, nothing found.
+- A `conflict` eval task: the model is handed a stale revision, and
+  scored on whether it passes the guard, reports the refusal, and leaves
+  the document alone rather than writing again without the guard. It is
+  the one refusal the design exists for that a test can produce on
+  demand.
+
 ## [0.9.0] - 2026-09-05
 
 ### Added

@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-05
+
 ### Added
 - The error path is tested end to end. Google's documented error bodies
   now go through the whole stack — classification, wording, tool

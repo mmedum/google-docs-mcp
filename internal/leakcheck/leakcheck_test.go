@@ -95,10 +95,26 @@ func TestNothingIdentifyingIsCommitted(t *testing.T) {
 		if strings.IndexByte(text, 0) >= 0 {
 			continue // binary
 		}
-		for _, found := range findLeaks(text) {
+		for _, found := range findLeaks(allowed(text)) {
 			t.Errorf("%s: %s", name, found)
 		}
 	}
+}
+
+// allowed drops the lines that carry the marker. The planted strings in
+// this file's own table are the case it exists for: a scanner has to
+// contain the shapes it catches, and the marker is per line, so nothing
+// else in the file is excused. gitleaks reads its own marker the same
+// way and on the same lines, for the same reason.
+func allowed(text string) string {
+	var b strings.Builder
+	for line := range strings.Lines(text) {
+		if strings.Contains(line, "leakcheck:"+"allow") {
+			continue
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 // findLeaks reports everything in text that looks like it identifies
@@ -139,14 +155,14 @@ func TestRulesCatchPlantedIdentifiers(t *testing.T) {
 		text  string
 		leaks bool
 	}{
-		{"real address", "contact alice@acme.co.uk for access", true},
+		{"real address", "contact alice@acme.co.uk for access", true}, // leakcheck:allow
 		{"documentation address", "owner o@example.test signed in", false},
 		{"test domain", "a@b.test", false},
-		{"subject id", "sub 109876543210987654321 logged in", true},
-		{"client id", "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com", true},
+		{"subject id", "sub 109876543210987654321 logged in", true},                                     // leakcheck:allow
+		{"client id", "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com", true}, // leakcheck:allow gitleaks:allow
 		{"api host on its own", "https://docs.googleapis.com/v1/documents", false},
-		{"photo url", "https://lh3.googleusercontent.com/a-/AOh14GhAbCdEfGhIjK", true},
-		{"real-looking document id", "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms", true},
+		{"photo url", "https://lh3.googleusercontent.com/a-/AOh14GhAbCdEfGhIjK", true},     // leakcheck:allow
+		{"real-looking document id", "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms", true}, // leakcheck:allow
 		{"synthetic document id", "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", false},
 		{"invented by repetition", "1AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH", false},
 		{"a commit sha is not an id", "pinned at f06c13b6b1a9625abc9e6e439d9c05a8f2190e94", false},

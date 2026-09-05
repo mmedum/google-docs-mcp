@@ -138,7 +138,7 @@ func (p *profile) tokenSource(ctx context.Context) (oauth2.TokenSource, credenti
 	if err != nil {
 		return nil, "", err
 	}
-	return auth.TokenSource(ctx, oc, tok), src, nil
+	return auth.TokenSource(ctx, oc, tok, p.cfg.HTTPTimeout), src, nil
 }
 
 func runServer(args []string) int {
@@ -280,7 +280,7 @@ func cmdLogin(args []string) int {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	opts := auth.LoginOptions{Out: os.Stdout, Timeout: timeout}
+	opts := auth.LoginOptions{Out: os.Stdout, Timeout: timeout, HTTPTimeout: cfg.HTTPTimeout}
 	if noBrowser {
 		opts.OpenBrowser = func(string) error { return errors.New("--no-browser") }
 	}

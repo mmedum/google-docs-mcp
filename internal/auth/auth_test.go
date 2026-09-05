@@ -187,12 +187,12 @@ func TestTokenSourceRevokeInspect(t *testing.T) {
 	defer func() { RevokeURL, TokenInfoURL = old1, old2 }()
 
 	cfg := &oauth2.Config{ClientID: "cid", Endpoint: oauth2.Endpoint{TokenURL: srv.URL + "/token", AuthStyle: oauth2.AuthStyleInParams}}
-	ts := TokenSource(context.Background(), cfg, "rt")
+	ts := TokenSource(context.Background(), cfg, "rt", 0)
 	tok, err := ts.Token()
 	if err != nil || tok.AccessToken != "fresh" {
 		t.Fatalf("token source: %+v %v", tok, err)
 	}
-	if _, err := TokenSource(context.Background(), cfg, "wrong").Token(); err == nil {
+	if _, err := TokenSource(context.Background(), cfg, "wrong", 0).Token(); err == nil {
 		t.Fatal("bad refresh token should fail")
 	}
 	if err := Revoke(context.Background(), nil, "rt"); err != nil || revoked != "rt" {
@@ -210,5 +210,50 @@ func TestTokenSourceRevokeInspect(t *testing.T) {
 	}
 	if missing := HasScopes([]string{"a", "b"}, []string{"a", "c"}); len(missing) != 1 || missing[0] != "c" {
 		t.Fatalf("HasScopes = %v", missing)
+	}
+}
+
+// A token endpoint that accepts the connection and never answers must
+// not hang the caller: without a client in the context the oauth2
+// library uses http.DefaultClient, which has no timeout at all.
+func TestTokenRefreshIsBounded(t *testing.T) {
+	// A listener that accepts and never answers. Not httptest: its Close
+	// waits for the connection, and the point here is a connection nobody
+	// ever finishes.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		var held []net.Conn
+		defer func() {
+			for _, c := range held {
+				_ = c.Close()
+			}
+		}()
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			held = append(held, c)
+		}
+	}()
+
+	cfg := &oauth2.Config{ClientID: "cid", Endpoint: oauth2.Endpoint{
+		TokenURL: "http://" + ln.Addr().String() + "/token", AuthStyle: oauth2.AuthStyleInParams}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := TokenSource(context.Background(), cfg, "rt", 150*time.Millisecond).Token()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a hung token endpoint should not yield a token")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refresh never gave up: the oauth2 call is unbounded")
 	}
 }

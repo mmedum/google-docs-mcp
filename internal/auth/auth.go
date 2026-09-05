@@ -107,6 +107,10 @@ type LoginOptions struct {
 	Timeout time.Duration
 	// Listener overrides the loopback listener (tests).
 	Listener net.Listener
+	// HTTPTimeout bounds the code exchange. Zero means
+	// DefaultHTTPTimeout; it is not the same as Timeout, which bounds
+	// the person's trip through the browser.
+	HTTPTimeout time.Duration
 }
 
 // Login runs the loopback authorization-code flow and returns a token
@@ -209,7 +213,7 @@ func Login(ctx context.Context, cfg *oauth2.Config, opts LoginOptions) (*oauth2.
 		return nil, errors.New("auth: timed out waiting for the browser")
 	}
 
-	tok, err := conf.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+	tok, err := conf.Exchange(boundHTTP(ctx, opts.HTTPTimeout), code, oauth2.VerifierOption(verifier))
 	if err != nil {
 		return nil, fmt.Errorf("auth: exchange code: %w", err)
 	}
@@ -219,8 +223,26 @@ func Login(ctx context.Context, cfg *oauth2.Config, opts LoginOptions) (*oauth2.
 	return tok, nil
 }
 
-// TokenSource returns a caching token source backed by the refresh token.
-func TokenSource(ctx context.Context, cfg *oauth2.Config, refreshToken string) oauth2.TokenSource {
+// DefaultHTTPTimeout bounds an OAuth call when no timeout is given.
+const DefaultHTTPTimeout = 60 * time.Second
+
+// boundHTTP puts a client with a timeout in the context. Without one the
+// oauth2 library uses http.DefaultClient, which has none: a token
+// endpoint that accepts the connection and never answers would hang the
+// first tool call for as long as the process runs. The per-request
+// timeout on the API client does not cover the refresh, because the
+// refresh happens inside the token source, not on that client.
+func boundHTTP(ctx context.Context, timeout time.Duration) context.Context {
+	if timeout <= 0 {
+		timeout = DefaultHTTPTimeout
+	}
+	return context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: timeout})
+}
+
+// TokenSource returns a caching token source backed by the refresh
+// token. timeout bounds each refresh; zero means DefaultHTTPTimeout.
+func TokenSource(ctx context.Context, cfg *oauth2.Config, refreshToken string, timeout time.Duration) oauth2.TokenSource {
+	ctx = boundHTTP(ctx, timeout)
 	return oauth2.ReuseTokenSource(nil, cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}))
 }
 

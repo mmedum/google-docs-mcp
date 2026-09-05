@@ -1,9 +1,13 @@
-// Command devcheck is the JSON half of the repository's gates. The
-// shell scripts do the git and file plumbing; anything that has to read
-// a tool schema happens here, in the language the project is written in.
+// Command devcheck is the repository's gates. They were shell scripts
+// until two of them went wrong in ways bash made easy: a hand-written
+// package list that fell behind in silence, and a staleness rule that
+// failed on the release it was written to guard. Being Go, they run
+// wherever CI runs and they have tests of their own.
 //
 //	go run ./internal/devcheck tool-names schemas.json
 //	go run ./internal/devcheck schema-diff old.json new.json
+//	go run ./internal/devcheck coverage cov.out 80
+//	go run ./internal/devcheck staleness ./google-docs-mcp
 package main
 
 import (
@@ -11,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -27,7 +32,7 @@ type schemaDump struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fail("usage: devcheck tool-names FILE | schema-diff OLD NEW")
+		fail("usage: devcheck tool-names FILE | schema-diff OLD NEW | coverage PROFILE MIN | staleness [BIN]")
 	}
 	switch os.Args[1] {
 	case "tool-names":
@@ -48,6 +53,27 @@ func main() {
 		if breaking := diff(read(os.Args[2]), read(os.Args[3])); breaking {
 			os.Exit(1)
 		}
+	case "staleness":
+		bin := "./google-docs-mcp"
+		if len(os.Args) == 3 {
+			bin = os.Args[2]
+		}
+		if err := staleness(bin); err != nil {
+			fail("%v", err)
+		}
+		fmt.Println("staleness check ok")
+	case "coverage":
+		if len(os.Args) != 4 {
+			fail("usage: devcheck coverage PROFILE MIN")
+		}
+		min, err := strconv.ParseFloat(os.Args[3], 64)
+		if err != nil {
+			fail("coverage: %v", err)
+		}
+		if err := coverageFloor(os.Args[2], min); err != nil {
+			fail("%v", err)
+		}
+		fmt.Println("coverage floor ok")
 	default:
 		fail("unknown command %q", os.Args[1])
 	}

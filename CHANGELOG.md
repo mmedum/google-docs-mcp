@@ -8,6 +8,11 @@ and new required fields are breaking; the schema diff in CI flags them.
 ## [Unreleased]
 
 ### Changed
+- The live driver is Go: `go test -tags=live ./internal/livecheck` drives
+  the binary over stdio through the MCP SDK's own client, replacing
+  `scripts/live-drive.py`. Steps that must be refused now assert their
+  refusal instead of printing it for a human to read, so a green run means
+  the guards fired as well as the writes.
 - The repository's gates no longer need Python. `make check` shelled out
   to `python3` twice — to list tool names and to diff two schema dumps —
   which made an interpreter an undeclared prerequisite of a Go project's

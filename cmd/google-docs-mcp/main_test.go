@@ -27,6 +27,10 @@ func TestClientWentAway(t *testing.T) {
 		{"cancelled context", context.Canceled, true},
 		{"a real protocol failure is not a disconnect", &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "internal error"}, false},
 		{"any other error", errors.New("transport exploded"), false},
+		// Matching the message text instead of the code would call this a
+		// clean shutdown. Silly, but it is the difference the code match
+		// buys, so the test records it rather than the fix alone.
+		{"an error that merely reads like the SDK's", errors.New("the server is closing time at the pub"), false},
 	} {
 		if got := clientWentAway(tc.err); got != tc.want {
 			t.Errorf("%s: got %t, want %t", tc.name, got, tc.want)

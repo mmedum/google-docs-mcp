@@ -35,6 +35,8 @@ jobs:
       - run: go test -race -coverpkg=./internal/... -coverprofile=cov.out -covermode=atomic ./...
       # Every platform now, not only Linux: the floor is Go rather than
       # a shell script, so there is nothing left that only bash can run.
+      - name: what is in the workspace
+        run: ls; pwd; go env GOFLAGS
       - name: coverage floor
         run: go run ./internal/devcheck coverage cov.out 80
 

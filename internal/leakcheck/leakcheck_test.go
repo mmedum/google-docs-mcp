@@ -179,6 +179,65 @@ func TestRulesCatchPlantedIdentifiers(t *testing.T) {
 	}
 }
 
+// TestHistoryCarriesNoIdentifiers scans every blob ever committed, not
+// just the files as they stand. The tree scan cannot see an identifier
+// that was committed and later edited out — and that is the shape of the
+// accident this repository has already had once, when two of Claude
+// Code's settings files were swept in by `git add -A` and removed in a
+// later commit. gitleaks in CI scans a pull request's own commits, so
+// these rules have never run over the whole history either.
+//
+// Guarded by LEAKCHECK_HISTORY=1: it reads the object store, which is
+// not a per-push cost. Run it before a release, or after a scare.
+func TestHistoryCarriesNoIdentifiers(t *testing.T) {
+	if os.Getenv("LEAKCHECK_HISTORY") == "" {
+		t.Skip("set LEAKCHECK_HISTORY=1 to scan every blob in the history")
+	}
+	root := moduleRoot(t)
+	out, err := exec.Command("git", "-C", root, "rev-list", "--objects", "--all").Output()
+	if err != nil {
+		t.Skipf("git rev-list: %v", err)
+	}
+
+	type blob struct{ sha, path string }
+	var blobs []blob
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		sha, path, ok := strings.Cut(line, " ")
+		if !ok || path == "" || seen[sha] {
+			continue // a commit or a tree, or a blob under a second name
+		}
+		if skipFiles[filepath.Base(path)] {
+			continue
+		}
+		seen[sha] = true
+		blobs = append(blobs, blob{sha, path})
+	}
+	if len(blobs) < 50 {
+		t.Fatalf("only %d blobs; the scan is not seeing the history", len(blobs))
+	}
+
+	scanned := 0
+	for _, b := range blobs {
+		data, err := exec.Command("git", "-C", root, "cat-file", "blob", b.sha).Output()
+		if err != nil {
+			continue
+		}
+		text := string(data)
+		if strings.IndexByte(text, 0) >= 0 {
+			continue // binary
+		}
+		scanned++
+		for _, found := range findLeaks(allowed(text)) {
+			// The commit is named, because a finding in history is not
+			// fixed by editing a file: it needs the history rewritten, or
+			// a decision that this one is harmless.
+			t.Errorf("%s (blob %s, first seen as %s): %s", b.path, b.sha[:12], b.path, found)
+		}
+	}
+	t.Logf("scanned %d text blobs across the whole history", scanned)
+}
+
 func safeDomain(domain string) bool {
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
 	if safeDomains[domain] {

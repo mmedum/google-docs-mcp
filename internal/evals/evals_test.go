@@ -57,7 +57,11 @@ func TestEvals(t *testing.T) {
 				if tk.setup != nil {
 					tk.setup(s, doc)
 				}
-				prompt = fmt.Sprintf(tk.prompt, doc)
+				if tk.promptFn != nil {
+					prompt = tk.promptFn(s, doc)
+				} else {
+					prompt = fmt.Sprintf(tk.prompt, doc)
+				}
 			}
 
 			tr := runClaude(t, prompt, tk.env)

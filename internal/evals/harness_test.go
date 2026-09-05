@@ -173,6 +173,20 @@ func (s *server) pendingSuggestions(doc string) int {
 	return s.scraped(pendingRE, text, "the suggestion count")
 }
 
+// revision is the document's current revision id, which a task needs
+// when it has to hand the model a stale one.
+func (s *server) revision(doc string) string {
+	s.t.Helper()
+	text, _ := s.must("get_document", map[string]any{"document": doc})
+	m := revisionRE.FindStringSubmatch(text)
+	if m == nil {
+		s.t.Fatalf("cannot read the revision from get_document; the wording changed:\n%s", clip(text, 400))
+	}
+	return m[1]
+}
+
+var revisionRE = regexp.MustCompile(`(?m)^revision (\S+)`)
+
 type docInfo struct {
 	footnotes int
 	tabs      []string

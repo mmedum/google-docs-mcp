@@ -67,6 +67,12 @@ and are preferred by the Makefile; install them with
   rows, which makes it the quickest end-to-end check of a layout change.
 - `go vet -tags=integration ./...` (part of `make vet`) keeps the tagged
   tests compiling even though CI never runs them.
+- **Before a release, scan the history**: `LEAKCHECK_HISTORY=1 go test
+  ./internal/leakcheck -run TestHistoryCarriesNoIdentifiers` reads every
+  blob ever committed, which the ordinary run does not — a file that
+  carried an identifier and was cleaned up later still carries it in the
+  object store. It takes a few seconds and is skipped without the
+  variable.
 - **Adding a tool or an op costs three entries, and each one fails loudly
   if you skip it**: a step in `internal/livecheck` (or `TestCoverage`
   fails), a row in `server.toolArgs` (or `TestEveryToolHasArgs` fails),

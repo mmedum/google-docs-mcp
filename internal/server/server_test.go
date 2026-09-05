@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sort"
 	"strings"
 	"testing"
 
@@ -696,6 +697,72 @@ func TestResources(t *testing.T) {
 	}
 }
 
+// toolArgs is one call's worth of arguments for every registered tool.
+// It exists so a test can drive the whole surface rather than the two or
+// three tools someone thought of: TestEveryToolHasArgs fails when a tool
+// is added without an entry, so the logging guarantee below cannot
+// quietly stop covering the newest tool. Whether a call succeeds against
+// the fake does not matter here — a refusal is logged too, and a refusal
+// is exactly where a message tends to quote the document.
+var toolArgs = map[string]map[string]any{
+	"add_comment":       {"document": fixtureID, "content": "a note", "target": map[string]any{"text": "Revenue"}},
+	"create_document":   {"title": "scratch"},
+	"delete_comment":    {"document": fixtureID, "comment_id": "c1"},
+	"delete_tab":        {"document": fixtureID, "tab": "Tab 1"},
+	"diff_revisions":    {"document": fixtureID, "from": "1"},
+	"edit_document":     {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "append", "content": leakCanary}}},
+	"edit_table":        {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "set_cells", "table": "tbl1", "cells": map[string]any{"r1c1": leakCanary}}}},
+	"export_document":   {"document": fixtureID, "format": "md"},
+	"find_in_document":  {"document": fixtureID, "query": "Revenue"},
+	"format_document":   {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "text_style", "target": map[string]any{"text": "Revenue"}, "bold": true}}},
+	"get_document":      {"document": fixtureID},
+	"get_outline":       {"document": fixtureID},
+	"insert_object":     {"document": fixtureID, "mode": "direct", "kind": "date", "date": "2026-09-05"},
+	"layout_document":   {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "page", "page_size": "A4"}}},
+	"list_comments":     {"document": fixtureID},
+	"list_revisions":    {"document": fixtureID},
+	"list_suggestions":  {"document": fixtureID},
+	"manage_tabs":       {"document": fixtureID, "action": "add", "title": "Appendix"},
+	"read_document":     {"document": fixtureID},
+	"reply_comment":     {"document": fixtureID, "comment_id": "c1", "content": "a reply"},
+	"review_suggestion": {"document": fixtureID, "action": "accept", "ids": []any{"suggest.x"}},
+	"search_documents":  {"title": "scratch"},
+}
+
+// leakCanary is text a call sends in, so the logging test can look for
+// it coming back out of the log.
+const leakCanary = "Revenue grew substantially in Q3."
+
+// TestEveryToolHasArgs keeps toolArgs complete. Without it the surface
+// tests below silently shrink to whatever was registered when they were
+// written — the failure mode where a guarantee is still asserted, but
+// about less and less of the server.
+func TestEveryToolHasArgs(t *testing.T) {
+	cs := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)},
+		config.Config{DefaultWriteMode: config.WriteDirect, EnableDestructive: true})
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools.Tools) == 0 {
+		t.Fatal("no tools registered")
+	}
+	for _, tool := range tools.Tools {
+		if _, ok := toolArgs[tool.Name]; !ok {
+			t.Errorf("tool %s has no entry in toolArgs; add one so the surface tests cover it", tool.Name)
+		}
+	}
+	names := map[string]bool{}
+	for _, tool := range tools.Tools {
+		names[tool.Name] = true
+	}
+	for name := range toolArgs {
+		if !names[name] {
+			t.Errorf("toolArgs names %s, which is not registered", name)
+		}
+	}
+}
+
 // TestDebugLogsCarryNoDocumentData is the guarantee a person needs
 // before pasting a log into a bug report: at the loudest level the
 // server offers, the log says a call happened and how it went, and
@@ -708,7 +775,7 @@ func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	srv := server.New(server.Deps{Service: svc, Config: config.Config{DefaultWriteMode: config.WriteDirect}, Logger: logger, Version: "test"})
+	srv := server.New(server.Deps{Service: svc, Config: config.Config{DefaultWriteMode: config.WriteDirect, EnableDestructive: true}, Logger: logger, Version: "test"})
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()
 	ss, err := srv.Connect(ctx, st, nil)
@@ -722,21 +789,32 @@ func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 	}
 	defer func() { _ = cs.Close() }()
 
-	secret := "Revenue grew substantially in Q3."
-	if res := call(t, cs, "read_document", map[string]any{"document": fixtureID}); res.IsError {
-		t.Fatalf("read: %s", textOf(res))
+	// Every registered tool, not a chosen few: whether a call succeeds
+	// against the fake is irrelevant, since a refusal is logged too and a
+	// refusal is where a message is most tempted to quote the document.
+	names := make([]string, 0, len(toolArgs))
+	for name := range toolArgs {
+		names = append(names, name)
 	}
-	if res := call(t, cs, "edit_document", map[string]any{"document": fixtureID, "mode": "direct",
-		"ops": []any{map[string]any{"op": "append", "content": secret}}}); res.IsError {
-		t.Fatalf("edit: %s", textOf(res))
+	sort.Strings(names)
+	for _, name := range names {
+		if _, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: toolArgs[name]}); err != nil {
+			t.Fatalf("%s: protocol error: %v", name, err)
+		}
 	}
 
 	got := logs.String()
 	if !strings.Contains(got, "mcp call") || !strings.Contains(got, "tool=read_document") {
 		t.Fatalf("debug logging should record that a call happened:\n%s", got)
 	}
-	// The document's id, its title, its text, and the text we sent.
-	for _, leak := range []string{fixtureID, "Quarterly Report", "Revenue grew", secret, "h.bg"} {
+	for _, name := range names {
+		if !strings.Contains(got, "tool="+name) {
+			t.Errorf("no log line for %s; the leak check never saw it", name)
+		}
+	}
+	// The document's id, its title, its text, the text a call sent, and a
+	// heading id.
+	for _, leak := range []string{fixtureID, "Quarterly Report", "Revenue grew", leakCanary, "h.bg"} {
 		if strings.Contains(got, leak) {
 			t.Errorf("debug log leaked %q:\n%s", leak, got)
 		}

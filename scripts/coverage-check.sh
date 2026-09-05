@@ -7,7 +7,20 @@ PROFILE=${1:-cov.out}
 MIN=${2:-80}
 MODULE=github.com/mmedum/google-docs-mcp
 fail=0
-for pkg in internal/doc internal/render internal/service internal/gapi internal/config internal/credentials internal/auth internal/tools internal/server; do
+# The list is derived, not typed: a package added under internal/ is
+# under the floor from its first commit. An exemption has to be written
+# down here, which makes it a decision someone can see in review.
+#
+#   devcheck  a build-gate helper with no runtime path; the gates that
+#             use it are what exercise it
+#   doctest   fixtures for other packages' tests
+#   gdocs     wire types: struct tags, no logic
+#   leakcheck a test-only package: it scans the repository, it has no
+#             statements of its own to cover
+exempt="internal/devcheck internal/doc/doctest internal/gdocs internal/leakcheck"
+packages=$(go list ./internal/... | sed "s|^$MODULE/||")
+for pkg in $packages; do
+  case " $exempt " in *" $pkg "*) continue ;; esac
   pct=$(awk -v p="$MODULE/$pkg/" 'NR>1 && index($1, p)==1 {
       if (!($1 in stmts)) stmts[$1]=$2;
       if ($3>0) hit[$1]=1 }

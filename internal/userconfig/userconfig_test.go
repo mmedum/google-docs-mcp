@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +72,96 @@ func TestBaseDirFallsBackToUserConfigDir(t *testing.T) {
 	}
 	if filepath.Base(d) != AppDir {
 		t.Fatalf("base dir = %s", d)
+	}
+}
+
+// The error paths: a config directory that cannot be located at all, a
+// file that is not JSON, a save whose parent is a file, and a remove
+// whose target is a non-empty directory. They are the branches a caller
+// only meets on a broken machine, which is exactly when a bare
+// "userconfig" in the message would waste someone's afternoon.
+func TestErrorPaths(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv(EnvDir, base)
+
+	t.Run("unparsable config", func(t *testing.T) {
+		p, err := Path("bad")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("{not json"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = Load("bad")
+		if err == nil || errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "parse") {
+			t.Fatalf("Load on a broken file = %v", err)
+		}
+	})
+
+	t.Run("save under a file", func(t *testing.T) {
+		// A regular file exactly where the profile's directory has to go:
+		// MkdirAll cannot create it.
+		blocker := filepath.Join(base, "profiles", "blocked")
+		if err := os.MkdirAll(filepath.Dir(blocker), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(blocker, []byte("in the way"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(blocker) })
+		if err := Save("blocked", Config{}); err == nil || !strings.Contains(err.Error(), "create") {
+			t.Fatalf("Save into a blocked path = %v", err)
+		}
+	})
+
+	t.Run("remove a directory", func(t *testing.T) {
+		p, err := Path("dir")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(p, "child"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := Remove("dir"); err == nil || !strings.Contains(err.Error(), "remove") {
+			t.Fatalf("Remove on a non-empty directory = %v", err)
+		}
+	})
+
+	t.Run("missing file is not an error", func(t *testing.T) {
+		if err := Remove("never-saved"); err != nil {
+			t.Fatalf("Remove of an absent config = %v", err)
+		}
+	})
+}
+
+// With no environment override and no home directory, there is nowhere
+// to put a config, and every path helper has to say so rather than
+// returning a path relative to nothing.
+func TestNoConfigDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.UserConfigDir falls back to other variables on Windows")
+	}
+	t.Setenv(EnvDir, "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	for name, fn := range map[string]func(string) (string, error){
+		"ProfileDir": ProfileDir, "Path": Path,
+		"DefaultClientSecretPath": DefaultClientSecretPath, "TokenFilePath": TokenFilePath,
+	} {
+		if _, err := fn("default"); err == nil {
+			t.Errorf("%s should fail with no config directory", name)
+		}
+	}
+	if _, err := Load("default"); err == nil {
+		t.Error("Load should fail with no config directory")
+	}
+	if err := Save("default", Config{}); err == nil {
+		t.Error("Save should fail with no config directory")
+	}
+	if err := Remove("default"); err == nil {
+		t.Error("Remove should fail with no config directory")
 	}
 }

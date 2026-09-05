@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-09-05
+
 ### Changed
 - CI no longer cancels a superseded run **on `main`**. Cancelling one on
   a branch costs nothing, but cancelling on the default branch leaves a

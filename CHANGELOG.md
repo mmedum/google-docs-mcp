@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-05
+
 ### Fixed
 - Releases could not publish: signing failed with "create bundle file:
   open : no such file or directory". Pinning the actions moved

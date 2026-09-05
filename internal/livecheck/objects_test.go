@@ -34,6 +34,7 @@ func liveObjects(t *testing.T, d *driver, doc string) {
 	}
 
 	const logo = "https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png"
+	const otherLogo = "https://www.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png"
 	d.ok("insert image", "insert_object", map[string]any{"document": doc, "kind": "image", "url": logo,
 		"width_pt": 48, "mode": "direct",
 		"location": map[string]any{"at": "after", "of": map[string]any{"text": "Closing line"}}})
@@ -44,10 +45,12 @@ func liveObjects(t *testing.T, d *driver, doc string) {
 		t.Log("no inline image id in the read; skipping replace and delete")
 		return
 	}
+	// A different image, and cropped: swapping the same URL back in would
+	// look the same whether the replace worked or quietly did nothing.
 	d.ok("replace the image source", "insert_object", map[string]any{"document": doc, "action": "replace",
-		"object_id": obj, "url": logo, "mode": "direct"})
+		"object": obj, "url": otherLogo, "crop": true, "mode": "direct"})
 	d.ok("delete the image", "insert_object", map[string]any{"document": doc, "action": "delete",
-		"object_id": obj, "mode": "direct"})
+		"object": obj, "mode": "direct"})
 }
 
 // liveTabs covers add, rename, nesting and both directions of move, then
@@ -58,6 +61,14 @@ func liveTabs(t *testing.T, d *driver, doc string) {
 	d.ok("rename tab", "manage_tabs", map[string]any{"document": doc, "action": "rename", "tab": "Appendix", "title": "Appendix A"})
 	_, sc := d.okStruct("add parent tab", "manage_tabs", map[string]any{"document": doc, "action": "add", "title": "Parent"})
 	parent := str(sc, "tab_id")
+	// The tab tree goes in a cleanup rather than here: the resource reads
+	// later in the run address the tab nested under this one, and a
+	// cleanup still runs when a step in between gives up.
+	if d.destructive && parent != "" {
+		t.Cleanup(func() {
+			d.ok("delete the parent tab, child and all", "delete_tab", map[string]any{"document": doc, "tab": parent})
+		})
+	}
 	d.ok("nest tab under parent", "manage_tabs", map[string]any{"document": doc, "action": "move", "tab": "Appendix A", "parent": "Parent"})
 	d.ok("move parent tab first", "manage_tabs", map[string]any{"document": doc, "action": "move", "tab": "Parent", "position": 1})
 	d.ok("tabs after the moves", "get_document", map[string]any{"document": doc})
@@ -70,7 +81,7 @@ func liveTabs(t *testing.T, d *driver, doc string) {
 	d.ok("move parent tab back to the end", "manage_tabs", map[string]any{"document": doc, "action": "move", "tab": "Parent", "position": 2})
 	after := d.ok("tabs after moving it back", "get_document", map[string]any{"document": doc})
 	if i, j := indexOf(after, `tab 1 "Tab 1"`), indexOf(after, `tab 1 "Parent"`); i < 0 && j >= 0 {
-		t.Errorf("the content tab should be first again:\n%s", truncate(after, 500))
+		t.Errorf("the content tab should be first again:\n%s", shown(after, 500))
 	}
 
 	d.ok("create header and footer", "edit_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
@@ -90,9 +101,6 @@ func liveTabs(t *testing.T, d *driver, doc string) {
 		map[string]any{"op": "delete_header"}, map[string]any{"op": "delete_footer"},
 	}})
 
-	if d.destructive && parent != "" {
-		d.ok("delete the parent tab, child and all", "delete_tab", map[string]any{"document": doc, "tab": parent})
-	}
 }
 
 func indexOf(haystack, needle string) int {

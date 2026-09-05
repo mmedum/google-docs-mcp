@@ -29,7 +29,7 @@ func liveLayout(t *testing.T, d *driver, doc string) {
 	}})
 	back := d.ok("read the redefined HEADING_2 back", "get_document", map[string]any{"document": doc})
 	if !strings.Contains(back, "named style HEADING_2") {
-		t.Errorf("get_document should report the named styles in use:\n%s", truncate(back, 600))
+		t.Errorf("get_document should report the named styles in use:\n%s", shown(back, 600))
 	}
 	// heading_2 is carried by a paragraph here, so the read below shows the
 	// change; a style nothing uses is not reported.
@@ -62,7 +62,7 @@ func liveLayout(t *testing.T, d *driver, doc string) {
 		map[string]any{"op": "create_named_range", "name": "live anchor", "target": map[string]any{"text": "Closing line"}}}})
 	named := d.ok("get_document lists the named range", "get_document", map[string]any{"document": doc})
 	if !strings.Contains(named, "live anchor") {
-		t.Errorf("the named range should be reported:\n%s", truncate(named, 600))
+		t.Errorf("the named range should be reported:\n%s", shown(named, 600))
 	}
 	d.ok("edit through the named range", "edit_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
 		map[string]any{"op": "replace", "target": map[string]any{"named_range": "live anchor"},

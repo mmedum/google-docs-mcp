@@ -86,7 +86,7 @@ func TestLive(t *testing.T) {
 	// text around it is not.
 	styled := d.ok("read with styles", "read_document", map[string]any{"document": doc, "with_styles": true})
 	if !strings.Contains(styled, "color: #1a73e8") {
-		t.Errorf("with_styles should annotate the colour a run sets itself:\n%s", truncate(styled, 400))
+		t.Errorf("with_styles should annotate the colour a run sets itself:\n%s", shown(styled, 400))
 	}
 
 	d.ok("find", "find_in_document", map[string]any{"document": doc, "query": "point"})

@@ -24,7 +24,7 @@ func liveComments(t *testing.T, d *driver, doc string) {
 	// listing, which is the only place a caller learns thread ids.
 	listed := d.ok("list comments after adding one", "list_comments", map[string]any{"document": doc})
 	if comment != "" && !strings.Contains(listed, comment) {
-		t.Errorf("comment %s is not in the listing:\n%s", comment, truncate(listed, 500))
+		t.Errorf("comment %s is not in the listing:\n%s", comment, shown(listed, 500))
 	}
 	if comment != "" {
 		d.ok("reply", "reply_comment", map[string]any{"document": doc, "comment_id": comment, "content": "Reply from the live test."})

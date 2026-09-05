@@ -49,7 +49,7 @@ func liveResources(t *testing.T, d *driver, doc string) {
 		for _, c := range res.Contents {
 			b.WriteString(c.Text)
 		}
-		t.Logf("=== %s ===\n%s", label, truncate(scrub(b.String()), 500))
+		t.Logf("=== %s ===\n%s", label, shown(b.String(), 500))
 	}
 	read("resource: whole document", "gdocs://"+doc, false)
 	read("resource: outline", "gdocs://"+doc+"/outline", false)

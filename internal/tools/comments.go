@@ -38,6 +38,7 @@ type DeleteCommentInput struct {
 	Document  string `json:"document" jsonschema:"document id or any docs.google.com URL"`
 	CommentID string `json:"comment_id" jsonschema:"thread id from list_comments"`
 	ReplyID   string `json:"reply_id,omitempty" jsonschema:"delete only this reply of the thread"`
+	Confirm   string `json:"confirm_comment_id,omitempty" jsonschema:"repeat comment_id exactly; the deletion is refused without it"`
 }
 
 func registerCommentsRead(s *mcp.Server, d Deps) {
@@ -94,10 +95,14 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "delete_comment",
 		Description: "Delete a comment thread, or one reply of it, from a Google Doc. Only the author can delete; a " +
-			"resolved thread is usually the better outcome (reply_comment with action resolve). Ask the person first.",
+			"resolved thread is usually the better outcome (reply_comment with action resolve). Ask the person " +
+			"first, and pass confirm_comment_id repeating comment_id exactly, or the call is refused.",
 		Annotations: destructive,
 		Meta:        destructiveMeta,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteCommentInput) (*mcp.CallToolResult, *service.DeleteCommentResult, error) {
+		if err := confirmTarget("comment_id", in.CommentID, in.Confirm); err != nil {
+			return nil, nil, fail(err)
+		}
 		res, err := d.Service.DeleteComment(ctx, service.DeleteCommentRequest{Document: in.Document, CommentID: in.CommentID, ReplyID: in.ReplyID})
 		if err != nil {
 			return nil, nil, fail(err)

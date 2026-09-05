@@ -44,7 +44,7 @@ func liveClient(t *testing.T) *gapi.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return gapi.New(auth.TokenSource(context.Background(), oc, rt), gapi.Options{Timeout: 60 * time.Second, UserAgent: "google-docs-mcp/spike"})
+	return gapi.New(auth.TokenSource(context.Background(), oc, rt, 60*time.Second), gapi.Options{Timeout: 60 * time.Second, UserAgent: "google-docs-mcp/spike"})
 }
 
 func req(t *testing.T, v any) json.RawMessage {

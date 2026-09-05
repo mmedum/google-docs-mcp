@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -317,16 +318,39 @@ func wrapAPI(err error, what string) error {
 		return e
 	}
 	class := gapi.Class(err)
+	// Google's typed reason, where it sent one. It says whether a refusal
+	// can be acted on at all — storageQuotaExceeded is not a permission
+	// and downloadRestrictedForRevision cannot be granted — so it must
+	// survive into the message the model reads, which otherwise replaces
+	// Google's answer with our guess at it.
+	reason := ""
+	var apiErr *gapi.APIError
+	if errors.As(err, &apiErr) {
+		reason = apiErr.Reason
+	}
 	msg := ""
 	switch {
 	case errors.Is(err, gapi.ErrMissingScope):
 		msg = "the stored credentials lack a required OAuth scope; re-run `google-docs-mcp login`"
 	case errors.Is(err, gapi.ErrUnauthorized):
 		msg = "Google rejected the stored credentials; run `google-docs-mcp login` and try again"
+	case errors.Is(err, gapi.ErrForbidden) && reason == "storageQuotaExceeded":
+		// Classed forbidden because Google refused and the caller cannot
+		// route around it, but it is not a permission and the message has
+		// to say so or the model goes looking for sharing settings.
+		msg = "the account's Drive storage is full, so Google will not create or extend a document; free space or add capacity"
+	case errors.Is(err, gapi.ErrForbidden) && reason != "":
+		// The guess below is wrong whenever Google said why, so it is not
+		// offered: a full Drive is not a sharing problem.
+		msg = "Google refused this call on the " + what + "; its reason was " + reason
 	case errors.Is(err, gapi.ErrForbidden):
 		msg = "this account cannot access the " + what + " (not shared with it, or the API is disabled in the Cloud project)"
 	case errors.Is(err, gapi.ErrNotFound):
 		msg = "the " + what + " was not found; check the id or URL and that it is shared with this account"
+	case errors.Is(err, gapi.ErrRateLimited) && reason == "dailyLimitExceeded":
+		// A daily project quota does not refill by waiting, so the usual
+		// advice would send the model round a loop until midnight.
+		msg = "the Cloud project's daily quota for this API is spent; retrying will not clear it before the quota resets"
 	case errors.Is(err, gapi.ErrRateLimited):
 		msg = "Google's rate limit was hit; wait a moment and retry"
 	case errors.Is(err, gapi.ErrServer):
@@ -335,6 +359,9 @@ func wrapAPI(err error, what string) error {
 		msg = "could not reach Google: " + err.Error()
 	default:
 		msg = err.Error()
+	}
+	if reason != "" && !strings.Contains(msg, reason) {
+		msg += " (Google's reason: " + reason + ")"
 	}
 	return &Error{Class: class, Message: msg, Err: err}
 }

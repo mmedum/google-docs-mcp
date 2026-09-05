@@ -52,7 +52,55 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("google api: HTTP %d %s: %s [%s %s]", e.Status, e.RPC, e.Message, e.Method, e.Path)
+	// The reason is the part that says whether a refusal can be acted on
+	// — storageQuotaExceeded and downloadRestrictedForRevision both arrive
+	// as a bare 403 otherwise — so it goes in the message, not just in the
+	// field the classifier reads.
+	status := e.RPC
+	if e.Reason != "" && e.Reason != e.RPC {
+		if status == "" {
+			status = e.Reason
+		} else {
+			status += " (" + e.Reason + ")"
+		}
+	}
+	return fmt.Sprintf("google api: HTTP %d %s: %s [%s %s]", e.Status, status, e.Message, e.Method, e.Path)
+}
+
+// rateLimit403 are the reasons Drive answers with 403 that mean a quota
+// rather than a permission: it reports throttling as 403, not 429, and
+// prescribes exponential backoff for it. The value says whether backing
+// off can help — the per-minute limits refill, the daily project quota
+// does not.
+//
+// Keys are normalised by reasonKey. The Drive guide spells these
+// camelCase in the legacy `error.errors[]` envelope, while a
+// google.rpc.ErrorInfo detail spells the same condition UPPER_SNAKE, and
+// parseAPIError prefers the detail — so a lookup on the literal string
+// would miss silently if Drive ever sends both.
+//
+// https://developers.google.com/workspace/drive/api/guides/handle-errors
+var rateLimit403 = map[string]bool{
+	reasonKey("rateLimitExceeded"):        true,
+	reasonKey("userRateLimitExceeded"):    true,
+	reasonKey("sharingRateLimitExceeded"): true,
+	reasonKey("dailyLimitExceeded"):       false,
+}
+
+// reasonKey folds the two spellings of a reason onto one key.
+func reasonKey(reason string) string {
+	return strings.ToLower(strings.ReplaceAll(reason, "_", ""))
+}
+
+// retryableThrottle reports whether backing off can clear a 403.
+func retryableThrottle(e *APIError) bool {
+	return e.Status == 403 && rateLimit403[reasonKey(e.Reason)]
+}
+
+// throttled reports whether an error is a 403 that means "slow down".
+func throttled(e *APIError) bool {
+	_, ok := rateLimit403[reasonKey(e.Reason)]
+	return e.Status == 403 && ok
 }
 
 // Unwrap maps the response onto a sentinel class.
@@ -63,6 +111,8 @@ func (e *APIError) Unwrap() error {
 		return ErrUnauthorized
 	case e.Status == 403 && (e.Reason == "ACCESS_TOKEN_SCOPE_INSUFFICIENT" || strings.Contains(msg, "insufficient authentication scopes")):
 		return ErrMissingScope
+	case throttled(e):
+		return ErrRateLimited
 	case e.Status == 403:
 		return ErrForbidden
 	case e.Status == 404:

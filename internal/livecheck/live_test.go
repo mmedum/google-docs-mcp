@@ -92,8 +92,10 @@ func truthy(s string) bool {
 }
 
 // call runs one tool and logs a scrubbed transcript line. It returns the
-// text, the structured result that write tools also carry, and whether
-// the tool refused — a refusal is often the point of the step.
+// text unredacted, so a step can parse the ids and URLs it needs out of
+// it — pass it through shown before logging it anywhere — along with the
+// structured result that write tools also carry, and whether the tool
+// refused, which is often the point of the step.
 func (d *driver) call(label, name string, args map[string]any) (string, map[string]any, bool) {
 	d.t.Helper()
 	res, err := d.cs.CallTool(d.ctx, &mcp.CallToolParams{Name: name, Arguments: args})
@@ -106,8 +108,8 @@ func (d *driver) call(label, name string, args map[string]any) (string, map[stri
 			b.WriteString(tc.Text)
 		}
 	}
-	text := scrub(b.String())
-	d.t.Logf("=== %s (isError=%t) ===\n%s", label, res.IsError, truncate(text, 900))
+	text := b.String()
+	d.t.Logf("=== %s (isError=%t) ===\n%s", label, res.IsError, shown(text, 900))
 	sc, _ := res.StructuredContent.(map[string]any)
 	return text, sc, res.IsError
 }
@@ -117,7 +119,7 @@ func (d *driver) ok(label, name string, args map[string]any) string {
 	d.t.Helper()
 	text, _, isErr := d.call(label, name, args)
 	if isErr {
-		d.t.Errorf("%s should have worked: %s", label, truncate(text, 300))
+		d.t.Errorf("%s should have worked: %s", label, shown(text, 300))
 	}
 	return text
 }
@@ -127,7 +129,7 @@ func (d *driver) okStruct(label, name string, args map[string]any) (string, map[
 	d.t.Helper()
 	text, sc, isErr := d.call(label, name, args)
 	if isErr {
-		d.t.Errorf("%s should have worked: %s", label, truncate(text, 300))
+		d.t.Errorf("%s should have worked: %s", label, shown(text, 300))
 	}
 	return text, sc
 }
@@ -157,14 +159,18 @@ func (d *driver) refused(label, name string, args map[string]any, want string) s
 	text, _, isErr := d.call(label, name, args)
 	switch {
 	case !isErr:
-		d.t.Errorf("%s should have been refused, got: %s", label, truncate(text, 300))
+		d.t.Errorf("%s should have been refused, got: %s", label, shown(text, 300))
 	case want != "" && !strings.Contains(text, want):
-		d.t.Errorf("%s refused for the wrong reason, wanted %q: %s", label, want, truncate(text, 300))
+		d.t.Errorf("%s refused for the wrong reason, wanted %q: %s", label, want, shown(text, 300))
 	}
 	return text
 }
 
-func truncate(s string, n int) string {
+// shown prepares a result for the transcript: everything logged goes
+// through here, so the scrubbing happens once and a step still parses the
+// ids and URLs it needs out of the untouched text.
+func shown(s string, n int) string {
+	s = scrub(s)
 	if len(s) <= n {
 		return s
 	}

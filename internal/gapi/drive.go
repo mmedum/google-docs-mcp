@@ -387,6 +387,11 @@ type operation struct {
 // files.download, the only Drive method that takes a revisionId for
 // Docs files. It starts a long-running operation, polls it, then fetches
 // the content it names. The content URL must stay on Google's hosts.
+//
+// The POST that starts it is a read: it creates nothing in the person's
+// Drive, so repeating it costs an export, not a duplicate. That is what
+// kindRead now means — retryable on any transient failure — so a POST
+// that does change something must not borrow it.
 func (c *Client) ExportRevision(ctx context.Context, fileID, revisionID, mimeType string) ([]byte, error) {
 	v := url.Values{}
 	v.Set("mimeType", mimeType)
@@ -428,6 +433,13 @@ func (c *Client) ExportRevision(ctx context.Context, fileID, revisionID, mimeTyp
 // credentials to: the APIs, Google's content hosts, and docs.google.com,
 // where the export URLs that files.download returns for old revisions
 // live (observed live 2026-09-03: docs.google.com/feeds/download/...).
+//
+// It is passed url.URL.Host, port and all, and a host carrying a port
+// therefore matches nothing and is refused. That is deliberate: the URL
+// this guards can come out of a response body (ExportRevision follows
+// the operation's DownloadURI) and the request carries the access token,
+// so the check decides whether a credential leaves the machine. Do not
+// "tidy" this to u.Hostname().
 func googleHost(host string) bool {
 	host = strings.ToLower(host)
 	return host == "googleapis.com" || strings.HasSuffix(host, ".googleapis.com") || strings.HasSuffix(host, ".googleusercontent.com") || host == "docs.google.com"

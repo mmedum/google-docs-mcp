@@ -68,12 +68,16 @@ func (tr *trace) toolNames() []string {
 
 // runClaude drives Claude Code headless with only this server's tools,
 // in a workdir of its own so the client picks up no project config.
-func runClaude(t *testing.T, prompt string) *trace {
+func runClaude(t *testing.T, prompt string, extraEnv map[string]string) *trace {
 	t.Helper()
 	dir := t.TempDir()
+	serverEnv := map[string]string{"GDOCS_PREVIEW": previewFlag(), "GDOCS_LOG_LEVEL": "warn"}
+	for k, v := range extraEnv {
+		serverEnv[k] = v
+	}
 	cfg := map[string]any{"mcpServers": map[string]any{mcpName: map[string]any{
 		"command": binPath(t),
-		"env":     map[string]string{"GDOCS_PREVIEW": previewFlag(), "GDOCS_LOG_LEVEL": "warn"},
+		"env":     serverEnv,
 	}}}
 	cfgPath := filepath.Join(dir, "mcp.json")
 	raw, err := json.Marshal(cfg)

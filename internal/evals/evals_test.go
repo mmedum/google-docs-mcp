@@ -48,13 +48,19 @@ func TestEvals(t *testing.T) {
 	for _, tk := range tasks {
 		t.Run(tk.name, func(t *testing.T) {
 			s := connect(t)
-			doc := s.seed(tk.name)
-			t.Logf("document: https://docs.google.com/document/d/%s/edit", doc)
-			if tk.setup != nil {
-				tk.setup(s, doc)
+			var doc, prompt string
+			if tk.noDoc {
+				prompt = tk.prompt
+			} else {
+				doc = s.seed(tk.name)
+				t.Logf("document: https://docs.google.com/document/d/%s/edit", doc)
+				if tk.setup != nil {
+					tk.setup(s, doc)
+				}
+				prompt = fmt.Sprintf(tk.prompt, doc)
 			}
 
-			tr := runClaude(t, fmt.Sprintf(tk.prompt, doc))
+			tr := runClaude(t, prompt, tk.env)
 			checks := tk.check(s, doc, tr)
 
 			res := result{Task: tk.name, Doc: doc, Total: len(checks), Trace: tr}

@@ -304,7 +304,7 @@ func TestWriteNetworkFailureIsAmbiguous(t *testing.T) {
 	c, srv := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	srv.Close()
 	_, err := c.BatchUpdate(context.Background(), "abc", &BatchUpdateRequest{})
-	if !errors.Is(err, ErrAmbiguous) || Class(err) != "ambiguous" {
+	if !errors.Is(err, ErrAmbiguous) || Class(err) != "ambiguous_outcome" {
 		t.Fatalf("got %v", err)
 	}
 	_, err = c.About(context.Background())

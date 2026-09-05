@@ -209,9 +209,17 @@ func wrapTransportError(err error) error {
 	return fmt.Errorf("%w: %w", ErrNetwork, err)
 }
 
-// Class returns a short lower-case class name for an error, for LLM-facing
-// messages: auth, forbidden, not_found, rate_limited, server, invalid,
-// conflict, network, ambiguous, unexpected.
+// Classes lists every class Class can return, so a test can check this
+// half of the vocabulary against the service's list rather than trusting
+// two comments to agree.
+func Classes() []string {
+	return []string{"auth", "forbidden", "not_found", "rate_limited", "server",
+		"invalid", "conflict", "network", "ambiguous_outcome", "unexpected"}
+}
+
+// Class returns a short lower-case class name for an error, for
+// LLM-facing messages. Every value it returns is in Classes, and
+// service.Classes is the whole vocabulary this server speaks.
 func Class(err error) string {
 	switch {
 	case errors.Is(err, ErrMissingScope):
@@ -231,7 +239,10 @@ func Class(err error) string {
 	case errors.Is(err, ErrInvalid):
 		return "invalid"
 	case errors.Is(err, ErrAmbiguous):
-		return "ambiguous"
+		// Not "ambiguous": that word is taken by a target matching
+		// several things, which asks the caller to choose. This one says
+		// the write may or may not have landed, which asks them to look.
+		return "ambiguous_outcome"
 	case errors.Is(err, ErrNetwork):
 		return "network"
 	}

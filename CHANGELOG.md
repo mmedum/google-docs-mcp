@@ -8,6 +8,10 @@ and new required fields are breaking; the schema diff in CI flags them.
 ## [Unreleased]
 
 ### Changed
+- CI no longer cancels a superseded run **on `main`**. Cancelling one on
+  a branch costs nothing, but cancelling on the default branch leaves a
+  merged commit with no verdict, and whoever bisects later finds a green
+  history with a hole in it.
 - Two gates are Go rather than bash, and have tests of their own. The
   coverage floor and the staleness check were shell scripts; both had
   hand-written lists that fell behind in silence (the packages under the

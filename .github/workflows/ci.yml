@@ -11,9 +11,14 @@ permissions:
 # A push supersedes the run before it on the same ref. Without this a
 # branch pushed three times runs three full matrices, and only the last
 # one's verdict is the one anybody reads.
+#
+# Not on main, though. Cancelling a superseded branch run costs nothing;
+# cancelling one on the default branch leaves a merged commit with no
+# verdict at all, and whoever bisects later finds a green history with a
+# hole in it.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:

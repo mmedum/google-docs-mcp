@@ -26,6 +26,14 @@ and new required fields are breaking; the schema diff in CI flags them.
   which made an interpreter an undeclared prerequisite of a Go project's
   own definition of done. Both now run `go run ./internal/devcheck`.
 
+### Fixed
+- The server exited non-zero when a client disconnected, which is how
+  every session ends: the SDK reports a closed connection as JSON-RPC
+  -32004 with the EOF only as message text, so `errors.Is(err, io.EOF)`
+  never matched it. Hosts log a non-zero exit as a crash. The stdio smoke
+  test never caught it because it slept before closing stdin, and the
+  exit is clean when nothing is in flight; it now closes abruptly too.
+
 ## [0.7.0] - 2026-09-04
 
 ### Added

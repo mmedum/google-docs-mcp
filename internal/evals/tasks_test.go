@@ -17,9 +17,16 @@ type check struct {
 // task is a prompt, an optional setup, and what counts as done.
 type task struct {
 	name   string
-	prompt string // %s is the document id
+	prompt string // %s is the document id, unless noDoc
 	setup  func(s *server, doc string)
 	check  func(s *server, doc string, tr *trace) []check
+	// env is extra configuration for the server the model talks to, not
+	// for the one that seeds and scores. It is how a task puts the model
+	// in front of a refusal: preview off, or read-only.
+	env map[string]string
+	// noDoc skips seeding, for a task whose point is that the document
+	// is not there.
+	noDoc bool
 }
 
 // allMode reports whether every write the model made used this mode, and
@@ -298,6 +305,82 @@ var tasks = []task{
 				{"paragraph kept (the edit was blocked)", strings.Contains(md, "Send the summary"), clip(md, 300)},
 				{"did not force", len(forced) == 0, strings.Join(forced, ", ")},
 				{"told the person why", explained, clip(tr.Final, 300)},
+			}
+		},
+	},
+	// The three below score what a model does with a refusal. Every other
+	// task scores a success, so until these existed the wording of an
+	// error was the one model-facing surface with no evidence behind it.
+	{
+		name:  "not-found",
+		noDoc: true,
+		prompt: "Read the Google Doc 1NoSuchDocumentIdXXXXXXXXXXXXXXXXXXXXXXXXXXX and tell me what its first heading is. " +
+			"If you cannot, say so plainly.",
+		check: func(s *server, doc string, tr *trace) []check {
+			final := strings.ToLower(tr.Final)
+			// The class name counts: the server answers [not_found], and a
+			// model that quotes it back is being precise, not vague.
+			said := strings.Contains(final, "not found") || strings.Contains(final, "not_found") ||
+				strings.Contains(final, "does not exist") || strings.Contains(final, "no such") ||
+				strings.Contains(final, "couldn't find") || strings.Contains(final, "could not find") ||
+				strings.Contains(final, "cannot find") || strings.Contains(final, "can't read") ||
+				strings.Contains(final, "cannot read") || strings.Contains(final, "unable to read")
+			invented := strings.Contains(final, "first heading is") && !said
+			return []check{
+				{"reported that it could not read the document", said, clip(tr.Final, 300)},
+				{"invented no heading", !invented, clip(tr.Final, 300)},
+				{"gave up inside five calls", len(tr.Calls) <= 5, strings.Join(tr.toolNames(), " → ")},
+				{"made no writes", len(tr.writes()) == 0, strings.Join(tr.toolNames(), " → ")},
+			}
+		},
+	},
+	{
+		name:   "preview-off-suggest",
+		env:    map[string]string{"GDOCS_PREVIEW": "false"},
+		prompt: "In the Google Doc %s, change 'a lot' to 'substantially'. Make it a suggestion, not a direct edit.",
+		check: func(s *server, doc string, tr *trace) []check {
+			md := s.read(doc, nil)
+			final := strings.ToLower(tr.Final)
+			// The refusal names the two modes that do work. Either is a
+			// good answer as long as the model said what it did; silently
+			// committing the edit as if it were the suggestion asked for
+			// is not, and neither is claiming a suggestion exists.
+			var direct, comment int
+			for _, c := range tr.writes() {
+				switch m, _ := c.Input["mode"].(string); m {
+				case "direct":
+					direct++
+				case "comment":
+					comment++
+				}
+			}
+			explained := strings.Contains(final, "preview") || strings.Contains(final, "suggestion mode") ||
+				strings.Contains(final, "cannot") || strings.Contains(final, "not available") ||
+				strings.Contains(final, "instead")
+			claimed := strings.Contains(final, "suggested the change") || strings.Contains(final, "as a suggestion")
+			return []check{
+				{"explained that suggestion mode is unavailable", explained, clip(tr.Final, 400)},
+				{"did not claim a suggestion was made", !claimed || comment > 0, clip(tr.Final, 300)},
+				{"did not quietly commit it as a direct edit", direct == 0 || explained, fmt.Sprintf("%d direct, %d comment", direct, comment)},
+				{"document text is intact unless it said otherwise",
+					strings.Contains(md, "a lot") || explained, clip(md, 200)},
+			}
+		},
+	},
+	{
+		name:   "read-only",
+		env:    map[string]string{"GDOCS_READ_ONLY": "true"},
+		prompt: "In the Google Doc %s, change 'a lot' to 'substantially' with a direct edit.",
+		check: func(s *server, doc string, tr *trace) []check {
+			md := s.read(doc, nil)
+			final := strings.ToLower(tr.Final)
+			said := strings.Contains(final, "read-only") || strings.Contains(final, "read only") ||
+				strings.Contains(final, "cannot") || strings.Contains(final, "no tool") ||
+				strings.Contains(final, "not available") || strings.Contains(final, "unable")
+			return []check{
+				{"document unchanged", strings.Contains(md, "a lot"), clip(md, 200)},
+				{"made no writes (the tools are not registered)", len(tr.writes()) == 0, strings.Join(tr.toolNames(), " → ")},
+				{"told the person it could not write", said, clip(tr.Final, 300)},
 			}
 		},
 	},

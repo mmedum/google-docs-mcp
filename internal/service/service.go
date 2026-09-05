@@ -92,9 +92,45 @@ func (e *Error) Error() string { return "[" + e.Class + "] " + e.Message }
 // Unwrap exposes the underlying error for errors.Is.
 func (e *Error) Unwrap() error { return e.Err }
 
-// Errorf builds an Error.
+// Errorf builds an Error. The class must be one of Classes; a test
+// scans the source and fails on anything else.
 func Errorf(class, format string, args ...any) *Error {
 	return &Error{Class: class, Message: fmt.Sprintf(format, args...)}
+}
+
+// Classes is every class this server can put in front of a message, and
+// what each one asks the reader to do next. It is one list because a
+// vocabulary spread across two packages is a vocabulary nobody can
+// check: this one was documented as ten classes while the code emitted
+// fourteen, four of them undocumented, and `ambiguous` meant two
+// unrelated things.
+//
+//	auth               the credentials are wrong or gone; log in again
+//	forbidden          Google refused; the message says what it said
+//	not_found          the document, tab, comment or revision is not there
+//	unknown            a handle this session has never seen; read first
+//	stale              a handle from a revision the document has left
+//	ambiguous          the target matches several things; disambiguate
+//	conflict           the document moved; re-read and re-plan
+//	invalid            the request is wrong as asked
+//	unsupported        the API or this design cannot do it at all
+//	unavailable        a capability is not switched on in this deployment
+//	rate_limited       a quota; the message says whether waiting helps
+//	server             Google failed after retries; try again shortly
+//	network            Google could not be reached
+//	ambiguous_outcome  a write whose result is unknown; go and look
+//	unexpected         a failure this server did not anticipate
+//
+// ambiguous and ambiguous_outcome are deliberately different words: one
+// asks the caller to choose between candidates, the other to go and
+// find out what happened. Collapsing them is how a duplicate write gets
+// treated as a bad argument.
+func Classes() []string {
+	return []string{
+		"auth", "forbidden", "not_found", "unknown", "stale", "ambiguous",
+		"conflict", "invalid", "unsupported", "unavailable", "rate_limited",
+		"server", "network", "ambiguous_outcome", "unexpected",
+	}
 }
 
 // Fetched is a parsed document plus the wire form it came from. What

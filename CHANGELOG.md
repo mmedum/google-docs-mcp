@@ -7,6 +7,24 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+- `[ambiguous]` meant two opposite things. A target matching several
+  passages and a write whose outcome is unknown both came out as
+  `[ambiguous]`, and they ask the caller to do opposite things — choose
+  between candidates, or go and look at the document. A write with an
+  unknown outcome is `[ambiguous_outcome]` now.
+
+### Added
+- The error vocabulary is one list that a test holds. It was documented
+  as ten classes while the code emitted fifteen, four of them
+  (`unknown`, `stale`, `unavailable`, `unsupported`) named in no
+  document at all — the vocabulary lived in comments in two packages, so
+  nothing could contradict it. `service.Classes` now carries every class
+  with what it asks the reader to do next, and
+  `TestClassVocabularyIsClosed` scans every `Errorf` in `internal/` and
+  fails on a class that is not listed, a listed class nothing emits, or
+  a scan that read too few files to be looking at anything.
+
 ## [0.9.2] - 2026-09-05
 
 ### Fixed

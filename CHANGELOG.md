@@ -24,6 +24,19 @@ and new required fields are breaking; the schema diff in CI flags them.
   there. It now shares one logger, drives the conflict path, and looks
   for the id, its first six characters, and the revision id.
 
+### Added
+- A gate on the pins themselves. Two releases have been broken by a pin
+  that was not one: `v0.8.0` published nothing because a SHA on
+  `cosign-installer` pins the action and not the cosign it installs, and
+  `goreleaser-action` was pinned by SHA while being asked for `~> v2`.
+  A comment beside the value did not hold either of them shut, so
+  `TestWorkflowsPinExactly` now fails on an action that is not a full
+  commit SHA and on a tool version that is a range, a bare major or
+  `latest` — checked against all four loose spellings, including the
+  `~> v2.18.0` that survived a review in a sibling repository. It also
+  fails when it finds no workflows or no versions, because a checker
+  that reads nothing passes for the wrong reason.
+
 ### Changed
 - The error fixture sends Google's two spellings of a reason —
   camelCase in the legacy `errors[]`, UPPER_SNAKE in the `ErrorInfo`

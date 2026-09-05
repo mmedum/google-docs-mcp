@@ -83,7 +83,16 @@ A tag is the whole release process; nothing is published by hand.
 4. `make check`. The staleness gate fails *between* steps 2 and 3 —
    "source changed since vX but [Unreleased] is empty" — so run it after
    the tag, not before.
-5. Push the commit, let CI go green, then push the tag.
+5. Open the release commit as a pull request, let CI go green on all
+   three platforms, and merge it. Direct pushes to `main` are not the
+   process, releases included.
+6. Push the tag once the commit is on `main`. Tags are not covered by the
+   branch rules, so this step is a direct push and the release workflow
+   takes it from there.
+
+Push tags one at a time: GitHub drops tag events past the third in a
+single push, and the release workflow then never runs. `workflow_dispatch`
+is there for re-running a release against a tag when that happens.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds with
 GoReleaser for linux, darwin and windows on amd64 and arm64, and

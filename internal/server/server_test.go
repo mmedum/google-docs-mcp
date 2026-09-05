@@ -23,11 +23,12 @@ import (
 const fixtureID = "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX"
 
 type fakeAPI struct {
-	raw      []byte
-	err      error
-	batches  []*gapi.BatchUpdateRequest
-	comments []*gapi.DriveComment
-	deleted  []string
+	raw       []byte
+	err       error
+	batchErrs []error
+	batches   []*gapi.BatchUpdateRequest
+	comments  []*gapi.DriveComment
+	deleted   []string
 }
 
 func (f *fakeAPI) GetDocument(_ context.Context, id string, _ gapi.GetOptions) (*gapi.DocumentResult, error) {
@@ -50,6 +51,11 @@ func (f *fakeAPI) GetFile(_ context.Context, id string) (*gapi.File, error) {
 
 func (f *fakeAPI) BatchUpdate(_ context.Context, id string, req *gapi.BatchUpdateRequest) (*gapi.BatchUpdateResponse, error) {
 	f.batches = append(f.batches, req)
+	if len(f.batchErrs) > 0 {
+		err := f.batchErrs[0]
+		f.batchErrs = f.batchErrs[1:]
+		return nil, err
+	}
 	raw := `{"replies":[{"insertComment":{"commentThread":{"commentId":"c1"}}}],"writeControl":{"requiredRevisionId":"rev-0002"},"suggestionResponses":[{"createdSuggestionIds":["suggest.x"]}]}`
 	return &gapi.BatchUpdateResponse{DocumentID: id, WriteControl: &gapi.WriteControl{RequiredRevisionID: "rev-0002"}, Raw: json.RawMessage(raw)}, nil
 }
@@ -872,11 +878,14 @@ func TestEveryToolHasArgs(t *testing.T) {
 // JSON-RPC frames if it were handed a logger, which is why it is not.
 func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 	api := &fakeAPI{raw: doctest.RawFixture(t)}
-	svc := service.New(api, service.Options{DefaultWriteMode: config.WriteDirect})
-	_, _ = svc.Fetch(context.Background(), fixtureID)
-
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	// The service gets the same logger as the server. It did not until
+	// the security document was audited: the two service lines that
+	// carried a document id went to a logger this test never read, so the
+	// guarantee was being checked one layer above where it was broken.
+	svc := service.New(api, service.Options{DefaultWriteMode: config.WriteDirect, Logger: logger})
+	_, _ = svc.Fetch(context.Background(), fixtureID)
 	srv := server.New(server.Deps{Service: svc, Config: config.Config{DefaultWriteMode: config.WriteDirect, EnableDestructive: true}, Logger: logger, Version: "test"})
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()
@@ -905,7 +914,15 @@ func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 		}
 	}
 
+	// The conflict path logs at info, not debug, and until now no test
+	// had ever made it run — which is where the id survived longest.
+	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The provided revision id does not match the current revision"}}
+	_, _ = cs.CallTool(ctx, &mcp.CallToolParams{Name: "edit_document", Arguments: toolArgs["edit_document"]})
+
 	got := logs.String()
+	if !strings.Contains(got, "re-planning once") {
+		t.Errorf("the conflict path never ran, so its log line was never checked:\n%s", got)
+	}
 	if !strings.Contains(got, "mcp call") || !strings.Contains(got, "tool=read_document") {
 		t.Fatalf("debug logging should record that a call happened:\n%s", got)
 	}
@@ -914,9 +931,13 @@ func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 			t.Errorf("no log line for %s; the leak check never saw it", name)
 		}
 	}
-	// The document's id, its title, its text, the text a call sent, and a
-	// heading id.
-	for _, leak := range []string{fixtureID, "Quarterly Report", "Revenue grew", leakCanary, "h.bg"} {
+	// The id, six characters of the id, the revision that names one state
+	// of it, the title, the text, the text a call sent, and a heading id.
+	// The prefix is here because it was in every debug line until the
+	// security document was audited against the code: §12 says a log
+	// carries nothing about the document, and six characters of an id is
+	// six characters of an id.
+	for _, leak := range []string{fixtureID, fixtureID[:6], "rev-0001", "Quarterly Report", "Revenue grew", leakCanary, "h.bg"} {
 		if strings.Contains(got, leak) {
 			t.Errorf("debug log leaked %q:\n%s", leak, got)
 		}

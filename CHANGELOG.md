@@ -7,6 +7,49 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+- Debug logs carried part of a document's identity after all. The
+  security page promised "no document data at any level" in one
+  paragraph and admitted "ids (truncated), revisions" in a table row two
+  screens later, and the code did the second: six characters of the
+  document id and the whole revision id on every fetch, and an id on the
+  revision-conflict path. The bug form tells people a debug log is safe
+  to attach, so the promise is the one that had to become true. Ids are
+  gone from every line, the request path logs as `/v1/documents/…/x`,
+  and `ShortID` is documented as being for a filename a person has to
+  recognise, never for a log.
+- The test that guaranteed this could not see two of the three leaks: it
+  read the server's logger while the service wrote to its own, and it
+  searched for the whole id rather than the prefix that was actually
+  there. It now shares one logger, drives the conflict path, and looks
+  for the id, its first six characters, and the revision id.
+
+### Added
+- A gate on the pins themselves. Two releases have been broken by a pin
+  that was not one: `v0.8.0` published nothing because a SHA on
+  `cosign-installer` pins the action and not the cosign it installs, and
+  `goreleaser-action` was pinned by SHA while being asked for `~> v2`.
+  A comment beside the value did not hold either of them shut, so
+  `TestWorkflowsPinExactly` now fails on an action that is not a full
+  commit SHA and on a tool version that is a range, a bare major or
+  `latest` — checked against all four loose spellings, including the
+  `~> v2.18.0` that survived a review in a sibling repository. It also
+  fails when it finds no workflows or no versions, because a checker
+  that reads nothing passes for the wrong reason.
+
+### Changed
+- The error fixture sends Google's two spellings of a reason —
+  camelCase in the legacy `errors[]`, UPPER_SNAKE in the `ErrorInfo`
+  detail — because a fake that sends one spelling in both places cannot
+  catch a parser that prefers the wrong envelope. A sibling server had
+  that bug live with a green suite. One assertion here was pinning the
+  parser's preference rather than the contract, and now checks that the
+  reason arrives in either spelling.
+- docs/security.md says what the code does: the destructive-tool
+  annotations are advisory and unregistration is the control, exports
+  are no longer "a later phase", and the table gains the identifier
+  scan, the credential-host allowlist and the OAuth timeout.
+
 ## [0.9.1] - 2026-09-05
 
 ### Added

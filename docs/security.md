@@ -26,7 +26,11 @@
   are startup and shutdown facts; per-call debug logging records the
   method, the tool name, the outcome and the duration. Document ids,
   titles and text never reach a log, so a debug log is safe to attach to
-  a bug report. A test fails the build if that stops being true.
+  a bug report. A test fails the build if that stops being true — it
+  drives every registered tool and the conflict path, and it looks for
+  the id, the first six characters of the id, and the revision id, all
+  three of which a log line carried until this claim was audited against
+  the code in September 2026.
 - Scopes: `documents` and `drive` (or their read-only variants with
   `GDOCS_READ_ONLY`). `drive` is required to reach documents the app did
   not create; the narrower `drive.file` cannot.
@@ -38,12 +42,15 @@
 |---|---|
 | The model edits the wrong passage | Targets are exact text, stable heading ids, or handles checked against the revision they came from. Every write is guarded by `requiredRevisionId`; a concurrent edit is re-planned once, then refused. |
 | Content anchored to comments, suggestions, images or footnotes is destroyed | Direct edits refuse to delete such ranges unless `force` is passed; `suggest` and `comment` modes delete nothing. |
-| Destructive actions | Delete tools are unregistered unless `GDOCS_ENABLE_DESTRUCTIVE=true`, carry `destructiveHint`, and request user interaction. |
+| Destructive actions | Delete tools are **unregistered** unless `GDOCS_ENABLE_DESTRUCTIVE=true`. They also carry `destructiveHint` and `requiresUserInteraction`, but both are advisory — the spec says clients treat tool annotations as untrusted, and a host in an auto-approve mode runs a registered tool without asking. What this server controls is what it registers and what it refuses; the hints are a courtesy to clients that honour them. |
 | Runaway output | Reads are budgeted (`max_chars`, default 20 000) and cut at block boundaries. |
 | Regex denial of service | Go's RE2 engine, linear time. |
 | Secrets in the repository | gitleaks in pre-commit and CI with rules for Google client ids, secrets and refresh tokens; fixtures are synthetic. |
-| Document content in logs | Logs carry ids (truncated), revisions, counts and latencies, never text. |
-| Arbitrary file writes | Exports (later phase) are confined to `GDOCS_EXPORT_DIR`. |
+| Identifiers in the repository, which are not secrets and which no secret scanner flags | `internal/leakcheck` fails the build on an address at a domain someone could own, a 21-digit account id, an OAuth client id, a user-content URL carrying an id, or a Drive id that does not look invented. `LEAKCHECK_HISTORY=1` runs the same rules over every blob ever committed, since a tree scan cannot see what was cleaned up in a later commit. |
+| Document content in logs | Logs carry counts, durations, outcomes and method names. No ids — not even a prefix — no revisions, no titles, no text. `TestDebugLogsCarryNoDocumentData` drives every registered tool plus the conflict path and fails on any of them. |
+| A credential sent somewhere it should not go | Every request URL is checked against an allowlist of Google hosts before the token is attached, matched on `url.URL.Host`, so a host carrying a port matches nothing and is refused. This is not a formality: `ExportRevision` follows a download URL taken from a response body. |
+| A hung Google endpoint | Every API call carries `GDOCS_HTTP_TIMEOUT`, and so does the OAuth token refresh and the code exchange at login — the refresh happens inside the token source, on the client in its context, which is a separate place to put a deadline and was missing one. |
+| Arbitrary file writes | Exports are confined to `GDOCS_EXPORT_DIR`, and a format that writes a file is refused when it is unset. |
 
 ## Reporting
 

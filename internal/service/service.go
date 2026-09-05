@@ -170,7 +170,9 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 	if !fresh {
 		s.Remember(f)
 	}
-	s.log.DebugContext(ctx, "document fetched", "doc", gapi.ShortID(id), "revision", f.Doc.RevisionID, "tabs", len(f.Doc.Tabs))
+	// No id and no revision: a revision id names one state of one
+	// document as precisely as the id names the document.
+	s.log.DebugContext(ctx, "document fetched", "tabs", len(f.Doc.Tabs))
 	return f, nil
 }
 

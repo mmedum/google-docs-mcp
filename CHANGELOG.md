@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-05
+
 ### Fixed
 - Debug logs carried part of a document's identity after all. The
   security page promised "no document data at any level" in one

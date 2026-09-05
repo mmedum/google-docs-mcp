@@ -36,14 +36,15 @@ sboms:
   - artifacts: archive
 
 # Sign the checksum file with a keyless Sigstore certificate tied to the
-# workflow's OIDC identity: no private key to hold or leak.
+# workflow's OIDC identity: no private key to hold or leak. cosign v3
+# dropped --output-signature and --output-certificate for --bundle, which
+# writes everything a verifier needs into one file.
 signs:
   - cmd: cosign
-    certificate: "${artifact}.pem"
+    signature: "${artifact}.bundle"
     args:
       - sign-blob
-      - "--output-certificate=${certificate}"
-      - "--output-signature=${signature}"
+      - "--bundle=${signature}"
       - "${artifact}"
       - "--yes"
     artifacts: checksum

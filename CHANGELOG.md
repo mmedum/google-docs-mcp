@@ -7,6 +7,16 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+- Releases could not publish: signing failed with "create bundle file:
+  open : no such file or directory". Pinning the actions moved
+  `cosign-installer` to its v4, which installs cosign 3, and cosign 3
+  dropped `--output-signature` and `--output-certificate` in favour of
+  `--bundle`. The signature is now `checksums.txt.bundle`, carrying
+  everything a verifier needs, and the README's `cosign verify-blob`
+  matches. The versions those actions install are pinned too — a SHA on
+  an installer pins the wrapper, not the tool.
+
 ## [0.8.0] - 2026-09-05
 
 ### Fixed

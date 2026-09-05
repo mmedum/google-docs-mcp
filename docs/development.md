@@ -29,13 +29,20 @@ and are preferred by the Makefile; install them with
 - Integration tests are tagged and need a login:
   `GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestPreviewSpike -v`
   creates a scratch document and checks the Developer Preview features.
-- `scripts/live-drive.py` drives every tool and every op kind over stdio
-  against a new scratch document, plus the `gdocs://` resources; read its
-  header. It needs `GDOCS_ENABLE_DESTRUCTIVE=true` for the deletion
-  steps, and should be run with `GDOCS_PREVIEW` both on and off before a
-  phase is called done. Every `isError=True` in its output should be an
-  expected refusal (the overwrite guard, suggest mode where the API
-  refuses it, an unknown resource); anything else is a regression.
+- The live driver drives every tool and every op kind against a new
+  scratch document, through the binary over stdio exactly as a client
+  would, plus the `gdocs://` resources:
+
+  ```
+  make build && go test -tags=live ./internal/livecheck -v -timeout 20m
+  ```
+
+  It needs `GDOCS_ENABLE_DESTRUCTIVE=true` for the deletion steps, and
+  should be run with `GDOCS_PREVIEW` both on and off before a phase is
+  called done. Steps that must be refused assert their refusal, so a
+  green run means the guards fired as well as the writes; the transcript
+  is scrubbed of ids so it can be pasted. The scratch document is left
+  behind on purpose and its URL is the last line.
 - **Verifying what the server writes but cannot read back.** Some
   properties never come back through a read of the text: a redefined
   named style, for one, since `read_document with_styles` annotates only

@@ -67,8 +67,7 @@ rather than from someone's laptop:
 
 ```
 gh attestation verify google-docs-mcp_*_linux_amd64.tar.gz --repo mmedum/google-docs-mcp
-cosign verify-blob checksums.txt --signature checksums.txt.sig \
-  --certificate checksums.txt.pem \
+cosign verify-blob checksums.txt --bundle checksums.txt.bundle \
   --certificate-identity-regexp 'https://github.com/mmedum/google-docs-mcp/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```

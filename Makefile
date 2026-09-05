@@ -42,7 +42,7 @@ test: ## Unit tests with race detector and coverage
 
 .PHONY: cover
 cover: test ## Enforce the coverage floor on core packages
-	@bash scripts/coverage-check.sh cov.out $(COVER_MIN)
+	@$(GO) run ./internal/devcheck coverage cov.out $(COVER_MIN)
 
 .PHONY: bench
 bench: ## Benchmarks over the synthetic large document (doctest.Large)
@@ -70,7 +70,7 @@ smoke: build ## Drive the binary over stdio
 
 .PHONY: staleness
 staleness: build ## Docs must match the code
-	@bash scripts/staleness-check.sh $(BIN)
+	@$(GO) run ./internal/devcheck staleness $(BIN)
 
 .PHONY: check
 check: fmt vet lint cover vuln licenses schema-diff smoke staleness ## Everything CI runs

@@ -67,6 +67,17 @@ and are preferred by the Makefile; install them with
   rows, which makes it the quickest end-to-end check of a layout change.
 - `go vet -tags=integration ./...` (part of `make vet`) keeps the tagged
   tests compiling even though CI never runs them.
+- **The gates are Go, and tested.** `internal/devcheck` holds the
+  coverage floor, the staleness check, the tool-name and schema
+  comparisons and the workflow pin check, each with tests of its own —
+  `go test ./internal/devcheck`. They were shell scripts until two of
+  them went wrong in ways bash made easy: a hand-written package list
+  that fell behind without a sound, and a staleness rule that failed on
+  the release pull request it was written to guard. Each derives its
+  lists from the code and fails when it finds too little to be looking
+  at anything. Only the stdio smoke test and the schema-diff worktree
+  driver are still shell, because both are process plumbing rather than
+  logic.
 - **Before a release, scan the history**: `LEAKCHECK_HISTORY=1 go test
   ./internal/leakcheck -run TestHistoryCarriesNoIdentifiers` reads every
   blob ever committed, which the ordinary run does not — a file that

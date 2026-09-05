@@ -33,9 +33,10 @@ jobs:
           go-version-file: go.mod
       - run: go build ./...
       - run: go test -race -coverpkg=./internal/... -coverprofile=cov.out -covermode=atomic ./...
+      # Every platform now, not only Linux: the floor is Go rather than
+      # a shell script, so there is nothing left that only bash can run.
       - name: coverage floor
-        if: runner.os == 'Linux'
-        run: bash scripts/coverage-check.sh cov.out 80
+        run: go run ./internal/devcheck coverage cov.out 80
 
   lint:
     runs-on: ubuntu-latest
@@ -85,7 +86,7 @@ jobs:
       - run: go build -o google-docs-mcp ./cmd/google-docs-mcp
       - run: bash scripts/stdio-smoke.sh ./google-docs-mcp
       - run: bash scripts/schema-diff.sh ./google-docs-mcp
-      - run: bash scripts/staleness-check.sh ./google-docs-mcp
+      - run: go run ./internal/devcheck staleness ./google-docs-mcp
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: schemas

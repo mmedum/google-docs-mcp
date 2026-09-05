@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-09-05
+
 ### Added
 - The live driver sweeps every tool that accepts `dry_run` and checks the
   one thing a test double cannot: that the document's revision is

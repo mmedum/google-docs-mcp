@@ -8,3 +8,9 @@ client_secret*.json
 token.json
 .env
 __pycache__/
+
+# Claude Code's local settings, and the temp files it writes beside them
+# while a session is running. `git add -A` sweeps those up if they happen
+# to exist at that moment, which is how two of them reached this history.
+.claude/settings.local.json
+.claude/settings.local.json.tmp.*

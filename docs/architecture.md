@@ -656,7 +656,7 @@ accounts. That sets these requirements:
   checks (suggest mode visible in the UI, anchored comments), run
   manually until enrolment exists in CI.
 - **Stdio smoke**: initialise, list tools, `get_document` on a scratch id.
-- **Agent evals** (`scripts/evals/run.py`, Phase 3): thirteen tasks
+- **Agent evals** (`internal/evals`, `-tags=evals`, Phase 3): thirteen tasks
   through Claude Code headless (`claude -p` with only this server's
   tools), each against a scratch document the harness seeds through the
   server, scored on the end state read back through the server and on

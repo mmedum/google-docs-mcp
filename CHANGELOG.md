@@ -15,6 +15,10 @@ and new required fields are breaking; the schema diff in CI flags them.
   of asking reporters to audit their own logs.
 
 ### Changed
+- The agent evals are Go: `go test -tags=evals ./internal/evals`, one
+  subtest per task, replacing `scripts/evals/run.py`. `-run` selects a
+  task and a failed check names itself instead of being counted. No
+  Python remains in the repository.
 
 - The live driver is Go: `go test -tags=live ./internal/livecheck` drives
   the binary over stdio through the MCP SDK's own client, replacing

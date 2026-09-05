@@ -251,8 +251,8 @@ make build
 
 Test fixtures are synthetic. Never add content, ids or URLs from real
 documents; gitleaks runs in pre-commit and CI. `make bench` measures the
-large-document paths; `scripts/evals/run.py` runs the agent evals
-against your own account (see its header).
+large-document paths; `go test -tags=evals ./internal/evals` runs the
+agent evals against your own account (see the package comment).
 
 ## Licence
 

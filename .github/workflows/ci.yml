@@ -31,14 +31,18 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # bash on all three runners, deliberately. With the default shell,
+      # PowerShell turned `-coverprofile=cov.out` into a file called
+      # `cov`, so the profile the next step reads did not exist under the
+      # name this file gives it. Nobody saw it because the coverage floor
+      # ran on Linux only until the gate stopped being a shell script.
       - run: go build ./...
+        shell: bash
       - run: go test -race -coverpkg=./internal/... -coverprofile=cov.out -covermode=atomic ./...
-      # Every platform now, not only Linux: the floor is Go rather than
-      # a shell script, so there is nothing left that only bash can run.
-      - name: what is in the workspace
-        run: ls; pwd; go env GOFLAGS
+        shell: bash
       - name: coverage floor
         run: go run ./internal/devcheck coverage cov.out 80
+        shell: bash
 
   lint:
     runs-on: ubuntu-latest

@@ -16,7 +16,14 @@ and new required fields are breaking; the schema diff in CI flags them.
   guard. They are `devcheck coverage` and `devcheck staleness` now, they
   derive both lists from the code, they assert a floor on how much they
   read, and the coverage floor runs on every platform in CI instead of
-  only on Linux.
+  only on Linux. Turning it on for Windows immediately found two things
+  nobody could have seen while it ran on Linux alone: the workflow's
+  default shell there is PowerShell, which turned `-coverprofile=cov.out`
+  into a file called `cov`, so the profile was never where the workflow
+  said it was; and `internal/userconfig` sat at 78.9% on Windows against
+  93% elsewhere, because the test for "there is nowhere to put a config"
+  skipped there instead of clearing `%AppData%`, which is the same
+  experiment. The test job runs under bash on all three runners now.
 - A delete now has to name what it deletes twice. `delete_tab` takes
   `confirm_tab` and `delete_comment` takes `confirm_comment_id`, each
   repeating the target exactly, and the call is refused otherwise. Both

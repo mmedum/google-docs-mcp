@@ -141,12 +141,18 @@ func TestErrorPaths(t *testing.T) {
 // to put a config, and every path helper has to say so rather than
 // returning a path relative to nothing.
 func TestNoConfigDirectory(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("os.UserConfigDir falls back to other variables on Windows")
-	}
 	t.Setenv(EnvDir, "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("HOME", "")
+	if runtime.GOOS == "windows" {
+		// os.UserConfigDir reads %AppData% on Windows and errors when it
+		// is empty, which is the same experiment as clearing HOME
+		// elsewhere. Skipping it here cost real coverage: the package sat
+		// at 78.9% on the Windows runner and 93% everywhere else, and
+		// nobody could see it while the floor ran on Linux alone.
+		t.Setenv("AppData", "")
+	} else {
+		t.Setenv("XDG_CONFIG_HOME", "")
+		t.Setenv("HOME", "")
+	}
 	for name, fn := range map[string]func(string) (string, error){
 		"ProfileDir": ProfileDir, "Path": Path,
 		"DefaultClientSecretPath": DefaultClientSecretPath, "TokenFilePath": TokenFilePath,

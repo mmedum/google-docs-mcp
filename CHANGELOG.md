@@ -7,6 +7,17 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- The live driver sweeps every tool that accepts `dry_run` and checks the
+  one thing a test double cannot: that the document's revision is
+  unchanged afterwards. A fake accepts the batch whether or not the code
+  meant to send it, so "nothing was sent" is only establishable against
+  the real document. It also holds each rendering to its promise — it
+  must say it was a dry run and name the operations it would perform —
+  after a sibling server found three dry runs describing a request body
+  beside a null field. The sweep fails when a tool gains `dry_run`
+  without joining it, which it did on its first run.
+
 ### Fixed
 - `[ambiguous]` meant two opposite things. A target matching several
   passages and a write whose outcome is unknown both came out as

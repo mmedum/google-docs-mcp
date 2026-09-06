@@ -323,10 +323,18 @@ func TestEveryPlaceAPersonIsWrittenIsKnown(t *testing.T) {
 // instead and propagated through names like `User` until it counted
 // fifteen hundred reads, so it is the declarations that are followed,
 // not the data flow.
+// wireTypePackages hold the types that come off the wire carrying a
+// person: one per line, because the two together on one line score as
+// a high-entropy secret.
+var wireTypePackages = []string{
+	"internal/gapi",
+	"internal/gdocs",
+}
+
 func personFields(t *testing.T, root string, dirs []string) map[string]bool {
 	t.Helper()
 	fields := map[string]bool{}
-	for _, dir := range []string{"internal/gapi", "internal/gdocs"} {
+	for _, dir := range wireTypePackages {
 		entries, err := os.ReadDir(filepath.Join(root, dir))
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)

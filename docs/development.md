@@ -67,10 +67,10 @@ and are preferred by the Makefile; install them with
   rows, which makes it the quickest end-to-end check of a layout change.
 - `go vet -tags=integration ./...` (part of `make vet`) keeps the tagged
   tests compiling even though CI never runs them.
-- **The gates are Go, and tested.** `internal/devcheck` holds the
+- **The gates are Go, and tested.** `scripts/gates` holds the
   coverage floor, the staleness check, the tool-name and schema
   comparisons and the workflow pin check, each with tests of its own —
-  `go test ./internal/devcheck`. They were shell scripts until two of
+  `go test ./scripts/gates`. They were shell scripts until two of
   them went wrong in ways bash made easy: a hand-written package list
   that fell behind without a sound, and a staleness rule that failed on
   the release pull request it was written to guard. Each derives its
@@ -79,7 +79,7 @@ and are preferred by the Makefile; install them with
   driver are still shell, because both are process plumbing rather than
   logic.
 - **Before a release, scan the history**: `LEAKCHECK_HISTORY=1 go test
-  ./internal/leakcheck -run TestHistoryCarriesNoIdentifiers` reads every
+  ./scripts/gates -run TestHistoryCarriesNoIdentifiers` reads every
   blob ever committed, which the ordinary run does not — a file that
   carried an identifier and was cleaned up later still carries it in the
   object store. It takes a few seconds and is skipped without the

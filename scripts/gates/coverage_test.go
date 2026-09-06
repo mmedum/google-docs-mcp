@@ -108,7 +108,7 @@ func TestEveryExemptionNamesARealPackage(t *testing.T) {
 	// Not Skipf. A check that skips when it cannot read its input
 	// reports the same green as a check that read everything and found
 	// nothing, which is the failure this whole file exists to avoid.
-	pkgs, err := internalPackages(module, repoRoot(t))
+	pkgs, err := internalPackages(module, mustModuleRoot(t))
 	if err != nil {
 		t.Fatalf("go list ./internal/...: %v", err)
 	}

@@ -50,9 +50,16 @@ tool surface, the addressing model, or the write path.
 - `internal/redact/` the transcript redactor, shared by both drivers and
   carrying no build tag so its tests run in every `make check`. Anything
   that writes an artifact a person may paste goes through it.
-- The gates: `internal/devcheck/` coverage, staleness and the pin checks;
-  `internal/leakcheck/` scans the repository for anything identifying;
-  `internal/livecheck/` the live driver (build tag `live`) plus the
+- **The dev tooling lives in `scripts/`, as Go, and there is no shell.**
+  `scripts/gates/` is one command with a registry: coverage, staleness,
+  pins, leaks, classes, schema-diff, smoke and parity. `internal/` is the
+  server's own implementation, and a thing that only ever runs on a
+  maintainer's machine does not belong there. No shell either — a shell
+  script is held to no gofmt, vet, lint or test, `make check` runs on the
+  Windows runner where bash is a dependency rather than a given, and a
+  script that parses JSON with `sed` is how a quote ends up inside a
+  string.
+- `internal/livecheck/` the live driver (build tag `live`) plus the
   untagged gates over both drivers; `internal/evals/` the agent evals
   (build tag `evals`); `internal/doc/doctest/` shared fixtures.
 - `testdata/sample.json` synthetic fixture; `testdata/golden/` renderer goldens.

@@ -8,6 +8,31 @@ and new required fields are breaking; the schema diff in CI flags them.
 ## [Unreleased]
 
 ### Changed
+- The dev tooling is Go under `scripts/gates`, and there is no shell.
+  `internal/devcheck` moved out of the server's own tree, because
+  something that only ever runs on a maintainer's machine does not belong
+  in `internal/`; `scripts/schema-diff.sh` and `scripts/stdio-smoke.sh`
+  are Go commands. A shell script is held to no gofmt, vet, lint or test,
+  `make check` runs on the Windows runner where bash is a dependency
+  rather than a given, and a script that parses JSON with `sed` is how a
+  quote ends up inside a string.
+- `leaks`, `pins` and `classes` are named targets rather than tests that
+  happened to run. They always ran, inside `go test ./...`, so nothing
+  new is caught — but the target list is what a person reads to find out
+  what is covered, and a check running invisibly is one nobody can audit
+  without grepping for it.
+- **A parity gate.** `make check` and CI must run the same set, and they
+  did not: `make vet` ran four passes and CI ran one, so fourteen
+  build-tagged files compiled only on a maintainer's machine. The two
+  lists live in different files and you are only ever editing one of
+  them, which is why this is a gate and not a habit. It compares by
+  command rather than by target name, and separately requires every
+  tagged vet pass to appear in both. Watched to fail in both directions.
+- `scripts/gates` is one registry: the usage text, the dispatch and the
+  parity gate all read the same list, so they cannot drift from each
+  other.
+
+### Changed
 - The README carries badges — CI, latest release, Go reference, licence —
   and no longer states a version in prose. The status line said v0.5.0
   five releases after v0.5.0, and the first fix was a gate to keep the

@@ -29,6 +29,10 @@ and new required fields are breaking; the schema diff in CI flags them.
   from, that it is percent-encoded in the printed URL, and how to forward
   it — and links `SECURITY.md` and `CONTRIBUTING.md`, which existed and
   were unreachable from the front page.
+- `login --no-browser` says "(not opening a browser: --no-browser)"
+  rather than "(could not open a browser automatically: --no-browser)".
+  It is the documented path for logging in over SSH, so it should not
+  report a flag the person just passed as a failure.
 - §17 records an open decision: `make check` runs `go vet` four times and
   CI runs it once, so 14 build-tagged files compile only on a
   maintainer's machine.

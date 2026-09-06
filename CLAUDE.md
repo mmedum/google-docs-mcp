@@ -59,7 +59,8 @@ tool surface, the addressing model, or the write path.
 
 ## Definition of done
 
-`make check` (gofmt; vet across all four build tags; golangci-lint;
+`make check` (gofmt; four vet passes — untagged plus `integration`,
+`live` and `evals`; golangci-lint;
 race tests with the 80% floor; govulncheck; a licence check; a schema
 diff against the last tag; the stdio smoke test; and the staleness check
 of README/docs/CHANGELOG against the code) plus tests for new behaviour, `/simplify` and

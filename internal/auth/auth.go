@@ -95,6 +95,11 @@ const (
 	GoogleTokenURL = "https://oauth2.googleapis.com/token"
 )
 
+// ErrNoBrowser is what an OpenBrowser hook returns when the caller asked
+// for the URL instead of a browser. Exported so the caller does not have
+// to encode that choice in an error string the printer then matches on.
+var ErrNoBrowser = errors.New("--no-browser")
+
 // LoginOptions tune the interactive flow. Zero values are sensible.
 type LoginOptions struct {
 	// OpenBrowser is called with the authorization URL. nil uses the OS
@@ -195,8 +200,16 @@ func Login(ctx context.Context, cfg *oauth2.Config, opts LoginOptions) (*oauth2.
 	if open == nil {
 		open = OpenBrowser
 	}
+	// ErrNoBrowser is a choice, not a failure: printing "could not open a
+	// browser automatically: --no-browser" told someone who had just
+	// passed that flag that something had gone wrong. It is the
+	// documented path for logging in over SSH, so it reads as one.
 	if err := open(authURL); err != nil {
-		_, _ = fmt.Fprintf(out, "(could not open a browser automatically: %v)\n", err)
+		if errors.Is(err, ErrNoBrowser) {
+			_, _ = fmt.Fprintln(out, "(not opening a browser: --no-browser)")
+		} else {
+			_, _ = fmt.Fprintf(out, "(could not open a browser automatically: %v)\n", err)
+		}
 	}
 	_, _ = fmt.Fprintln(out, "Waiting for the browser to finish...")
 

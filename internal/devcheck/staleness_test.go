@@ -96,3 +96,75 @@ func TestPatternsMatchTheRealShapes(t *testing.T) {
 		t.Fatal("fixture drifted")
 	}
 }
+
+// The status rule, exercised over the states this repository cannot
+// reach. It always has a tag, so the branches that matter to a sibling
+// before its first release would otherwise ship green here and misfire
+// there — which is the same argument this file makes about every other
+// gate in it.
+func TestStatusProblems(t *testing.T) {
+	body := func(status, seventeen string) string {
+		return "# Architecture\n\n" + status + "\n\n## 1. Mission\n\ntext\n\n## 17. Open decisions\n\n" +
+			seventeen + "\n\n## 18. Evidence\n"
+	}
+	openDecision := "Something is undecided."
+	noDecision := "None. Everything is decided."
+	claimsOpen := "**Status:** v1.0.0 (2026-09-06). One design decision is open (§17)."
+	claimsShut := "**Status:** v1.0.0 (2026-09-06). Phases 0 to 4 are done."
+
+	cases := []struct {
+		name       string
+		status     string
+		seventeen  string
+		tag, next  string
+		wantSubstr string // "" means no problem
+	}{
+		{"released and current", claimsOpen, openDecision, "1.0.0", "1.0.0", ""},
+		{"the version about to be tagged", claimsOpen, openDecision, "0.9.5", "1.0.0", ""},
+		{"behind the tag", claimsShut, noDecision, "1.0.0", "1.0.0", ""},
+		{"stale version", "**Status:** v0.5.0.", noDecision, "1.0.0", "1.0.0", "says Status v0.5.0"},
+
+		// Before the first release: no tag, nothing under a version
+		// heading. None of these can happen in this repository.
+		{"unreleased and claims nothing", "This is phase 2.", noDecision, "", "", ""},
+		{"unreleased but claims a version", "**Status:** v0.1.0.", noDecision, "", "",
+			"there is no tag and no version heading to confirm it"},
+
+		// The half a badge cannot carry.
+		{"claims open while §17 says none", claimsOpen, noDecision, "1.0.0", "1.0.0",
+			"claims an open decision while §17 has none"},
+		{"claims none while §17 lists one", claimsShut, openDecision, "1.0.0", "1.0.0",
+			"claims no open decision while §17 lists one"},
+
+		// git gave us nothing: the message must say so rather than
+		// rendering "the released tag is v" with nothing after it.
+		{"no tag but a heading exists", "**Status:** v0.5.0.", noDecision, "", "1.0.0",
+			"no released tag was found"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := statusProblems(body(c.status, c.seventeen), c.tag, c.next)
+			joined := strings.Join(got, "\n")
+			switch {
+			case c.wantSubstr == "" && len(got) > 0:
+				t.Errorf("expected no problem, got:\n%s", joined)
+			case c.wantSubstr != "" && !strings.Contains(joined, c.wantSubstr):
+				t.Errorf("expected a problem mentioning %q, got:\n%s", c.wantSubstr, joined)
+			}
+		})
+	}
+}
+
+// A status line with no **Status:** at all is a problem once something
+// has shipped, and not before.
+func TestStatusProblemsWithNoStatusLine(t *testing.T) {
+	text := "# Architecture\n\nprose\n\n## 17. Open decisions\n\nNone.\n"
+	if got := statusProblems(text, "", ""); len(got) > 0 {
+		t.Errorf("before the first release a missing status line is fine, got: %v", got)
+	}
+	got := statusProblems(text, "1.0.0", "1.0.0")
+	if len(got) == 0 || !strings.Contains(strings.Join(got, "\n"), "has no **Status:** line") {
+		t.Errorf("after a release a missing status line is a problem, got: %v", got)
+	}
+}

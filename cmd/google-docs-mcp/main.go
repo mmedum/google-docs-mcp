@@ -294,7 +294,7 @@ func cmdLogin(args []string) int {
 	defer cancel()
 	opts := auth.LoginOptions{Out: os.Stdout, Timeout: timeout, HTTPTimeout: cfg.HTTPTimeout}
 	if noBrowser {
-		opts.OpenBrowser = func(string) error { return errors.New("--no-browser") }
+		opts.OpenBrowser = func(string) error { return auth.ErrNoBrowser }
 	}
 	tok, err := auth.Login(ctx, oc, opts)
 	if err != nil {

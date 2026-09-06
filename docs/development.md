@@ -72,10 +72,10 @@ and are preferred by the Makefile; install them with
 - **The gates are Go, and tested.** `scripts/gates` holds all eight: the
   coverage floor, the staleness check, the schema diff, the stdio smoke
   test, the identifier scan, the workflow pin check, the error-class
-  check and the parity check. Six have tests of their own, `go test
+  check and the parity check. Seven have tests of their own, `go test
   ./scripts/gates`, each watched to fail before it was trusted; the
-  smoke test and the schema diff are drives of the built binary, so
-  `make check` running them is the test. They were shell scripts until
+  schema diff is a drive of the built binary, so `make check` running it
+  is the test. They were shell scripts until
   two of them went wrong in ways bash made easy: a hand-written package
   list that fell behind without a sound, and a staleness rule that
   failed on the release pull request it was written to guard. Each

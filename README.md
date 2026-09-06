@@ -125,6 +125,27 @@ enabled for your project, set `GDOCS_PREVIEW=true`. The programme terms
 allow use inside your own organisation; do not offer a preview-enabled
 deployment to people outside it.
 
+**These features sit outside the version promise below.** They are the
+one part of this server built on an API Google may change or withdraw
+while it is in preview, and a change there is not something this project
+can absorb without changing behaviour. Everything reachable with
+`GDOCS_PREVIEW` unset follows semver as stated; the preview-gated
+features follow Google's preview programme, and if it moves, they move.
+
+## Versioning
+
+From v1.0.0, semver as you would expect: a tool removed or renamed, an
+argument that becomes required, or a change to what a tool returns is a
+major version. New tools and new optional arguments are minor. The
+schema diff in CI is what enforces it, and it runs on every pull
+request — the tool surface cannot change without the diff naming it.
+
+The two exclusions, both stated so they are decisions rather than
+surprises: the Developer Preview features above, and the exact prose of
+a tool's text output, which is written for a model to read and will be
+reworded when a model reads it badly. The `structuredContent` a tool
+returns is covered; the sentence wrapped around it is not.
+
 ## Connect a client
 
 Claude Code:

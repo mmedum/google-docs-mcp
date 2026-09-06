@@ -84,6 +84,21 @@ func TestParityCatchesDivergence(t *testing.T) {
 			want: `gate "pins" is declared in scripts/gates but no `,
 		},
 		{
+			// A gate CI plainly runs, inside a block scalar. The problem
+			// list must stay empty: this one is a false alarm rather than
+			// a miss, and a gate that cries wolf gets edited out.
+			name: "a step is a run: block and the gate is inside it",
+			ci: strings.Replace(parityCI, pinsStep,
+				"      - run: |\n          go run ./scripts/gates pins\n", 1),
+			want: "",
+		},
+		{
+			name: "the block ended before the gate was named",
+			ci: strings.Replace(parityCI, pinsStep,
+				"      - run: |\n          echo building\n      - name: go run ./scripts/gates pins\n", 1),
+			want: `gate "pins" is declared in scripts/gates but no `,
+		},
+		{
 			name:     "`make check` stopped depending on a gate",
 			makefile: strings.Replace(parityMakefile, " pins", "", 1),
 			want:     "`make check` does not depend on it",
@@ -119,6 +134,12 @@ func TestParityCatchesDivergence(t *testing.T) {
 			problems, _, err := parityCheck(makefile, ci, parityDeclared)
 			if err != nil {
 				t.Fatalf("parityCheck: %v", err)
+			}
+			if c.want == "" {
+				if len(problems) > 0 {
+					t.Errorf("expected no problem; got:\n%s", strings.Join(problems, "\n"))
+				}
+				return
 			}
 			if !strings.Contains(strings.Join(problems, "\n"), c.want) {
 				t.Errorf("no problem containing %q; got:\n%s", c.want, strings.Join(problems, "\n"))

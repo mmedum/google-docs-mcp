@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -90,7 +91,15 @@ func leaks(w io.Writer, _ []string) error {
 		}
 		text := string(data)
 		if strings.IndexByte(text, 0) >= 0 {
-			continue // binary
+			// Binary, so none of the rules below can read it — which is
+			// how an 8 MB `gates` binary carrying 66 absolute paths from
+			// a maintainer's machine passed this gate, `make check` and
+			// eight green checks. What can still be said about a binary
+			// is whether it belongs in a repository of source at all.
+			if why := artifact(data); why != "" {
+				problems = append(problems, name+": "+why)
+			}
+			continue
 		}
 		scanned++
 		for _, found := range findLeaks(allowed(text)) {
@@ -181,4 +190,42 @@ func safeDomain(domain string) bool {
 }
 func invented(id string) bool {
 	return inventedWord.MatchString(id) || hasRun(id, 4)
+}
+
+// Magic numbers of a linked executable. `go build ./scripts/gates`
+// drops one beside the source under whatever name the directory has,
+// and `git add -A` sweeps it in; two of the four servers in this family
+// did exactly that, and one pushed three of them to a public main,
+// where they are 97% of the packed history.
+var executableMagic = [][]byte{
+	[]byte("\x7fELF"),                                  // Linux, BSD
+	[]byte("MZ"),                                       // Windows PE
+	{0xfe, 0xed, 0xfa, 0xce}, {0xce, 0xfa, 0xed, 0xfe}, // Mach-O, 32-bit
+	{0xfe, 0xed, 0xfa, 0xcf}, {0xcf, 0xfa, 0xed, 0xfe}, // Mach-O, 64-bit
+	{0xca, 0xfe, 0xba, 0xbe}, // Mach-O universal
+}
+
+// maxBinary is what a binary file may weigh before it has to justify
+// itself. Nothing binary is tracked in this repository at all, so this
+// is a floor on what may be added rather than a description of what is
+// here; a fixture that genuinely needs to be binary will be far under
+// it, and a build artifact will not.
+const maxBinary = 1 << 20
+
+// artifact reports why a binary file does not belong in the repository,
+// or "" if it may stay. It is deliberately not overridable by a marker
+// comment: a binary cannot carry one, and the way past this rule should
+// be an edit somebody reviews.
+func artifact(data []byte) string {
+	for _, magic := range executableMagic {
+		if bytes.HasPrefix(data, magic) {
+			return fmt.Sprintf("a compiled executable, %d bytes. Nothing built belongs in the "+
+				"tree; add it to .gitignore", len(data))
+		}
+	}
+	if len(data) > maxBinary {
+		return fmt.Sprintf("%d bytes of binary, past the %d-byte limit. No rule here can read it, "+
+			"so it is carried on trust", len(data), maxBinary)
+	}
+	return ""
 }

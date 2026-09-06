@@ -7,6 +7,17 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- `make leaks` refuses a build artifact. The rules are regexes over text,
+  so the scan skipped any file holding a NUL byte — and an 8 MB `gates`
+  binary, carrying 66 absolute paths from a maintainer's machine because
+  it was built without `-trimpath`, passed the gate, `make check` and
+  eight green CI checks. The history scan skipped it for the same reason.
+  A binary is now refused if it starts with an executable's magic number
+  or exceeds a megabyte, while it is still untracked, so it fails before
+  `git add -A` can sweep it in. Two of the four servers in this family
+  made the same mistake; the other has three of them on a public `main`.
+
 ### Changed
 - The dev tooling is Go under `scripts/gates`, and there is no shell.
   `internal/devcheck` moved out of the server's own tree, because
@@ -45,6 +56,13 @@ and new required fields are breaking; the schema diff in CI flags them.
   other.
 
 ### Fixed
+- The parity gate called a gate missing when a `run: |` block ran it.
+  Requiring the command on the `run:` line itself was safe here — nothing
+  in the workflow is a block scalar — and wrong in general: it fails
+  closed, so nothing slips through, but the first multi-line step
+  somebody writes reports a gate CI plainly runs as absent, and a gate
+  that cries wolf is a gate that gets edited out. Found by the drive
+  server, which hit it while porting the same rule.
 - The error-class gate could not see a duplicate. It compacted
   `service.Classes` as it stood, and `slices.Compact` only removes runs
   of adjacent equals, so a class written twice anywhere but next to

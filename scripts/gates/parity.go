@@ -105,7 +105,13 @@ func parityCheck(makefile, ci string, declared []string) (problems []string, vet
 	}
 
 	// Both sides are read with their commented-out lines removed, and the
-	// CI side only counts a gate named on a `run:` line. Matching the raw
+	// CI side only counts a gate named by a `run:` step. That narrower
+	// rule is safe only because the pattern is the invocation
+	// (`go run ./scripts/gates NAME`) rather than the gate's bare name,
+	// so it cannot appear anywhere but a `run:`. A sibling keyed the same
+	// map on tool names, where `lint` is satisfied by a `uses:` action —
+	// there the rule has to accept a `uses:` reference too. If a gate here
+	// is ever satisfied by an action, this needs widening with it. Matching the raw
 	// text meant that commenting out a step to unblock a red build left
 	// parity green — the one divergence it exists to catch, achieved by
 	// typing one `#`. What remains uncovered is a step disabled by an
@@ -162,12 +168,34 @@ func code(text string) string {
 	return strings.Join(kept, "\n")
 }
 
-// runLines keeps the lines of a workflow that actually run something.
+// runLines keeps the lines of a workflow that actually run something: a
+// `run:` line, and the body of a `run: |` block, which is every line
+// indented past the `run:` that opened it. Requiring the command on the
+// `run:` line itself was safe here and wrong in general — it fails
+// closed, so nothing slips through, but the first multi-line step
+// somebody writes reports a gate CI plainly runs as missing. Block
+// scalars are the one piece of YAML this needs to know, and indentation
+// is all it takes to find the end of one.
 func runLines(ci string) string {
 	var kept []string
+	body := -1
 	for _, l := range strings.Split(code(ci), "\n") {
-		if strings.Contains(l, "run:") {
-			kept = append(kept, l)
+		indent := len(l) - len(strings.TrimLeft(l, " \t"))
+		if body >= 0 {
+			if strings.TrimSpace(l) == "" || indent > body {
+				kept = append(kept, l)
+				continue
+			}
+			body = -1
+		}
+		i := strings.Index(l, "run:")
+		if i < 0 {
+			continue
+		}
+		kept = append(kept, l)
+		switch strings.TrimSpace(l[i+len("run:"):]) {
+		case "|", "|-", "|+", ">", ">-", ">+":
+			body = indent
 		}
 	}
 	return strings.Join(kept, "\n")

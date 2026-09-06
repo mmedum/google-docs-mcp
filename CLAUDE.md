@@ -45,13 +45,25 @@ tool surface, the addressing model, or the write path.
 - `internal/doc/` model, handles, sections; `internal/render/` markdown,
   text, outline; `internal/service/` orchestration and scope resolution;
   `internal/tools/` MCP tools; `internal/server/` SDK wiring and schema dump.
+- `internal/markdown/` the fragment parser; `internal/plan/` write
+  planning and index math; `internal/version/` the build stamp.
+- `internal/redact/` the transcript redactor, shared by both drivers and
+  carrying no build tag so its tests run in every `make check`. Anything
+  that writes an artifact a person may paste goes through it.
+- The gates: `internal/devcheck/` coverage, staleness and the pin checks;
+  `internal/leakcheck/` scans the repository for anything identifying;
+  `internal/livecheck/` the live driver (build tag `live`) plus the
+  untagged gates over both drivers; `internal/evals/` the agent evals
+  (build tag `evals`); `internal/doc/doctest/` shared fixtures.
 - `testdata/sample.json` synthetic fixture; `testdata/golden/` renderer goldens.
 
 ## Definition of done
 
-`make check` (gofmt, vet, golangci-lint, race tests with the 80% floor,
-govulncheck, stdio smoke, staleness check of README/docs/CHANGELOG
-against the code) plus tests for new behaviour, `/simplify` and
+`make check` (gofmt; four vet passes — untagged plus `integration`,
+`live` and `evals`; golangci-lint;
+race tests with the 80% floor; govulncheck; a licence check; a schema
+diff against the last tag; the stdio smoke test; and the staleness check
+of README/docs/CHANGELOG against the code) plus tests for new behaviour, `/simplify` and
 `/code-review high` on the changed files with findings resolved or
 explained, and a look at `--dump-schemas` for breaking changes. Commit
 at each milestone with a message that says what and why. Phases end

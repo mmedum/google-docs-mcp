@@ -7,6 +7,27 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-06
+
+### Added
+- A version promise, in the README. From here a tool removed or renamed,
+  an argument that becomes required, or a change to what a tool returns
+  is a major version; new tools and new optional arguments are minor.
+  The schema diff in CI enforces it on every pull request.
+- Two exclusions from that promise, named so they are decisions rather
+  than surprises: the Developer Preview features, which are built on an
+  API Google may change or withdraw while it is in preview, and the
+  exact prose of a tool's text output, which is written for a model to
+  read and will be reworded when a model reads it badly. What a tool
+  returns as `structuredContent` is covered; the sentence around it is
+  not.
+
+### Changed
+- 1.0.0 is a promise about compatibility, not new behaviour: no code
+  changed from 0.9.5. The §16 gates that had guarded this version — use
+  in anger, and an eval round with another client — are retired in the
+  design document with the reasons, rather than left to lapse.
+
 ## [0.9.5] - 2026-09-06
 
 ### Changed

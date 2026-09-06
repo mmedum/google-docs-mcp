@@ -827,8 +827,29 @@ paragraph borders alone and twelve more for cells. A width of zero reads
 back as no border, which is what Google means by the empty border object
 it returns for an edge that is not drawn.
 
-v1.0.0 waits for use in anger and a further eval round with another
-client.
+**v1.0.0, released 2026-09-06.** The two gates this section set were
+use in anger and a further eval round with another client. Neither was
+met as written, and both were retired deliberately rather than left to
+lapse.
+
+*Use in anger* was waiting on one outside user's report, which had been
+waiting on a message nobody had sent. It is a gate on somebody else's
+clock, and holding a version number against it taught nothing: the
+report is worth having whether the tag says 0.9 or 1.0.
+
+*A further eval round with another client* became one round on the same
+client. The 17 tasks were re-run on the released code — 17/17, 59/59
+checks — but through Claude Code again, because the second client is
+Claude Desktop, which cannot be driven headlessly, and a third is not
+installed. Half a gate met honestly is better than a whole one claimed;
+the clause is retired rather than quietly ignored.
+
+What replaced them is narrower and enforceable: the version promise is
+written down in the README with its two exclusions named — the
+Developer Preview features, because they are built on an API Google may
+change while it is in preview, and the prose of a tool's text output,
+because it is written for a model and will be reworded when a model
+reads it badly. The schema diff in CI is what holds the rest.
 
 ## 17. Open decisions
 

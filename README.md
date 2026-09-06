@@ -11,7 +11,7 @@ Single static binary. Per-user OAuth against your own Google account, in
 your own Google Cloud project. Nothing leaves your machine except calls to
 Google's APIs.
 
-**Status: v0.5.0.** Reading, searching, creating, exporting, editing with
+**Status: v1.0.0.** Reading, searching, creating, exporting, editing with
 minimal diffs in suggest, direct or comment mode, formatting, reviewing
 suggestions, comment threads, revision history and diffs, tables, tabs,
 headers, footers, footnotes, images, chips, named ranges, page and section
@@ -114,6 +114,28 @@ loopback port, and stores the refresh token in your OS keyring (Secret
 Service, Keychain or Credential Manager), falling back to a 0600 file
 with a warning when no keyring is available. `doctor` checks every step
 and tells you exactly what is missing.
+
+### Logging in over SSH
+
+The callback goes to the *remote* host's loopback address and your
+browser is local, so the port has to be forwarded. It is drawn at random
+and appears only in the URL `login` prints, percent-encoded as
+`127.0.0.1%3A<port>`:
+
+```
+google-docs-mcp login --no-browser
+```
+
+Read the port out of that URL, forward it from a second local terminal,
+then open the URL in your own browser:
+
+```
+ssh -N -L <port>:127.0.0.1:<port> you@remote-host
+```
+
+If `ssh` says `bind: Address already in use`, stop the login with Ctrl-C
+and start it again to draw a different port. `--timeout` sets how long
+`login` waits; the default is five minutes.
 
 ### Optional: Developer Preview
 
@@ -273,6 +295,21 @@ Test fixtures are synthetic. Never add content, ids or URLs from real
 documents; gitleaks runs in pre-commit and CI. `make bench` measures the
 large-document paths; `go test -tags=evals ./internal/evals` runs the
 agent evals against your own account (see the package comment).
+
+## Security
+
+Report a vulnerability privately: see [SECURITY.md](SECURITY.md), which
+says what is in scope and how to reach me. Do not open a public issue
+for one.
+
+`docs/security.md` describes what the server does with your credentials
+and your documents — what reaches a log, what `doctor` prints, and what
+the drivers write — and each claim there is held by a test.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the branch and review flow, and
+`make check` is what has to pass.
 
 ## Licence
 

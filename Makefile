@@ -73,7 +73,7 @@ staleness: build ## Docs must match the code
 	@$(GO) run ./internal/devcheck staleness $(BIN)
 
 .PHONY: check
-check: fmt vet lint cover vuln licenses schema-diff smoke staleness ## Everything CI runs
+check: fmt vet lint cover vuln licenses schema-diff smoke staleness ## Everything CI runs, plus the vet passes it does not: see docs/architecture.md
 
 .PHONY: clean
 clean:

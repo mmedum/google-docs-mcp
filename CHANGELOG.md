@@ -116,9 +116,9 @@ and new required fields are breaking; the schema diff in CI flags them.
   documents. Ids, URLs and revisions have a shape and were already
   caught; a person's name has none, so names are caught by position —
   a closed, short set, because this project's renderers wrote every one
-  of them — and an address is caught both ways. The redactor moved to
-  `internal/livecheck/scrub.go` with no build tag, so its tests run in
-  every `make check` instead of only when someone runs the driver with
+  of them — and an address is caught both ways. The redactor is
+  `internal/redact`, carrying no build tag, so its tests run in every
+  `make check` instead of only when someone runs a driver with
   credentials.
 - `docs/security.md` said logs carry no document data, which was true and
   narrower than it read: `doctor` output and the driver transcript are

@@ -1,11 +1,13 @@
 # Architecture — google-docs-mcp
 
-**Status:** v0.9.1 (2026-09-05). All design decisions are resolved (§17).
-Phases 0, 1 and 2 are implemented: auth, raw client, model, renderer,
-reads, search, create, export, editing with minimal diffs in all three
-modes, formatting, suggestion review, comment threads on both backends,
-revision history and diffs, tables, tabs, headers, footers, footnotes,
-images and chips; §16 lists what Phase 3 adds. Every convention here was
+**Status:** v1.0.0 (2026-09-06). Phases 0 to 4 are done (§16): auth, raw
+client, model, renderer, reads, search, create, export, editing with
+minimal diffs in all three modes, formatting, suggestion review, comment
+threads on both backends, revision history and diffs, tables, tabs,
+headers, footers, footnotes, images and chips, resources, and the agent
+evals. The tool surface covers every GA member of the Docs `Request`
+union plus four preview members. One design decision is open (§17): CI
+and `make check` do not run the same things. Every convention here was
 checked against primary sources; §18 lists what was confirmed, refuted,
 and changed.
 
@@ -693,8 +695,10 @@ accounts. That sets these requirements:
   every op kind against one scratch document, through the binary over
   stdio as a client drives it, with the steps that must be refused
   asserting their refusal. Manual, never CI. Run 2026-09-05 as the Go
-  port: 91 steps with `GDOCS_PREVIEW=true`, 88 with it off, every
-  failure an intended refusal. `TestCoverage` in the same package makes
+  port. Last run 2026-09-06 for v1.0.0: 109 steps with
+  `GDOCS_PREVIEW=true`, 107 with it off, every failure an intended
+  refusal, and both transcripts scanned afterwards for an address, a
+  document URL, a resource id and a revision id — none present. `TestCoverage` in the same package makes
   the coverage rule a check rather than a comment: it reads the
   package's own source and fails when a registered tool has no step or
   an op kind never appears as an `op`.
@@ -853,8 +857,25 @@ reads it badly. The schema diff in CI is what holds the rest.
 
 ## 17. Open decisions
 
-None. Everything in §15 is decided; the next step is Phase 0 (§16), which
-begins only on an explicit go.
+**CI and `make check` do not run the same things, and nothing notices.**
+The `vet` target runs `go vet` four times — plain, `integration`, `live`,
+`evals` — while `ci.yml` runs it once and passes `-tags` nowhere. So the
+14 build-tagged files (9 `live`, 4 `evals`, 1 `integration`) compile only
+where somebody runs `make check` by hand, and can break on `main` with CI
+green. Found by the google-chat-mcp session on 2026-09-06, which had the
+same gap; three of the four sibling repos have it in one direction or the
+other.
+
+Two fixes, and the choice is the open part. Adding four `-tags` lines to
+CI closes today's instance and leaves the mechanism: the local gate list
+and the CI gate list are two lists in two files, and you are only ever
+editing one of them. A **parity gate** — asserting that the two run the
+same set — closes the mechanism, and is what the sheets server adopted.
+This is the same shape as everything in §18's later rows, one level up,
+so the parity gate is the one this document would choose; it is recorded
+here rather than done because it is the owner's call.
+
+Everything in §15 is otherwise decided.
 
 ## 17a. Deferred cleanups
 

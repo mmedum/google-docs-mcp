@@ -20,6 +20,12 @@ var (
 	readmeTool = regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z_]+)` + "`" + ` \|`)
 	// A version heading, as Keep a Changelog writes it.
 	versionHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`)
+	// The status line at the top of each document, which is the first
+	// thing anyone reads and the last thing anyone updates.
+	// The two documents write it differently — `**Status: v1.0.0.**` and
+	// `**Status:** v1.0.0` — so both forms count. Requiring one shape
+	// would be churn in the prose to suit the checker.
+	statusLine = regexp.MustCompile(`(?m)^\*\*Status:(?:\*\*)? +v?(\d+\.\d+\.\d+)`)
 )
 
 // staleness fails when the documentation drifts from the code. Each
@@ -95,6 +101,8 @@ func staleness(bin string) error {
 	if err := changelogDocumentsTheChange(); err != nil {
 		problems = append(problems, err.Error())
 	}
+
+	problems = append(problems, staleStatusLines()...)
 
 	if len(problems) > 0 {
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
@@ -180,4 +188,53 @@ func difference(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// staleStatusLines checks the version each document claims at the top.
+//
+// This is here because both of them were wrong at once and nothing
+// noticed: the README said v0.5.0 five releases after v0.5.0, and the
+// architecture document said v0.9.1 and "phases 0, 1 and 2 are
+// implemented" on the day v1.0.0 shipped with phases 0 to 4 done. They
+// are the first lines a reader sees and the ones furthest from any test,
+// which is exactly the combination this file exists for.
+//
+// Either the released version or the one about to be released counts,
+// because a release commit writes the new version into these lines
+// before the tag exists — the same scar changelogDocumentsTheChange
+// carries, for the same reason.
+func staleStatusLines() []string {
+	tag := strings.TrimPrefix(strings.TrimSpace(run("git", "describe", "--tags", "--abbrev=0")), "v")
+	changelog, err := os.ReadFile("CHANGELOG.md")
+	if err != nil {
+		return []string{"read CHANGELOG.md: " + err.Error()}
+	}
+	next := ""
+	if m := versionHeading.FindSubmatch(changelog); m != nil {
+		next = string(m[1])
+	}
+	if tag == "" && next == "" {
+		return []string{"no released tag and no version heading; the status check has nothing to compare against"}
+	}
+
+	var problems []string
+	for _, doc := range []string{"README.md", "docs/architecture.md"} {
+		data, err := os.ReadFile(doc)
+		if err != nil {
+			problems = append(problems, "read "+doc+": "+err.Error())
+			continue
+		}
+		m := statusLine.FindSubmatch(data)
+		if m == nil {
+			problems = append(problems, doc+" has no **Status:** line; the check cannot see what it claims")
+			continue
+		}
+		got := string(m[1])
+		if got != tag && got != next {
+			problems = append(problems, fmt.Sprintf(
+				"%s says Status v%s; the released tag is v%s and the changelog's newest heading is v%s",
+				doc, got, tag, next))
+		}
+	}
+	return problems
 }

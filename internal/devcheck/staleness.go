@@ -218,7 +218,14 @@ func staleStatusLines() []string {
 	}
 
 	var problems []string
-	for _, doc := range []string{"README.md", "docs/architecture.md"} {
+	// Only the architecture document. The README used to carry the
+	// version too, and the honest fix for a copy of a fact going stale
+	// was to delete the copy rather than build machinery to maintain it:
+	// the release badge shows the version, self-updating, and cannot be
+	// wrong. What is left here is a claim no tag can derive — which
+	// phases are done, and whether §17 has anything open — and both
+	// halves of it were false on the day v1.0.0 shipped.
+	for _, doc := range []string{"docs/architecture.md"} {
 		data, err := os.ReadFile(doc)
 		if err != nil {
 			problems = append(problems, "read "+doc+": "+err.Error())

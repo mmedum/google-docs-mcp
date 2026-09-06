@@ -1,5 +1,10 @@
 # google-docs-mcp
 
+[![CI](https://github.com/mmedum/google-docs-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mmedum/google-docs-mcp/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/mmedum/google-docs-mcp?sort=semver)](https://github.com/mmedum/google-docs-mcp/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-docs-mcp.svg)](https://pkg.go.dev/github.com/mmedum/google-docs-mcp)
+[![License: Apache 2.0](https://img.shields.io/github/license/mmedum/google-docs-mcp)](./LICENSE)
+
 A production-grade [Model Context Protocol](https://modelcontextprotocol.io)
 server for Google Docs, written in Go. It lets Claude Code, Claude Desktop
 and any other MCP client work inside a Google Doc the way a careful
@@ -11,7 +16,7 @@ Single static binary. Per-user OAuth against your own Google account, in
 your own Google Cloud project. Nothing leaves your machine except calls to
 Google's APIs.
 
-**Status: v1.0.0.** Reading, searching, creating, exporting, editing with
+**What works today.** Reading, searching, creating, exporting, editing with
 minimal diffs in suggest, direct or comment mode, formatting, reviewing
 suggestions, comment threads, revision history and diffs, tables, tabs,
 headers, footers, footnotes, images, chips, named ranges, page and section

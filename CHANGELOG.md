@@ -7,6 +7,32 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+- The README carries badges — CI, latest release, Go reference, licence —
+  and no longer states a version in prose. The status line said v0.5.0
+  five releases after v0.5.0, and the first fix was a gate to keep the
+  copy correct; the better one was to delete the copy. A release badge
+  shows the version, updates itself, and cannot be wrong.
+- The staleness gate checks the version `docs/architecture.md` claims at
+  the top, against the released tag or the changelog's newest heading.
+  That document is kept because its claim is not a copy of anything: it
+  says which phases are done and whether any design decision is open, and
+  both halves were false on the day v1.0.0 shipped.
+- Documentation corrections the gate could not see: `CLAUDE.md`'s map of
+  where things go named 13 of 20 packages, missing `internal/redact` and
+  every gate package; the definition of done described a `make check`
+  without its licence check or schema diff and with one vet pass where
+  there are four; a 0.9.5 entry named a file that stopped existing inside
+  0.9.5; and §16's live-driver step counts predated the run before
+  v1.0.0.
+- The README explains logging in over SSH — where the callback port comes
+  from, that it is percent-encoded in the printed URL, and how to forward
+  it — and links `SECURITY.md` and `CONTRIBUTING.md`, which existed and
+  were unreachable from the front page.
+- §17 records an open decision: `make check` runs `go vet` four times and
+  CI runs it once, so 14 build-tagged files compile only on a
+  maintainer's machine.
+
 ## [1.0.0] - 2026-09-06
 
 ### Added

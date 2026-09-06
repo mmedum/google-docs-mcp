@@ -36,9 +36,12 @@ sboms:
   - artifacts: archive
 
 # Sign the checksum file with a keyless Sigstore certificate tied to the
-# workflow's OIDC identity: no private key to hold or leak. cosign v3
-# dropped --output-signature and --output-certificate for --bundle, which
-# writes everything a verifier needs into one file.
+# workflow's OIDC identity: no private key to hold or leak. --bundle is
+# not a preference here: cosign's v3.0.1 notes say it "has moved from
+# optional to required in v3", so the v0.8.0 release did not degrade
+# quietly when cosign-installer fetched 3 — it failed with no output path
+# at all. The notes say nothing about --output-signature or
+# --output-certificate, so do not describe them as dropped.
 signs:
   - cmd: cosign
     signature: "${artifact}.bundle"

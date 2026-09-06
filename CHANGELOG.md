@@ -28,6 +28,11 @@ and new required fields are breaking; the schema diff in CI flags them.
   them, which is why this is a gate and not a habit. It compares by
   command rather than by target name, and separately requires every
   tagged vet pass to appear in both. Watched to fail in both directions.
+- §17 has no open decision left: the parity gate closes the one that
+  stood there. The staleness gate caught the status line still claiming
+  it, which is what that half of the check is for — and then caught a bug
+  in itself, because "No design decision is open" contains "decision is
+  open", so a denial read as a claim. Both are covered now.
 - `scripts/gates` is one registry: the usage text, the dispatch and the
   parity gate all read the same list, so they cannot drift from each
   other.

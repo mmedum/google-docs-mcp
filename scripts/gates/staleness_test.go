@@ -111,6 +111,8 @@ func TestStatusProblems(t *testing.T) {
 	noDecision := "None. Everything is decided."
 	claimsOpen := "**Status:** v1.0.0 (2026-09-06). One design decision is open (§17)."
 	claimsShut := "**Status:** v1.0.0 (2026-09-06). Phases 0 to 4 are done."
+	// The denial, which contains the phrase the claim is detected by.
+	claimsNone := "**Status:** v1.0.0 (2026-09-06). No design decision is open (§17)."
 
 	cases := []struct {
 		name       string
@@ -134,6 +136,9 @@ func TestStatusProblems(t *testing.T) {
 		{"claims open while §17 says none", claimsOpen, noDecision, "1.0.0", "1.0.0",
 			"claims an open decision while §17 has none"},
 		{"claims none while §17 lists one", claimsShut, openDecision, "1.0.0", "1.0.0",
+			"claims no open decision while §17 lists one"},
+		{"denies one and §17 has none", claimsNone, noDecision, "1.0.0", "1.0.0", ""},
+		{"denies one while §17 lists one", claimsNone, openDecision, "1.0.0", "1.0.0",
 			"claims no open decision while §17 lists one"},
 
 		// git gave us nothing: the message must say so rather than

@@ -6,8 +6,8 @@ minimal diffs in all three modes, formatting, suggestion review, comment
 threads on both backends, revision history and diffs, tables, tabs,
 headers, footers, footnotes, images and chips, resources, and the agent
 evals. The tool surface covers every GA member of the Docs `Request`
-union plus four preview members. One design decision is open (§17): CI
-and `make check` do not run the same things. Every convention here was
+union plus four preview members. No design decision is open (§17). Every
+convention here was
 checked against primary sources; §18 lists what was confirmed, refuted,
 and changed.
 
@@ -857,25 +857,15 @@ reads it badly. The schema diff in CI is what holds the rest.
 
 ## 17. Open decisions
 
-**CI and `make check` do not run the same things, and nothing notices.**
-The `vet` target runs `go vet` four times — plain, `integration`, `live`,
-`evals` — while `ci.yml` runs it once and passes `-tags` nowhere. So the
-14 build-tagged files (9 `live`, 4 `evals`, 1 `integration`) compile only
-where somebody runs `make check` by hand, and can break on `main` with CI
-green. Found by the google-chat-mcp session on 2026-09-06, which had the
-same gap; three of the four sibling repos have it in one direction or the
-other.
+None.
 
-Two fixes, and the choice is the open part. Adding four `-tags` lines to
-CI closes today's instance and leaves the mechanism: the local gate list
-and the CI gate list are two lists in two files, and you are only ever
-editing one of them. A **parity gate** — asserting that the two run the
-same set — closes the mechanism, and is what the sheets server adopted.
-This is the same shape as everything in §18's later rows, one level up,
-so the parity gate is the one this document would choose; it is recorded
-here rather than done because it is the owner's call.
-
-Everything in §15 is otherwise decided.
+The one that stood here — that `make check` and CI did not run the same
+things, so fourteen build-tagged files compiled only on a maintainer's
+machine — is closed by the parity gate in `scripts/gates`. The choice
+recorded here was between adding four `-tags` lines to the workflow and
+building the gate; the gate won, because the four lines close today's
+instance and leave the mechanism, and the mechanism is that the two lists
+live in different files and you are only ever editing one of them.
 
 ## 17a. Deferred cleanups
 

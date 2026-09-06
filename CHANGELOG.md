@@ -45,6 +45,13 @@ and new required fields are breaking; the schema diff in CI flags them.
   other.
 
 ### Fixed
+- The parity gate called a gate missing when a `run: |` block ran it.
+  Requiring the command on the `run:` line itself was safe here — nothing
+  in the workflow is a block scalar — and wrong in general: it fails
+  closed, so nothing slips through, but the first multi-line step
+  somebody writes reports a gate CI plainly runs as absent, and a gate
+  that cries wolf is a gate that gets edited out. Found by the drive
+  server, which hit it while porting the same rule.
 - The error-class gate could not see a duplicate. It compacted
   `service.Classes` as it stood, and `slices.Compact` only removes runs
   of adjacent equals, so a class written twice anywhere but next to

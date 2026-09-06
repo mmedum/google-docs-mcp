@@ -287,7 +287,16 @@ func claimsOpenDecision(text string) bool {
 	if i := strings.Index(text, "\n## "); i > 0 {
 		head = text[:i]
 	}
-	return strings.Contains(head, "decision is open") || strings.Contains(head, "decisions are open")
+	lower := strings.ToLower(head)
+	// The negation first. "No design decision is open" contains "decision
+	// is open", so a plain substring test reads a denial as a claim —
+	// which is what it did, on the commit that closed §17.
+	for _, denial := range []string{"no design decision is open", "no design decisions are open"} {
+		if strings.Contains(lower, denial) {
+			return false
+		}
+	}
+	return strings.Contains(lower, "decision is open") || strings.Contains(lower, "decisions are open")
 }
 
 // sectionBody returns the text under a heading, up to the next one.

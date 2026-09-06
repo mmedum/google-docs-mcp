@@ -34,7 +34,7 @@ concurrency:
 # `uses:` step, and it is not the shell the implicit default gives you —
 # GitHub runs an explicit bash as `bash --noprofile --norc -eo pipefail`,
 # so a command failing mid-pipeline now fails the step on all three
-# runners. `internal/devcheck` has the check that this block is here.
+# runners. The `pins` gate in `scripts/gates` checks this block is here.
 defaults:
   run:
     shell: bash
@@ -58,7 +58,7 @@ jobs:
       - run: go build ./...
       - run: go test -race -coverpkg=./internal/... -coverprofile=cov.out -covermode=atomic ./...
       - name: coverage floor
-        run: go run ./internal/devcheck coverage cov.out 80
+        run: go run ./scripts/gates coverage cov.out 80
 
   lint:
     runs-on: ubuntu-latest
@@ -73,6 +73,12 @@ jobs:
       - name: gofmt
         run: out=$(gofmt -l .); [ -z "$out" ] || { echo "$out"; exit 1; }
       - run: go vet ./...
+      # The tagged passes. Without them the build-tagged files compile
+      # only where somebody runs `make check` by hand, which is what the
+      # parity gate now refuses.
+      - run: go vet -tags=integration ./...
+      - run: go vet -tags=live ./...
+      - run: go vet -tags=evals ./...
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.13.2
@@ -115,9 +121,13 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build -o google-docs-mcp ./cmd/google-docs-mcp
-      - run: bash scripts/stdio-smoke.sh ./google-docs-mcp
-      - run: bash scripts/schema-diff.sh ./google-docs-mcp
-      - run: go run ./internal/devcheck staleness ./google-docs-mcp
+      - run: go run ./scripts/gates smoke ./google-docs-mcp
+      - run: go run ./scripts/gates schema-diff ./google-docs-mcp
+      - run: go run ./scripts/gates staleness ./google-docs-mcp
+      - run: go run ./scripts/gates leaks
+      - run: go run ./scripts/gates pins
+      - run: go run ./scripts/gates classes
+      - run: go run ./scripts/gates parity
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: schemas

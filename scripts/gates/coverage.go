@@ -24,7 +24,6 @@ import (
 // stated reason ("absent from an untagged go list") quietly stopped
 // being true.
 var exemptFromFloor = map[string]string{
-	"internal/devcheck":    "a build-gate helper with no runtime path; the gates that use it are what exercise it",
 	"internal/doc/doctest": "fixtures for other packages' tests",
 	"internal/gdocs":       "wire types: struct tags, no logic",
 }

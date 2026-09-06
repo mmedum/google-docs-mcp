@@ -42,7 +42,7 @@ test: ## Unit tests with race detector and coverage
 
 .PHONY: cover
 cover: test ## Enforce the coverage floor on core packages
-	@$(GO) run ./internal/devcheck coverage cov.out $(COVER_MIN)
+	@$(GO) run ./scripts/gates coverage cov.out $(COVER_MIN)
 
 .PHONY: bench
 bench: ## Benchmarks over the synthetic large document (doctest.Large)
@@ -62,18 +62,34 @@ schemas: build ## Dump tool schemas
 
 .PHONY: schema-diff
 schema-diff: build ## Diff tool schemas against the last tag
-	@bash scripts/schema-diff.sh $(BIN)
+	@$(GO) run ./scripts/gates schema-diff $(BIN)
 
 .PHONY: smoke
-smoke: build ## Drive the binary over stdio
-	@bash scripts/stdio-smoke.sh $(BIN)
+smoke: build ## Drive the binary over stdio, twice
+	@$(GO) run ./scripts/gates smoke $(BIN)
 
 .PHONY: staleness
 staleness: build ## Docs must match the code
-	@$(GO) run ./internal/devcheck staleness $(BIN)
+	@$(GO) run ./scripts/gates staleness $(BIN)
+
+.PHONY: leaks
+leaks: ## Nothing identifying may be in the repository
+	@$(GO) run ./scripts/gates leaks
+
+.PHONY: pins
+pins: ## Every action and every tool it installs is one exact version
+	@$(GO) run ./scripts/gates pins
+
+.PHONY: gate-classes
+gate-classes: ## The error classes the code emits are the ones it documents
+	@$(GO) run ./scripts/gates classes
+
+.PHONY: parity
+parity: ## `make check` and CI run the same gates
+	@$(GO) run ./scripts/gates parity
 
 .PHONY: check
-check: fmt vet lint cover vuln licenses schema-diff smoke staleness ## Everything CI runs, plus the vet passes it does not: see docs/architecture.md
+check: fmt vet lint cover vuln licenses leaks pins gate-classes schema-diff smoke staleness parity ## Everything CI runs
 
 .PHONY: clean
 clean:

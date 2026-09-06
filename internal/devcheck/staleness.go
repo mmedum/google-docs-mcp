@@ -213,9 +213,14 @@ func staleStatusLines() []string {
 	if m := versionHeading.FindSubmatch(changelog); m != nil {
 		next = string(m[1])
 	}
-	if tag == "" && next == "" {
-		return []string{"no released tag and no version heading; the status check has nothing to compare against"}
-	}
+	// A repository before its first tag with everything still under
+	// [Unreleased] has nothing to compare against, and that is not a
+	// failure — it is the normal state of a project that has not shipped.
+	// The failure is a document claiming a version when nothing can
+	// confirm it, so the check is: gather the claims first, and only then
+	// decide whether the absence of a reference matters. A sibling server
+	// hit this on the first run of its own copy.
+	unreleased := tag == "" && next == ""
 
 	var problems []string
 	// Only the architecture document. The README used to carry the
@@ -233,10 +238,19 @@ func staleStatusLines() []string {
 		}
 		m := statusLine.FindSubmatch(data)
 		if m == nil {
+			if unreleased {
+				continue // nothing claimed, nothing shipped, nothing to check
+			}
 			problems = append(problems, doc+" has no **Status:** line; the check cannot see what it claims")
 			continue
 		}
 		got := string(m[1])
+		if unreleased {
+			problems = append(problems, fmt.Sprintf(
+				"%s claims Status v%s, but there is no tag and no version heading to confirm it "+
+					"— say which phase it is in until the first release", doc, got))
+			continue
+		}
 		if got != tag && got != next {
 			problems = append(problems, fmt.Sprintf(
 				"%s says Status v%s; the released tag is v%s and the changelog's newest heading is v%s",

@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-09-06
+
 ### Changed
 - The leak gate scans files that are not committed yet. It read the
   index alone, so a brand-new file was invisible to it until someone

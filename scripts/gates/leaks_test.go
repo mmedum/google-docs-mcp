@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"os/exec"
@@ -103,4 +104,52 @@ func TestHistoryCarriesNoIdentifiers(t *testing.T) {
 		}
 	}
 	t.Logf("scanned %d text blobs across the whole history", scanned)
+}
+
+// The rule that would have caught the 8 MB `gates` binary this gate,
+// `make check` and eight green CI checks all passed. Binary files are
+// unreadable to every other rule here, so what is asserted about them is
+// that they are neither built nor large.
+func TestArtifactRule(t *testing.T) {
+	big := append([]byte("fixture\x00"), bytes.Repeat([]byte{0x7f}, maxBinary)...)
+	cases := []struct {
+		name string
+		data []byte
+		want bool
+	}{
+		{"an ELF binary", append([]byte("\x7fELF\x02\x01"), 0x00, 0x99), true},
+		{"a Windows PE", []byte("MZ\x90\x00\x03\x00"), true},
+		{"a Mach-O", []byte{0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00}, true},
+		{"a fat Mach-O", []byte{0xca, 0xfe, 0xba, 0xbe, 0x00, 0x02}, true},
+		{"over the size limit", big, true},
+		{"a small binary fixture", []byte("PNG\x00\x1a\n"), false},
+		{"empty", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := artifact(c.data) != ""; got != c.want {
+				t.Errorf("artifact() rejected = %v, want %v (%q)", got, c.want, artifact(c.data))
+			}
+		})
+	}
+}
+
+// The gate over the whole repository, with one planted. A rule proved
+// only through its own helper is a rule nobody has watched work.
+func TestLeaksCatchesAPlantedBinary(t *testing.T) {
+	root := mustModuleRoot(t)
+	path := filepath.Join(root, "planted-binary-for-test")
+	if err := os.WriteFile(path, []byte("\x7fELF\x02\x01\x01\x00planted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	err := leaks(io.Discard, nil)
+	if err == nil {
+		t.Fatal("the gate passed with a compiled executable in the tree")
+	}
+	if !strings.Contains(err.Error(), "planted-binary-for-test") ||
+		!strings.Contains(err.Error(), "compiled executable") {
+		t.Errorf("the failure does not name the file and why: %v", err)
+	}
 }

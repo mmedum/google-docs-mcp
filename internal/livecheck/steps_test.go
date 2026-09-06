@@ -43,7 +43,11 @@ func TestLive(t *testing.T) {
 		t.Fatal("create returned no document id; nothing else can run")
 	}
 	t.Cleanup(func() {
-		t.Logf("=== scratch document left behind ===\nhttps://docs.google.com/document/d/%s/edit\ndelete it when you are done; Drive search title:\"safe to delete\" finds every run's", doc)
+		// Not the URL. This runs at the end of every live run, so it
+		// was the last line of every transcript — a real document id in
+		// the artifact this package exists to keep clean. The search
+		// term finds them all and identifies none.
+		t.Logf("=== scratch document left behind ===\ndelete it when you are done; Drive search title:\"safe to delete\" finds every run's")
 	})
 
 	d.ok("read without handles", "read_document", map[string]any{"document": doc, "with_handles": false})

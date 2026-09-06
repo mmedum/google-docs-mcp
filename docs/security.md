@@ -61,7 +61,7 @@
   so names are caught by position — the set is closed and short because
   this project's own renderers wrote every one of them — and an address
   is caught both ways, since `userLabel` renders a person as
-  `Name <address>`. `internal/livecheck/scrub.go` carries no build tag,
+  `Name <address>`. `internal/redact` carries no build tag,
   so the tests for it run in every `make check` rather than only when
   someone runs the driver with credentials.
 - Scopes: `documents` and `drive` (or their read-only variants with

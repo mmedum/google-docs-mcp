@@ -10,7 +10,7 @@
 // Deletion steps run only with GDOCS_ENABLE_DESTRUCTIVE=true. Suggestion
 // mode and anchored comments need Developer Preview (GDOCS_PREVIEW=true,
 // the default here). The scratch document is left behind on purpose and
-// its URL is printed at the end; delete it when you are done.
+// its id is deliberately not printed; delete it when you are done.
 //
 // Coverage rule when a tool or op is added: every tool in --dump-schemas
 // must appear in a d.call, and every op kind in plan.Kinds in an "op".
@@ -18,6 +18,7 @@ package livecheck
 
 import (
 	"context"
+	"github.com/mmedum/google-docs-mcp/internal/redact"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,3 +160,6 @@ func first(re *regexp.Regexp, s string) string {
 	}
 	return ""
 }
+
+// shown is the funnel every transcript line goes through.
+func shown(s string, n int) string { return redact.Clip(s, n) }

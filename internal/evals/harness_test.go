@@ -17,6 +17,7 @@ package evals
 import (
 	"context"
 	"fmt"
+	"github.com/mmedum/google-docs-mcp/internal/redact"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -233,10 +234,15 @@ func (s *server) threads(doc string) []thread {
 	return out
 }
 
+// clip redacts before truncating, and every caller logs its result, so
+// this is the eval harness's funnel in the same way `shown` is the live
+// driver's. It had no redaction at all: three t.Fatalf sites printed 400
+// characters of raw tool output — owner names and addresses, comment
+// authors, document text — into a transcript people paste.
+// clip is redact.Clip with newlines flattened, which is what a one-line
+// failure message wants. Collapsing after is safe and after is where it
+// has to be: the rules that catch a person are line-anchored, so a
+// transcript already flattened matches none of them.
 func clip(s string, n int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
+	return strings.ReplaceAll(redact.Clip(s, n), "\n", " ")
 }

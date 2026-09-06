@@ -34,6 +34,7 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/config"
 	"github.com/mmedum/google-docs-mcp/internal/credentials"
 	"github.com/mmedum/google-docs-mcp/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/internal/redact"
 	"github.com/mmedum/google-docs-mcp/internal/server"
 	"github.com/mmedum/google-docs-mcp/internal/service"
 	"github.com/mmedum/google-docs-mcp/internal/userconfig"
@@ -77,7 +78,7 @@ accepts the matching flags (run one with -h).
 }
 
 func fail(format string, args ...any) int {
-	fmt.Fprintf(os.Stderr, "google-docs-mcp: "+format+"\n", args...)
+	fmt.Fprintln(os.Stderr, "google-docs-mcp: "+redactText(fmt.Sprintf(format, args...)))
 	return 1
 }
 
@@ -150,7 +151,7 @@ func runServer(args []string) int {
 	fs.BoolVar(&dumpSchemas, "dump-schemas", false, "print tool schemas as JSON and exit")
 	cfg, err := loadConfig(fs, args)
 	if showVersion {
-		fmt.Println(version.Info())
+		outf("%s\n", version.Info())
 		return 0
 	}
 	if err != nil {
@@ -179,13 +180,17 @@ func runServer(args []string) int {
 	}
 	ts, src, err := p.tokenSource(ctx)
 	if err != nil {
-		logger.Warn("no usable credentials; every tool will return an [auth] error until `google-docs-mcp login` succeeds", "err", err)
+		// Masked: this err comes from LoadClientSecret, which formats the
+		// client secret path into it, and the bug form invites people to
+		// paste the debug log. The same hole the `doctor` fix closed,
+		// six lines above the fix.
+		logger.Warn("no usable credentials; every tool will return an [auth] error until `google-docs-mcp login` succeeds", "err", redactText(err.Error()))
 		ts = gapi.NoCredentials{Reason: err}
 	} else {
 		// Masked for the same reason as `status`: docs/security.md tells
 		// people a debug log is safe to attach to a bug report, and this
 		// line runs at Info on every start.
-		logger.Info("credentials resolved", "profile", cfg.Profile, "source", string(src), "account", maskAddress(p.user.AccountEmail))
+		logger.Info("credentials resolved", "profile", cfg.Profile, "source", string(src), "account", redactText(p.user.AccountEmail))
 		// Warm the token off the startup path; the token source is safe
 		// for concurrent use and the first tool call reuses the result.
 		go func() {
@@ -261,7 +266,7 @@ func openCommand(name string, args []string, define func(*flag.FlagSet)) (*profi
 	return p, fs, nil
 }
 
-func warnStderr(msg string) { fmt.Fprintln(os.Stderr, "warning: "+msg) }
+func warnStderr(msg string) { fmt.Fprintln(os.Stderr, "warning: "+redactText(msg)) }
 
 func cmdLogin(args []string) int {
 	var noBrowser bool
@@ -275,11 +280,14 @@ func cmdLogin(args []string) int {
 	}
 	cfg := p.cfg
 	if _, err := os.Stat(p.clientSecretPath); err != nil {
-		return fail("OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", maskClientID(p.clientSecretPath))
+		return fail("OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", p.clientSecretPath)
 	}
 	scopes := auth.Scopes(cfg.ReadOnly)
 	oc, err := auth.LoadClientSecret(p.clientSecretPath, scopes)
 	if err != nil {
+		// `login` is where this actually fails — bad JSON, the wrong
+		// client type, permissions — so it is the likelier route to a
+		// pasted client id than the `doctor` path that was fixed first.
 		return fail("%v", err)
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -316,7 +324,7 @@ func cmdLogin(args []string) int {
 	if err := userconfig.Save(cfg.Profile, p.user); err != nil {
 		return fail("save profile: %v", err)
 	}
-	fmt.Printf("Logged in as %s (profile %q, token stored in %s).\n", orUnknown(email), cfg.Profile, src)
+	outf("Logged in as %s (profile %q, token stored in %s).\n", orUnknown(email), cfg.Profile, src)
 	return 0
 }
 
@@ -346,7 +354,7 @@ func cmdLogout(args []string) int {
 			return fail("save profile: %v", err)
 		}
 	}
-	fmt.Printf("Logged out of profile %q.\n", p.cfg.Profile)
+	outf("Logged out of profile %q.\n", p.cfg.Profile)
 	return 0
 }
 
@@ -361,28 +369,28 @@ func cmdStatus(args []string) int {
 
 func printStatus(p *profile) {
 	cfg := p.cfg
-	fmt.Println(version.Info())
-	fmt.Printf("profile:         %s (%s)\n", cfg.Profile, p.dir)
+	outf("%s\n", version.Info())
+	outf("profile:         %s (%s)\n", cfg.Profile, p.dir)
 	exists := "missing"
 	if _, err := os.Stat(p.clientSecretPath); err == nil {
 		exists = "present"
 	}
-	fmt.Printf("client secret:   %s (%s)\n", maskClientID(p.clientSecretPath), exists)
+	outf("client secret:   %s (%s)\n", p.clientSecretPath, exists)
 	if _, src, err := p.store.Resolve(); err == nil {
-		fmt.Printf("refresh token:   stored in %s\n", src)
+		outf("refresh token:   stored in %s\n", src)
 	} else {
-		fmt.Printf("refresh token:   none (%v)\n", err)
+		outf("refresh token:   none (%v)\n", err)
 	}
-	fmt.Printf("account:         %s\n", orUnknown(maskAddress(p.user.AccountEmail)))
+	outf("account:         %s\n", orUnknown(p.user.AccountEmail))
 	if len(p.user.Scopes) > 0 {
-		fmt.Printf("scopes at login: %s\n", strings.Join(p.user.Scopes, " "))
+		outf("scopes at login: %s\n", strings.Join(p.user.Scopes, " "))
 	}
-	fmt.Printf("preview:         %t\n", cfg.Preview)
-	fmt.Printf("write modes:     %s (default %s)\n", joinModes(cfg.AvailableWriteModes()), cfg.DefaultWriteMode)
-	fmt.Printf("read-only:       %t\n", cfg.ReadOnly)
-	fmt.Printf("destructive:     %t\n", cfg.EnableDestructive)
-	fmt.Printf("export dir:      %s\n", orUnknown(cfg.ExportDir))
-	fmt.Printf("http timeout:    %s\n", cfg.HTTPTimeout)
+	outf("preview:         %t\n", cfg.Preview)
+	outf("write modes:     %s (default %s)\n", joinModes(cfg.AvailableWriteModes()), cfg.DefaultWriteMode)
+	outf("read-only:       %t\n", cfg.ReadOnly)
+	outf("destructive:     %t\n", cfg.EnableDestructive)
+	outf("export dir:      %s\n", orUnknown(cfg.ExportDir))
+	outf("http timeout:    %s\n", cfg.HTTPTimeout)
 }
 
 func cmdDoctor(args []string) int {
@@ -392,7 +400,7 @@ func cmdDoctor(args []string) int {
 	}
 	cfg := p.cfg
 	printStatus(p)
-	fmt.Println()
+	outf("\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -410,10 +418,10 @@ func cmdDoctor(args []string) int {
 	check := func(name string, err error, detail string) {
 		if err != nil {
 			failed++
-			fmt.Printf("✘ %s: %v\n", name, hide(err.Error()))
+			outf("✘ %s: %v\n", name, hide(err.Error()))
 			return
 		}
-		fmt.Printf("✔ %s%s\n", name, detail)
+		outf("✔ %s%s\n", name, detail)
 	}
 
 	ts, _, err := p.tokenSource(ctx)
@@ -445,7 +453,7 @@ func cmdDoctor(args []string) int {
 	if u, err := api.About(ctx); err != nil {
 		check("Drive API (about.get)", err, "")
 	} else {
-		check("Drive API (about.get)", nil, " as "+maskAddress(u.EmailAddress))
+		check("Drive API (about.get)", nil, " as "+u.EmailAddress)
 	}
 
 	if ref != "" {
@@ -467,17 +475,17 @@ func cmdDoctor(args []string) int {
 			case cfg.Preview:
 				check("Developer Preview (commentsViewMode)", perr, "")
 			default:
-				fmt.Printf("• Developer Preview not available for this project yet (%s); suggestion mode and anchored comments stay off\n", gapi.Class(perr))
+				outf("• Developer Preview not available for this project yet (%s); suggestion mode and anchored comments stay off\n", gapi.Class(perr))
 			}
 		}
 	} else {
-		fmt.Println("• pass a document id or URL to also test documents.get and the Developer Preview")
+		outf("• pass a document id or URL to also test documents.get and the Developer Preview\n")
 	}
 	if failed > 0 {
-		fmt.Printf("\n%d check(s) failed\n", failed)
+		outf("\n%d check(s) failed\n", failed)
 		return 1
 	}
-	fmt.Println("\nall checks passed")
+	outf("\nall checks passed\n")
 	return 0
 }
 
@@ -488,13 +496,36 @@ func cmdDoctor(args []string) int {
 // of the full path would have missed — while a document reference the
 // caller typed has no shape at all, so the only way to catch it is that
 // we are holding the value.
+// redactText is the one place this command removes what must not be
+// printed. Every stream it writes goes through it.
+//
+// It exists because masking at each call site does not hold: three
+// separate discoveries of one rule — the status line, then the startup
+// log, then `login` — each got a different subset of it, and the newest
+// insight (an address can arrive inside an error nothing here formatted,
+// which is how a 403 names the account) reached only the newest site. A
+// print added tomorrow is safe by default now; before, it was safe only
+// if its author remembered both rules.
+func redactText(s string) string {
+	s = redact.Address.ReplaceAllStringFunc(s, maskAddress)
+	return maskClientID(s)
+}
+
+// redactor adds what only one command knows: the document reference the
+// caller typed, which has no shape and so cannot be caught by a pattern.
 func redactor(ref string) func(string) string {
 	return func(s string) string {
 		if ref != "" {
 			s = strings.ReplaceAll(s, ref, "<ref>")
 		}
-		return maskClientID(s)
+		return redactText(s)
 	}
+}
+
+// outf and failf are the two streams. Nothing in this file writes to
+// stdout or stderr except through them.
+func outf(format string, args ...any) {
+	fmt.Print(redactText(fmt.Sprintf(format, args...)))
 }
 
 // maskAddress keeps the domain and drops the local part, because these

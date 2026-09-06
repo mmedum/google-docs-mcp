@@ -5,6 +5,7 @@ package evals
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mmedum/google-docs-mcp/internal/redact"
 	"os"
 	"path/filepath"
 	"sort"
@@ -87,9 +88,16 @@ func TestEvals(t *testing.T) {
 			results = append(results, res)
 			mu.Unlock()
 
+			// Redacted before it is written. This file carries the raw
+			// document id, every tool argument and the full text of every
+			// tool result — an owner's name and address, comment authors,
+			// document content — and nothing touched it, while the live
+			// driver beside it redacted every line. It is JSON, but it is
+			// text, and the rules are the same ones.
 			raw, err := json.MarshalIndent(res, "", "  ")
 			if err == nil {
-				_ = os.WriteFile(filepath.Join(outDir(t), tk.name+".json"), raw, 0o644)
+				_ = os.WriteFile(filepath.Join(outDir(t), tk.name+".json"),
+					[]byte(redact.Transcript(string(raw))), 0o644)
 			}
 			t.Logf("%d/%d checks, %d calls, %d turns, $%.2f, %.0fs: %s",
 				res.Passed, res.Total, len(tr.Calls), tr.Turns, tr.Cost, tr.Seconds, strings.Join(tr.toolNames(), " → "))

@@ -8,6 +8,29 @@ and new required fields are breaking; the schema diff in CI flags them.
 ## [Unreleased]
 
 ### Changed
+- The leak gate scans files that are not committed yet. It read the
+  index alone, so a brand-new file was invisible to it until someone
+  staged it — `make check` went green on a working tree carrying an
+  address, and the check that says nothing identifying is committed had
+  never looked at the thing about to be. Proved by planting one, which
+  passed. It also fails rather than skips when `git ls-files` fails: a
+  check that skips when it cannot read its input reports the same green
+  as one that read everything.
+- Three gates hold what used to be habit. A driver may not call
+  `fmt.Print*`, and may not log a value that came back from a tool
+  without passing it through the redactor — the sources of tool text are
+  derived from the SDK call rather than listed, after a listed version
+  turned out to be inert over the whole eval harness. Nothing in the
+  command writes to a stream except through one boundary, which is what
+  would have caught the three unmasked prints above without anyone
+  finding them by hand. And the places a person is written are counted
+  from the type declarations on both sides — a version that typed the
+  field names said `Email` where the Drive type says `EmailAddress`, so
+  it could not see the one function that renders an address.
+- The coverage floor derives its own zero-statement exemptions from
+  `go list`. Two entries had been added and removed by hand as files
+  moved between packages; a package with no non-test Go files cannot be
+  below a floor, and now says so itself.
 - Every workflow sets `defaults: run: shell: bash`, and a gate fails one
   that does not. The Windows runner defaults to PowerShell, which read
   `-coverprofile=cov.out` as a file called `cov`; the fix had been three
@@ -27,6 +50,26 @@ and new required fields are breaking; the schema diff in CI flags them.
   ever had, so the one wrapper-installed tool the check did not cover
   was the one it appeared to cover.
 ### Security
+- Six more places a real person or document reached an artifact people
+  paste, found by reviewing the fix that closed the first ones. The live
+  driver's cleanup logged the scratch document's URL as the last line of
+  every run. `diff_revisions` renders `revision A → B` and only the
+  first id had a rule, so the second survived. The startup log and
+  `login` both printed an error carrying the client-secret path, six
+  lines from where that was fixed for `doctor`, and `login` printed the
+  full account address. The eval harness wrote a JSON artifact holding
+  the document id, every tool argument and the full text of every tool
+  result, and printed 400 raw characters of tool output on three
+  failure paths — it had no redaction at all while the driver beside it
+  redacted every line.
+- Two more prints of a real document: the preview spike printed the
+  scratch document's URL, and a live comment step printed a real comment
+  id. Both were outside the two packages the first version of the print
+  gate looked at.
+- The redactor is `internal/redact`, so both drivers use the same rules
+  and its tests run in every `make check` rather than only under a build
+  tag. `doctor` also masks an address arriving inside an error nothing
+  here formatted, which is how Google's 403 names an account.
 - `doctor` and `status` no longer print the signed-in account's address,
   the title of the document they check, or its revision id, and a Google
   OAuth client id is removed from the client-secret path. The README

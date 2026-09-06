@@ -11,7 +11,6 @@ package gapi_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,7 +187,10 @@ func TestPreviewSpike(t *testing.T) {
 			report["rejected_still_present"] = findSuggestion(parsed, "to be rejected") != ""
 		}
 	}
-	fmt.Println("spike document:", doc.DocumentURL(id))
+	// Not the URL. A spike leaves a real document behind and this was
+	// the last line it printed; the id is in the report file the spike
+	// writes, which is not a transcript people paste.
+	t.Log("spike document created; see the report file for its id")
 }
 
 func findSuggestion(d *doc.Document, contains string) string {

@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"strings"
 	"testing"
@@ -129,8 +132,73 @@ func TestDoctorOutputHidesWhatItKnows(t *testing.T) {
 		t.Error("the directory should survive; it is the diagnostic part")
 	}
 
+	// An address can arrive in an error nothing here formatted: Google
+	// echoes its `message` field verbatim in a 403, and it names the
+	// account.
+	if got := hide("googleapi: Error 403: ann.petersen@acme-corp.example does not have permission"); strings.Contains(got, "ann.petersen") {
+		t.Errorf("address survived an API error: %q", got)
+	}
+
 	// Nothing to hide is not an error.
 	if got := redactor("")("plain text"); got != "plain text" {
 		t.Errorf("empty redactor changed %q", got)
 	}
+}
+
+// Everything this command prints goes through one of four functions, and
+// this is what keeps it that way.
+//
+// The rule exists because the alternative was tried and failed three
+// times: `status`, then the startup log, then `login` each printed a
+// path or an address, each was fixed on its own, and each fix taught the
+// next site nothing. The last one was six lines from the one before it.
+// A print added tomorrow inherits the redaction instead of needing an
+// author who remembers both rules.
+func TestNothingPrintsOutsideTheBoundary(t *testing.T) {
+	const file = "main.go"
+	// usage writes static help to a caller-supplied writer; the other
+	// three are the boundary itself.
+	boundary := map[string]bool{"usage": true, "fail": true, "warnStderr": true, "outf": true}
+
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", file, err)
+	}
+
+	funcs, found := 0, 0
+	for _, decl := range parsed.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		funcs++
+		if boundary[fn.Name.Name] {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "fmt" || !strings.HasPrefix(sel.Sel.Name, "Print") && !strings.HasPrefix(sel.Sel.Name, "Fprint") {
+				return true
+			}
+			found++
+			t.Errorf("%s writes with fmt.%s at %s — use outf or fail, so the redaction is not "+
+				"something each new print has to remember", fn.Name.Name, sel.Sel.Name, fset.Position(call.Pos()))
+			return true
+		})
+	}
+
+	// Zero functions walked and zero stray prints are the same output.
+	if funcs < 15 {
+		t.Fatalf("only %d functions walked in %s; the check is not reading it", funcs, file)
+	}
+	t.Logf("%d functions walked, %d stray prints", funcs, found)
 }

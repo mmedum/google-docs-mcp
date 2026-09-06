@@ -16,6 +16,7 @@
 package leakcheck
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,13 +75,31 @@ func hasRun(s string, n int) bool {
 
 func TestNothingIdentifyingIsCommitted(t *testing.T) {
 	root := moduleRoot(t)
-	out, err := exec.Command("git", "-C", root, "ls-files", "-z").Output()
+	// --others --exclude-standard adds files that are not committed yet
+	// but would be by the next `git add -A`. Scanning only the index
+	// meant a brand-new file was invisible to this gate until someone
+	// staged it — so `make check` went green on a working tree carrying
+	// an address, and the check that says nothing identifying is
+	// committed had never looked at the thing about to be. Verified by
+	// planting one: it passed.
+	out, err := exec.Command("git", "-C", root, "ls-files", "-z",
+		"--cached", "--others", "--exclude-standard").Output()
 	if err != nil {
-		t.Skipf("git ls-files: %v", err)
+		// Outside a git checkout there is nothing to enumerate and
+		// nothing to be wrong: a module-cache copy, a source tarball or
+		// a vendored build is not a repository, and this module is
+		// distributed to other people who will run `go test ./...` in
+		// exactly those. Any other failure is a broken check, and a
+		// broken check must not pass.
+		if ee := (*exec.ExitError)(nil); errors.As(err, &ee) &&
+			strings.Contains(string(ee.Stderr), "not a git repository") {
+			t.Skip("not a git checkout; nothing to enumerate")
+		}
+		t.Fatalf("git ls-files: %v", err)
 	}
 	files := strings.Split(strings.TrimRight(string(out), "\x00"), "\x00")
 	if len(files) < 20 {
-		t.Fatalf("only %d tracked files; the scan is not seeing the repository", len(files))
+		t.Fatalf("only %d files; the scan is not seeing the repository", len(files))
 	}
 
 	for _, name := range files {

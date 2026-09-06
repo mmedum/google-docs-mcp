@@ -34,4 +34,13 @@ paths = [
 # commits, and the comment can only clear the commit that carries it.
 regexes = [
   '''123456789012-abcdefghijklmnopqrstuvwxyz012345\.apps\.googleusercontent\.com''', # leakcheck:allow
+
+  # gitleaks 8.30.1's generic-api-key rule scores this package path as a
+  # high-entropy secret where it appears in a list beside another path —
+  # `internal/redact`'s gate reads the wire types out of these two
+  # packages, so the pair sits on one line. Allowed as the literal rather
+  # than by path, so a real secret in the same file is still a finding,
+  # and here rather than inline because this job scans the pull request's
+  # commits and a comment can only clear the commit that carries it.
+  '''internal/gdocs''',
 ]

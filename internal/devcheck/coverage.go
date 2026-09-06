@@ -27,7 +27,6 @@ var exemptFromFloor = map[string]string{
 	"internal/devcheck":    "a build-gate helper with no runtime path; the gates that use it are what exercise it",
 	"internal/doc/doctest": "fixtures for other packages' tests",
 	"internal/gdocs":       "wire types: struct tags, no logic",
-	"internal/leakcheck":   "a test-only package: it scans the repository and has no statements of its own",
 }
 
 // coverageFloor enforces a statement-coverage floor per package. The
@@ -158,7 +157,14 @@ func moduleName() (string, error) {
 // resolve from inside a package and the command exits 1 there — which a
 // check that skipped on error would have reported as success.
 func internalPackages(module, dir string) ([]string, error) {
-	cmd := exec.Command("go", "list", "./internal/...")
+	// A package with no non-test Go files has no statements, so it can
+	// be neither covered nor below a floor. Two entries in the map above
+	// used to say exactly that in prose, and they thrashed: moving one
+	// file out of a build tag added statements to a package and its
+	// exemption had to go; moving the file to another package took them
+	// away and the exemption had to come back. `go list` answers it
+	// exactly, so those two entries delete themselves and stay deleted.
+	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}}\t{{len .GoFiles}}", "./internal/...")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -166,10 +172,11 @@ func internalPackages(module, dir string) ([]string, error) {
 	}
 	var pkgs []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
+		path, files, ok := strings.Cut(line, "\t")
+		if !ok || path == "" || files == "0" {
 			continue
 		}
-		pkgs = append(pkgs, strings.TrimPrefix(line, module+"/"))
+		pkgs = append(pkgs, strings.TrimPrefix(path, module+"/"))
 	}
 	sort.Strings(pkgs)
 	return pkgs, nil

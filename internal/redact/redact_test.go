@@ -1,4 +1,4 @@
-package livecheck
+package redact
 
 import (
 	"strings"
@@ -16,7 +16,7 @@ import (
 // The five positions: internal/service/ops.go (Info.text), history.go
 // (list_revisions), search.go (search_documents), suggestions.go
 // (list_suggestions) and internal/render/comments.go.
-func TestScrubKeepsPeopleAndDocumentsOut(t *testing.T) {
+func TestTranscriptKeepsPeopleAndDocumentsOut(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
@@ -74,6 +74,14 @@ func TestScrubKeepsPeopleAndDocumentsOut(t *testing.T) {
 			"- c9 [t3] by <person>\n",
 		},
 		{
+			// The sixth position. `revision` precedes the first id and
+			// nothing preceded the second, so a real id survived a
+			// transcript that claimed to carry none.
+			"diff_revisions names two revisions",
+			"revision 1SyntheticRevisionIdXXXXXXXXXX → 1SyntheticOtherRevXXXXXXXXXXXX (markdown): +3 −1 lines\n",
+			"revision <rev> → <rev> (markdown): +3 −1 lines\n",
+		},
+		{
 			"document url and revision, the shapes that always worked",
 			"https://docs.google.com/document/d/1SyntheticDocumentIdXXXXXXXXXXXX/edit revision 1SyntheticRevisionIdXXXXXXXXXX\n",
 			"https://docs.google.com/document/d/<scratch>/edit revision <rev>\n",
@@ -91,8 +99,8 @@ func TestScrubKeepsPeopleAndDocumentsOut(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := scrub(c.in); got != c.want {
-				t.Errorf("scrub(%q)\n got %q\nwant %q", c.in, got, c.want)
+			if got := Transcript(c.in); got != c.want {
+				t.Errorf("Transcript(%q)\n got %q\nwant %q", c.in, got, c.want)
 			}
 		})
 	}
@@ -102,8 +110,8 @@ func TestScrubKeepsPeopleAndDocumentsOut(t *testing.T) {
 // remark: a comment's quote and body, and a suggestion's diff, do not
 // survive. If someone later finds a terminator that is safe for a
 // display name, this is the test that should change.
-func TestScrubLosesWhatFollowsAPerson(t *testing.T) {
-	got := scrub("- s1 [p3] replace by Ann Petersen {--old text--} {++new text++}\n")
+func TestTranscriptLosesWhatFollowsAPerson(t *testing.T) {
+	got := Transcript("- s1 [p3] replace by Ann Petersen {--old text--} {++new text++}\n")
 	for _, lost := range []string{"old text", "new text"} {
 		if strings.Contains(got, lost) {
 			t.Errorf("expected %q to be lost with the name; got %q", lost, got)
@@ -113,7 +121,7 @@ func TestScrubLosesWhatFollowsAPerson(t *testing.T) {
 
 // The guarantee stated over a whole transcript rather than per line,
 // because a pasted transcript is the artifact the promise is about.
-func TestScrubLeavesNothingIdentifying(t *testing.T) {
+func TestTranscriptLeavesNothingIdentifying(t *testing.T) {
 	transcript := `=== get_document (isError=false) ===
 Quarterly Revenue Plan
 https://docs.google.com/document/d/1SyntheticDocumentIdXXXXXXXXXXXX/edit
@@ -124,7 +132,7 @@ last modified 2026-09-01T10:00:00Z by Bo Nilsen <bo@acme-corp.example>
 - c9 [t3] by Ann Petersen (2026-09-01T10:00:00Z) on “point”: please cite
     ↳ Bo Nilsen resolved: agreed
 `
-	got := scrub(transcript)
+	got := Transcript(transcript)
 	for _, forbidden := range []string{
 		"Ann Petersen", "Bo Nilsen",
 		"ann.petersen@acme-corp.example", "bo@acme-corp.example",
@@ -153,9 +161,9 @@ last modified 2026-09-01T10:00:00Z by Bo Nilsen <bo@acme-corp.example>
 // discriminates is a value only the *shape* rules catch, cut in the
 // middle — truncate first and the address stops looking like an address,
 // so nothing matches it and the fragment survives.
-func TestShownRedactsBeforeTruncating(t *testing.T) {
+func TestClipRedactsBeforeTruncating(t *testing.T) {
 	line := "granted to ann@acme-corp.example today"
-	if got := shown(line, 23); strings.Contains(got, "acme-cor") {
+	if got := Clip(line, 23); strings.Contains(got, "acme-cor") {
 		t.Errorf("shown truncated before redacting: %q", got)
 	}
 }

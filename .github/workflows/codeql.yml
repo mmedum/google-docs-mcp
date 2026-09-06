@@ -11,6 +11,13 @@ on:
 permissions:
   contents: read
 
+# bash on every runner, for every `run` step in this file. Uniform
+# across workflows, and checked by TestWorkflowsPinTheShell; ci.yml
+# carries why, and §18 of docs/architecture.md carries the evidence.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   analyze:
     runs-on: ubuntu-latest

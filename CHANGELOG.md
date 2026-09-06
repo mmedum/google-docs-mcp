@@ -26,6 +26,45 @@ and new required fields are breaking; the schema diff in CI flags them.
   been naming `gitleaks-version`, which is not an input that action has
   ever had, so the one wrapper-installed tool the check did not cover
   was the one it appeared to cover.
+### Security
+- `doctor` and `status` no longer print the signed-in account's address,
+  the title of the document they check, or its revision id, and a Google
+  OAuth client id is removed from the client-secret path. The README
+  asks people to paste `doctor` output into a bug report, so all of that
+  was going into public issues. The account line keeps the domain and
+  drops the local part, because the question it answers is "am I signed
+  in as the right account?" and the domain is what answers it. The
+  document check reports counts rather than values, so there is no value
+  path for a later edit to widen. Nobody chose to print a client id: the
+  Cloud console names the file it hands you after the client, so
+  printing where the secret lives printed the id with it. Masking is
+  applied to every line the command prints rather than to the one that
+  formats a path: the path reached the output again inside errors other
+  packages had formatted it into. The startup log line recording the
+  resolved account is masked for the same reason. `doctor` still names
+  the account the token actually belongs to, masked — that check is the
+  only one that catches a stale profile or a `GDOCS_REFRESH_TOKEN`
+  override, and dropping it answered the question with the unchecked
+  half.
+- The live driver's transcript redactor now covers people as well as
+  documents. Ids, URLs and revisions have a shape and were already
+  caught; a person's name has none, so names are caught by position —
+  a closed, short set, because this project's renderers wrote every one
+  of them — and an address is caught both ways. The redactor moved to
+  `internal/livecheck/scrub.go` with no build tag, so its tests run in
+  every `make check` instead of only when someone runs the driver with
+  credentials.
+- `docs/security.md` said logs carry no document data, which was true and
+  narrower than it read: `doctor` output and the driver transcript are
+  different surfaces, and both are pasted into issues. It now covers all
+  three.
+- The agent-eval transcript no longer prints the document's URL. It is
+  the other artifact people paste, and it had no redactor at all.
+- A coverage-floor exemption naming a package `go list ./internal/...`
+  does not return now fails the build. Such an entry reads as a
+  considered decision and exempts nothing; two were stale, one of them
+  because a build tag was removed and its stated reason quietly stopped
+  being true.
 
 ## [0.9.4] - 2026-09-05
 

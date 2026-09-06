@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -181,7 +182,10 @@ func runServer(args []string) int {
 		logger.Warn("no usable credentials; every tool will return an [auth] error until `google-docs-mcp login` succeeds", "err", err)
 		ts = gapi.NoCredentials{Reason: err}
 	} else {
-		logger.Info("credentials resolved", "profile", cfg.Profile, "source", string(src), "account", p.user.AccountEmail)
+		// Masked for the same reason as `status`: docs/security.md tells
+		// people a debug log is safe to attach to a bug report, and this
+		// line runs at Info on every start.
+		logger.Info("credentials resolved", "profile", cfg.Profile, "source", string(src), "account", maskAddress(p.user.AccountEmail))
 		// Warm the token off the startup path; the token source is safe
 		// for concurrent use and the first tool call reuses the result.
 		go func() {
@@ -271,7 +275,7 @@ func cmdLogin(args []string) int {
 	}
 	cfg := p.cfg
 	if _, err := os.Stat(p.clientSecretPath); err != nil {
-		return fail("OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", p.clientSecretPath)
+		return fail("OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", maskClientID(p.clientSecretPath))
 	}
 	scopes := auth.Scopes(cfg.ReadOnly)
 	oc, err := auth.LoadClientSecret(p.clientSecretPath, scopes)
@@ -363,13 +367,13 @@ func printStatus(p *profile) {
 	if _, err := os.Stat(p.clientSecretPath); err == nil {
 		exists = "present"
 	}
-	fmt.Printf("client secret:   %s (%s)\n", p.clientSecretPath, exists)
+	fmt.Printf("client secret:   %s (%s)\n", maskClientID(p.clientSecretPath), exists)
 	if _, src, err := p.store.Resolve(); err == nil {
 		fmt.Printf("refresh token:   stored in %s\n", src)
 	} else {
 		fmt.Printf("refresh token:   none (%v)\n", err)
 	}
-	fmt.Printf("account:         %s\n", orUnknown(p.user.AccountEmail))
+	fmt.Printf("account:         %s\n", orUnknown(maskAddress(p.user.AccountEmail)))
 	if len(p.user.Scopes) > 0 {
 		fmt.Printf("scopes at login: %s\n", strings.Join(p.user.Scopes, " "))
 	}
@@ -393,10 +397,20 @@ func cmdDoctor(args []string) int {
 	defer cancel()
 
 	failed := 0
+	// Errors are redacted too, not just the lines this command formats
+	// itself. Masking the one Printf that prints the path was not
+	// enough: the path reached the output again inside an error another
+	// package had formatted — `auth: read client secret <path>`, on the
+	// commonest failure there is, three lines under the masked line.
+	ref := ""
+	if fs.NArg() > 0 {
+		ref = fs.Arg(0)
+	}
+	hide := redactor(ref)
 	check := func(name string, err error, detail string) {
 		if err != nil {
 			failed++
-			fmt.Printf("✘ %s: %v\n", name, err)
+			fmt.Printf("✘ %s: %v\n", name, hide(err.Error()))
 			return
 		}
 		fmt.Printf("✔ %s%s\n", name, detail)
@@ -422,20 +436,30 @@ func cmdDoctor(args []string) int {
 	}
 
 	api := gapi.New(ts, gapi.Options{Timeout: cfg.HTTPTimeout, UserAgent: "google-docs-mcp/" + version.String()})
+	// The address is masked but not dropped. `status` prints the account
+	// from the profile file, written at the last login; this line is the
+	// only one that says whose token is actually being used, which
+	// differs whenever GDOCS_REFRESH_TOKEN overrides the stored one or
+	// the profile is stale. Dropping it answered "am I signed in as the
+	// right account?" with the unchecked half.
 	if u, err := api.About(ctx); err != nil {
 		check("Drive API (about.get)", err, "")
 	} else {
-		check("Drive API (about.get)", nil, " as "+u.EmailAddress)
+		check("Drive API (about.get)", nil, " as "+maskAddress(u.EmailAddress))
 	}
 
-	if fs.NArg() > 0 {
-		ref := fs.Arg(0)
+	if ref != "" {
 		svc := service.New(api, service.Options{Logger: slog.New(slog.DiscardHandler)})
 		f, err := svc.Fetch(ctx, ref)
 		if err != nil {
 			check("Docs API (documents.get)", err, "")
 		} else {
-			check("Docs API (documents.get)", nil, fmt.Sprintf(" %q, %d tab(s), revision %s", f.Doc.Title, len(f.Doc.Tabs), f.Doc.RevisionID))
+			// Counts, not values. The title is content from a real
+			// document and the revision id is an identifier, and this
+			// output is what the bug form asks people to paste. Not
+			// formatted at all rather than formatted and masked, so
+			// there is no value path for a later edit to widen.
+			check("Docs API (documents.get)", nil, fmt.Sprintf(" %d tab(s), revision present", len(f.Doc.Tabs)))
 			_, perr := api.GetDocument(ctx, f.Doc.ID, gapi.GetOptions{SuggestionsViewMode: gapi.SuggestionsInline, CommentsViewMode: gapi.CommentsIncluded})
 			switch {
 			case perr == nil:
@@ -456,6 +480,55 @@ func cmdDoctor(args []string) int {
 	fmt.Println("\nall checks passed")
 	return 0
 }
+
+// redactor returns the function `doctor` passes its error lines
+// through. The two halves are caught differently on purpose: a client id
+// has a shape, so maskClientID finds it anywhere — including in an error
+// that named only the file's base name, which a known-value replacement
+// of the full path would have missed — while a document reference the
+// caller typed has no shape at all, so the only way to catch it is that
+// we are holding the value.
+func redactor(ref string) func(string) string {
+	return func(s string) string {
+		if ref != "" {
+			s = strings.ReplaceAll(s, ref, "<ref>")
+		}
+		return maskClientID(s)
+	}
+}
+
+// maskAddress keeps the domain and drops the local part, because these
+// two halves answer different questions. `doctor` output is what the bug
+// form asks people to paste into a public issue, so the address itself —
+// the part that identifies a person, and that can be correlated or
+// spammed — must not survive. But the reason anyone reads this line is
+// "am I signed in as the right account?", and for someone with a work
+// and a personal Google account the domain is precisely what answers it.
+// Keeping the domain does mean a company domain appears in pasted
+// output; that is the deliberate half of the trade, not an oversight.
+func maskAddress(addr string) string {
+	local, domain, ok := strings.Cut(addr, "@")
+	if !ok || local == "" || domain == "" {
+		return addr
+	}
+	return "…@" + domain
+}
+
+// maskClientID removes a Google OAuth client id from a path. Nobody
+// chose to print a client id: the Cloud console names the file it hands
+// you after the client, so printing where the client secret lives prints
+// the id with it. The directory and the file's shape are what make the
+// line useful when someone's setup is wrong, and both survive.
+func maskClientID(path string) string {
+	return clientIDInName.ReplaceAllString(path, "client_secret_<id>")
+}
+
+// Only the id span is replaced, because the file does not always keep
+// the name the console gave it: a second download becomes
+// "… (1).json" and people rename them. Requiring the full
+// ".apps.googleusercontent.com.json" suffix left every variant printing
+// the id in full.
+var clientIDInName = regexp.MustCompile(`client_secret_[0-9]+-[A-Za-z0-9_-]+`)
 
 func orUnknown(s string) string {
 	if s == "" {

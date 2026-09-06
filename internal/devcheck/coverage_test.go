@@ -97,6 +97,36 @@ func TestCoverageProfileArithmetic(t *testing.T) {
 
 // Every exemption carries a reason, because the reason is the only thing
 // that makes an exemption reviewable.
+// A reason is not enough: the package has to exist in the list the floor
+// is derived from, or the exemption is a claim about nothing. Both stale
+// entries this caught had a perfectly good reason written beside them.
+func TestEveryExemptionNamesARealPackage(t *testing.T) {
+	module, err := moduleName()
+	if err != nil {
+		t.Fatalf("go list -m: %v", err)
+	}
+	// Not Skipf. A check that skips when it cannot read its input
+	// reports the same green as a check that read everything and found
+	// nothing, which is the failure this whole file exists to avoid.
+	pkgs, err := internalPackages(module, repoRoot(t))
+	if err != nil {
+		t.Fatalf("go list ./internal/...: %v", err)
+	}
+	if len(pkgs) < 5 {
+		t.Fatalf("only %d packages listed; the check is not reading go list", len(pkgs))
+	}
+	listed := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		listed[p] = true
+	}
+	for pkg := range exemptFromFloor {
+		if !listed[pkg] {
+			t.Errorf("%s is exempted from the coverage floor but is not in `go list ./internal/...`, "+
+				"so the exemption applies to nothing", pkg)
+		}
+	}
+}
+
 func TestEveryExemptionHasAReason(t *testing.T) {
 	if len(exemptFromFloor) == 0 {
 		t.Fatal("no exemptions listed; the map is not being read")

@@ -31,6 +31,39 @@
   the id, the first six characters of the id, and the revision id, all
   three of which a log line carried until this claim was audited against
   the code in September 2026.
+- **`doctor` and `status` output is what a bug report carries, so it is
+  held to the same rule.** The promise above is about logs, and that is
+  narrower than it reads: the README asks people to paste `doctor`
+  output into an issue, which is a different surface, and until this was
+  audited that surface printed the signed-in account's address twice,
+  the title of whichever document was checked, and its revision id.
+  Those are gone, and the same masking now covers every line `doctor`
+  prints, errors included — the client-secret path reached the output a
+  second time inside `auth: read client secret <path>`, three lines
+  under the line that had been carefully masked, on the commonest
+  failure there is. The startup log line that records the resolved
+  account is masked too, since that log is the other thing a bug report
+  carries. The account line keeps the domain and drops the local part,
+  because the reason to read it is "am I signed in as the right
+  account?" and for someone with a work and a personal account the
+  domain is what answers that — keeping it is the deliberate half of the
+  trade. The client-secret line prints the path, with a Google client id
+  removed from the file name: nobody chose to print a client id, but the
+  Cloud console names the file it hands you after the client, so
+  printing where the secret lives printed the id along with it. The
+  document check reports counts rather than values, so there is no value
+  path for a later edit to widen.
+- **The live driver's transcript is redacted before it is written**, for
+  the same reason: it is pasted into issues and commit messages. Ids and
+  URLs are caught by shape; a revision is caught by shape where it is
+  written as `revision <id>` and by position in a revision listing,
+  which writes the id bare. A person's name has no shape,
+  so names are caught by position — the set is closed and short because
+  this project's own renderers wrote every one of them — and an address
+  is caught both ways, since `userLabel` renders a person as
+  `Name <address>`. `internal/livecheck/scrub.go` carries no build tag,
+  so the tests for it run in every `make check` rather than only when
+  someone runs the driver with credentials.
 - Scopes: `documents` and `drive` (or their read-only variants with
   `GDOCS_READ_ONLY`). `drive` is required to reach documents the app did
   not create; the narrower `drive.file` cannot.

@@ -53,7 +53,12 @@ func TestEvals(t *testing.T) {
 				prompt = tk.prompt
 			} else {
 				doc = s.seed(tk.name)
-				t.Logf("document: https://docs.google.com/document/d/%s/edit", doc)
+				// The id is not logged. This transcript is the other
+				// artifact people paste, and it had no redactor at all —
+				// the live driver's scrub covers its own output and
+				// nothing covers this one. The document is one the eval
+				// just created, so naming the task is enough to find it.
+				t.Logf("document: seeded for %s", tk.name)
 				if tk.setup != nil {
 					tk.setup(s, doc)
 				}

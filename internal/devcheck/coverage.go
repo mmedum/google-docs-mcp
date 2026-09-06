@@ -15,13 +15,19 @@ import (
 // from `go list ./internal/...`, so a package added under internal/ is
 // under the floor from its first commit; an exemption has to be written
 // here, where a reviewer sees it.
+//
+// An entry naming a package the list does not contain is worse than no
+// entry: it reads as a considered exemption and exempts nothing.
+// `TestEveryExemptionNamesARealPackage` is what stops that, and it was
+// written after two of these — `internal/livecheck` and `internal/evals`
+// — had gone stale, one of them because a build tag was removed and its
+// stated reason ("absent from an untagged go list") quietly stopped
+// being true.
 var exemptFromFloor = map[string]string{
 	"internal/devcheck":    "a build-gate helper with no runtime path; the gates that use it are what exercise it",
 	"internal/doc/doctest": "fixtures for other packages' tests",
 	"internal/gdocs":       "wire types: struct tags, no logic",
 	"internal/leakcheck":   "a test-only package: it scans the repository and has no statements of its own",
-	"internal/livecheck":   "the live driver: build-tagged, so it is absent from an untagged go list and listed here for the tagged case",
-	"internal/evals":       "the agent evals: build-tagged, same reason",
 }
 
 // coverageFloor enforces a statement-coverage floor per package. The
@@ -38,7 +44,7 @@ func coverageFloor(profile string, min float64) error {
 	if err != nil {
 		return err
 	}
-	pkgs, err := internalPackages(module)
+	pkgs, err := internalPackages(module, "")
 	if err != nil {
 		return err
 	}
@@ -147,8 +153,14 @@ func moduleName() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func internalPackages(module string) ([]string, error) {
-	out, err := exec.Command("go", "list", "./internal/...").Output()
+// dir is where `go list` runs. The gate passes "" and runs at the module
+// root; a test has to name the root, because ./internal/... does not
+// resolve from inside a package and the command exits 1 there — which a
+// check that skipped on error would have reported as success.
+func internalPackages(module, dir string) ([]string, error) {
+	cmd := exec.Command("go", "list", "./internal/...")
+	cmd.Dir = dir
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("go list ./internal/...: %w", err)
 	}

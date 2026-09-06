@@ -37,20 +37,6 @@ type driver struct {
 	preview     bool
 }
 
-// scrub keeps document ids, revision ids and URLs out of the transcript,
-// which people paste into issues and chat.
-var (
-	docURL  = regexp.MustCompile(`/document/d/[A-Za-z0-9_-]+`)
-	gdocs   = regexp.MustCompile(`gdocs://[A-Za-z0-9_-]{20,}`)
-	revText = regexp.MustCompile(`revision [A-Za-z0-9_-]{20,}`)
-)
-
-func scrub(s string) string {
-	s = docURL.ReplaceAllString(s, "/document/d/<scratch>")
-	s = gdocs.ReplaceAllString(s, "gdocs://<scratch>")
-	return revText.ReplaceAllString(s, "revision <rev>")
-}
-
 // start builds nothing and assumes `make build`: the point is to drive
 // the binary a person would run.
 func start(t *testing.T) *driver {
@@ -164,17 +150,6 @@ func (d *driver) refused(label, name string, args map[string]any, want string) s
 		d.t.Errorf("%s refused for the wrong reason, wanted %q: %s", label, want, shown(text, 300))
 	}
 	return text
-}
-
-// shown prepares a result for the transcript: everything logged goes
-// through here, so the scrubbing happens once and a step still parses the
-// ids and URLs it needs out of the untouched text.
-func shown(s string, n int) string {
-	s = scrub(s)
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 // first returns the first submatch of re in s, or "".

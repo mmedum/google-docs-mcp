@@ -83,7 +83,10 @@ func liveDryRuns(t *testing.T, d *driver, doc, table string) {
 
 	after := first(revisionOf, d.ok("revision after the dry runs", "get_document", map[string]any{"document": doc}))
 	if after != before {
-		t.Errorf("a dry run changed the document: revision %s became %s after %d dry runs", before, after, covered)
+		// The ids are not printed. They would reach the transcript
+		// without passing through shown, and the failure is the fact
+		// that the revision moved, not which revision it moved to.
+		t.Errorf("a dry run changed the document: the revision moved after %d dry runs", covered)
 	}
 	t.Logf("=== dry runs ===\n%d tools swept, revision unchanged", covered)
 }

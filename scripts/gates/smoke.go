@@ -98,22 +98,44 @@ func drive(bin string, env []string, input string, pause time.Duration) (stdout,
 	if err := cmd.Start(); err != nil {
 		return "", "", err
 	}
+	// Past Start there is a child, and every way out of this function has
+	// to take it with it. The paths below used to return without one:
+	// a server that died during init makes the write fail with EPIPE, and
+	// the gate then reported a broken pipe while discarding the stderr
+	// that said why — and a failing Close left an MCP server running with
+	// an open stdin for as long as the gate did. Reaping before reading
+	// the buffers also keeps the read off the copying goroutines.
+	reaped := false
+	reap := func() {
+		if !reaped {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			reaped = true
+		}
+	}
+	defer reap()
+
 	if _, err := io.WriteString(stdin, input); err != nil {
-		return "", "", err
+		reap()
+		return out.String(), errBuf.String(), err
 	}
 	if pause > 0 {
 		time.Sleep(pause)
 	}
 	if err := stdin.Close(); err != nil {
-		return "", "", err
+		reap()
+		return out.String(), errBuf.String(), err
 	}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err = <-done:
+		reaped = true
 	case <-time.After(20 * time.Second):
 		_ = cmd.Process.Kill()
+		<-done // that goroutine's Wait is the reap, and it flushes the buffers
+		reaped = true
 		return out.String(), errBuf.String(), errors.New("the server did not exit after stdin closed")
 	}
 	return out.String(), errBuf.String(), err

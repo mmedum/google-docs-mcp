@@ -1,7 +1,7 @@
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     # Kept equal to GITLEAKS_VERSION in .github/workflows/ci.yml, and
-    # TestScannersAgree fails if they drift. Two versions means a commit
+    # the `pins` gate fails if they drift. Two versions means a commit
     # can pass the hook and fail the job, on rules that exist in one and
     # not the other — the local check would then be teaching the wrong
     # thing about what CI will say.

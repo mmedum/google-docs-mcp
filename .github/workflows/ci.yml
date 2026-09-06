@@ -34,7 +34,7 @@ concurrency:
 # `uses:` step, and it is not the shell the implicit default gives you —
 # GitHub runs an explicit bash as `bash --noprofile --norc -eo pipefail`,
 # so a command failing mid-pipeline now fails the step on all three
-# runners. `internal/devcheck` has the check that this block is here.
+# runners. The `pins` gate in `scripts/gates` checks this block is here.
 defaults:
   run:
     shell: bash

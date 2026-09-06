@@ -1,5 +1,7 @@
 /google-docs-mcp
 /google-docs-mcp.exe
+/gates
+/gates.exe
 /dist/
 cov.out
 schemas.json

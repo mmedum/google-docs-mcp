@@ -35,7 +35,7 @@ var errorfClass = regexp.MustCompile(`Errorf\("([a-z_]+)"`)
 func classes(w io.Writer, _ []string) error {
 	var problems []string
 	known := service.Classes()
-	if len(known) != len(slices.Compact(slices.Clone(known))) {
+	if hasDuplicate(known) {
 		problems = append(problems, fmt.Sprintf("service.Classes has duplicates: %v", known))
 	}
 
@@ -98,4 +98,14 @@ func classes(w io.Writer, _ []string) error {
 	_, err = fmt.Fprintf(w, "classes ok: %d in the vocabulary, %d emitted directly, %d files scanned\n",
 		len(known), len(seen), files)
 	return err
+}
+
+// hasDuplicate reports whether xs repeats a value. It sorts a copy first
+// because slices.Compact only removes runs of adjacent equals, and
+// service.Classes is an unsorted literal — so the version of this check
+// that compacted it as it stood could only ever have caught a duplicate
+// somebody wrote twice in a row.
+func hasDuplicate(xs []string) bool {
+	sorted := slices.Sorted(slices.Values(xs))
+	return len(slices.Compact(sorted)) != len(xs)
 }

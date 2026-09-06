@@ -27,7 +27,14 @@ and new required fields are breaking; the schema diff in CI flags them.
   lists live in different files and you are only ever editing one of
   them, which is why this is a gate and not a habit. It compares by
   command rather than by target name, and separately requires every
-  tagged vet pass to appear in both. Watched to fail in both directions.
+  tagged vet pass to appear in both. Both files are read with their
+  commented-out lines removed, and a gate counts as running in CI only
+  where a `run:` step names it: matching the raw text meant that
+  commenting out a step to unblock a red build left parity green, which
+  is the divergence it exists to catch, reached by typing one `#`. The
+  rule is a function over the two files' text, and its tests watch it
+  fail in both directions and on each of the ways a step can be present
+  without running.
 - §17 has no open decision left: the parity gate closes the one that
   stood there. The staleness gate caught the status line still claiming
   it, which is what that half of the check is for — and then caught a bug
@@ -37,7 +44,13 @@ and new required fields are breaking; the schema diff in CI flags them.
   parity gate all read the same list, so they cannot drift from each
   other.
 
-### Changed
+### Fixed
+- The error-class gate could not see a duplicate. It compacted
+  `service.Classes` as it stood, and `slices.Compact` only removes runs
+  of adjacent equals, so a class written twice anywhere but next to
+  itself passed — in an unsorted literal, which is every case that would
+  actually happen. It sorts a copy first, and the test fails against the
+  old version.
 - The README carries badges — CI, latest release, Go reference, licence —
   and no longer states a version in prose. The status line said v0.5.0
   five releases after v0.5.0, and the first fix was a gate to keep the

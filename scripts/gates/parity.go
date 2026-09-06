@@ -58,7 +58,22 @@ func parity(w io.Writer, _ []string) error {
 		return fmt.Errorf("no ci.yml among the workflows; the check is reading the wrong place")
 	}
 
-	// Every gate this program declares must be reachable from both.
+	declared := declaredGates()
+	problems, vetPasses, err := parityCheck(string(makefile), ci, declared)
+	if err != nil {
+		return err
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("%s", strings.Join(problems, "\n"))
+	}
+	_, err = fmt.Fprintf(w, "parity ok: %d gates in both, %d tagged vet passes in both\n",
+		len(declared), vetPasses)
+	return err
+}
+
+// declaredGates is every command the registry marks as running in both
+// places, sorted.
+func declaredGates() []string {
 	var declared []string
 	for name, c := range commands {
 		if c.gate {
@@ -66,35 +81,45 @@ func parity(w io.Writer, _ []string) error {
 		}
 	}
 	slices.Sort(declared)
+	return declared
+}
+
+// parityCheck is the rule itself, over the text of the two files rather
+// than the files. A gate that has never been watched fail is not yet a
+// gate, and this one cannot be watched fail against the repository
+// without first breaking the repository — so the reading is up there and
+// the rule is here, where a test can hand it a Makefile and a workflow
+// that disagree.
+func parityCheck(makefile, ci string, declared []string) (problems []string, vetPasses int, err error) {
 	if len(declared) < 5 {
-		return fmt.Errorf("only %d gates declared; the registry is not being read", len(declared))
+		return nil, 0, fmt.Errorf("only %d gates declared; the registry is not being read", len(declared))
 	}
 
-	m := checkTarget.FindSubmatch(makefile)
+	m := checkTarget.FindStringSubmatch(makefile)
 	if m == nil {
-		return fmt.Errorf("no `check:` target in the Makefile; the check is reading the wrong file")
+		return nil, 0, fmt.Errorf("no `check:` target in the Makefile; the check is reading the wrong file")
 	}
-	prereqs := strings.Fields(string(m[1]))
+	prereqs := strings.Fields(m[1])
 	if len(prereqs) < 5 {
-		return fmt.Errorf("the check target has %d prerequisites; that is not the whole list", len(prereqs))
+		return nil, 0, fmt.Errorf("the check target has %d prerequisites; that is not the whole list", len(prereqs))
 	}
 
+	// Both sides are read with their commented-out lines removed, and the
+	// CI side only counts a gate named on a `run:` line. Matching the raw
+	// text meant that commenting out a step to unblock a red build left
+	// parity green — the one divergence it exists to catch, achieved by
+	// typing one `#`. What remains uncovered is a step disabled by an
+	// `if:` that is never true; seeing that needs a YAML parse, and this
+	// gate is not worth a dependency.
 	inCI := map[string]bool{}
-	for _, m := range ciGate.FindAllStringSubmatch(ci, -1) {
+	for _, m := range ciGate.FindAllStringSubmatch(runLines(ci), -1) {
 		inCI[m[1]] = true
 	}
-	// A gate CI runs through `go test` rather than through this program
-	// still runs; the registry names the command, and the workflow may
-	// reach it either way.
-	if strings.Contains(ci, "go test") {
-		inCI["coverage"] = true
-	}
 
-	var problems []string
 	for _, name := range declared {
 		if !inCI[name] {
 			problems = append(problems, fmt.Sprintf(
-				"gate %q is declared in scripts/gates but no CI workflow runs it", name))
+				"gate %q is declared in scripts/gates but no `run:` step in ci.yml runs it", name))
 		}
 		if !slices.Contains(prereqs, name) && !slices.Contains(prereqs, makeTargetFor(name)) {
 			problems = append(problems, fmt.Sprintf(
@@ -105,8 +130,8 @@ func parity(w io.Writer, _ []string) error {
 	// The specific divergence that started this: a tagged vet pass that
 	// only ever runs locally. Build tags are where a whole package can
 	// stop compiling with CI perfectly green.
-	local := tagSet(vetTags.FindAllStringSubmatch(string(makefile), -1))
-	remote := tagSet(vetTags.FindAllStringSubmatch(ci, -1))
+	local := tagSet(vetTags.FindAllStringSubmatch(code(makefile), -1))
+	remote := tagSet(vetTags.FindAllStringSubmatch(code(ci), -1))
 	for _, tag := range local {
 		if !slices.Contains(remote, tag) {
 			problems = append(problems, fmt.Sprintf(
@@ -120,13 +145,32 @@ func parity(w io.Writer, _ []string) error {
 				"CI runs `vet -tags=%s` and `make vet` does not; a contributor cannot reproduce it", tag))
 		}
 	}
+	return problems, len(local), nil
+}
 
-	if len(problems) > 0 {
-		return fmt.Errorf("%s", strings.Join(problems, "\n"))
+// code drops whole-line comments, which both file formats spell with a
+// leading `#`. Only whole lines: a `#` further along a line can be
+// inside a string, and a trailing comment does not stop the command in
+// front of it from running anyway.
+func code(text string) string {
+	var kept []string
+	for _, l := range strings.Split(text, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(l), "#") {
+			kept = append(kept, l)
+		}
 	}
-	_, err = fmt.Fprintf(w, "parity ok: %d gates in both, %d tagged vet passes in both\n",
-		len(declared), len(local))
-	return err
+	return strings.Join(kept, "\n")
+}
+
+// runLines keeps the lines of a workflow that actually run something.
+func runLines(ci string) string {
+	var kept []string
+	for _, l := range strings.Split(code(ci), "\n") {
+		if strings.Contains(l, "run:") {
+			kept = append(kept, l)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 // makeTargetFor maps a gate to the Makefile target that runs it, for the

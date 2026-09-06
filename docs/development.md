@@ -65,19 +65,25 @@ and are preferred by the Makefile; install them with
   same export shows the page background and margins on `<body>`, column
   widths and row heights on the table, and `<thead>` for pinned header
   rows, which makes it the quickest end-to-end check of a layout change.
-- `go vet -tags=integration ./...` (part of `make vet`) keeps the tagged
-  tests compiling even though CI never runs them.
-- **The gates are Go, and tested.** `scripts/gates` holds the
-  coverage floor, the staleness check, the tool-name and schema
-  comparisons and the workflow pin check, each with tests of its own —
-  `go test ./scripts/gates`. They were shell scripts until two of
-  them went wrong in ways bash made easy: a hand-written package list
-  that fell behind without a sound, and a staleness rule that failed on
-  the release pull request it was written to guard. Each derives its
-  lists from the code and fails when it finds too little to be looking
-  at anything. Only the stdio smoke test and the schema-diff worktree
-  driver are still shell, because both are process plumbing rather than
-  logic.
+- `go vet -tags=integration ./...` keeps the tagged tests compiling even
+  though nothing runs them on a pull request. It is part of `make vet`
+  and of CI, along with the `live` and `evals` passes; the parity gate is
+  what holds those two lists to the same set.
+- **The gates are Go, and tested.** `scripts/gates` holds all eight: the
+  coverage floor, the staleness check, the schema diff, the stdio smoke
+  test, the identifier scan, the workflow pin check, the error-class
+  check and the parity check. Six have tests of their own, `go test
+  ./scripts/gates`, each watched to fail before it was trusted; the
+  smoke test and the schema diff are drives of the built binary, so
+  `make check` running them is the test. They were shell scripts until
+  two of them went wrong in ways bash made easy: a hand-written package
+  list that fell behind without a sound, and a staleness rule that
+  failed on the release pull request it was written to guard. Each
+  derives its lists from the code and fails when it finds too little to
+  be looking at anything. No shell is left anywhere in the repository —
+  the smoke test and the schema-diff worktree driver were the last two,
+  and `make check` runs on the Windows runner, where bash is a
+  dependency rather than a given.
 - **Before a release, scan the history**: `LEAKCHECK_HISTORY=1 go test
   ./scripts/gates -run TestHistoryCarriesNoIdentifiers` reads every
   blob ever committed, which the ordinary run does not — a file that

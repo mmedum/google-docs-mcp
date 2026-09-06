@@ -86,7 +86,7 @@ func init() {
 
 func main() {
 	if len(os.Args) < 2 {
-		fail(usage())
+		fail("%s", usage())
 	}
 	c, ok := commands[os.Args[1]]
 	if !ok {

@@ -12,6 +12,13 @@ on:
 permissions:
   contents: read
 
+# bash on every runner, for every `run` step in this file. Uniform
+# across workflows, and checked by TestWorkflowsPinTheShell; ci.yml
+# carries why, and §18 of docs/architecture.md carries the evidence.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
@@ -47,7 +54,7 @@ jobs:
           # action installs — the lesson from the cosign 3 release
           # failure, applied to the step that decides what the artifacts
           # are.
-          version: "v2.18.0"
+          version: "v2.18.1"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

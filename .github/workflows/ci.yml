@@ -20,6 +20,25 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# bash on every runner, for every `run` step in this file. With the
+# default shell, PowerShell on the Windows runner turned
+# `-coverprofile=cov.out` into a file called `cov`, so the profile the
+# next step read did not exist under the name this file gives it, and
+# nobody saw it because the coverage gate ran on Linux only until it
+# stopped being a shell script.
+#
+# Set here rather than on the job or the step. The runner hands every
+# `run` block to a shell, so this is not about which steps look
+# shell-ish, and a default set at this level is inherited by a job
+# somebody adds later. Two things it does not do: it never reaches a
+# `uses:` step, and it is not the shell the implicit default gives you —
+# GitHub runs an explicit bash as `bash --noprofile --norc -eo pipefail`,
+# so a command failing mid-pipeline now fails the step on all three
+# runners. `internal/devcheck` has the check that this block is here.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
     name: test (${{ matrix.os }})
@@ -36,18 +55,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # bash on all three runners, deliberately. With the default shell,
-      # PowerShell turned `-coverprofile=cov.out` into a file called
-      # `cov`, so the profile the next step reads did not exist under the
-      # name this file gives it. Nobody saw it because the coverage floor
-      # ran on Linux only until the gate stopped being a shell script.
       - run: go build ./...
-        shell: bash
       - run: go test -race -coverpkg=./internal/... -coverprofile=cov.out -covermode=atomic ./...
-        shell: bash
       - name: coverage floor
         run: go run ./internal/devcheck coverage cov.out 80
-        shell: bash
 
   lint:
     runs-on: ubuntu-latest
@@ -82,6 +93,15 @@ jobs:
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The scanner this wrapper installs, pinned like cosign and
+          # syft. It differs from those two in the mechanism and in the
+          # risk: the version is an env var rather than a `with:` input,
+          # and the action's default is a hard-coded number rather than
+          # `latest`, so a SHA here already pins something. Named anyway,
+          # so which gitleaks ran is a line in this file rather than a
+          # constant inside a five-megabyte bundle. No `v` prefix — the
+          # action's README documents the bare form.
+          GITLEAKS_VERSION: "8.30.1"
 
   smoke:
     runs-on: ubuntu-latest

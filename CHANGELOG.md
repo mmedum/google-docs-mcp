@@ -7,6 +7,25 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+- Every workflow sets `defaults: run: shell: bash`, and a gate fails one
+  that does not. The Windows runner defaults to PowerShell, which read
+  `-coverprofile=cov.out` as a file called `cov`; the fix had been three
+  `shell: bash` lines on the steps that existed at the time, which is a
+  rule nothing makes the next step follow. Set at workflow level because
+  the runner hands every `run` block to a shell — so this is not a
+  property of steps that look shell-ish, nor of jobs that look
+  matrix-ish. Note an explicit bash is not the implicit default: GitHub
+  runs it as `bash --noprofile --norc -eo pipefail`, so a command
+  failing mid-pipeline now fails the step on Linux and macOS too.
+- goreleaser is pinned to v2.18.1, up from v2.18.0, for its dependency
+  security bump.
+- The gitleaks the CI scan installs is named in the workflow as
+  `GITLEAKS_VERSION`, and pre-commit installs the same version, with a
+  test that fails if the two drift. `versionKeys` in the pins check had
+  been naming `gitleaks-version`, which is not an input that action has
+  ever had, so the one wrapper-installed tool the check did not cover
+  was the one it appeared to cover.
 ### Security
 - `doctor` and `status` no longer print the signed-in account's address,
   the title of the document they check, or its revision id, and a Google

@@ -25,13 +25,39 @@ const Name = "google-docs-mcp"
 // upgrade can be told apart from a tool-surface change.
 const SDKVersion = "v1.7.0"
 
-const instructions = "Google Docs tools. Start with get_document (metadata, capabilities, default write mode) or " +
-	"get_outline (headings with stable heading_id and block handles), then read_document scoped to a section; avoid " +
-	"reading long documents whole. Edit with edit_document and format_document: target content by quoting exact text, " +
-	"by heading_id, or by handle; never by position. Every write takes mode suggest, direct or comment; use the mode " +
-	"the person asked for, and dry_run when unsure. Handles like p12 are valid for the revision_id they came with. " +
-	"Resources gdocs://<id>, gdocs://<id>/outline and gdocs://<id>/tabs/<tab> hold the same content as markdown for " +
-	"clients that attach a document whole; they carry no handles."
+// instructionsFor is what the server tells a model about itself, for the
+// configuration it was actually started in.
+//
+// It was one constant, and `GDOCS_READ_ONLY=true` drops every write tool
+// — so a read-only server opened by telling the model to "edit with
+// edit_document and format_document" and then registered neither. The
+// test that should have caught it built only the default surface, which
+// is the same reason a sibling server carried the identical bug: a
+// configuration nobody tests is a configuration whose instructions
+// nobody reads.
+//
+// The read-only note says whose limit it is. A model that cannot tell
+// "this server was started without writes" from "Google Docs cannot do
+// that" reports the wrong thing to the person who asked.
+func instructionsFor(cfg config.Config) string {
+	const opening = "Google Docs tools. Start with get_document (metadata, capabilities, default write mode) or " +
+		"get_outline (headings with stable heading_id and block handles), then read_document scoped to a section; " +
+		"avoid reading long documents whole. "
+	const writing = "Edit with edit_document and format_document: target content by quoting exact text, by " +
+		"heading_id, or by handle; never by position. Every write takes mode suggest, direct or comment; use the " +
+		"mode the person asked for, and dry_run when unsure. "
+	const readOnly = "This server was started read-only and registers no write tools at all: nothing here can " +
+		"change a document, add a comment or make a suggestion. That is how this server was configured, not a " +
+		"limit of Google Docs, and it is worth saying that way to whoever asked. "
+	const closing = "Handles like p12 are valid for the revision_id they came with. " +
+		"Resources gdocs://<id>, gdocs://<id>/outline and gdocs://<id>/tabs/<tab> hold the same content as markdown " +
+		"for clients that attach a document whole; they carry no handles."
+
+	if cfg.ReadOnly {
+		return opening + readOnly + closing
+	}
+	return opening + writing + closing
+}
 
 // Deps are what the server needs.
 type Deps struct {
@@ -47,7 +73,7 @@ func New(d Deps) *mcp.Server {
 	// JSON-RPC frame (checked in v1.7.0, §18). Attach it at debug, where
 	// its session chatter belongs; at info it would put two lines per
 	// session into every client's log file for nothing.
-	opts := &mcp.ServerOptions{Instructions: instructions}
+	opts := &mcp.ServerOptions{Instructions: instructionsFor(d.Config)}
 	if d.Logger != nil && d.Logger.Enabled(context.Background(), slog.LevelDebug) {
 		opts.Logger = d.Logger
 	}

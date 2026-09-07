@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format is
 follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
-## [Unreleased]
+## [1.0.1] - 2026-09-07
 
 ### Added
 - `make leaks` refuses a build artifact. The rules are regexes over text,

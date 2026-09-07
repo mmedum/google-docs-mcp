@@ -88,8 +88,16 @@ gate-classes: ## The error classes the code emits are the ones it documents
 parity: ## `make check` and CI run the same gates
 	@$(GO) run ./scripts/gates parity
 
+.PHONY: api-coverage
+api-coverage: ## Every published API method has a verdict, and every call has a row
+	@$(GO) run ./scripts/gates api-coverage
+
+.PHONY: api-diff
+api-diff: ## Refetch the discovery documents and rewrite the snapshot (network; not a gate)
+	@$(GO) run ./scripts/gates api-diff
+
 .PHONY: check
-check: fmt vet lint cover vuln licenses leaks pins gate-classes schema-diff smoke staleness parity ## Everything CI runs
+check: fmt vet lint cover vuln licenses leaks pins gate-classes api-coverage schema-diff smoke staleness parity ## Everything CI runs
 
 .PHONY: clean
 clean:

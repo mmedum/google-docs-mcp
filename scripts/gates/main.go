@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // command is one thing this program can do.
@@ -80,6 +82,14 @@ func init() {
 		"parity": {
 			run: parity, args: "", gate: true,
 			doc: "`make check` and CI run the same gates",
+		},
+		"api-coverage": {
+			run: apiCoverage, args: "", gate: true,
+			doc: "every published API method has a verdict, and every call has a row",
+		},
+		"api-diff": {
+			run: apiDiff, args: "",
+			doc: "refetch the discovery documents and rewrite the snapshot (network)",
 		},
 	}
 }
@@ -285,4 +295,9 @@ func moduleRoot() (string, error) {
 		}
 		dir = parent
 	}
+}
+
+// contextWithTimeout keeps the one network call in this program bounded.
+func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), d)
 }

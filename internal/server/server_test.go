@@ -979,3 +979,78 @@ func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 		}
 	}
 }
+
+// The instructions must never name a tool the server did not register.
+//
+// They were one constant while read-only mode dropped six groups of
+// tools, so a read-only server told the model to "edit with edit_document
+// and format_document" and registered neither. Nothing caught it because
+// every test that read the instructions built the default surface. This
+// one builds all three.
+func TestInstructionsNameOnlyRegisteredTools(t *testing.T) {
+	modes := []struct {
+		name string
+		cfg  config.Config
+	}{
+		{"default", config.Config{DefaultWriteMode: config.WriteDirect}},
+		{"read-only", config.Config{ReadOnly: true, DefaultWriteMode: config.WriteDirect}},
+		{"destructive", config.Config{EnableDestructive: true, DefaultWriteMode: config.WriteDirect}},
+	}
+
+	// Every name this server can register in any configuration, so the
+	// check tests the instructions against a real vocabulary rather than
+	// against whatever it can parse out of prose.
+	every := map[string]bool{}
+	for _, m := range modes {
+		s := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, m.cfg)
+		res, err := s.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tool := range res.Tools {
+			every[tool.Name] = true
+		}
+	}
+	if len(every) < 20 {
+		t.Fatalf("only %d tool names across every mode; the check is not reading the server", len(every))
+	}
+
+	for _, m := range modes {
+		t.Run(m.name, func(t *testing.T) {
+			s := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, m.cfg)
+			res, err := s.ListTools(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			registered := map[string]bool{}
+			for _, tool := range res.Tools {
+				registered[tool.Name] = true
+			}
+
+			// Read them the way a client does, from the initialize
+			// result, rather than from the function that builds them.
+			init := s.InitializeResult()
+			if init == nil {
+				t.Fatal("no initialize result; the session did not handshake")
+			}
+			text := init.Instructions
+			if text == "" {
+				t.Fatal("the server sent no instructions at all")
+			}
+			named := 0
+			for name := range every {
+				if !strings.Contains(text, name) {
+					continue
+				}
+				named++
+				if !registered[name] {
+					t.Errorf("the instructions tell the model to use %s, which this configuration does not register",
+						name)
+				}
+			}
+			if named < 3 {
+				t.Errorf("the instructions name %d tools; they are not describing this server", named)
+			}
+		})
+	}
+}

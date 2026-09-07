@@ -70,6 +70,16 @@ and new required fields are breaking; the schema diff in CI flags them.
   the code never requests.
 
 ### Fixed
+- A read-only server no longer advertises tools it does not register. The
+  server instructions were one constant while `GDOCS_READ_ONLY=true` drops
+  six groups of tools, so a read-only server opened by telling the model
+  to "edit with edit_document and format_document" and then registered
+  neither. They are built for the configuration now, and the read-only
+  text says whose limit it is: a model that cannot tell "this server was
+  started without writes" from "Google Docs cannot do that" reports the
+  wrong one to the person who asked. Every test that read the
+  instructions had built the default surface, which is why nothing caught
+  it; the new one builds all three.
 - The README lists four OAuth scopes and never said why, so the first
   outside reader to check what `login` actually requests found two of them
   and concluded the other two were dead. They are not: a normal login asks

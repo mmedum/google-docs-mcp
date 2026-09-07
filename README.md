@@ -99,6 +99,14 @@ is no shared app and nothing to verify with Google.
      for such apps after 7 days, so you will run `login` weekly.
 4. Add scopes (Google Auth Platform → Data Access): `.../auth/documents`,
    `.../auth/documents.readonly`, `.../auth/drive`, `.../auth/drive.readonly`.
+
+   All four, though one login never asks for more than two of them: a
+   normal login requests `documents` and `drive`, and `GDOCS_READ_ONLY=true`
+   requests `documents.readonly` and `drive.readonly` instead. The consent
+   screen lists what the client may ask for, so it has to cover both, and
+   a scope it has not been given is refused at the moment somebody first
+   tries read-only mode. Google grants only what is requested, so listing
+   the read-only pair costs a normal login nothing.
 5. Create an OAuth client (Google Auth Platform → Clients) of type
    **Desktop app**, download its JSON, and store it as
    `~/.config/google-docs-mcp/client_secret.json` (Linux; the

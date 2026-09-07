@@ -56,6 +56,14 @@ and new required fields are breaking; the schema diff in CI flags them.
   other.
 
 ### Fixed
+- The README lists four OAuth scopes and never said why, so the first
+  outside reader to check what `login` actually requests found two of them
+  and concluded the other two were dead. They are not: a normal login asks
+  for `documents` and `drive`, and `GDOCS_READ_ONLY=true` asks for the
+  `.readonly` pair instead, so a consent screen has to carry both or
+  read-only mode is refused the first time somebody tries it. The
+  instruction was right and unexplained, which for a setup step is the
+  same as wrong.
 - The parity gate called a gate missing when a `run: |` block ran it.
   Requiring the command on the `run:` line itself was safe here — nothing
   in the workflow is a block scalar — and wrong in general: it fails

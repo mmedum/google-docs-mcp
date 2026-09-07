@@ -103,13 +103,7 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	if file, err := s.api.GetFile(ctx, id); err == nil && file.Name != "" {
 		title = file.Name
 	}
-	name := strings.TrimSpace(unsafeName.ReplaceAllString(title, " "))
-	if name == "" {
-		name = "document"
-	}
-	if len(name) > 80 {
-		name = name[:80]
-	}
+	name := fileName(title)
 	dir := filepath.Clean(s.opts.ExportDir)
 	path := filepath.Join(dir, fmt.Sprintf("%s-%s.%s", name, gapi.ShortID(id), format))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -121,4 +115,26 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	res.Path = path
 	res.Text = fmt.Sprintf("exported %q as %s to %s (%d bytes)", title, format, path, len(data))
 	return res, nil
+}
+
+// fileName turns a document title into a name a person can recognise in
+// a directory listing.
+//
+// Two things an outside user hit, both in the sentence this replaces.
+// Substituting a space for each run of unsafe characters turned the
+// comma in "Poem, typeset" into a second space, because the space after
+// the comma was safe and survived; collapsing runs afterwards is what
+// makes a title with punctuation come out looking deliberate. And the
+// 80-character limit was a byte slice, so a title with any multi-byte
+// character in the wrong place was cut through the middle of a rune —
+// unreported, because it needs a long title in a language whose
+// characters are not one byte each, which nobody here had exported.
+func fileName(title string) string {
+	// strings.Fields both collapses the runs and trims the ends.
+	name := strings.Join(strings.Fields(unsafeName.ReplaceAllString(title, " ")), " ")
+	if name == "" {
+		return "document"
+	}
+	clipped, _ := clipUTF8(name, 80)
+	return strings.TrimSpace(clipped)
 }

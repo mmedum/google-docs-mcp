@@ -375,7 +375,7 @@ func TestHelpers(t *testing.T) {
 	if got := redactPath("https://www.googleapis.com/drive/v3/files/1AbCdEfGhIjKlMnOp/comments"); strings.Contains(got, "1AbCdE") {
 		t.Fatalf("redactPath left part of the id: %q", got)
 	}
-	if ShortID("abc") != "abc" || ShortID("abcdefgh") != "abcdef…" {
+	if ShortID("abc") != "abc" || ShortID("abcdefgh") != "abcdef" {
 		t.Fatal("ShortID")
 	}
 	if got := parseRetryAfter("7"); got != 7*time.Second {

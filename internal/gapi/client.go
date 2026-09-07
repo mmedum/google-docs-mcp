@@ -303,9 +303,16 @@ var idInPath = regexp.MustCompile(`/(documents|files)/([^/?]+)`)
 // has to recognise, never for a log: §12 promises a log carries nothing
 // about the document, and six characters of an id is still six
 // characters of an id.
+//
+// It used to end a shortened id with U+2026, which reads well in prose
+// and badly in a filename: an outside user reported it, and they were
+// right. A character outside ASCII in a name a person has to type, tab
+// complete, quote in a shell or move between filesystems buys nothing
+// here — the id fragment is there to tell two exports of the same title
+// apart, and it does that without announcing that it is short.
 func ShortID(id string) string {
 	if len(id) > 6 {
-		return id[:6] + "…"
+		return id[:6]
 	}
 	return id
 }

@@ -80,6 +80,16 @@ and new required fields are breaking; the schema diff in CI flags them.
   wrong one to the person who asked. Every test that read the
   instructions had built the default surface, which is why nothing caught
   it; the new one builds all three.
+- Exported filenames. Three things in one sentence, two of them reported
+  by the first outside person to export a document. A comma in the title
+  became two spaces, because each run of unsafe characters was replaced
+  with a space and the space after the comma was safe and survived. A
+  shortened id ended in U+2026, which reads well in prose and badly in a
+  name somebody has to type, tab complete or move between filesystems.
+  And the 80-character limit was a byte slice, so a title in a language
+  whose characters are not one byte each was cut through the middle of a
+  rune — unreported, because catching it needs a long title nobody here
+  had exported.
 - The README lists four OAuth scopes and never said why, so the first
   outside reader to check what `login` actually requests found two of them
   and concluded the other two were dead. They are not: a normal login asks

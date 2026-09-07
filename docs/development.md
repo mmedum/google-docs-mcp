@@ -69,13 +69,13 @@ and are preferred by the Makefile; install them with
   though nothing runs them on a pull request. It is part of `make vet`
   and of CI, along with the `live` and `evals` passes; the parity gate is
   what holds those two lists to the same set.
-- **The gates are Go, and tested.** `scripts/gates` holds all eight: the
+- **The gates are Go, and tested.** `scripts/gates` holds all nine: the
   coverage floor, the staleness check, the schema diff, the stdio smoke
   test, the identifier scan, the workflow pin check, the error-class
-  check and the parity check. Seven have tests of their own, `go test
-  ./scripts/gates`, each watched to fail before it was trusted; the
-  schema diff is a drive of the built binary, so `make check` running it
-  is the test. They were shell scripts until
+  check, the API-coverage check and the parity check. Eight have tests of
+  their own, `go test ./scripts/gates`, each watched to fail before it
+  was trusted; the schema diff is a drive of the built binary, so `make
+  check` running it is the test. They were shell scripts until
   two of them went wrong in ways bash made easy: a hand-written package
   list that fell behind without a sound, and a staleness rule that
   failed on the release pull request it was written to guard. Each
@@ -84,6 +84,26 @@ and are preferred by the Makefile; install them with
   the smoke test and the schema-diff worktree driver were the last two,
   and `make check` runs on the Windows runner, where bash is a
   dependency rather than a given.
+- **Every method Google publishes has a verdict.** `make api-coverage`
+  holds three things to each other: `testdata/api-methods.json`, which is
+  every method of the Docs and Drive APIs as their discovery documents
+  publish them; `testdata/api-coverage.tsv`, one line per method saying
+  `used` (naming the `internal/gapi` method that implements it) or `out`
+  (with the reason); and the client itself, read out of the syntax. A
+  method Google adds fails the build until somebody judges it, and a call
+  the client makes with no row fails it too.
+
+  `make api-diff` refetches and rewrites the snapshot, reporting NEW,
+  GONE and CHANGED with the verb and path — a method that keeps its name
+  and moves is a break a list of names would hide. It is the only thing
+  here that touches the network and it is deliberately **not** a gate: a
+  check that fails when Google is slow is one people learn to rerun until
+  it passes. The snapshot it writes is what CI reads, so completeness is
+  still checked on every pull request.
+
+  Nobody edits the JSON and nothing generates the TSV. Keeping the verb
+  and path in the machine's file is the point: a sibling put them in the
+  hand-kept one, where the only check on them was a target CI never ran.
 - **Before a release, scan the history**: `LEAKCHECK_HISTORY=1 go test
   ./scripts/gates -run TestHistoryCarriesNoIdentifiers` reads every
   blob ever committed, which the ordinary run does not — a file that

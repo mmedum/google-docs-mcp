@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format is
 follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
+## [Unreleased]
+
+### Added
+- An API-coverage gate. `make api-coverage` holds three things to each
+  other: every method the Docs and Drive discovery documents publish, one
+  hand-written verdict per method (`used`, naming the `internal/gapi`
+  method that implements it, or `out` with a reason), and the client's own
+  calls read out of the syntax. A capability Google adds now fails the
+  build until somebody judges it, and a call with no row fails it too —
+  67 methods published, 17 used. `make api-diff` refetches and rewrites
+  the snapshot, reporting what is new, gone or moved; it is the only thing
+  here that touches the network and deliberately not a gate, because a
+  check that fails when Google is slow is one people learn to rerun until
+  it passes. The snapshot it writes is what CI reads, so completeness is
+  checked on every pull request rather than whenever somebody remembers.
+  Watched failing four ways. The two-file split, and both traps it avoids,
+  came from the chat server building the same gate first.
+
 ## [1.0.1] - 2026-09-07
 
 ### Added

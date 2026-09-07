@@ -1,0 +1,76 @@
+# One verdict per published API method. A person writes this file; nothing generates it.
+# The published list lives in api-methods.json, which `gates api-diff` writes and nobody edits.
+#
+# used	the reason names the method in internal/gapi that implements it
+# out	the reason says why this server deliberately does not call it
+#
+# api	method	verdict	reason
+
+docs	documents.batchUpdate	used	BatchUpdate
+docs	documents.create	used	CreateDocument
+docs	documents.get	used	GetDocument
+
+drive	about.get	used	About
+drive	accessproposals.get	out	access requests are a sharing workflow, and sharing is Drive's
+drive	accessproposals.list	out	access requests are a sharing workflow, and sharing is Drive's
+drive	accessproposals.resolve	out	access requests are a sharing workflow, and sharing is Drive's
+drive	approvals.approve	out	Workspace administration surface, not a document operation
+drive	approvals.cancel	out	Workspace administration surface, not a document operation
+drive	approvals.comment	out	Workspace administration surface, not a document operation
+drive	approvals.decline	out	Workspace administration surface, not a document operation
+drive	approvals.get	out	Workspace administration surface, not a document operation
+drive	approvals.list	out	Workspace administration surface, not a document operation
+drive	approvals.reassign	out	Workspace administration surface, not a document operation
+drive	approvals.start	out	Workspace administration surface, not a document operation
+drive	apps.get	out	installed Drive apps; nothing here dispatches to another application
+drive	apps.list	out	installed Drive apps; nothing here dispatches to another application
+drive	changes.getStartPageToken	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
+drive	changes.list	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
+drive	changes.watch	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
+drive	channels.stop	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
+drive	comments.create	used	CreateComment
+drive	comments.delete	used	DeleteComment
+drive	comments.get	used	GetComment
+drive	comments.list	used	ListComments
+drive	comments.update	used	UpdateComment
+drive	drives.create	out	shared drive administration, covered by google-drive-mcp
+drive	drives.delete	out	shared drive administration, covered by google-drive-mcp
+drive	drives.get	out	shared drive administration, covered by google-drive-mcp
+drive	drives.hide	out	shared drive administration, covered by google-drive-mcp
+drive	drives.list	out	shared drive administration, covered by google-drive-mcp
+drive	drives.unhide	out	shared drive administration, covered by google-drive-mcp
+drive	drives.update	out	shared drive administration, covered by google-drive-mcp
+drive	files.copy	out	file-level Drive concern, covered by the sibling google-drive-mcp; this server edits what is inside a document
+drive	files.create	out	a document is created through docs documents.create, which returns the document itself; creating a file of another kind is Drive's
+drive	files.delete	out	hard rule 4 keeps deletion to comments and tabs; deleting the file is a different act with Drive's trash behind it
+drive	files.download	used	ExportRevision
+drive	files.emptyTrash	out	account-wide and unscopeable: the worst call it can express empties the whole trash
+drive	files.export	used	Export
+drive	files.generateCseToken	out	client-side encryption, which the Docs API this server writes through does not support
+drive	files.generateIds	out	pre-allocated ids matter for resumable uploads, which this server does not do
+drive	files.get	used	GetFile
+drive	files.list	used	SearchFiles
+drive	files.listLabels	out	Drive labels, which google-drive-mcp registers behind GDRIVE_LABELS
+drive	files.modifyLabels	out	Drive labels, which google-drive-mcp registers behind GDRIVE_LABELS
+drive	files.update	out	renaming, moving and trashing are file metadata; the tool surface changes content, not the file
+drive	files.watch	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
+drive	operations.get	out	long-running operation polling; no call this server makes returns one
+drive	permissions.create	out	sharing is Drive's, and a Docs server that could grant access would widen what a leaked token reaches
+drive	permissions.delete	out	sharing is Drive's, and a Docs server that could revoke access would widen what a leaked token reaches
+drive	permissions.get	out	file-level Drive concern, covered by the sibling google-drive-mcp; this server edits what is inside a document
+drive	permissions.list	out	file-level Drive concern, covered by the sibling google-drive-mcp; this server edits what is inside a document
+drive	permissions.update	out	file-level Drive concern, covered by the sibling google-drive-mcp; this server edits what is inside a document
+drive	replies.create	used	CreateReply
+drive	replies.delete	used	DeleteReply
+drive	replies.get	out	a reply arrives with its thread from comments.list; fetching one alone is a round trip for data already in hand
+drive	replies.list	out	replies come nested in comments.list, which is how list_comments returns whole threads
+drive	replies.update	used	UpdateReply
+drive	revisions.delete	out	removing a revision destroys history this server exists to read
+drive	revisions.get	out	the revision's metadata comes from revisions.list and its bytes from files.download; this adds a round trip for neither
+drive	revisions.list	used	ListRevisions
+drive	revisions.update	out	keeping a revision forever is file history management rather than reading it
+drive	teamdrives.create	out	Drive's own superseded alias for the drives resource; the replacement is out of scope too
+drive	teamdrives.delete	out	Drive's own superseded alias for the drives resource; the replacement is out of scope too
+drive	teamdrives.get	out	Drive's own superseded alias for the drives resource; the replacement is out of scope too
+drive	teamdrives.list	out	Drive's own superseded alias for the drives resource; the replacement is out of scope too
+drive	teamdrives.update	out	Drive's own superseded alias for the drives resource; the replacement is out of scope too

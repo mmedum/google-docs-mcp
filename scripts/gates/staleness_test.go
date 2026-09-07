@@ -173,3 +173,46 @@ func TestStatusProblemsWithNoStatusLine(t *testing.T) {
 		t.Errorf("after a release a missing status line is a problem, got: %v", got)
 	}
 }
+
+// The README's scope list against what login requests. The setup step is
+// followed exactly once, by somebody who cannot tell it failed until a
+// login is refused, which is why it needs a gate rather than a proofread.
+func TestScopesAgree(t *testing.T) {
+	wanted := []string{
+		"https://www.googleapis.com/auth/documents",
+		"https://www.googleapis.com/auth/drive",
+	}
+	cases := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"both, abbreviated as the README writes them", "add `.../auth/documents` and `.../auth/drive`", ""},
+		{"both, written in full", "add https://www.googleapis.com/auth/documents and https://www.googleapis.com/auth/drive", ""},
+		{"one missing", "add `.../auth/documents`", "does not list the OAuth scope"},
+		{"none at all", "add the two scopes below", "does not list the OAuth scope"},
+		{"one the code never requests", "`.../auth/documents`, `.../auth/drive`, `.../auth/drive.metadata`", "which login never requests"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := strings.Join(scopesAgree(c.text, wanted), "\n")
+			if c.want == "" {
+				if got != "" {
+					t.Errorf("expected no problem; got %s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, c.want) {
+				t.Errorf("no problem containing %q; got %q", c.want, got)
+			}
+		})
+	}
+}
+
+// A derivation that reads nothing must say so rather than pass.
+func TestScopesAgreeRefusesAnEmptyDerivation(t *testing.T) {
+	got := scopesAgree("anything at all", []string{"https://www.googleapis.com/auth/documents"})
+	if len(got) != 1 || !strings.Contains(got[0], "not reading the code") {
+		t.Errorf("a one-scope derivation should be refused; got %v", got)
+	}
+}

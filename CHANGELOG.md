@@ -55,6 +55,20 @@ and new required fields are breaking; the schema diff in CI flags them.
   parity gate all read the same list, so they cannot drift from each
   other.
 
+### Added
+- The staleness gate holds the README's OAuth scope list to the scopes
+  `login` actually requests, derived from `auth.Scopes` rather than typed
+  out. The setup step is the one page a person follows exactly once, with
+  no way to tell it was wrong until a login is refused, and no gate
+  compared it with the code. All four sibling servers had a version of
+  this: one listed four scopes and explained none, one listed a single
+  scope where `login` can request five under feature flags, and one said
+  "add the two scopes below" and then listed none at all, in a released
+  README. A feature-gated scope is the one nobody notices, because it is
+  absent from every run that does not use the feature. Watched failing in
+  both directions — a scope dropped from the README, and one listed that
+  the code never requests.
+
 ### Fixed
 - The README lists four OAuth scopes and never said why, so the first
   outside reader to check what `login` actually requests found two of them

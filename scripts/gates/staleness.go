@@ -6,8 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+
+	"github.com/mmedum/google-docs-mcp/internal/auth"
 )
 
 var (
@@ -55,6 +58,8 @@ func staleness(bin string) error {
 	if len(registered) == 0 {
 		return fmt.Errorf("the binary registered no tools; the check is not looking at a server")
 	}
+
+	problems = append(problems, scopeProblems()...)
 
 	readme, err := os.ReadFile("README.md")
 	if err != nil {
@@ -327,4 +332,67 @@ func describeVersion(v string) string {
 		return "absent"
 	}
 	return "v" + v
+}
+
+// scopeProblems holds the README's OAuth scope list to the scopes the
+// code actually requests.
+//
+// The setup step is the one page a person follows exactly once, with no
+// way to tell whether it worked until a login fails, and no gate here
+// compared it with the code. An outside reader following it found four
+// scopes listed, checked what `login` sends, saw two, and reported the
+// other two as dead — they belong to read-only mode, so the instruction
+// was right and unexplained. Two sibling servers had the same blind spot
+// and worse: one listed a single scope where login can request five under
+// feature flags, and one said "add the two scopes below" and then listed
+// none at all, in a released README. A feature-gated scope is the one
+// nobody notices, because it is absent from every run that does not use
+// the feature.
+//
+// The list is derived from auth.Scopes rather than typed here, so adding
+// a scope fails this until the README says so.
+func scopeProblems() []string {
+	wanted := append(auth.Scopes(false), auth.Scopes(true)...)
+	slices.Sort(wanted)
+	wanted = slices.Compact(wanted)
+
+	readme, err := os.ReadFile("README.md")
+	if err != nil {
+		return []string{"README.md: " + err.Error()}
+	}
+	return scopesAgree(string(readme), wanted)
+}
+
+// scopesAgree is the rule itself, over the README's text. It is split
+// from the reading because a fix that lives in the reader is one any
+// caller can walk past — a sibling put the same comment stripping in its
+// file loader and watched its own tests bypass it.
+func scopesAgree(text string, wanted []string) []string {
+	if len(wanted) < 2 {
+		return []string{"auth.Scopes returned fewer than two scopes; the derivation is not reading the code"}
+	}
+
+	var problems []string
+	for _, scope := range wanted {
+		// The README writes them abbreviated, as `.../auth/documents`.
+		if !strings.Contains(text, scope) && !strings.Contains(text, shortScope(scope)) {
+			problems = append(problems, "README does not list the OAuth scope "+scope+
+				", which login requests; a consent screen built from it will refuse that mode")
+		}
+	}
+	for _, found := range readmeScopes.FindAllStringSubmatch(text, -1) {
+		if !slices.Contains(wanted, "https://www.googleapis.com/auth/"+found[1]) {
+			problems = append(problems, "README lists the OAuth scope "+found[1]+
+				", which login never requests; a reader who checks will find it missing and doubt the rest")
+		}
+	}
+	return problems
+}
+
+// readmeScopes matches a scope however the README abbreviates it.
+var readmeScopes = regexp.MustCompile(`(?:https://www\.googleapis\.com|\.\.\.)/auth/([a-z.]+)`)
+
+// shortScope is the abbreviation the README uses in prose.
+func shortScope(scope string) string {
+	return ".../auth/" + strings.TrimPrefix(scope, "https://www.googleapis.com/auth/")
 }

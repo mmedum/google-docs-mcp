@@ -34,6 +34,12 @@ type DocumentResult struct {
 func (c *Client) GetDocument(ctx context.Context, id string, o GetOptions) (*DocumentResult, error) {
 	q := url.Values{}
 	q.Set("includeTabsContent", "true")
+	// Google indents its JSON unless told not to, which on a 150-page
+	// document is 58% of the bytes on the wire (measured live) for
+	// whitespace nothing reads. It costs more than bandwidth now that
+	// StructuralElement keeps the bytes it decoded from, because
+	// retained indentation is retained memory.
+	q.Set("prettyPrint", "false")
 	if o.SuggestionsViewMode != "" {
 		q.Set("suggestionsViewMode", o.SuggestionsViewMode)
 	}

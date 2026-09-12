@@ -5,6 +5,8 @@
 // tags follow the API.
 package gdocs
 
+import "encoding/json"
+
 // Document is the documents.get response.
 type Document struct {
 	DocumentID          string                      `json:"documentId,omitempty"`
@@ -22,6 +24,9 @@ type Document struct {
 	DocumentStyle       *DocumentStyle              `json:"documentStyle,omitempty"`
 	NamedStyles         *NamedStyles                `json:"namedStyles,omitempty"`
 	Tabs                []*Tab                      `json:"tabs,omitempty"`
+	// Pending suggestions to the document-wide styles.
+	SuggestedDocumentStyleChanges map[string]SuggestedDocumentStyle `json:"suggestedDocumentStyleChanges,omitempty"`
+	SuggestedNamedStylesChanges   map[string]SuggestedNamedStyles   `json:"suggestedNamedStylesChanges,omitempty"`
 	// Developer Preview fields, populated when commentsViewMode asks for them.
 	Comments    []CommentThread    `json:"comments,omitempty"`
 	Suggestions []SuggestionThread `json:"suggestions,omitempty"`
@@ -82,6 +87,23 @@ func WalkTabs(tabs []*Tab, fn func(*Tab) bool) bool {
 	return true
 }
 
+// DocumentTabs flattens a response's tabs into their content, parents
+// before children, skipping the tabs that carry none. Every caller that
+// wants a tab's id-keyed collections wants this rather than WalkTabs.
+func DocumentTabs(d *Document) []*DocumentTab {
+	if d == nil {
+		return nil
+	}
+	var out []*DocumentTab
+	WalkTabs(d.Tabs, func(t *Tab) bool {
+		if t.DocumentTab != nil {
+			out = append(out, t.DocumentTab)
+		}
+		return true
+	})
+	return out
+}
+
 // TabProperties identify and place a tab.
 type TabProperties struct {
 	TabID        string `json:"tabId,omitempty"`
@@ -113,6 +135,32 @@ type DocumentTab struct {
 	// CommentAnchors map anchor ids to ranges (Developer Preview, with
 	// commentsViewMode).
 	CommentAnchors map[string]CommentAnchor `json:"commentAnchors,omitempty"`
+	// Pending suggestions to the document-wide styles.
+	SuggestedDocumentStyleChanges map[string]SuggestedDocumentStyle `json:"suggestedDocumentStyleChanges,omitempty"`
+	SuggestedNamedStylesChanges   map[string]SuggestedNamedStyles   `json:"suggestedNamedStylesChanges,omitempty"`
+}
+
+// UnmarshalJSON decodes the element and keeps the bytes it came from.
+// The alias is what stops it recursing into itself.
+func (s *StructuralElement) UnmarshalJSON(data []byte) error {
+	type plain StructuralElement
+	if err := json.Unmarshal(data, (*plain)(s)); err != nil {
+		return err
+	}
+	// Copied, not aliased: json.Unmarshal makes no promise about the
+	// lifetime of what it hands an UnmarshalJSON method.
+	s.raw = append(json.RawMessage(nil), data...)
+	return nil
+}
+
+// RawJSON is the element exactly as the API sent it, or nil for an
+// element that came from somewhere other than a response — a fixture
+// built in Go, or one this server constructed.
+func (s *StructuralElement) RawJSON() json.RawMessage {
+	if s == nil {
+		return nil
+	}
+	return s.raw
 }
 
 // CommentAnchor is where a comment thread is pinned (Developer Preview).
@@ -125,6 +173,10 @@ type CommentAnchor struct {
 type PositionedObject struct {
 	ObjectID                   string                      `json:"objectId,omitempty"`
 	PositionedObjectProperties *PositionedObjectProperties `json:"positionedObjectProperties,omitempty"`
+
+	SuggestedInsertionID                       string                                         `json:"suggestedInsertionId,omitempty"`
+	SuggestedDeletionIDs                       []string                                       `json:"suggestedDeletionIds,omitempty"`
+	SuggestedPositionedObjectPropertiesChanges map[string]SuggestedPositionedObjectProperties `json:"suggestedPositionedObjectPropertiesChanges,omitempty"`
 }
 
 // PositionedObjectProperties wrap the embedded object and its placement.
@@ -225,7 +277,24 @@ type Suggested struct {
 	SuggestedDeletionIDs  []string `json:"suggestedDeletionIds,omitempty"`
 }
 
+// SuggestedStyle carries the suggested text-style changes every inline
+// element can have, keyed by suggestion id. It is separate from
+// Suggested because the block-level elements that embed Suggested — a
+// table, a section break, an equation — have insertion and deletion ids
+// but no text style of their own to change.
+type SuggestedStyle struct {
+	SuggestedTextStyleChanges map[string]SuggestedTextStyle `json:"suggestedTextStyleChanges,omitempty"`
+}
+
 // StructuralElement is one block of a segment.
+//
+// It keeps the bytes it was decoded from, because read_document's
+// format: raw promises "the Docs API JSON" and a round trip through
+// these types can only ever return the fields these types model. That
+// was not a theoretical gap: it is how #46 came to be filed as a silent
+// write failure, when the write had worked and the raw read was dropping
+// the field that proved it. Nine types still model fewer fields than the
+// API publishes; with the bytes kept, format: raw stops caring.
 type StructuralElement struct {
 	StartIndex      int64            `json:"startIndex,omitempty"`
 	EndIndex        int64            `json:"endIndex,omitempty"`
@@ -233,6 +302,9 @@ type StructuralElement struct {
 	Table           *Table           `json:"table,omitempty"`
 	SectionBreak    *SectionBreak    `json:"sectionBreak,omitempty"`
 	TableOfContents *TableOfContents `json:"tableOfContents,omitempty"`
+
+	// raw is the element as it arrived; see the type comment.
+	raw json.RawMessage
 }
 
 // Paragraph is a paragraph block.
@@ -241,6 +313,12 @@ type Paragraph struct {
 	ParagraphStyle      *ParagraphStyle     `json:"paragraphStyle,omitempty"`
 	Bullet              *Bullet             `json:"bullet,omitempty"`
 	PositionedObjectIDs []string            `json:"positionedObjectIds,omitempty"`
+	// The pending suggestions on the paragraph itself, keyed by
+	// suggestion id: its style, its list membership, and the floating
+	// objects a suggestion would anchor to it.
+	SuggestedParagraphStyleChanges map[string]SuggestedParagraphStyle `json:"suggestedParagraphStyleChanges,omitempty"`
+	SuggestedBulletChanges         map[string]SuggestedBullet         `json:"suggestedBulletChanges,omitempty"`
+	SuggestedPositionedObjectIDs   map[string]ObjectReferences        `json:"suggestedPositionedObjectIds,omitempty"`
 }
 
 // ParagraphStyle is paragraph formatting. Every field the API accepts on
@@ -324,6 +402,7 @@ type ParagraphElement struct {
 // TextRun is styled text.
 type TextRun struct {
 	Suggested
+	SuggestedStyle
 	Content   string     `json:"content,omitempty"`
 	TextStyle *TextStyle `json:"textStyle,omitempty"`
 }
@@ -384,6 +463,7 @@ type HeadingLink struct {
 // InlineObjectElement references an inline object.
 type InlineObjectElement struct {
 	Suggested
+	SuggestedStyle
 	InlineObjectID string     `json:"inlineObjectId,omitempty"`
 	TextStyle      *TextStyle `json:"textStyle,omitempty"`
 }
@@ -391,6 +471,7 @@ type InlineObjectElement struct {
 // FootnoteReference marks a footnote in the body.
 type FootnoteReference struct {
 	Suggested
+	SuggestedStyle
 	FootnoteID     string     `json:"footnoteId,omitempty"`
 	FootnoteNumber string     `json:"footnoteNumber,omitempty"`
 	TextStyle      *TextStyle `json:"textStyle,omitempty"`
@@ -399,12 +480,14 @@ type FootnoteReference struct {
 // Break is a page break, column break or horizontal rule.
 type Break struct {
 	Suggested
+	SuggestedStyle
 	TextStyle *TextStyle `json:"textStyle,omitempty"`
 }
 
 // Person is a people chip.
 type Person struct {
 	Suggested
+	SuggestedStyle
 	PersonID         string            `json:"personId,omitempty"`
 	PersonProperties *PersonProperties `json:"personProperties,omitempty"`
 	TextStyle        *TextStyle        `json:"textStyle,omitempty"`
@@ -419,6 +502,7 @@ type PersonProperties struct {
 // RichLink is a smart chip linking to a Drive file or URL.
 type RichLink struct {
 	Suggested
+	SuggestedStyle
 	RichLinkID         string              `json:"richLinkId,omitempty"`
 	RichLinkProperties *RichLinkProperties `json:"richLinkProperties,omitempty"`
 	TextStyle          *TextStyle          `json:"textStyle,omitempty"`
@@ -434,9 +518,12 @@ type RichLinkProperties struct {
 // DateElement is a date chip.
 type DateElement struct {
 	Suggested
+	SuggestedStyle
 	DateID                string                 `json:"dateId,omitempty"`
 	DateElementProperties *DateElementProperties `json:"dateElementProperties,omitempty"`
 	TextStyle             *TextStyle             `json:"textStyle,omitempty"`
+
+	SuggestedDateElementPropertiesChanges map[string]SuggestedDateElementProperties `json:"suggestedDateElementPropertiesChanges,omitempty"`
 }
 
 // DateElementProperties describe the date chip.
@@ -452,6 +539,7 @@ type DateElementProperties struct {
 // AutoText is generated text such as a page number.
 type AutoText struct {
 	Suggested
+	SuggestedStyle
 	Type      string     `json:"type,omitempty"`
 	TextStyle *TextStyle `json:"textStyle,omitempty"`
 }
@@ -462,6 +550,21 @@ type Table struct {
 	Rows      int64       `json:"rows,omitempty"`
 	Columns   int64       `json:"columns,omitempty"`
 	TableRows []*TableRow `json:"tableRows,omitempty"`
+	// TableStyle holds the column widths edit_table's style_columns op
+	// sets through updateTableColumnProperties; this is where a read
+	// finds them again.
+	TableStyle *TableStyle `json:"tableStyle,omitempty"`
+}
+
+// TableStyle is a table's column properties.
+type TableStyle struct {
+	TableColumnProperties []TableColumnProperties `json:"tableColumnProperties,omitempty"`
+}
+
+// TableColumnProperties is one column's width and how it was set.
+type TableColumnProperties struct {
+	WidthType string     `json:"widthType,omitempty"`
+	Width     *Dimension `json:"width,omitempty"`
 }
 
 // TableRow is one row.
@@ -470,6 +573,13 @@ type TableRow struct {
 	StartIndex int64        `json:"startIndex,omitempty"`
 	EndIndex   int64        `json:"endIndex,omitempty"`
 	TableCells []*TableCell `json:"tableCells,omitempty"`
+	// TableRowStyle carries the pinned-header flag pin_header_rows sets
+	// and the minimum height style_rows sets. The suggestion map beside
+	// it arrived first, which left this type able to report a suggested
+	// change to a row height it could not report the height of.
+	TableRowStyle *TableRowStyle `json:"tableRowStyle,omitempty"`
+
+	SuggestedTableRowStyleChanges map[string]SuggestedTableRowStyle `json:"suggestedTableRowStyleChanges,omitempty"`
 }
 
 // TableCell is one cell with nested content.
@@ -479,6 +589,8 @@ type TableCell struct {
 	EndIndex       int64                `json:"endIndex,omitempty"`
 	Content        []*StructuralElement `json:"content,omitempty"`
 	TableCellStyle *TableCellStyle      `json:"tableCellStyle,omitempty"`
+
+	SuggestedTableCellStyleChanges map[string]SuggestedTableCellStyle `json:"suggestedTableCellStyleChanges,omitempty"`
 }
 
 // TableCellStyle is the subset of cell formatting we read.
@@ -520,6 +632,30 @@ type SectionStyle struct {
 	DefaultFooterID   string `json:"defaultFooterId,omitempty"`
 	FirstPageHeaderID string `json:"firstPageHeaderId,omitempty"`
 	FirstPageFooterID string `json:"firstPageFooterId,omitempty"`
+	EvenPageHeaderID  string `json:"evenPageHeaderId,omitempty"`
+	EvenPageFooterID  string `json:"evenPageFooterId,omitempty"`
+	// Everything layout_document's section_style op writes. It wrote all
+	// of it and could read none of it back until the api-fields gate
+	// asked why, which is the asymmetry that gate exists to find: a
+	// person could set a section's margins and no read would show them.
+	ColumnProperties         []SectionColumnProperties `json:"columnProperties,omitempty"`
+	ColumnSeparatorStyle     string                    `json:"columnSeparatorStyle,omitempty"`
+	ContentDirection         string                    `json:"contentDirection,omitempty"`
+	MarginTop                *Dimension                `json:"marginTop,omitempty"`
+	MarginBottom             *Dimension                `json:"marginBottom,omitempty"`
+	MarginLeft               *Dimension                `json:"marginLeft,omitempty"`
+	MarginRight              *Dimension                `json:"marginRight,omitempty"`
+	MarginHeader             *Dimension                `json:"marginHeader,omitempty"`
+	MarginFooter             *Dimension                `json:"marginFooter,omitempty"`
+	PageNumberStart          int64                     `json:"pageNumberStart,omitempty"`
+	FlipPageOrientation      bool                      `json:"flipPageOrientation,omitempty"`
+	UseFirstPageHeaderFooter bool                      `json:"useFirstPageHeaderFooter,omitempty"`
+}
+
+// SectionColumnProperties is one column of a multi-column section.
+type SectionColumnProperties struct {
+	Width   *Dimension `json:"width,omitempty"`
+	Padding *Dimension `json:"paddingEnd,omitempty"`
 }
 
 // TableOfContents is a generated, read-only block.
@@ -531,6 +667,12 @@ type TableOfContents struct {
 // List describes a list's nesting levels.
 type List struct {
 	ListProperties *ListProperties `json:"listProperties,omitempty"`
+	// A list, an inline object and a positioned object carry one
+	// suggestedInsertionId rather than a list of them: the thing either
+	// came in with a suggestion or it did not.
+	SuggestedInsertionID           string                             `json:"suggestedInsertionId,omitempty"`
+	SuggestedDeletionIDs           []string                           `json:"suggestedDeletionIds,omitempty"`
+	SuggestedListPropertiesChanges map[string]SuggestedListProperties `json:"suggestedListPropertiesChanges,omitempty"`
 }
 
 // ListProperties hold the nesting levels.
@@ -550,6 +692,10 @@ type NestingLevel struct {
 type InlineObject struct {
 	ObjectID               string                  `json:"objectId,omitempty"`
 	InlineObjectProperties *InlineObjectProperties `json:"inlineObjectProperties,omitempty"`
+
+	SuggestedInsertionID                   string                                     `json:"suggestedInsertionId,omitempty"`
+	SuggestedDeletionIDs                   []string                                   `json:"suggestedDeletionIds,omitempty"`
+	SuggestedInlineObjectPropertiesChanges map[string]SuggestedInlineObjectProperties `json:"suggestedInlineObjectPropertiesChanges,omitempty"`
 }
 
 // InlineObjectProperties wrap the embedded object.

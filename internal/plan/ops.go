@@ -122,6 +122,10 @@ type Op struct {
 	// CommentAnchor is where a comment-mode proposal attaches. Defaults to Target.
 	CommentAnchor *Rng
 	Anchors       []Anchor
+	// Restyled are the pending suggested formatting changes covering the
+	// target, which the guard checks against what this op sets. The
+	// service fills it for the formatting ops only.
+	Restyled []doc.StyleChange
 
 	// TableAt is the start of the table a table op works on.
 	TableAt *Loc
@@ -444,8 +448,116 @@ func keyIndex(op *Op) int64 {
 	return -1
 }
 
+// sets lists the properties a formatting op writes, named as the API
+// names them, or nil for an op that is not a style change.
+//
+// bullets and the table-cell ops are deliberately absent, though the
+// model does carry their pending suggestions (Paragraph.BulletChanges,
+// Cell.StyleChanges, Cell.RowChanges). They compile to
+// createParagraphBullets, deleteParagraphBullets and
+// updateTableCellStyle, and the collision was only ever observed on
+// updateTextStyle and updateParagraphStyle. Warning about a request kind
+// nobody has watched would be inventing a finding; the data is parsed
+// and waiting for whoever runs the probe (spike B in internal/gapi).
+func (op *Op) sets() []string {
+	switch op.Kind {
+	case OpTextStyle:
+		_, fields := op.Text.body()
+		return fields
+	case OpParagraphStyle:
+		_, fields := op.Para.body()
+		return fields
+	case OpClearFormatting:
+		// Every character property at once, so any pending one collides.
+		return []string{"*"}
+	}
+	return nil
+}
+
+// guardRestyle warns when a direct formatting change touches a property
+// a pending suggestion on the same range already sets.
+//
+// A warning rather than a refusal, because Google's behaviour here is
+// not one rule. Verified live on 2026-09-12: suggesting bold and then
+// applying bold directly leaves the run unbolded, and the same holds for
+// a paragraph alignment suggested and then applied with the same value —
+// the batch is accepted, the reply is empty, and nothing changes. Yet a
+// font size suggested at 20pt and then set directly to 20pt does land,
+// and so does an alignment set to a different value than the pending
+// suggestion names. So the collision is real and reproducible but its
+// exact rule is not known, and a refusal would block writes that work.
+// What the person needs either way is to be told a pending suggestion is
+// sitting on the property they just set, because that is the thing
+// ops_applied cannot tell them.
+func guardRestyle(ops []Op, o Options, res *Result) {
+	if o.Mode != ModeDirect {
+		// In suggest mode the change becomes a suggestion of its own and
+		// in comment mode nothing is written at all.
+		return
+	}
+	for i := range ops {
+		op := &ops[i]
+		// The cheap test first: op.sets() builds and throws away a style
+		// body, and nearly every op in nearly every document has nothing
+		// suggested over it.
+		if len(op.Restyled) == 0 {
+			continue
+		}
+		fields := op.sets()
+		if len(fields) == 0 {
+			continue
+		}
+		mask := maskOf(fields)
+		for _, c := range op.Restyled {
+			if hit := overlapProps(mask, c.Props); len(hit) > 0 {
+				res.Warnings = append(res.Warnings, fmt.Sprintf(
+					"op %d: suggestion %s already suggests %s on %s; Google accepts a direct change to the same property and may silently drop it, so check the result or review the suggestion first (list_suggestions, review_suggestion)",
+					op.Seq, c.ID, doc.PropList(hit), op.Description))
+			}
+		}
+	}
+}
+
+// fieldMask is an op's fields mask as a set, built once per op.
+type fieldMask struct {
+	all   bool // "*", the API's own wildcard: clear_formatting
+	names map[string]bool
+}
+
+func maskOf(fields []string) fieldMask {
+	if len(fields) == 1 && fields[0] == "*" {
+		return fieldMask{all: true}
+	}
+	m := fieldMask{names: make(map[string]bool, len(fields))}
+	for _, f := range fields {
+		m.names[f] = true
+	}
+	return m
+}
+
+// overlapProps are the properties a suggestion sets that the mask also
+// sets.
+func overlapProps(mask fieldMask, suggested []string) []string {
+	var out []string
+	for _, p := range suggested {
+		// A suggestion names a nested property as shading.backgroundColor
+		// and a repeated one as styles.0.textStyle.bold; an op's fields
+		// mask only ever names the top of that path, which is why the
+		// comparison is on the first segment rather than the whole of it.
+		top := p
+		if i := strings.IndexByte(p, '.'); i >= 0 {
+			top = p[:i]
+		}
+		if mask.all || mask.names[top] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // guard blocks direct edits that would destroy anchored content.
 func guard(ops []Op, o Options, res *Result) error {
+	guardRestyle(ops, o, res)
 	for i := range ops {
 		op := &ops[i]
 		if !kindInfos[op.Kind].Deletes || len(op.Anchors) == 0 {

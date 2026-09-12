@@ -248,12 +248,16 @@ func apiDiff(w io.Writer, _ []string) error {
 		return err
 	}
 	if len(lines) == 0 {
-		_, err = fmt.Fprintf(w, "api diff: nothing moved; %s rewritten with today's date\n", apiMethodsFile)
+		if _, err := fmt.Fprintf(w, "api diff: nothing moved; %s rewritten with today's date\n", apiMethodsFile); err != nil {
+			return err
+		}
+		return writeFieldSnapshot(w, root)
+	}
+	if _, err := fmt.Fprintf(w, "%s\n\n%s rewritten. Every NEW method needs a verdict in %s before `make check` passes.\n",
+		strings.Join(lines, "\n"), apiMethodsFile, apiCoverageFile); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "%s\n\n%s rewritten. Every NEW method needs a verdict in %s before `make check` passes.\n",
-		strings.Join(lines, "\n"), apiMethodsFile, apiCoverageFile)
-	return err
+	return writeFieldSnapshot(w, root)
 }
 
 func fetchDiscovery(url string) ([]apiMethod, error) {

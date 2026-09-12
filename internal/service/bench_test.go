@@ -178,6 +178,22 @@ func BenchmarkAnchorsInLarge(b *testing.B) {
 	}
 }
 
+// BenchmarkRestylesInLarge is the formatting guard's range query, run
+// once per formatting op. The first version allocated a closure per
+// block — 7 383 allocations for a query that finds nothing on a document
+// with no suggestions in it — so the allocation count is the number
+// worth watching here, not the time.
+func BenchmarkRestylesInLarge(b *testing.B) {
+	_, f := largeService(b, doctest.DefaultLarge)
+	seg := f.Doc.Tabs[0].Body
+	mid := seg.Blocks[len(seg.Blocks)/2]
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		textRestylesIn(seg, mid.Start, mid.End+500)
+	}
+}
+
 func BenchmarkEditDryRunLarge(b *testing.B) {
 	svc, f := largeService(b, doctest.DefaultLarge)
 	needle := uniqueSentence(f)

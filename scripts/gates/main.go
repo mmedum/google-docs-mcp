@@ -87,6 +87,10 @@ func init() {
 			run: apiCoverage, args: "", gate: true,
 			doc: "every published API method has a verdict, and every call has a row",
 		},
+		"api-fields": {
+			run: apiFields, args: "", gate: true,
+			doc: "every published field of a type we model is modelled or written off",
+		},
 		"api-diff": {
 			run: apiDiff, args: "",
 			doc: "refetch the discovery documents and rewrite the snapshot (network)",

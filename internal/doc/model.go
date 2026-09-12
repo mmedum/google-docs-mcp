@@ -21,6 +21,11 @@ type Document struct {
 	SuggestionsViewMode string
 	// Tabs in document order, parents before children.
 	Tabs []*Tab
+	// FormatSuggestions are the pending suggestions that change only
+	// formatting, in document order. Nothing else can see them: they
+	// insert and delete no text, so a walk over the suggestion ids on
+	// runs and blocks passes straight over them.
+	FormatSuggestions []FormatSuggestion
 
 	byHandle map[string]*Block // every block by handle, filled by Parse
 	byCell   map[string]*Cell  // every table cell by handle, filled by Parse
@@ -411,6 +416,10 @@ type Paragraph struct {
 	Bullet              *BulletInfo
 	Runs                []*Run
 	PositionedObjectIDs []string
+	// StyleChanges and BulletChanges are the pending suggested changes
+	// to the paragraph's own style and to its list membership.
+	StyleChanges  []StyleChange
+	BulletChanges []StyleChange
 }
 
 // BulletInfo is list membership.
@@ -461,6 +470,10 @@ type Run struct {
 
 	Inserted []string
 	Deleted  []string
+	// StyleChanges are the pending suggested restylings of this run.
+	// They insert and delete nothing, so Inserted and Deleted are both
+	// empty on a run that carries one.
+	StyleChanges []StyleChange
 }
 
 // IsSuggestedInsertion reports whether the run exists only as a suggestion.
@@ -527,6 +540,10 @@ type Cell struct {
 	// Style is what the cell carries itself: background, content
 	// alignment, per-side padding and borders.
 	Style CellStyle
+	// StyleChanges and RowChanges are the pending suggested changes to
+	// the cell's own style and to the style of the row holding it.
+	StyleChanges []StyleChange
+	RowChanges   []StyleChange
 }
 
 // CellStyle is a table cell's own formatting.

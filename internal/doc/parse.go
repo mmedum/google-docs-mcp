@@ -37,6 +37,7 @@ func Parse(d *gdocs.Document) (*Document, error) {
 		}
 		out.Tabs = append(out.Tabs, parseTab(legacy, 1))
 		out.index()
+		out.FormatSuggestions = out.formatSuggestions(d)
 		return out, nil
 	}
 	var walk func([]*gdocs.Tab)
@@ -48,6 +49,7 @@ func Parse(d *gdocs.Document) (*Document, error) {
 	}
 	walk(d.Tabs)
 	out.index()
+	out.FormatSuggestions = out.formatSuggestions(d)
 	return out, nil
 }
 
@@ -266,6 +268,8 @@ func parseTable(seg *Segment, t *gdocs.Table, handle string) *Table {
 				}
 				c.Style = parseCellStyle(st)
 			}
+			c.StyleChanges = changesOf(tc.SuggestedTableCellStyleChanges)
+			c.RowChanges = changesOf(row.SuggestedTableRowStyleChanges)
 			c.Blocks = parseBlocks(seg, c, c.Handle+"/", tc.Content)
 			cells = append(cells, c)
 		}
@@ -302,6 +306,8 @@ func markMerged(tbl *Table) {
 
 func parseParagraph(tab *Tab, p *gdocs.Paragraph) *Paragraph {
 	para := &Paragraph{PositionedObjectIDs: p.PositionedObjectIDs}
+	para.StyleChanges = changesOf(p.SuggestedParagraphStyleChanges)
+	para.BulletChanges = changesOf(p.SuggestedBulletChanges)
 	if ps := p.ParagraphStyle; ps != nil {
 		para.NamedStyle = ps.NamedStyleType
 		para.HeadingID = ps.HeadingID
@@ -324,6 +330,16 @@ func parseParagraph(tab *Tab, p *gdocs.Paragraph) *Paragraph {
 	return para
 }
 
+// suggestions records what a suggestion did to an inline element: the
+// ids of the suggestions inserting or deleting it, and the pending
+// restylings of it. One call rather than two lines per case, because a
+// carrier that gets only the first line looks exactly like a carrier
+// that cannot be restyled — which is the shape of #46.
+func (r *Run) suggestions(s gdocs.Suggested, st gdocs.SuggestedStyle) {
+	r.Inserted, r.Deleted = s.SuggestedInsertionIDs, s.SuggestedDeletionIDs
+	r.StyleChanges = textChanges(st)
+}
+
 func parseElement(el *gdocs.ParagraphElement) *Run {
 	if el == nil {
 		return nil
@@ -334,26 +350,26 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 		r.Kind = RunText
 		r.Text = el.TextRun.Content
 		r.Style = parseTextStyle(el.TextRun.TextStyle)
-		r.Inserted, r.Deleted = el.TextRun.SuggestedInsertionIDs, el.TextRun.SuggestedDeletionIDs
+		r.suggestions(el.TextRun.Suggested, el.TextRun.SuggestedStyle)
 	case el.InlineObjectElement != nil:
 		e := el.InlineObjectElement
 		r.Kind, r.ObjectID = RunInlineObject, e.InlineObjectID
 		r.Style = parseTextStyle(e.TextStyle)
-		r.Inserted, r.Deleted = e.SuggestedInsertionIDs, e.SuggestedDeletionIDs
+		r.suggestions(e.Suggested, e.SuggestedStyle)
 	case el.FootnoteReference != nil:
 		e := el.FootnoteReference
 		r.Kind, r.FootnoteID, r.FootnoteNumber = RunFootnoteRef, e.FootnoteID, e.FootnoteNumber
 		r.Style = parseTextStyle(e.TextStyle)
-		r.Inserted, r.Deleted = e.SuggestedInsertionIDs, e.SuggestedDeletionIDs
+		r.suggestions(e.Suggested, e.SuggestedStyle)
 	case el.PageBreak != nil:
 		r.Kind = RunPageBreak
-		r.Inserted, r.Deleted = el.PageBreak.SuggestedInsertionIDs, el.PageBreak.SuggestedDeletionIDs
+		r.suggestions(el.PageBreak.Suggested, el.PageBreak.SuggestedStyle)
 	case el.ColumnBreak != nil:
 		r.Kind = RunColumnBreak
-		r.Inserted, r.Deleted = el.ColumnBreak.SuggestedInsertionIDs, el.ColumnBreak.SuggestedDeletionIDs
+		r.suggestions(el.ColumnBreak.Suggested, el.ColumnBreak.SuggestedStyle)
 	case el.HorizontalRule != nil:
 		r.Kind = RunHorizontalRule
-		r.Inserted, r.Deleted = el.HorizontalRule.SuggestedInsertionIDs, el.HorizontalRule.SuggestedDeletionIDs
+		r.suggestions(el.HorizontalRule.Suggested, el.HorizontalRule.SuggestedStyle)
 	case el.Person != nil:
 		e := el.Person
 		r.Kind = RunPerson
@@ -365,7 +381,7 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 			r.Text = r.PersonEmail
 		}
 		r.Style = parseTextStyle(e.TextStyle)
-		r.Inserted, r.Deleted = e.SuggestedInsertionIDs, e.SuggestedDeletionIDs
+		r.suggestions(e.Suggested, e.SuggestedStyle)
 	case el.RichLink != nil:
 		e := el.RichLink
 		r.Kind = RunRichLink
@@ -377,7 +393,7 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 			r.Text = r.LinkURI
 		}
 		r.Style = parseTextStyle(e.TextStyle)
-		r.Inserted, r.Deleted = e.SuggestedInsertionIDs, e.SuggestedDeletionIDs
+		r.suggestions(e.Suggested, e.SuggestedStyle)
 	case el.DateElement != nil:
 		e := el.DateElement
 		r.Kind = RunDate
@@ -388,14 +404,14 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 			}
 		}
 		r.Style = parseTextStyle(e.TextStyle)
-		r.Inserted, r.Deleted = e.SuggestedInsertionIDs, e.SuggestedDeletionIDs
+		r.suggestions(e.Suggested, e.SuggestedStyle)
 	case el.Equation != nil:
 		r.Kind = RunEquation
 		r.Inserted, r.Deleted = el.Equation.SuggestedInsertionIDs, el.Equation.SuggestedDeletionIDs
 	case el.AutoText != nil:
 		r.Kind, r.AutoTextType = RunAutoText, el.AutoText.Type
 		r.Style = parseTextStyle(el.AutoText.TextStyle)
-		r.Inserted, r.Deleted = el.AutoText.SuggestedInsertionIDs, el.AutoText.SuggestedDeletionIDs
+		r.suggestions(el.AutoText.Suggested, el.AutoText.SuggestedStyle)
 	default:
 		return nil
 	}

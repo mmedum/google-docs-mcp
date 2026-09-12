@@ -217,14 +217,14 @@ for the defaults.
 |---|---|
 | `get_document` | Title, tabs, revision id, owner, last change, counts, and this server's capabilities (available write modes, default). Per tab it also reports the page setup, the floating objects, the named ranges and the named style definitions its paragraphs carry — everything a read of the text cannot show. Cheap; call it first. |
 | `get_outline` | Heading tree per tab with stable `heading_id`s, block handles, and section sizes. |
-| `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Block handles come with the text unless `with_handles` is false; options add styles, pending suggestions as `{++inserted++}` / `{--deleted--}`, and comment markers `{>>c:id<<}`. |
+| `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Block handles come with the text unless `with_handles` is false; options add styles, pending suggestions as `{++inserted++}` / `{--deleted--}` / `{==restyled==}`, and comment markers `{>>c:id<<}`. |
 | `find_in_document` | Text or regex search returning handles, offsets and context. |
 | `search_documents` | Locate documents by title or content, owner, or modification date. |
 | `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
 | `create_document` | New document, optionally with markdown content. |
 | `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. |
-| `list_suggestions` | Pending suggested edits with ids, text and handles. |
+| `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing. |
 | `review_suggestion` | Accept, reject or discard suggestions by id or all (Developer Preview). |
 | `list_comments` | Comment threads with every reply, resolved and deleted state, quoted text and the block they sit on. |
 | `add_comment` | Comment on a passage (pinned with Developer Preview, quoted otherwise) or on the document. |

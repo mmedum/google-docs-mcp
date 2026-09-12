@@ -23,6 +23,81 @@ and new required fields are breaking; the schema diff in CI flags them.
   Watched failing four ways. The two-file split, and both traps it avoids,
   came from the chat server building the same gate first.
 
+### Added
+- An API-fields gate. `make api-fields` holds the wire types to the Docs
+  discovery document the way `api-coverage` holds the client to its
+  method list: the published schemas and properties in
+  `testdata/api-fields.json`, one hand-written row per exception in
+  `testdata/api-fields.tsv` (`out`, `extra` for a Developer Preview field
+  public discovery does not publish, `alias` for a schema modelled under
+  another name), and the modelled side read out of `internal/gdocs` with
+  `go/ast`, promoting the tags of embedded structs. Both directions fail
+  the build, and the number of schemas matched is part of the rule, so a
+  struct renamed out of the way cannot quietly stop being checked.
+
+  It was written because the types had drifted 40 fields from the API
+  without anything saying so — the suggestion field behind #46, and 39
+  more the spike that found it went on to count. Judging those 39 against
+  "if a tool writes a field, the types must carry it" added 16 of them:
+  twelve `SectionStyle` fields, a table's column widths and a row's
+  pinned-header flag, every one of which `layout_document` or `edit_table`
+  could already set and no read could report. The other 23 are read-only
+  detail with a reason each. `make api-diff` writes both snapshots.
+
+### Fixed
+- Suggestions that only change formatting are no longer invisible. A
+  suggested restyling inserts and deletes nothing — the API records it as
+  a `suggestedTextStyleChanges` entry on the run — and `internal/gdocs`
+  had no field for it, so every read reported the document as holding no
+  suggestion: `list_suggestions` answered `0 pending suggestion(s)` in
+  the same session where the write had just returned a suggestion id,
+  `read_document format: raw` dropped the field while re-marshalling our
+  own wire types, and `include_suggestions` and `with_styles` showed
+  nothing. Reported as a silent write failure in #46; the write had
+  worked all along, and the reading of it was what lied.
+
+  All sixty-one `suggested*` fields the Docs discovery document publishes
+  are now carried, across twenty-two types, so a suggestion this server
+  cannot render is still one it cannot report as absent. `list_suggestions`
+  gains a `format` kind, a `formats` field saying what a suggestion
+  restyles (`text: bold`, `paragraph: alignment`) and a `restyled` field
+  quoting the text it covers, the way `inserted` and `deleted` already
+  quote theirs; a read marks one as
+  CriticMarkup `{==text==}{>>s:<id> suggests bold<<}`, a highlight rather
+  than an insertion, because nothing was added or removed. What a
+  suggestion sets is read from its `*SuggestionState`, never from the
+  style beside it: the API fills that with every inherited property, so
+  trusting it reports nine changes where a person asked for one.
+
+### Changed
+- `read_document format: raw` returns the bytes Google sent, not a
+  re-encoding of this server's wire types. Its schema promises "Docs API
+  JSON", and marshalling the types could only ever return the fields they
+  model — so the one read whose job is to show what the API said was the
+  least faithful read on the server. It dropped 39 published fields
+  across nine types (`SectionStyle` alone missing all four margins,
+  `columnProperties` and `pageNumberStart`), and it is how #46 came to be
+  filed against the write path at all: the raw read had dropped the field
+  that proved the write had worked. Elements now keep the bytes they were
+  decoded from; a document built in Go, with no bytes to keep, still
+  encodes from the types. Output stays compact, so `max_chars` still buys
+  the same amount of document.
+- `documents.get` asks for compact JSON. Google indents by default, which
+  on a 150-page document is 7.44 MB on the wire against 2.96 MB without
+  it — 60% of the bytes for whitespace nothing reads, and, now that
+  elements keep what they decoded from, retained indentation as well. The
+  round trip costs 28 → 41 ms of decoding and 7.7 → 11.2 MB of heap for
+  the kept bytes on a document that size, against 4.5 MB less to
+  download.
+- A direct formatting change over a property a pending suggestion already
+  sets now comes back with a warning naming the suggestion and the
+  property. Google accepts such a request, replies with an empty result
+  and sometimes applies nothing — verified live: bold over a suggested
+  bold, and an alignment over the same suggested alignment, both leave
+  the document unchanged, while a font size set to the value a suggestion
+  names does land. The rule is inconsistent, so this warns rather than
+  refusing; `ops_applied` alone could not tell anyone which had happened.
+
 ## [1.0.1] - 2026-09-07
 
 ### Added

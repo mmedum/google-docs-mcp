@@ -6,6 +6,7 @@ package render
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -58,9 +59,24 @@ type span struct {
 	style    doc.TextStyle
 	inserted string
 	deleted  string
+	// restyled are the pending suggested restylings of the run. A
+	// restyling inserts and deletes nothing, so a span can carry one
+	// with inserted and deleted both empty.
+	restyled []doc.StyleChange
 }
 
 func suggestionKey(ids []string) string { return strings.Join(ids, ",") }
+
+// sameRestyle reports whether two runs carry the same pending
+// restylings, so two adjacent runs merge into one span only when they
+// do. Google splits a run to hang a style suggestion on part of it, and
+// merging the halves back together would put the marker around text the
+// suggestion does not cover.
+func sameRestyle(a, b []doc.StyleChange) bool {
+	return slices.EqualFunc(a, b, func(x, y doc.StyleChange) bool {
+		return x.ID == y.ID && slices.Equal(x.Props, y.Props)
+	})
+}
 
 // locatedIn reports whether the thread was located in this segment.
 func (m Mark) locatedIn(seg *doc.Segment) bool {
@@ -139,11 +155,12 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable
 		spans = nil
 	}
 	addText := func(text string, r *doc.Run) {
-		s := span{text: text, style: r.Style, inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted)}
+		s := span{text: text, style: r.Style, inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted), restyled: r.StyleChanges}
 		if inTable {
 			s.text = tableCellText(s.text)
 		}
-		if n := len(spans); n > 0 && spans[n-1].style == s.style && spans[n-1].inserted == s.inserted && spans[n-1].deleted == s.deleted {
+		if n := len(spans); n > 0 && spans[n-1].style == s.style && spans[n-1].inserted == s.inserted && spans[n-1].deleted == s.deleted &&
+			sameRestyle(spans[n-1].restyled, s.restyled) {
 			spans[n-1].text += s.text
 		} else {
 			spans = append(spans, s)
@@ -172,7 +189,7 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable
 			addText(text, r)
 			continue
 		}
-		s := span{text: objectText(r, seg.Tab), inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted)}
+		s := span{text: objectText(r, seg.Tab), inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted), restyled: r.StyleChanges}
 		if s.text == "" {
 			continue
 		}
@@ -180,7 +197,7 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable
 			s.text = tableCellText(s.text)
 		}
 		flush()
-		b.WriteString(markSuggestion(s.text, s.inserted, s.deleted, o))
+		b.WriteString(markRestyle(markSuggestion(s.text, s.inserted, s.deleted, o), s, o))
 	}
 	flush()
 	return b.String()
@@ -326,8 +343,17 @@ func markSpan(s span, o Options) string {
 		if ann := styleAnnotation(st); ann != "" {
 			core += ann
 		}
+		if !o.Suggestions {
+			// With CriticMarkup off there is no marker to carry the
+			// suggestion, so the annotation is the only place it can
+			// appear. With it on, markRestyle reports it with its id,
+			// which is the form review_suggestion can act on.
+			if ann := restyleAnnotation(s.restyled); ann != "" {
+				core += ann
+			}
+		}
 	}
-	return lead + markSuggestion(core, s.inserted, s.deleted, o) + trail
+	return lead + markRestyle(markSuggestion(core, s.inserted, s.deleted, o), s, o) + trail
 }
 
 // markSuggestion applies CriticMarkup for suggested insertions and
@@ -543,4 +569,39 @@ func paragraphAnnotation(p *doc.Paragraph) string {
 		return ""
 	}
 	return " {" + strings.Join(parts, ", ") + "}"
+}
+
+// markRestyle marks a pending suggested restyling of the span.
+//
+// Not {++ ++} or {-- --}: those say text was added or removed, and a
+// restyling adds and removes nothing. CriticMarkup's highlight is what
+// fits — the text stands as it is, with a note on it — and the note
+// carries the suggestion id because that is what review_suggestion
+// takes. A span that is already marked as an insertion or a deletion
+// keeps that marker and takes the note beside it: one run can be both
+// suggested text and suggested formatting.
+func markRestyle(text string, s span, o Options) string {
+	if !o.Suggestions || len(s.restyled) == 0 || strings.TrimSpace(text) == "" {
+		return text
+	}
+	var b strings.Builder
+	if s.inserted == "" && s.deleted == "" {
+		b.WriteString("{==" + text + "==}")
+	} else {
+		b.WriteString(text)
+	}
+	for _, c := range s.restyled {
+		b.WriteString("{>>s:" + c.ID + " suggests " + doc.PropList(c.Props) + "<<}")
+	}
+	return b.String()
+}
+
+// restyleAnnotation is the with_styles form, without ids: "suggested:
+// bold, italic".
+func restyleAnnotation(cs []doc.StyleChange) string {
+	props := doc.Props(cs)
+	if len(props) == 0 {
+		return ""
+	}
+	return "{suggested: " + doc.PropList(props) + "}"
 }

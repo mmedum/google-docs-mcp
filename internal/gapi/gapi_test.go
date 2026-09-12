@@ -79,7 +79,7 @@ func TestGetDocumentDecodesAndSendsParams(t *testing.T) {
 	if gotPath != "/v1/documents/abc" || gotAuth != "Bearer tok" {
 		t.Fatalf("path %q auth %q", gotPath, gotAuth)
 	}
-	for _, want := range []string{"includeTabsContent=true", "suggestionsViewMode=SUGGESTIONS_INLINE", "commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED"} {
+	for _, want := range []string{"includeTabsContent=true", "suggestionsViewMode=SUGGESTIONS_INLINE", "commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED", "prettyPrint=false"} {
 		if !strings.Contains(gotQuery, want) {
 			t.Fatalf("query %q lacks %q", gotQuery, want)
 		}

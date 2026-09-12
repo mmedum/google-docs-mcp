@@ -85,8 +85,9 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "list_suggestions",
 		Description: "List pending suggested edits (tracked changes) in a Google Doc: id, kind (insert, delete, replace, " +
-			"structure), the inserted and deleted text, the block handle, and, with Developer Preview, the author and " +
-			"status. Ids feed review_suggestion.",
+			"structure, format), the inserted, deleted and restyled text, the block handle, and, with Developer Preview, the author and " +
+			"status. A format suggestion changes only formatting and says what it restyles, as \"text: bold\" or " +
+			"\"paragraph: alignment\". Ids feed review_suggestion.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DocumentInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.ListSuggestions(ctx, in.Document)

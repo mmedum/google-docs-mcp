@@ -6,8 +6,10 @@ minimal diffs in all three modes, formatting, suggestion review, comment
 threads on both backends, revision history and diffs, tables, tabs,
 headers, footers, footnotes, images and chips, resources, and the agent
 evals. The tool surface covers every GA member of the Docs `Request`
-union plus four preview members. No design decision is open (§17). Every
-convention here was
+union plus four preview members. One design decision is open (§17): the
+rule by which Google discards a direct formatting change that collides
+with a pending suggested one, which six rounds of live probing did not
+settle. Every convention here was
 checked against primary sources; §18 lists what was confirmed, refuted,
 and changed.
 
@@ -43,6 +45,9 @@ folder management, moving files, sharing, trashing, copying.
   silently corrupt documents (a-bonus #149), anchor comments through the
   Drive API where they never render inline (a-bonus #134), and none use
   `writeControl`, suggestion mode, or return the ranges they changed.
+- `documents.get` is asked for compact JSON (`prettyPrint=false`): a
+  150-page document is 7.44 MB indented and 2.96 MB without it, and the
+  indentation is retained memory now that elements keep their bytes.
 - **The API moved in our favour in July 2026.** The Docs API now has
   `writeControl.writeMode: SUGGEST` (every request in the batch becomes a
   suggested edit), `insertComment` anchored to a real `Range`,
@@ -193,10 +198,16 @@ Document
     Segments          body + headers{} + footers{} + footnotes{} (each its own index space)
       Blocks[]        ordinal, handle, kind, start/end (UTF-16), style
         Paragraph     namedStyle, headingId, bullet (listId, nesting), alignment,
-                      Runs[] (text, TextStyle, suggestion insert/delete ids), inline objects, footnote refs
+                      suggested paragraph-style and bullet changes,
+                      Runs[] (text, TextStyle, suggestion insert/delete ids,
+                      suggested text-style changes), inline objects, footnote refs
         Table         rows × cols, Cell[r][c] → nested Blocks, merged spans
         SectionBreak  section style
         TOC           rendered read-only
+  FormatSuggestions   every pending suggestion that only restyles: id, target, the
+                      properties from its suggestion state, handle. A restyling
+                      adds and removes nothing, so no walk over insert/delete
+                      ids can find one (§18, #46)
   Anchors             every comment range (preview) / quoted-text match (GA), suggestion range,
                       inline object and footnote reference, indexed by segment range
   Revision            revisionId of the fetch this tree came from
@@ -390,8 +401,17 @@ Resolution is reversible (`reopen`); deletion is gated. The guard, reads
 with `include_comments` and the listing share one located thread list
 per fetch.
 
-**Suggestions.** `list_suggestions` renders pending insert/delete/style
-suggestions with author and handles (GA). `review_suggestion`
+**Suggestions.** `list_suggestions` renders pending suggestions with
+author and handles (GA), of kind `insert`, `delete`, `replace`,
+`structure` or `format`. A `format` suggestion changes only formatting:
+it inserts and deletes nothing, so it is found through the
+`suggested*Changes` maps rather than through the suggestion ids on runs,
+and it reports what it restyles (`text: bold`, `paragraph: alignment`)
+from its suggestion state — never from the style beside it, which the
+API fills with every inherited property. Reads mark one as CriticMarkup
+`{==text==}{>>s:<id> suggests bold<<}`: a highlight, because nothing was
+added or removed. A direct formatting change over a property a pending
+suggestion already sets comes back with a warning (§18). `review_suggestion`
 (`action: accept | reject`, ids or `all`) and `mode: suggest` need
 preview. In SUGGEST mode the API refuses `AddDocumentTab`,
 `CreateNamedRange`, `DeleteFooter`, `DeleteHeader`, `DeleteNamedRange`,
@@ -857,7 +877,18 @@ reads it badly. The schema diff in CI is what holds the rest.
 
 ## 17. Open decisions
 
-None.
+**When exactly does Google drop a direct formatting change?** A direct
+`updateTextStyle` over a property a pending suggestion already sets is
+sometimes accepted and applied and sometimes accepted and discarded, and
+six rounds of live probing (§18, spike B) did not find the rule: bold
+over a suggested bold is dropped, an alignment over the same suggested
+alignment is dropped, but a font size set to exactly the value a pending
+suggestion names does land. Nothing in the reference, the suggestions
+how-to or the issue tracker describes the behaviour at all. Until it is
+known the server warns and names the suggestion rather than refusing,
+because a refusal would block the writes that work. Worth reporting
+upstream; the probe is in the repository so the answer can be rechecked
+when Google changes it.
 
 The one that stood here — that `make check` and CI did not run the same
 things, so fourteen build-tagged files compiled only on a maintainer's
@@ -968,6 +999,10 @@ checked rather than assumed.
 | HTTP status is enough to classify a Google error; the reason string refines it at most (the mapping's shape since Phase 0 — status first, one reason-based exception for scopes) | Refuted 2026-09-05 against the [Drive error guide](https://developers.google.com/workspace/drive/api/guides/handle-errors), after the google-drive-mcp session hit the same class of bug from the other side: Drive answers throttling with **403** — `rateLimitExceeded`, `userRateLimitExceeded`, `sharingRateLimitExceeded`, `dailyLimitExceeded` — and prescribes exponential backoff for it. Reading the status first made those `[forbidden]`, so a throttled read was never retried and the model was told to go looking for permissions that do not exist. The same page lists 403 reasons on our own surface that mean "cannot", not "may not": `downloadRestrictedForRevision`, `fileNotExportable`, `storageQuotaExceeded`, `appNotAuthorizedToFile` | `throttled` classifies the four quota reasons as `ErrRateLimited` before the generic 403, and `once` makes them transient so reads back off (writes still repeat only on 429 or 503, which prove nothing was applied). Every reason now appears in `APIError.Error()`, so a refusal the classifier cannot improve on still reaches the model with Google's own word for it. No reason has been *observed* live on this surface — the change is what the documented reasons mean, not a bug seen in the wild. |
 | The write-retry rule ("only 429 and 503, which prove nothing was applied") covers every write | Refuted in review 2026-09-05: the guard tested `k == kindWrite`, and Drive writes carry their own kind (`kindDriveWrite`, added for a separate rate limiter), so creating a comment or a reply was retried on **any** 5xx — a 500 arriving after Drive had created the comment left two. The classification change above would have widened it to throttling 403s as well. Neither was ever observed; the test that would have caught it existed only for document batches | The guard is `k != kindRead`, and the new test drives `CreateComment` through 403/500/503/429 (it fails against the old guard on exactly the 403 and the 500). A rule stated for "writes" is tested through every kind of write. |
 | A security document is a description of the code (implicit in keeping one) | Refuted 2026-09-05 by auditing §12 and docs/security.md line by line against the code, after a sibling server found its own security page promising a deadline the code did not keep. Two claims here were false in opposite directions: the page said "logs carry ids (truncated), revisions" in one row and "no document data at any level" in another, and the code did the first — `ShortID` put six characters of the id and the whole revision id into debug lines, and the conflict path logged an id at info. The test that was supposed to hold the guarantee passed because it searched for the *whole* id, and because the service's logger was not the logger it read | Ids are gone from every log line, including the path (`/v1/documents/…/x`); `ShortID` is documented as filename-only. The test reads the service's logger too, drives the conflict path, and looks for the id, its first six characters, and the revision. It catches two leaks against the previous code. Where the two rows disagreed, the stronger one is now true rather than the weaker one being written down. |
+| The wire types can be kept in step with the API by reading them carefully | Refuted by the whole of #46. The types had drifted 40 fields from the discovery document — the suggestion field that started the issue, and 39 more nobody had counted — and the repository already had an evidence-log row saying the types had drifted, which is a document, not a control. | The `api-fields` gate in `scripts/gates`, the method gate's pair of files one level down: the discovery document's schemas and properties in `testdata/api-fields.json`, one hand-written row per exception in `testdata/api-fields.tsv`, and the modelled side read out of `internal/gdocs` with `go/ast`, embedded tags promoted. Both directions fail, and the number of schemas matched is part of the rule so a rename cannot quietly take a type out of sight. Judging the 39 against "if a tool writes it, the types must carry it" added 16 fields — twelve of `SectionStyle`, a table's column widths, a row's pinned-header flag — and wrote off 23 read-only ones with reasons. Proven to bite: dropping `SectionStyle.marginTop` fails the gate. |
+| `format: raw` returns the Docs API's JSON, as its tool schema says | Refuted on 2026-09-12, by the same issue. `render.Raw` marshalled `internal/gdocs` structs, so the one read whose whole job is to show what Google said could only ever show the fields this server already models — and it silently dropped the rest. That is not a corner case: nine types model fewer fields than the API publishes, 39 in total, worst of them `SectionStyle` at 14 (every margin, `columnProperties`, `pageNumberStart`). It is also how #46 came to be filed against the write path: the raw read had dropped the field proving the write had worked, so the reporter read an empty `textStyle` as a no-op. | `StructuralElement` keeps the bytes it decoded from (`UnmarshalJSON` plus `RawJSON()`), and `render.Raw` returns those, compacted, falling back to marshalling the types for an element built in Go. `Block.Wire` had exactly one consumer, so the change is one field, one method and one branch — smaller than modelling the 39 fields, and it ends the class rather than one instance. Measured on a 150-page document: retained bytes are 1.03× the body (the nested elements inside table cells account for 8%, and `format: raw` never reads them), decode 28 → 41 ms, heap 7.7 → 11.2 MB. Paid for by asking Google to stop indenting: `prettyPrint=false` on `documents.get` takes the same document from 7.44 MB to 2.96 MB on the wire, verified live. |
+| The wire types need only the `suggested*Ids` fields, because a suggestion is an insertion or a deletion | Refuted live on 2026-09-12 (issue #46, spike B in `internal/gapi/rawsuggest_integration_test.go`). A `SUGGEST`-mode `updateTextStyle` records a `suggestedTextStyleChanges` entry keyed by suggestion id, and `internal/gdocs` had no field for it — nor for the other fifty-nine `suggested*` fields the discovery document lists across twenty-two types. So the suggestion existed and every read this server offers said it did not: `format: raw` re-marshals our own types and dropped it, `list_suggestions` walked insert/delete ids and answered "0 pending suggestion(s)" in the same session where the write had returned a suggestion id, and `include_suggestions` and `with_styles` showed nothing. The report was filed as a silent write no-op; the write had worked. | All sixty-one `suggested*` fields, taken from the discovery document rather than typed by hand, and a `SuggestedStyle` embeddable for the ten inline elements that carry a text style. The properties come from the `*SuggestionState` pair, walked by reflection over the API's own `<property>Suggested` convention: reading the style instead reports a suggestion to change nine properties where a person asked for one, because the style is the style as it would be *after* accepting. |
+| A direct formatting change over a pending suggested formatting change applies normally | Refuted, then only half-explained. Verified live 2026-09-12: suggesting bold and then setting bold directly leaves the run unbolded, and suggesting alignment `CENTER` then setting `CENTER` directly leaves the paragraph unaligned — the batch is accepted and its reply is empty. This, not the suggested insertion the issue blamed, is what made step 3 of #46 look like a no-op: it was step 2 having succeeded. But the rule is not "the same property": a font size suggested at 20pt and then set directly to 20pt *does* land, and an alignment set to a value the suggestion does not name lands too. A suggested insertion turned out to be irrelevant — a direct restyling of one applies whether the range covers the inserted run exactly, part of it, or straddles it and real text. | `guardRestyle` in `internal/plan` **warns** and names the suggestion and the property, in direct mode only. Not a refusal: the observed rule is inconsistent, so refusing would block writes that work. What the person needs either way is the thing `ops_applied` cannot tell them — that a pending suggestion is sitting on the property they just set. Worth reporting upstream; left open in §17. |
 | A comment beside a version keeps it pinned (the fix after the cosign 3 failure) | Refuted twice over: this repository had `goreleaser-action` pinned by SHA and asked for `~> v2`, and a sibling narrowed the same value to `~> v2.18.0` and recorded that in its evidence log **as the fix**, with a comment saying which half of the pin mattered. A `~>` value resolves to the highest match, so both still floated | The `pins` gate in `scripts/gates`: every action a full commit SHA, every tool version exactly one version, and a failure when it finds no workflows or no versions at all. Verified against `~> v2`, `~> v2.18.0`, `latest` and `v2`. A rule a comment cannot hold is a rule that needs a test. |
 | Gates are small enough to live in shell scripts | Refuted by their own failures, 2026-09-05: the coverage floor's package list was hand-written and silently stopped covering a new package; the staleness rule failed on the release pull request it guards; and the coverage floor ran only on Linux in CI because the other runners' bash could not be relied on. A sibling server had already moved its gates into one tested Go program, and its two gate bugs this week were the same two shapes | `scripts/gates` holds them, with tests: derived lists rather than typed ones, a floor on how much each read before it reports nothing, and every platform in CI. No shell is left: the stdio smoke test and the schema-diff worktree driver were the last two, and `make check` runs on the Windows runner, where bash is a dependency rather than a given. |
 | The Windows runner runs the same commands as the others (implicit in a three-platform matrix) | Refuted 2026-09-05, the moment the coverage floor stopped being Linux-only: the default shell there is PowerShell, and it turned `-coverprofile=cov.out` into a file named `cov`. Every Windows run for as long as the matrix has existed produced a profile under a name no step referred to, and nothing noticed because the only step that read it was skipped on Windows. The same run also showed `internal/userconfig` at 78.9% there against 93% elsewhere, from a test that skipped rather than clearing `%AppData%` | `shell: bash` on the test job, so one line means one thing on three runners; the userconfig test runs everywhere. A platform in the matrix that no gate reads is a platform nobody is testing. |

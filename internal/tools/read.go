@@ -45,7 +45,7 @@ type ReadInput struct {
 	Format             string `json:"format,omitempty" jsonschema:"markdown (default), text, or raw (Docs API JSON for the scoped blocks)"`
 	WithHandles        *bool  `json:"with_handles,omitempty" jsonschema:"prefix every block with its handle like [p12] and headings with {heading_id}; on by default because handles are what an edit targets; pass false to save about 15% of the tokens"`
 	WithStyles         bool   `json:"with_styles,omitempty" jsonschema:"annotate fonts, sizes, colours, underline and alignment that markdown cannot express, e.g. {font: Arial 11pt, color: #c00}"`
-	IncludeSuggestions bool   `json:"include_suggestions,omitempty" jsonschema:"show pending suggested edits as CriticMarkup: {++inserted++} and {--deleted--} followed by {>>s:<suggestion id><<}; default shows the committed text without them"`
+	IncludeSuggestions bool   `json:"include_suggestions,omitempty" jsonschema:"show pending suggested edits as CriticMarkup: {++inserted++}, {--deleted--} and {==restyled==} for a formatting-only suggestion, each followed by {>>s:<suggestion id><<}; default shows the committed text without them"`
 	IncludeComments    bool   `json:"include_comments,omitempty" jsonschema:"mark commented passages with {>>c:<comment id><<} right after the text they cover and list those threads below the content"`
 	MaxChars           int    `json:"max_chars,omitempty" jsonschema:"output budget in characters, cut at a block boundary; default 20000, maximum 400000"`
 	Revision           string `json:"revision,omitempty" jsonschema:"read an old revision by its id from list_revisions: Google's markdown or text export of the whole document at that time, with no handles or scoping"`
@@ -95,7 +95,8 @@ func registerRead(s *mcp.Server, d Deps) {
 			"with no scope it reads the whole body of the first tab. Output is budgeted by max_chars (default 20000 " +
 			"characters); when truncated the result carries continue_from to pass back. Block handles ([p12]) and heading " +
 			"ids come with the text unless with_handles is false; with_styles adds formatting markdown cannot show, " +
-			"include_suggestions shows pending suggested edits inline as {++inserted++} / {--deleted--}, and " +
+			"include_suggestions shows pending suggested edits inline as {++inserted++} / {--deleted--}, with a " +
+			"formatting-only suggestion as {==highlighted==} because it adds and removes nothing, and " +
 			"include_comments marks commented passages with {>>c:id<<} and lists those threads below. " +
 			"Empty paragraphs are kept so structure is faithful. Handles are valid for the revision_id returned.",
 		Annotations: readOnly,

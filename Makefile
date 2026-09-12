@@ -92,12 +92,16 @@ parity: ## `make check` and CI run the same gates
 api-coverage: ## Every published API method has a verdict, and every call has a row
 	@$(GO) run ./scripts/gates api-coverage
 
+.PHONY: api-fields
+api-fields: ## Every published field of a type we model is modelled or written off
+	@$(GO) run ./scripts/gates api-fields
+
 .PHONY: api-diff
 api-diff: ## Refetch the discovery documents and rewrite the snapshot (network; not a gate)
 	@$(GO) run ./scripts/gates api-diff
 
 .PHONY: check
-check: fmt vet lint cover vuln licenses leaks pins gate-classes api-coverage schema-diff smoke staleness parity ## Everything CI runs
+check: fmt vet lint cover vuln licenses leaks pins gate-classes api-coverage api-fields schema-diff smoke staleness parity ## Everything CI runs
 
 .PHONY: clean
 clean:

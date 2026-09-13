@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mmedum/google-docs-mcp/internal/redact"
 	"strings"
 
 	"golang.org/x/oauth2"
@@ -166,7 +167,7 @@ func parseAPIError(status int, method, path string, body []byte) *APIError {
 	e := &APIError{Status: status, Method: method, Path: path}
 	var g googleErrorBody
 	if err := json.Unmarshal(body, &g); err == nil && g.Error.Message != "" {
-		e.Message = g.Error.Message
+		e.Message = redact.Accounts(g.Error.Message)
 		e.RPC = g.Error.Status
 		for _, d := range g.Error.Details {
 			if d.Reason != "" {
@@ -178,7 +179,7 @@ func parseAPIError(status int, method, path string, body []byte) *APIError {
 			e.Reason = g.Error.Errors[0].Reason
 		}
 	} else {
-		e.Message = strings.TrimSpace(string(body))
+		e.Message = redact.Accounts(strings.TrimSpace(string(body)))
 		if r := []rune(e.Message); len(r) > 300 {
 			e.Message = string(r[:300]) + "…"
 		}

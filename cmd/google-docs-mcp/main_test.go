@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/mmedum/google-docs-mcp/internal/redact"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -58,8 +59,8 @@ func TestMaskAddress(t *testing.T) {
 		{"nodomain@", "nodomain@"},
 	}
 	for _, c := range cases {
-		if got := maskAddress(c.in); got != c.want {
-			t.Errorf("maskAddress(%q) = %q, want %q", c.in, got, c.want)
+		if got := redact.Account(c.in); got != c.want {
+			t.Errorf("redact.Account(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -201,4 +202,5 @@ func TestNothingPrintsOutsideTheBoundary(t *testing.T) {
 		t.Fatalf("only %d functions walked in %s; the check is not reading it", funcs, file)
 	}
 	t.Logf("%d functions walked, %d stray prints", funcs, found)
+
 }

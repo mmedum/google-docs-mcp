@@ -5,7 +5,10 @@
 // the eval harness had no redaction at all.
 package redact
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // Transcript keeps a real document and a real person out of the transcript,
 // which people paste into issues and chat.
@@ -42,7 +45,7 @@ var (
 	// read. `- ` is list_revisions, which writes the id bare.
 	revAny = regexp.MustCompile(`(?m)(^- |revision |→ )[A-Za-z0-9_-]{20,}`)
 
-	Address = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
+	Address = regexp.MustCompile(`[A-Za-z0-9._%+\-…]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
 
 	// The two line-leading person positions, and the mid-line one.
 	personLine = regexp.MustCompile(`(?m)^(owner |\s*↳ ).*$`)
@@ -71,3 +74,29 @@ func Clip(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// Account is an address with the local part removed and the domain kept.
+//
+// The domain is the half a diagnosis uses: shared drives are a Workspace
+// feature and a personal account cannot create one, so @gmail.com and a
+// Workspace domain are two different sets of behaviour to explain. The
+// local part answers nothing — it is never an input to any command here.
+func Account(addr string) string {
+	local, domain, ok := strings.Cut(addr, "@")
+	// Not an address: left alone rather than mangled, so a strange value
+	// stays legible to whoever is debugging it.
+	if !ok || local == "" || domain == "" {
+		return addr
+	}
+	return "…@" + domain
+}
+
+// Accounts masks every address in free text, for text this server did
+// not write: a 403 names the account it refused, and that message is
+// repeated into an error string that reaches stderr, which the MCP stdio
+// transport says clients may capture and forward, and a tool response.
+//
+// One place rather than at each print, because a print added later is
+// then safe without its author knowing the rule, and a writer wrapper
+// could split an address across two Write calls and miss it.
+func Accounts(s string) string { return Address.ReplaceAllStringFunc(s, Account) }

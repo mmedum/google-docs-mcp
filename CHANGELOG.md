@@ -8,35 +8,39 @@ and new required fields are breaking; the schema diff in CI flags them.
 ## [Unreleased]
 
 ### Added
-- The release page now carries the release notes. `scripts/relnotes`
-  builds the whole body from the `CHANGELOG.md` section matching the tag
-  and the workflow passes it with `--release-notes`, so what a person
-  wrote for a release is what a reader of the release sees. It replaces a
-  machine list of full commit SHAs that included the `Release X.Y.Z`
-  commit itself and matched the changelog nowhere.
+- The release page carries the release notes. `gates release-notes`
+  prints the `CHANGELOG.md` section matching the tag and the release
+  workflow passes it to goreleaser with `--release-notes`, so what a
+  person wrote for a release is what a reader of the release sees. It
+  replaces a machine list of full commit SHAs that included the
+  `Release X.Y.Z` commit itself and matched the changelog nowhere. A tag
+  whose section is missing or empty fails the release rather than
+  publishing one that says nothing.
 
-  The trap is `changelog.disable`. It looks like the way to stop the
-  commit list, and it is read in the changelog pipe's `Skip` method,
-  which runs before `Run` — so `ctx.ReleaseNotes` is never set, the file
-  passed to `--release-notes` is never read, and the body collapses to
-  the footer with nothing above it. That is not a hypothetical: a sibling
-  server carries `disable: true` and passes `--release-notes` in the same
-  workflow, and its release page shows a footer and nothing else. The
-  `changelog:` block is simply deleted here instead.
+  The command is the sibling servers' one, not a new one: this repository
+  had no version of it, and the standard's rule is to copy the existing
+  answer rather than invent another. The compare-link footer stop came
+  with it, and is worth keeping — the footer follows the oldest section
+  with no heading in between, so without it the oldest release's notes
+  end in a block of links.
 
-  `release.footer` stays where it is and still works.
+  **Do not reach for `changelog.disable` to stop the generated list.** It
+  is read in the changelog pipe's `Skip`, which runs before `Run`, so
+  `ctx.ReleaseNotes` is never assigned and the file named by
+  `--release-notes` is never opened: the body collapses to the footer
+  with nothing above it. That is not hypothetical — a sibling carries
+  `disable: true` and passes `--release-notes` in the same workflow, and
+  its release page has shown a footer and nothing else ever since. The
+  `changelog:` block is deleted here instead.
+
+  `release.footer` stays in `.goreleaser.yaml` and still works:
   `internal/pipe/release/body.go` wraps `ReleaseNotes` in
   `release.header` and `release.footer` on every path, `--release-notes`
-  included; the pair the changelog pipe's early return skips is the
-  `--release-header` and `--release-footer` *flags*, which is a different
-  thing. So `relnotes` emits the section alone, and the footer — one
-  shared wording across the servers — is configured once in
-  `.goreleaser.yaml`. All of it read out of goreleaser v2.18.1 rather
-  than inferred from the documentation, which does not cover the
-  interaction.
-
-  A tag whose section is missing or empty fails the release instead of
-  publishing one that says nothing.
+  included. The pair the changelog pipe's early return skips is the
+  `--release-header` and `--release-footer` *flags*, a different thing
+  with a similar name — and getting that backwards first is why this is
+  written down. Read out of goreleaser v2.18.1; the documentation does
+  not cover the interaction.
 - `CODE_OF_CONDUCT.md`, Contributor Covenant 3.0 — the one community
   health file GitHub's checklist names that this repository did not have.
   Reports go through GitHub's private security advisory flow rather than

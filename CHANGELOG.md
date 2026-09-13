@@ -7,6 +7,61 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- The release page carries the release notes. `gates release-notes`
+  prints the `CHANGELOG.md` section matching the tag and the release
+  workflow passes it to goreleaser with `--release-notes`, so what a
+  person wrote for a release is what a reader of the release sees. It
+  replaces a machine list of full commit SHAs that included the
+  `Release X.Y.Z` commit itself and matched the changelog nowhere. A tag
+  whose section is missing or empty fails the release rather than
+  publishing one that says nothing.
+
+  The command is the sibling servers' one, not a new one: this repository
+  had no version of it, and the standard's rule is to copy the existing
+  answer rather than invent another. The compare-link footer stop came
+  with it, and is worth keeping — the footer follows the oldest section
+  with no heading in between, so without it the oldest release's notes
+  end in a block of links.
+
+  **Do not reach for `changelog.disable` to stop the generated list.** It
+  is read in the changelog pipe's `Skip`, which runs before `Run`, so
+  `ctx.ReleaseNotes` is never assigned and the file named by
+  `--release-notes` is never opened: the body collapses to the footer
+  with nothing above it. That is not hypothetical — a sibling carries
+  `disable: true` and passes `--release-notes` in the same workflow, and
+  its release page has shown a footer and nothing else ever since. The
+  `changelog:` block is deleted here instead.
+
+  `release.footer` stays in `.goreleaser.yaml` and still works:
+  `internal/pipe/release/body.go` wraps `ReleaseNotes` in
+  `release.header` and `release.footer` on every path, `--release-notes`
+  included. The pair the changelog pipe's early return skips is the
+  `--release-header` and `--release-footer` *flags*, a different thing
+  with a similar name — and getting that backwards first is why this is
+  written down. Read out of goreleaser v2.18.1; the documentation does
+  not cover the interaction.
+- `CODE_OF_CONDUCT.md`, Contributor Covenant 3.0 — the one community
+  health file GitHub's checklist names that this repository did not have.
+  Reports go through GitHub's private security advisory flow rather than
+  an address, because hard rule 1 keeps account emails out of the tree
+  and the `leaks` gate enforces it.
+
+### Changed
+- The README follows one skeleton, shared with the sibling servers and
+  checked against GitHub's own README guidance, the community profile
+  checklist and the standard-readme spec. What changed here: a short
+  description under the 120 characters the spec asks for, `Why another Google Docs MCP` renamed to
+  `Why google-docs-mcp`, so the four servers name that section the same
+  way; `Reporting a problem` renamed to `Getting help` and moved out of the way of somebody
+  installing, a `How it works` section, a `Documentation` section
+  pointing at the three files under `docs/`, `Versioning` moved back with
+  the other reference sections, and a tail of
+  `Contributing → Security → Code of conduct → License`, each one line
+  linking the file it names. `Licence` is now `License`: it names the
+  `LICENSE` file and the `Apache-2.0` identifier, and British spelling
+  stays in the prose.
+
 ## [1.1.2] - 2026-09-13
 
 ### Added

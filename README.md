@@ -5,40 +5,20 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-docs-mcp.svg)](https://pkg.go.dev/github.com/mmedum/google-docs-mcp)
 [![License: Apache 2.0](https://img.shields.io/github/license/mmedum/google-docs-mcp)](./LICENSE)
 
-A production-grade [Model Context Protocol](https://modelcontextprotocol.io)
-server for Google Docs, written in Go. It lets Claude Code, Claude Desktop
-and any other MCP client work inside a Google Doc the way a careful
-colleague does: read it at the right granularity, edit it in place without
-damaging what is around the edit, propose changes as suggestions, comment
-on passages, and handle tables, tabs, headers, footnotes and formatting.
+Google Docs as MCP tools. Read, edit, suggest and comment on documents from Claude or any MCP client.
 
-Single static binary. Per-user OAuth against your own Google account, in
-your own Google Cloud project. Nothing leaves your machine except calls to
-Google's APIs.
+A single Go binary that speaks [Model Context Protocol](https://modelcontextprotocol.io)
+over stdio. It runs as a subprocess of your client, on your own machine,
+against your own Google account. There is no server to host, no shared
+deployment and no service account: you create a Google OAuth client, log
+in once, and the refresh token stays in your OS keyring.
 
-**What works today.** Reading, searching, creating, exporting, editing with
-minimal diffs in suggest, direct or comment mode, formatting, reviewing
-suggestions, comment threads, revision history and diffs, tables, tabs,
-headers, footers, footnotes, images, chips, named ranges, page and section
-layout, named styles, `gdocs://` resources, large-document performance and
-agent evals are in. Every GA member of the Docs API's `Request` union is
-emitted; §16 of the architecture says which fields of those requests the
-tools expose and which they deliberately do not. See
-[docs/architecture.md](docs/architecture.md) for the design and what the
-evals found.
+It works inside a document the way a careful colleague does — reads it at
+the right granularity, edits in place without damaging what surrounds the
+edit, proposes changes as suggestions, comments on passages, and handles
+tables, tabs, headers, footnotes and formatting.
 
-## Reporting a problem
-
-`google-docs-mcp doctor` checks credentials, scopes and API reachability
-and names what is missing; most first-run trouble is an API that was
-never enabled or a consent screen without you on it. If that does not
-explain it, open an issue — the bug form asks for the `doctor` output and
-the version. Never paste a document id or URL, document content, a
-`client_secret.json` or a token into an issue; describe the shape of the
-document instead. Security problems go through
-[SECURITY.md](SECURITY.md), privately.
-
-## Why another Google Docs MCP
+## Why google-docs-mcp
 
 Existing servers hand the model raw UTF-16 indices, convert markdown in
 ways that silently corrupt documents, and anchor comments through the
@@ -46,44 +26,50 @@ Drive API where they never render inline. This server keeps index math on
 the server, addresses content by exact text and stable heading ids, edits
 by minimal diff, refuses to overwrite anchored content, and uses the Docs
 API's suggestion mode where the project is enrolled. The reasoning and
-evidence are in [docs/architecture.md](docs/architecture.md).
+evidence are in [`docs/architecture.md`](docs/architecture.md).
+
+Reading, searching, creating, exporting, editing with minimal diffs in
+suggest, direct or comment mode, formatting, reviewing suggestions,
+comment threads, revision history and diffs, tables, tabs, headers,
+footers, footnotes, images, chips, named ranges, page and section layout,
+named styles, `gdocs://` resources, large-document performance and agent
+evals are all in. Every GA member of the Docs API's `Request` union is
+emitted; §16 of the architecture says which fields those tools expose and
+which they deliberately do not.
 
 ## Install
 
-```
+```bash
 go install github.com/mmedum/google-docs-mcp/cmd/google-docs-mcp@latest
 ```
 
 That puts `google-docs-mcp` in `$(go env GOPATH)/bin`, which is the path
-to give your MCP client. Or take a binary from the
-[releases page](https://github.com/mmedum/google-docs-mcp/releases):
-each tag publishes archives for linux, darwin and windows on amd64 and
-arm64, with a `checksums.txt` to verify against.
+to give your MCP client. Or take a signed archive from the
+[latest release](https://github.com/mmedum/google-docs-mcp/releases/latest)
+— Linux, macOS and Windows, on amd64 and arm64 — and verify it before you
+run it:
 
-```
+```bash
 tar xzf google-docs-mcp_*_linux_amd64.tar.gz
-sha256sum -c --ignore-missing checksums.txt
-install -m 0755 google-docs-mcp ~/.local/bin/
-```
+sha256sum -c checksums.txt --ignore-missing
 
-Every release is built by GitHub Actions from the tag and carries proof
-of it. To check that an archive came from this repository's workflow
-rather than from someone's laptop:
-
-```
-gh attestation verify google-docs-mcp_*_linux_amd64.tar.gz --repo mmedum/google-docs-mcp
-cosign verify-blob checksums.txt --bundle checksums.txt.bundle \
-  --certificate-identity-regexp 'https://github.com/mmedum/google-docs-mcp/.*' \
+# The checksum file is signed with a keyless Sigstore certificate tied to
+# the release workflow's identity. The bundle carries both.
+cosign verify-blob checksums.txt \
+  --bundle checksums.txt.bundle \
+  --certificate-identity-regexp 'https://github\.com/mmedum/google-docs-mcp/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# And the archive itself carries build provenance.
+gh attestation verify google-docs-mcp_*_linux_amd64.tar.gz --repo mmedum/google-docs-mcp
 ```
 
-Each archive also ships an SBOM (`.sbom.json`) listing what went into
-the binary. `go install` needs none of this: the module proxy and
-`sum.golang.org` verify the source before it is built.
-
+Every archive also ships an SBOM (`.sbom.json`), so you can see what is
+inside a binary you did not build. `go install` needs none of this: the
+module proxy and `sum.golang.org` verify the source before it is built.
 `google-docs-mcp --version` reports the release it came from either way.
 
-## Set up Google (once per person)
+## Set up Google
 
 Every deployer uses their own Google Cloud project and OAuth client. There
 is no shared app and nothing to verify with Google.
@@ -114,7 +100,7 @@ is no shared app and nothing to verify with Google.
    Keep it out of any repository.
 6. Run:
 
-```
+```bash
 google-docs-mcp login
 google-docs-mcp doctor https://docs.google.com/document/d/<some doc you can open>/edit
 ```
@@ -135,14 +121,14 @@ browser is local, so the port has to be forwarded. It is drawn at random
 and appears only in the URL `login` prints, percent-encoded as
 `127.0.0.1%3A<port>`:
 
-```
+```bash
 google-docs-mcp login --no-browser
 ```
 
 Read the port out of that URL, forward it from a second local terminal,
 then open the URL in your own browser:
 
-```
+```bash
 ssh -N -L <port>:127.0.0.1:<port> you@remote-host
 ```
 
@@ -167,25 +153,11 @@ can absorb without changing behaviour. Everything reachable with
 `GDOCS_PREVIEW` unset follows semver as stated; the preview-gated
 features follow Google's preview programme, and if it moves, they move.
 
-## Versioning
-
-From v1.0.0, semver as you would expect: a tool removed or renamed, an
-argument that becomes required, or a change to what a tool returns is a
-major version. New tools and new optional arguments are minor. The
-schema diff in CI is what enforces it, and it runs on every pull
-request — the tool surface cannot change without the diff naming it.
-
-The two exclusions, both stated so they are decisions rather than
-surprises: the Developer Preview features above, and the exact prose of
-a tool's text output, which is written for a model to read and will be
-reworded when a model reads it badly. The `structuredContent` a tool
-returns is covered; the sentence wrapped around it is not.
-
 ## Connect a client
 
 Claude Code:
 
-```
+```bash
 claude mcp add --transport stdio google-docs -- google-docs-mcp
 ```
 
@@ -208,7 +180,7 @@ edit, then start it. It also loads tool definitions lazily, so give it a
 moment before expecting the tools in a chat.
 
 All settings are environment variables; see
-[docs/configuration.md](docs/configuration.md). Nothing needs to be set
+[`docs/configuration.md`](docs/configuration.md). Nothing needs to be set
 for the defaults.
 
 ## Tools
@@ -264,20 +236,18 @@ stable `heading_id`, a block by handle (`p12`, valid for the revision it
 came from and re-checked on use), a table cell, or a named range, which
 is the one anchor that outlives an edit: Google moves it with the text it
 covers, so `create_named_range` now and `target: {named_range: …}` in a
-later call reach the same passage. New content is written
-as markdown. A `replace` is applied as the smallest diff between the old
-and new text, so untouched words keep their formatting and anchored
-comments.
+later call reach the same passage. New content is written as markdown. A
+`replace` is applied as the smallest diff between the old and new text, so
+untouched words keep their formatting and anchored comments.
 
 Tables are named by handle (`tbl1`) and cells as `r2c3`; a table that
 gets a data grid is inserted empty and filled in a second batch once it
 exists. Table ops read in order: once one changes the grid, the ops after
 it on that table are applied in a batch of their own, so their row,
-column and cell numbers mean the grid as it is by then.
-Old revisions are read and diffed through Google's export, so they have
-no handles.
+column and cell numbers mean the grid as it is by then. Old revisions are
+read and diffed through Google's export, so they have no handles.
 
-## Safety model
+## Safety
 
 - Read tools are annotated read-only. Write tools take a `mode` chosen by
   the person: `suggest` (tracked change), `direct`, or `comment` (the
@@ -294,36 +264,105 @@ no handles.
   (stderr) never contain document text.
 - Refresh tokens live in the OS keyring; `logout` revokes and deletes.
 
-See [docs/security.md](docs/security.md).
+## How it works
+
+```
+MCP client ──stdio──► google-docs-mcp
+                       ├── tools     one handler per tool; shapes the reply
+                       ├── service   orchestration and scope resolution
+                       ├── plan      write planning and all the index math
+                       ├── doc       model, handles, sections
+                       ├── render    markdown, text, outline
+                       ├── gapi      raw REST client for Docs and Drive
+                       └── auth      refresh token → access token
+```
+
+Index math never leaves the server: the model addresses content by exact
+text, `heading_id` or handle, and `internal/plan` turns that into the
+UTF-16 offsets the Docs API wants. The wire types in `internal/gdocs` are
+this project's own, held to Google's published discovery document by a
+gate, rather than the generated client.
+
+## Getting help
+
+`google-docs-mcp doctor` checks credentials, scopes and API reachability
+and names what is missing; most first-run trouble is an API that was
+never enabled or a consent screen without you on it. If that does not
+explain it, [open an issue](https://github.com/mmedum/google-docs-mcp/issues)
+— the bug form asks for the `doctor` output and the version.
+
+Never paste a document id or URL, document content, a
+`client_secret.json` or a token into an issue; describe the shape of the
+document instead. Security problems go through
+[`SECURITY.md`](SECURITY.md), privately.
+
+## Versioning
+
+From v1.0.0, semver as you would expect: a tool removed or renamed, an
+argument that becomes required, or a change to what a tool returns is a
+major version. New tools and new optional arguments are minor. The
+schema diff in CI is what enforces it, and it runs on every pull
+request — the tool surface cannot change without the diff naming it.
+
+The two exclusions, both stated so they are decisions rather than
+surprises: the Developer Preview features above, and the exact prose of
+a tool's text output, which is written for a model to read and will be
+reworded when a model reads it badly. The `structuredContent` a tool
+returns is covered; the sentence wrapped around it is not.
+
+Each release's notes are the matching section of
+[`CHANGELOG.md`](CHANGELOG.md); a change needing you to act — a new
+scope, another login, a different command in your client config — is
+marked **Breaking:** there.
 
 ## Development
 
+```bash
+make build     # the binary
+make test      # race detector, coverage floor
+make check     # everything CI runs
 ```
-make check      # gofmt, vet, golangci-lint, tests with coverage floor, govulncheck, stdio smoke
-make build
-./google-docs-mcp --dump-schemas
-```
+
+`make check` is the definition of done: formatting, `go vet` under every
+build tag, golangci-lint, race tests with a per-package coverage floor,
+`govulncheck`, a licence check, a secret scan, an API-coverage gate and
+an API-fields gate that fail when a Google API method or field has no
+verdict on it, a schema diff against the released tool surface, a stdio
+smoke test, and a staleness gate that fails when this README, the docs or
+the changelog drift from the code.
 
 Test fixtures are synthetic. Never add content, ids or URLs from real
-documents; gitleaks runs in pre-commit and CI. `make bench` measures the
-large-document paths; `go test -tags=evals ./internal/evals` runs the
-agent evals against your own account (see the package comment).
+documents. `make bench` measures the large-document paths;
+`go test -tags=evals ./internal/evals` runs the agent evals against your
+own account (see the package comment).
 
-## Security
+## Documentation
 
-Report a vulnerability privately: see [SECURITY.md](SECURITY.md), which
-says what is in scope and how to reach me. Do not open a public issue
-for one.
-
-`docs/security.md` describes what the server does with your credentials
-and your documents — what reaches a log, what `doctor` prints, and what
-the drivers write — and each claim there is held by a test.
+- [`docs/architecture.md`](docs/architecture.md) — the design, the
+  request flow, the evidence log behind every convention, and the
+  decisions a contributor should not undo.
+- [`docs/configuration.md`](docs/configuration.md) — every environment
+  variable and flag.
+- [`docs/security.md`](docs/security.md) — the threat model: what reaches
+  a log, what `doctor` prints, what the drivers write. Each claim is held
+  by a test.
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the branch and review flow, and
-`make check` is what has to pass.
+Questions and bugs go in
+[issues](https://github.com/mmedum/google-docs-mcp/issues); pull requests
+are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the branch and
+review flow, and `make check` is what has to pass.
 
-## Licence
+## Security
 
-Apache-2.0.
+[`SECURITY.md`](SECURITY.md) says what is in scope and how to report a
+vulnerability privately. Do not open a public issue for one.
+
+## Code of conduct
+
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — Contributor Covenant 3.0.
+
+## License
+
+Apache-2.0 — see [`LICENSE`](LICENSE).

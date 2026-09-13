@@ -51,6 +51,10 @@ func init() {
 			run: toolNames, args: "FILE",
 			doc: "print the tool names in a schema dump",
 		},
+		"release-notes": {
+			run: releaseNotes, args: "VERSION [CHANGELOG]",
+			doc: "one version's CHANGELOG section, which is the release note",
+		},
 		"schema-diff": {
 			run: schemaDiff, args: "[BIN]", gate: true,
 			doc: "diff the binary's tool schemas against the last tag",

@@ -127,6 +127,7 @@ jobs:
       - run: go run ./scripts/gates leaks
       - run: go run ./scripts/gates pins
       - run: go run ./scripts/gates classes
+      - run: go run ./scripts/gates transcript
       - run: go run ./scripts/gates api-coverage
       - run: go run ./scripts/gates api-fields
       - run: go run ./scripts/gates parity

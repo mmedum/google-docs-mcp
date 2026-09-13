@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format is
 follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
-## [Unreleased]
+## [1.1.0] - 2026-09-13
 
 ### Added
 - An API-coverage gate. `make api-coverage` holds three things to each
@@ -22,8 +22,6 @@ and new required fields are breaking; the schema diff in CI flags them.
   checked on every pull request rather than whenever somebody remembers.
   Watched failing four ways. The two-file split, and both traps it avoids,
   came from the chat server building the same gate first.
-
-### Added
 - An API-fields gate. `make api-fields` holds the wire types to the Docs
   discovery document the way `api-coverage` holds the client to its
   method list: the published schemas and properties in
@@ -57,6 +55,42 @@ and new required fields are breaking; the schema diff in CI flags them.
   twenty-one, and reading only the top level is how the sibling server's
   `File.capabilities` went 46 fields unchecked. The descent is here so
   that omission cannot start being true.
+
+### Changed
+- `read_document format: raw` returns the bytes Google sent, not a
+  re-encoding of this server's wire types. Its schema promises "Docs API
+  JSON", and marshalling the types could only ever return the fields they
+  model — so the one read whose job is to show what the API said was the
+  least faithful read on the server. It dropped 39 published fields
+  across nine types (`SectionStyle` alone missing all four margins,
+  `columnProperties` and `pageNumberStart`), and it is how #46 came to be
+  filed against the write path at all: the raw read had dropped the field
+  that proved the write had worked. Elements now keep the bytes they were
+  decoded from; a document built in Go, with no bytes to keep, still
+  encodes from the types. Output stays compact, so `max_chars` still buys
+  the same amount of document.
+- Every request asks for compact JSON. Google indents by default, which
+  on a 150-page document is 7.44 MB on the wire against 2.96 MB without
+  it — 60% of the bytes for whitespace nothing reads, and, now that
+  elements keep what they decoded from, retained indentation as well. The
+  round trip costs 28 → 41 ms of decoding and 7.7 → 11.2 MB of heap for
+  the kept bytes on a document that size, against 4.5 MB less to
+  download. Those figures come from a prose-heavy document and are not a
+  bound: an element's bytes are held again inside every ancestor's, so a
+  deeply table-nested document retains its cells once per level. Asked for in the one place that builds an HTTP request, not
+  in `documents.get`'s query where it began: the Drive half of this
+  client — exports, comment threads, revisions — was still receiving
+  indented JSON, and a call added later should not have to remember.
+  Skipped when the request is not asking for JSON, because an export asks
+  for bytes.
+- A direct formatting change over a property a pending suggestion already
+  sets now comes back with a warning naming the suggestion and the
+  property. Google accepts such a request, replies with an empty result
+  and sometimes applies nothing — verified live: bold over a suggested
+  bold, and an alignment over the same suggested alignment, both leave
+  the document unchanged, while a font size set to the value a suggestion
+  names does land. The rule is inconsistent, so this warns rather than
+  refusing; `ops_applied` alone could not tell anyone which had happened.
 
 ### Fixed
 - Suggestions that only change formatting are no longer invisible. A
@@ -121,42 +155,6 @@ and new required fields are breaking; the schema diff in CI flags them.
   other. Both shapes now go through one reading of what a tabless
   response describes, `gdocs.LegacyTab`, which is also what `Parse` uses
   — it was two lists before, and they disagreed in both directions.
-
-### Changed
-- `read_document format: raw` returns the bytes Google sent, not a
-  re-encoding of this server's wire types. Its schema promises "Docs API
-  JSON", and marshalling the types could only ever return the fields they
-  model — so the one read whose job is to show what the API said was the
-  least faithful read on the server. It dropped 39 published fields
-  across nine types (`SectionStyle` alone missing all four margins,
-  `columnProperties` and `pageNumberStart`), and it is how #46 came to be
-  filed against the write path at all: the raw read had dropped the field
-  that proved the write had worked. Elements now keep the bytes they were
-  decoded from; a document built in Go, with no bytes to keep, still
-  encodes from the types. Output stays compact, so `max_chars` still buys
-  the same amount of document.
-- Every request asks for compact JSON. Google indents by default, which
-  on a 150-page document is 7.44 MB on the wire against 2.96 MB without
-  it — 60% of the bytes for whitespace nothing reads, and, now that
-  elements keep what they decoded from, retained indentation as well. The
-  round trip costs 28 → 41 ms of decoding and 7.7 → 11.2 MB of heap for
-  the kept bytes on a document that size, against 4.5 MB less to
-  download. Those figures come from a prose-heavy document and are not a
-  bound: an element's bytes are held again inside every ancestor's, so a
-  deeply table-nested document retains its cells once per level. Asked for in the one place that builds an HTTP request, not
-  in `documents.get`'s query where it began: the Drive half of this
-  client — exports, comment threads, revisions — was still receiving
-  indented JSON, and a call added later should not have to remember.
-  Skipped when the request is not asking for JSON, because an export asks
-  for bytes.
-- A direct formatting change over a property a pending suggestion already
-  sets now comes back with a warning naming the suggestion and the
-  property. Google accepts such a request, replies with an empty result
-  and sometimes applies nothing — verified live: bold over a suggested
-  bold, and an alignment over the same suggested alignment, both leave
-  the document unchanged, while a font size set to the value a suggestion
-  names does land. The rule is inconsistent, so this warns rather than
-  refusing; `ops_applied` alone could not tell anyone which had happened.
 
 ## [1.0.1] - 2026-09-07
 

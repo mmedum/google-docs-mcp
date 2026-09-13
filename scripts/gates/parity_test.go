@@ -25,7 +25,7 @@ vet:
 	go vet -tags=integration ./...
 
 .PHONY: check
-check: fmt vet cover leaks pins gate-classes parity ## Everything CI runs
+check: fmt vet cover leaks pins classes parity ## Everything CI runs
 `
 	parityCI = `name: ci
 jobs:

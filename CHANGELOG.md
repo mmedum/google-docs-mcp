@@ -7,16 +7,23 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
-### Fixed
-- The schema diff can see the tools that register behind a flag.
-  `delete_comment` and `delete_tab` register only under
-  `GDOCS_ENABLE_DESTRUCTIVE`, and the gate dumped a default build on both
-  sides, so neither appeared in either surface — a removed field or a new
-  required one on either was invisible, quietly, with every check green.
-  It is the case the gate exists for: a deployer who turned the flag on
-  is a client written against that surface. Both sides now dump the whole
-  registrable surface, and a test holds it, because a comment cannot.
-  Found while checking release readiness for an unrelated change.
+### Changed
+- `--dump-schemas` emits the whole registrable surface, so the schema
+  diff compares like with like. `delete_comment` and `delete_tab`
+  register only under `GDOCS_ENABLE_DESTRUCTIVE`, and the dump carried a
+  default build, so neither was in either side of the comparison and a
+  removed field or a new required one on them was invisible with every
+  check green. The decision now sits in `tools.FullSurface`, beside
+  Register, which is the only place that can name every gate Register
+  reads; a test enumerates the gate flags and fails if any combination
+  registers a tool the full surface does not. A sibling server had the
+  same fault and was fixed the same way, having first been fixed two
+  other ways.
+- The `classes` gate's Make target is called `classes`, like the gate and
+  like the other three servers, instead of `gate-classes`. The parity
+  gate's rename map is one entry shorter, which its own comment asks for.
+
+## [Unreleased]
 
 ## [1.1.1] - 2026-09-13
 

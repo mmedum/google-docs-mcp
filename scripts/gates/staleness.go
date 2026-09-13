@@ -21,6 +21,9 @@ var (
 	// floor's hand-written package list: silent when it falls behind.
 	configKey  = regexp.MustCompile(`def\(&s\.\w+,\s*"[a-z-]+",\s*"([A-Z_]+)"`)
 	readmeTool = regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z_]+)` + "`" + ` \|`)
+	// A tool named anywhere in the prose, for the tools that register
+	// only behind a flag and so are described rather than tabulated.
+	readmeMention = regexp.MustCompile("`" + `([a-z_]+)` + "`")
 	// A version heading, as Keep a Changelog writes it.
 	versionHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`)
 	// The status line at the top of each document, which is the first
@@ -65,15 +68,39 @@ func staleness(bin string) error {
 	if err != nil {
 		return err
 	}
-	var documented []string
+	var tabled []string
 	for _, m := range readmeTool.FindAllStringSubmatch(string(readme), -1) {
-		documented = append(documented, m[1])
+		tabled = append(tabled, m[1])
 	}
-	sort.Strings(documented)
-	if missing := difference(registered, documented); len(missing) > 0 {
-		problems = append(problems, "README's tool table is missing: "+strings.Join(missing, ", "))
+	sort.Strings(tabled)
+
+	// Two directions, two sets, because they are asking different things.
+	//
+	// Every registered tool has to be documented SOMEWHERE, and the two
+	// that register only under GDOCS_ENABLE_DESTRUCTIVE are deliberately
+	// not in the table — the table is the surface a person gets by
+	// default, and they are described in the paragraph that explains the
+	// flag. So the missing check reads the whole file. It only got away
+	// with reading the table before because --dump-schemas emitted a
+	// default build, which is the thing that made the schema diff blind.
+	//
+	// The other direction still reads the table only: a row naming
+	// something that is not a tool is a real error, while an inline code
+	// span is as likely to be a field or an op name.
+	mentioned := map[string]bool{}
+	for _, m := range readmeMention.FindAllStringSubmatch(string(readme), -1) {
+		mentioned[m[1]] = true
 	}
-	if extra := difference(documented, registered); len(extra) > 0 {
+	var missing []string
+	for _, name := range registered {
+		if !mentioned[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		problems = append(problems, "README does not document: "+strings.Join(missing, ", "))
+	}
+	if extra := difference(tabled, registered); len(extra) > 0 {
 		problems = append(problems, "README's tool table names tools that are not registered: "+strings.Join(extra, ", "))
 	}
 

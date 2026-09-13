@@ -20,6 +20,28 @@ type Deps struct {
 	Logger  *slog.Logger
 }
 
+// FullSurface is the configuration under which every tool registers.
+//
+// It lives beside Register rather than in the command that dumps the
+// schemas, because it has to name every gate Register reads and the
+// command has no way to know when a new one appears.
+//
+// --dump-schemas uses it so that the schema diff compares the whole
+// registrable surface on both sides. Without it the dump carried a
+// default build, delete_comment and delete_tab were in neither surface,
+// and a removed field or a new required one on either was invisible with
+// every check green. A deployer who turned the flag on is a client
+// written against that surface.
+//
+// TestFullSurfaceRegistersEverything holds the claim rather than this
+// comment doing it: it enumerates the gate flags and requires no
+// combination to register a tool this one does not.
+func FullSurface(cfg config.Config) config.Config {
+	cfg.ReadOnly = false
+	cfg.EnableDestructive = true
+	return cfg
+}
+
 // Register adds every tool the configuration allows.
 func Register(s *mcp.Server, d Deps) {
 	if d.Logger == nil {

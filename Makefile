@@ -80,8 +80,8 @@ leaks: ## Nothing identifying may be in the repository
 pins: ## Every action and every tool it installs is one exact version
 	@$(GO) run ./scripts/gates pins
 
-.PHONY: gate-classes
-gate-classes: ## The error classes the code emits are the ones it documents
+.PHONY: classes
+classes: ## The error classes the code emits are the ones it documents
 	@$(GO) run ./scripts/gates classes
 
 .PHONY: parity
@@ -101,7 +101,7 @@ api-diff: ## Refetch the discovery documents and rewrite the snapshot (network; 
 	@$(GO) run ./scripts/gates api-diff
 
 .PHONY: check
-check: fmt vet lint cover vuln licenses leaks pins gate-classes api-coverage api-fields schema-diff smoke staleness parity ## Everything CI runs
+check: fmt vet lint cover vuln licenses leaks pins classes api-coverage api-fields schema-diff smoke staleness parity ## Everything CI runs
 
 .PHONY: clean
 clean:

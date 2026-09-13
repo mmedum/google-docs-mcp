@@ -94,6 +94,9 @@ func DocumentTabs(d *Document) []*DocumentTab {
 	if d == nil {
 		return nil
 	}
+	if len(d.Tabs) == 0 {
+		return []*DocumentTab{LegacyTab(d)}
+	}
 	var out []*DocumentTab
 	WalkTabs(d.Tabs, func(t *Tab) bool {
 		if t.DocumentTab != nil {
@@ -102,6 +105,29 @@ func DocumentTabs(d *Document) []*DocumentTab {
 		return true
 	})
 	return out
+}
+
+// LegacyTab is a response without tabs content read as the single tab it
+// describes: the Docs API carries the same collections on the document
+// itself when the caller did not ask for tabs.
+//
+// One list, because there were two and they disagreed. Parse built this
+// shape for its own use and left out the two suggested-style maps, while
+// the suggestion reader built it again and left out everything else — so
+// a collection Google adds to a tab had to be remembered in two places,
+// and forgetting one is exactly the "the read says no suggestion exists"
+// bug that sent anyone looking here in the first place.
+func LegacyTab(d *Document) *DocumentTab {
+	if d == nil {
+		return nil
+	}
+	return &DocumentTab{
+		Body: d.Body, Headers: d.Headers, Footers: d.Footers, Footnotes: d.Footnotes,
+		Lists: d.Lists, InlineObjects: d.InlineObjects, PositionedObjects: d.PositionedObjects,
+		NamedRanges: d.NamedRanges, DocumentStyle: d.DocumentStyle, NamedStyles: d.NamedStyles,
+		SuggestedDocumentStyleChanges: d.SuggestedDocumentStyleChanges,
+		SuggestedNamedStylesChanges:   d.SuggestedNamedStylesChanges,
+	}
 }
 
 // TabProperties identify and place a tab.

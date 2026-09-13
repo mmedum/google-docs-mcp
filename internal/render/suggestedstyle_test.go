@@ -95,3 +95,45 @@ func TestNoSuggestionNoMarker(t *testing.T) {
 		}
 	}
 }
+
+// TestParagraphRestyleIsMarked covers the half of the model the
+// renderers could not see: a suggested paragraph style or bullet change
+// is reported by list_suggestions, and read_document said nothing at all
+// while its own description promised a marker.
+func TestParagraphRestyleIsMarked(t *testing.T) {
+	seg := restyled(t, nil)
+	p := seg.Blocks[0].Paragraph
+	p.StyleChanges = []doc.StyleChange{{ID: "suggest.p", Props: []string{"alignment"}}}
+	p.BulletChanges = []doc.StyleChange{{ID: "suggest.b", Props: []string{"listId"}}}
+
+	got := render.Markdown(seg, 0, 1, render.Options{Suggestions: true}).Text
+	for _, want := range []string{
+		"{>>s:suggest.p suggests paragraph alignment<<}",
+		"{>>s:suggest.b suggests bullet list id<<}",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("want %s, got:\n%s", want, got)
+		}
+	}
+	// Not the highlight form: a paragraph-level suggestion covers the
+	// whole paragraph, and wrapping the line would swallow a heading's
+	// own marker.
+	if strings.Contains(got, "{==") {
+		t.Errorf("a paragraph restyle should not wrap the line:\n%s", got)
+	}
+	// And with CriticMarkup off there is no marker at all.
+	if quiet := render.Markdown(seg, 0, 1, render.Options{}).Text; strings.Contains(quiet, ">>s:") {
+		t.Errorf("markers belong to include_suggestions:\n%s", quiet)
+	}
+	// with_styles alone has no marker to carry the suggestion, so the
+	// annotation is where it has to appear — otherwise the read prints
+	// the paragraph's committed alignment and says nothing about the
+	// pending suggestion to change it, which is what the run path was
+	// already careful about.
+	styled := render.Markdown(seg, 0, 1, render.Options{WithStyles: true}).Text
+	for _, want := range []string{"suggested:", "alignment", "list id"} {
+		if !strings.Contains(styled, want) {
+			t.Errorf("with_styles should report the pending paragraph restyle (%q):\n%s", want, styled)
+		}
+	}
+}

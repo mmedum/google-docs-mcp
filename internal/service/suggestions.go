@@ -46,7 +46,7 @@ func (s *Service) ListSuggestions(ctx context.Context, ref string) (*Suggestions
 	if err != nil {
 		return nil, err
 	}
-	set := &suggestionSet{byID: map[string]*Suggestion{}}
+	set := &suggestionSet{byID: map[string]*Suggestion{}, edits: map[string]editKind{}}
 	set.collectEdits(f.Doc)
 	set.collectFormats(f.Doc)
 	threads := map[string]gdocs.SuggestionThread{}
@@ -63,7 +63,19 @@ func (s *Service) ListSuggestions(ctx context.Context, ref string) (*Suggestions
 type suggestionSet struct {
 	byID  map[string]*Suggestion
 	order []string
+	// What collectEdits was told, before the text was trimmed for
+	// display. list classifies on this rather than on whether the quoted
+	// text survived: a run whose whole content is "\n" trims to nothing,
+	// so an inserted blank line and a deleted one are the same string.
+	edits map[string]editKind
 }
+
+type editKind uint8
+
+const (
+	editInserted editKind = 1 << iota
+	editDeleted
+)
 
 func (s *suggestionSet) note(id, handle, inserted, deleted string, structure bool) *Suggestion {
 	sg, ok := s.byID[id]
@@ -94,11 +106,16 @@ func (s *suggestionSet) collectEdits(d *doc.Document) {
 			continue
 		}
 		for _, r := range b.Paragraph.Runs {
+			// Trimmed for display only. The classification reads s.edits,
+			// which records which loop this was.
+			text := strings.TrimSuffix(r.Text, "\n")
 			for _, id := range r.Inserted {
-				s.note(id, b.Handle, strings.TrimSuffix(r.Text, "\n"), "", false)
+				s.note(id, b.Handle, text, "", false)
+				s.edits[id] |= editInserted
 			}
 			for _, id := range r.Deleted {
-				s.note(id, b.Handle, "", strings.TrimSuffix(r.Text, "\n"), false)
+				s.note(id, b.Handle, "", text, false)
+				s.edits[id] |= editDeleted
 			}
 		}
 	}
@@ -115,6 +132,8 @@ func (s *suggestionSet) collectEdits(d *doc.Document) {
 // carrier added to doc and not here would have been dropped in silence,
 // which is the shape of the bug this all comes from.
 func (s *suggestionSet) collectFormats(d *doc.Document) {
+	// One entry per carrier is what the model used to hand over; it now
+	// merges them, so this is one entry per suggestion and target.
 	for _, fs := range d.FormatSuggestions {
 		sg := s.note(fs.ID, fs.Handle, "", "", false)
 		sg.Formats = append(sg.Formats, fs.Target+": "+doc.PropList(fs.Props))
@@ -130,13 +149,18 @@ func (s *suggestionSet) list(threads map[string]gdocs.SuggestionThread) []Sugges
 	out := make([]Suggestion, 0, len(s.order))
 	for _, id := range s.order {
 		sg := s.byID[id]
-		switch {
+		// On what the suggestion did, not on what its quoted text looks
+		// like. Deciding from the text made a suggestion that adds or
+		// removes a paragraph's lone "\n" — a blank line, a paragraph
+		// merge — indistinguishable from one that edits nothing, because
+		// the display text is trimmed of exactly that newline.
+		switch e := s.edits[id]; {
 		case sg.Kind != "":
-		case sg.Inserted != "" && sg.Deleted != "":
+		case e&editInserted != 0 && e&editDeleted != 0:
 			sg.Kind = "replace"
-		case sg.Inserted != "":
+		case e&editInserted != 0:
 			sg.Kind = "insert"
-		case sg.Deleted != "":
+		case e&editDeleted != 0:
 			sg.Kind = "delete"
 		default:
 			// Nothing added and nothing removed: a suggestion that only

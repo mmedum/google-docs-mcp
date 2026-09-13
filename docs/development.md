@@ -112,16 +112,24 @@ and are preferred by the Makefile; install them with
   does not model, `extra` for a field it carries that public discovery
   does not publish (the Developer Preview ones), `alias` for a schema
   modelled under another name (`Break` covers `pageBreak`, `columnBreak`
-  and `horizontalRule`). The modelled side is read out of
-  `internal/gdocs` with `go/ast`, promoting the tags of embedded structs,
-  because a field promoted from `Suggested` is on the wire exactly as if
-  it had been declared.
+  and `horizontalRule`), and `local` for a struct that models no
+  published schema at all (the Developer Preview comment shapes, and the
+  `SuggestedStyle` embeddable whose tags reach the wire through the
+  elements that embed it). `local` is the one verdict whose first column
+  names a Go struct rather than a schema. The modelled side is read out
+  of `internal/gdocs` with `go/ast`, promoting the tags of embedded
+  structs, because a field promoted from `Suggested` is on the wire
+  exactly as if it had been declared.
 
-  Both directions fail the build: a field Google adds to a type we model,
-  and a field we carry that nothing publishes. The count of schemas
-  actually matched is part of the rule too — a struct renamed out of the
-  way would otherwise stop being checked in silence, which is the failure
-  mode any gate built on a name match has.
+  Three directions fail the build: a field Google adds to a type we
+  model, a field we carry that nothing publishes, and a struct that
+  matches no schema and has no row saying why. The third is what makes
+  the set being compared part of the rule, and it is the reason there is
+  no floor under the number of schemas matched: there was one, at 80
+  against a real 104, and a rename that took a type out of the
+  comparison stayed well above it. A row that has outlived the thing it
+  describes fails too — an `out` row for a property Google has
+  withdrawn, or one the types have since grown.
 
   The rule the `out` rows are judged against: **if a tool here writes a
   field, the types must carry it**, because a person should not be able

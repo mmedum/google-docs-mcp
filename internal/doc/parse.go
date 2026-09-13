@@ -28,12 +28,7 @@ func Parse(d *gdocs.Document) (*Document, error) {
 		// the single tab.
 		legacy := &gdocs.Tab{
 			TabProperties: &gdocs.TabProperties{Title: d.Title},
-			DocumentTab: &gdocs.DocumentTab{
-				Body: d.Body, Headers: d.Headers, Footers: d.Footers, Footnotes: d.Footnotes,
-				Lists: d.Lists, InlineObjects: d.InlineObjects,
-				PositionedObjects: d.PositionedObjects, NamedRanges: d.NamedRanges, DocumentStyle: d.DocumentStyle,
-				NamedStyles: d.NamedStyles,
-			},
+			DocumentTab:   gdocs.LegacyTab(d),
 		}
 		out.Tabs = append(out.Tabs, parseTab(legacy, 1))
 		out.index()

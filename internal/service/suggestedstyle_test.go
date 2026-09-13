@@ -172,3 +172,115 @@ func TestClearFormattingCollidesWithEverySuggestedProperty(t *testing.T) {
 		t.Errorf("clear_formatting resets every property, so it collides with a suggested size: %v", res.Warnings)
 	}
 }
+
+// TestABlankLineEditKeepsItsDirection guards the classification.
+// collectEdits trims a run's trailing newline for display, so a
+// suggestion that adds or removes a paragraph's lone "\n" run leaves
+// both Inserted and Deleted empty — the two are the same string. Kind is
+// decided on which loop recorded the edit, so the direction survives.
+func TestABlankLineEditKeepsItsDirection(t *testing.T) {
+	var d gdocs.Document
+	if err := json.Unmarshal(doctest.RawFixture(t), &d); err != nil {
+		t.Fatal(err)
+	}
+	// One blank line marked deleted, the next marked inserted.
+	var marked int
+	for _, tab := range d.Tabs {
+		for _, el := range tab.DocumentTab.Body.Content {
+			if el.Paragraph == nil {
+				continue
+			}
+			for _, pe := range el.Paragraph.Elements {
+				if pe.TextRun == nil || pe.TextRun.Content != "\n" || marked > 1 {
+					continue
+				}
+				if marked == 0 {
+					pe.TextRun.SuggestedDeletionIDs = []string{"suggest.blank.del"}
+				} else {
+					pe.TextRun.SuggestedInsertionIDs = []string{"suggest.blank.ins"}
+				}
+				marked++
+			}
+		}
+	}
+	if marked < 2 {
+		t.Skip("the fixture needs two paragraphs whose only run is a newline")
+	}
+	raw, err := json.Marshal(&d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(&fakeAPI{raw: raw}, Options{Preview: true, DefaultWriteMode: config.WriteDirect})
+	res, err := svc.ListSuggestions(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"suggest.blank.del": "delete", "suggest.blank.ins": "insert"}
+	seen := map[string]bool{}
+	for _, sg := range res.Suggestions {
+		w, ok := want[sg.ID]
+		if !ok {
+			continue
+		}
+		seen[sg.ID] = true
+		if sg.Kind != w {
+			t.Errorf("%s: kind = %q, want %q (inserted %q, deleted %q, formats %v)",
+				sg.ID, sg.Kind, w, sg.Inserted, sg.Deleted, sg.Formats)
+		}
+	}
+	for id := range want {
+		if !seen[id] {
+			t.Errorf("%s is missing from the list: %+v", id, res.Suggestions)
+		}
+	}
+}
+
+// TestARestyleSpanningRunsIsReportedOnce is the shape Google produces on
+// the first try: it splits a text run wherever the existing style
+// changes, so one suggested bold across a link or an already-italic word
+// is recorded on several runs. Each was reported as its own formatting
+// change, and the quoted text was the first run's alone.
+func TestARestyleSpanningRunsIsReportedOnce(t *testing.T) {
+	style := map[string]gdocs.SuggestedTextStyle{
+		"s.bold": {TextStyleSuggestionState: &gdocs.TextStyleSuggestionState{BoldSuggested: true}},
+	}
+	run := func(text string, italic bool) *gdocs.ParagraphElement {
+		return &gdocs.ParagraphElement{TextRun: &gdocs.TextRun{
+			Content:        text,
+			TextStyle:      &gdocs.TextStyle{Italic: italic},
+			SuggestedStyle: gdocs.SuggestedStyle{SuggestedTextStyleChanges: style},
+		}}
+	}
+	raw, err := json.Marshal(&gdocs.Document{
+		DocumentID: fixtureID, RevisionID: "r",
+		Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+			{Paragraph: &gdocs.Paragraph{
+				ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+				// One suggestion, three runs, because the middle word is
+				// already italic.
+				Elements: []*gdocs.ParagraphElement{run("sentence ", false), run("one", true), run(" here\n", false)},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(&fakeAPI{raw: raw}, Options{Preview: true, DefaultWriteMode: config.WriteDirect})
+	res, err := svc.ListSuggestions(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sg := range res.Suggestions {
+		if sg.ID != "s.bold" {
+			continue
+		}
+		if len(sg.Formats) != 1 {
+			t.Errorf("one suggestion over three runs is one formatting change, got %v", sg.Formats)
+		}
+		if sg.Restyled != "sentence one here" {
+			t.Errorf("restyled = %q, want the whole span it covers", sg.Restyled)
+		}
+		return
+	}
+	t.Errorf("the suggestion is missing: %+v", res.Suggestions)
+}

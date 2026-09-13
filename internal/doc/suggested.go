@@ -229,9 +229,40 @@ func collect(v reflect.Value, prefix string, out *[]string) {
 				collect(fv.Index(j), fmt.Sprintf("%s.%d.", stem, j), out)
 			}
 		case strings.HasSuffix(name, "SuggestionState"):
-			collect(fv, prefix+strings.TrimSuffix(name, "SuggestionState")+".", out)
+			stem := prefix + strings.TrimSuffix(name, "SuggestionState")
+			before := len(*out)
+			collect(fv, stem+".", out)
+			// A state whose type declares no fields at all is named by the
+			// stem. Google publishes exactly one such state,
+			// EmbeddedDrawingPropertiesSuggestionState, so a suggested
+			// change to a drawing walks down to nothing and the read
+			// would say no suggestion exists.
+			//
+			// Only that shape. A state that HAS fields and sets none of
+			// them is a suggestion to change nothing, and Google sends
+			// those routinely — a paragraph restyling carries an empty
+			// shadingSuggestionState beside the one property it does set.
+			// Naming the stem there invents a property, and guardRestyle
+			// would then warn about a collision on a property nothing
+			// suggested.
+			if len(*out) == before && declaresNoFields(fv) {
+				*out = append(*out, stem)
+			}
 		}
 	}
+}
+
+// declaresNoFields reports whether the value is a struct the response
+// carried whose type has no fields at all — a state that cannot name a
+// property because the API gave it none to name.
+func declaresNoFields(v reflect.Value) bool {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return false
+		}
+		v = v.Elem()
+	}
+	return v.Kind() == reflect.Struct && v.NumField() == 0
 }
 
 // apiName is the field's name on the wire, or "" for a field the API
@@ -258,7 +289,11 @@ func (d *Document) formatSuggestions(wire *gdocs.Document) []FormatSuggestion {
 		for _, c := range cs {
 			if len(c.Props) == 0 {
 				// A state with nothing set is a suggestion to change
-				// nothing, and reporting one would be worse than missing it.
+				// nothing, and reporting one would be worse than missing
+				// it. This stayed true through #46: the state that names
+				// no property of its own — a drawing's — is named by its
+				// stem in collect, so it arrives here with a property and
+				// an empty list means what it says.
 				continue
 			}
 			out = append(out, FormatSuggestion{ID: c.ID, Target: target, Props: c.Props, Handle: handle, Text: text})
@@ -272,13 +307,13 @@ func (d *Document) formatSuggestions(wire *gdocs.Document) []FormatSuggestion {
 			// argument did — cost 46% of the time and 44% of the memory of
 			// a parse, on documents with no suggestion in them at all.
 			if len(p.StyleChanges) > 0 || len(p.BulletChanges) > 0 {
-				text := OneLine(Clip(p.Text(ViewInline), 60))
+				text := p.Text(ViewInline)
 				add("paragraph", b.Handle, text, p.StyleChanges)
 				add("bullet", b.Handle, text, p.BulletChanges)
 			}
 			for _, r := range p.Runs {
 				if len(r.StyleChanges) > 0 {
-					add("text", b.Handle, OneLine(Clip(r.Text, 60)), r.StyleChanges)
+					add("text", b.Handle, r.Text, r.StyleChanges)
 				}
 			}
 		}
@@ -286,15 +321,27 @@ func (d *Document) formatSuggestions(wire *gdocs.Document) []FormatSuggestion {
 			continue
 		}
 		for _, row := range b.Table.Cells {
+			// Parse hangs a row's suggestion on every cell of the row, so
+			// that a guard on any cell can see it (plan reads it from
+			// whichever cell an op targets). Reported once, from the first
+			// cell, whose handle also names it: emitting it per cell
+			// reported one suggestion three times on a three-column row,
+			// which is what a one-column fixture hid.
+			if len(row) > 0 {
+				add("table row", row[0].Handle, "", row[0].RowChanges)
+			}
 			for _, c := range row {
 				add("table cell", c.Handle, "", c.StyleChanges)
-				add("table row", c.Handle, "", c.RowChanges)
 			}
 		}
 	}
 	if wire == nil {
-		return out
+		return mergeCarriers(out)
 	}
+	// DocumentTabs reads a response without tabs content as the single tab
+	// it describes, so both shapes arrive here as tabs and neither loses
+	// its collections — which is the "the read says no suggestion exists"
+	// this whole file is about, on the other response shape.
 	for _, t := range gdocs.DocumentTabs(wire) {
 		for _, id := range suggestedIn(t.Lists, func(v gdocs.List) int { return len(v.SuggestedListPropertiesChanges) }) {
 			add("list", "", "", changesOf(t.Lists[id].SuggestedListPropertiesChanges))
@@ -312,9 +359,45 @@ func (d *Document) formatSuggestions(wire *gdocs.Document) []FormatSuggestion {
 		add("document style", "", "", changesOf(t.SuggestedDocumentStyleChanges))
 		add("named styles", "", "", changesOf(t.SuggestedNamedStylesChanges))
 	}
-	// A response without tabs content carries the same two on the document.
-	add("document style", "", "", changesOf(wire.SuggestedDocumentStyleChanges))
-	add("named styles", "", "", changesOf(wire.SuggestedNamedStylesChanges))
+	return mergeCarriers(out)
+}
+
+// mergeCarriers folds the carriers of one suggestion into one entry per
+// suggestion and target, and quotes the whole span they cover.
+//
+// A suggestion is recorded on every carrier it touches, and Google
+// splits a text run wherever the existing style changes — so suggesting
+// bold across a link, or across an already-italic word, records the same
+// change on three runs. Reported per carrier that read back as
+// "(text: bold) (text: bold) (text: bold)" with only the first run's
+// text quoted. The clip happens here, once, for the same reason: sixty
+// characters of the whole span, not sixty of each piece.
+func mergeCarriers(in []FormatSuggestion) []FormatSuggestion {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]FormatSuggestion, 0, len(in))
+	at := map[string]int{}
+	prop := map[string]bool{}
+	for _, fs := range in {
+		key := fs.ID + "\x00" + fs.Target
+		i, ok := at[key]
+		if !ok {
+			i = len(out)
+			at[key] = i
+			out = append(out, FormatSuggestion{ID: fs.ID, Target: fs.Target, Handle: fs.Handle})
+		}
+		for _, p := range fs.Props {
+			if k := key + "\x00" + p; !prop[k] {
+				prop[k] = true
+				out[i].Props = append(out[i].Props, p)
+			}
+		}
+		out[i].Text += fs.Text
+	}
+	for i := range out {
+		out[i].Text = OneLine(Clip(out[i].Text, 60))
+	}
 	return out
 }
 

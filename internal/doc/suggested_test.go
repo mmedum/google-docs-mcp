@@ -282,7 +282,7 @@ func TestSuggestedPropsUseTheAPIsNames(t *testing.T) {
 			t.Errorf("suggestion %s: want props %v, got %v", id, props, got[id])
 		}
 		for _, p := range props {
-			if strings.ContainsAny(p, "ID") && strings.Contains(strings.Join(got[id], ","), "ID") {
+			if strings.Contains(p, "ID") && strings.Contains(strings.Join(got[id], ","), "ID") {
 				t.Errorf("suggestion %s named a property with Go's spelling, not the API's: %v", id, got[id])
 			}
 		}
@@ -343,4 +343,233 @@ func TestEverySuggestionStateFieldIsNamedByItsTag(t *testing.T) {
 	if checked < 100 {
 		t.Fatalf("only %d fields checked; the list of state types has gone stale", checked)
 	}
+}
+
+// TestRowRestyleIsReportedOncePerRow is the bug a one-column fixture
+// hid: parse hangs a row's suggestion on every cell of the row, so a
+// three-column row reported one suggestion three times.
+func TestRowRestyleIsReportedOncePerRow(t *testing.T) {
+	cell := func(text string) *gdocs.TableCell {
+		return &gdocs.TableCell{Content: []*gdocs.StructuralElement{{Paragraph: &gdocs.Paragraph{
+			ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+			Elements:       []*gdocs.ParagraphElement{{TextRun: &gdocs.TextRun{Content: text + "\n"}}},
+		}}}}
+	}
+	row := &gdocs.TableRow{
+		TableCells: []*gdocs.TableCell{cell("a"), cell("b"), cell("c")},
+		SuggestedTableRowStyleChanges: map[string]gdocs.SuggestedTableRowStyle{
+			"s.row": {TableRowStyleSuggestionState: &gdocs.TableRowStyleSuggestionState{MinRowHeightSuggested: true}},
+		},
+	}
+	d, err := doc.Parse(&gdocs.Document{
+		DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+		Tabs: []*gdocs.Tab{{
+			TabProperties: &gdocs.TabProperties{TabID: "t.0"},
+			DocumentTab: &gdocs.DocumentTab{Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+				{Table: &gdocs.Table{Rows: 1, Columns: 3, TableRows: []*gdocs.TableRow{row}}},
+			}}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, fs := range d.FormatSuggestions {
+		if fs.ID == "s.row" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("one row suggestion on a three-column row should be reported once, got %d: %+v", n, d.FormatSuggestions)
+	}
+	// Every cell still knows its row has a pending change, which is what
+	// a guard on one cell needs.
+	for _, c := range d.Tabs[0].Body.Blocks[0].Table.Cells[0] {
+		if len(c.RowChanges) != 1 {
+			t.Errorf("cell %s lost its row's change: %+v", c.Handle, c.RowChanges)
+		}
+	}
+}
+
+// TestLegacyResponseKeepsItsCollectionSuggestions covers the response
+// shape without tabs content, which Parse supports by copying the
+// top-level collections into a synthetic tab. Reading the suggestions
+// only from the tabs lost every one of them.
+func TestLegacyResponseKeepsItsCollectionSuggestions(t *testing.T) {
+	d, err := doc.Parse(&gdocs.Document{
+		DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+		Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+			{Paragraph: &gdocs.Paragraph{
+				ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+				Elements:       []*gdocs.ParagraphElement{{TextRun: &gdocs.TextRun{Content: "t\n"}}},
+			}},
+		}},
+		Lists: map[string]gdocs.List{"list.1": {SuggestedListPropertiesChanges: map[string]gdocs.SuggestedListProperties{
+			"s.list": {ListPropertiesSuggestionState: &gdocs.ListPropertiesSuggestionState{
+				NestingLevelsSuggestionStates: []gdocs.NestingLevelSuggestionState{{BulletAlignmentSuggested: true}},
+			}},
+		}}},
+		SuggestedDocumentStyleChanges: map[string]gdocs.SuggestedDocumentStyle{
+			"s.docstyle": {DocumentStyleSuggestionState: &gdocs.DocumentStyleSuggestionState{MarginTopSuggested: true}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, fs := range d.FormatSuggestions {
+		seen[fs.ID]++
+	}
+	if seen["s.list"] != 1 {
+		t.Errorf("a legacy response's list suggestion should be reported once, got %d: %+v", seen["s.list"], d.FormatSuggestions)
+	}
+	// And exactly once, not once for the tabs and again for the document.
+	if seen["s.docstyle"] != 1 {
+		t.Errorf("the document style suggestion should be reported once, got %d", seen["s.docstyle"])
+	}
+}
+
+// TestTabbedResponseDoesNotDoubleReportDocumentStyle is the other half:
+// a response with tabs must not have the document-level collections read
+// a second time.
+func TestTabbedResponseDoesNotDoubleReportDocumentStyle(t *testing.T) {
+	change := map[string]gdocs.SuggestedDocumentStyle{
+		"s.docstyle": {DocumentStyleSuggestionState: &gdocs.DocumentStyleSuggestionState{MarginTopSuggested: true}},
+	}
+	d, err := doc.Parse(&gdocs.Document{
+		DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+		SuggestedDocumentStyleChanges: change,
+		Tabs: []*gdocs.Tab{{
+			TabProperties: &gdocs.TabProperties{TabID: "t.0"},
+			DocumentTab: &gdocs.DocumentTab{
+				Body:                          &gdocs.Body{Content: []*gdocs.StructuralElement{}},
+				SuggestedDocumentStyleChanges: change,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, fs := range d.FormatSuggestions {
+		if fs.ID == "s.docstyle" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("want one document-style suggestion, got %d: %+v", n, d.FormatSuggestions)
+	}
+}
+
+// TestAStateWithNoFieldsIsNamedByItsStem covers the one suggestion state
+// the API publishes with no fields in it. A suggested change to a
+// drawing sets only EmbeddedDrawingPropertiesSuggestionState, which is
+// `struct{}`, so walking it for set properties finds none — and a read
+// that reports no properties reports no suggestion at all, which is the
+// bug #46 was about. The stem is the property name.
+func TestAStateWithNoFieldsIsNamedByItsStem(t *testing.T) {
+	d, err := doc.Parse(&gdocs.Document{
+		DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+		Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+			{Paragraph: &gdocs.Paragraph{
+				ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+				Elements: []*gdocs.ParagraphElement{{InlineObjectElement: &gdocs.InlineObjectElement{
+					InlineObjectID: "kix.obj",
+				}}},
+			}},
+		}},
+		InlineObjects: map[string]gdocs.InlineObject{"kix.obj": {
+			ObjectID: "kix.obj",
+			SuggestedInlineObjectPropertiesChanges: map[string]gdocs.SuggestedInlineObjectProperties{
+				"s.drawing": {InlineObjectPropertiesSuggestionState: &gdocs.InlineObjectPropertiesSuggestionState{
+					EmbeddedObjectSuggestionState: &gdocs.EmbeddedObjectSuggestionState{
+						EmbeddedDrawingPropertiesSuggestionState: &gdocs.EmbeddedDrawingPropertiesSuggestionState{},
+					},
+				}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fs := range d.FormatSuggestions {
+		if fs.ID != "s.drawing" {
+			continue
+		}
+		want := "embeddedObject.embeddedDrawingProperties"
+		if len(fs.Props) != 1 || fs.Props[0] != want {
+			t.Fatalf("want the stem %q as the property, got %v", want, fs.Props)
+		}
+		// And it reaches a person as words, not as a dangling sentence.
+		if got := doc.PropList(fs.Props); got == "" || strings.Contains(got, ".") {
+			t.Errorf("PropList(%v) = %q", fs.Props, got)
+		}
+		return
+	}
+	t.Errorf("a suggestion whose state names no property was dropped: %+v", d.FormatSuggestions)
+}
+
+// The other side of the same rule: a state that has fields and sets none
+// of them is a suggestion to change nothing, and reporting one would be
+// worse than missing it.
+func TestAStateThatSetsNothingIsNotReported(t *testing.T) {
+	d, err := doc.Parse(&gdocs.Document{
+		DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+		Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+			{Paragraph: &gdocs.Paragraph{
+				ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+				Elements: []*gdocs.ParagraphElement{{TextRun: &gdocs.TextRun{
+					Content: "t\n",
+					SuggestedStyle: gdocs.SuggestedStyle{SuggestedTextStyleChanges: map[string]gdocs.SuggestedTextStyle{
+						"s.nothing": {TextStyleSuggestionState: &gdocs.TextStyleSuggestionState{}},
+					}},
+				}}},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fs := range d.FormatSuggestions {
+		if fs.ID == "s.nothing" {
+			t.Errorf("a state that sets nothing was reported as a suggestion: %+v", fs)
+		}
+	}
+}
+
+// TestAnEmptyNestedStateInventsNoProperty is the other side of
+// TestAStateWithNoFieldsIsNamedByItsStem. Google sends a nested state
+// object beside the property it does set — a paragraph restyling carries
+// an empty shadingSuggestionState — and naming that stem would report a
+// change to a property nobody suggested, which guardRestyle would then
+// warn about.
+func TestAnEmptyNestedStateInventsNoProperty(t *testing.T) {
+	d, err := doc.Parse(&gdocs.Document{
+		DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+		Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+			{Paragraph: &gdocs.Paragraph{
+				ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+				Elements:       []*gdocs.ParagraphElement{{TextRun: &gdocs.TextRun{Content: "t\n"}}},
+				SuggestedParagraphStyleChanges: map[string]gdocs.SuggestedParagraphStyle{
+					"s.p": {ParagraphStyleSuggestionState: &gdocs.ParagraphStyleSuggestionState{
+						AlignmentSuggested:     true,
+						ShadingSuggestionState: &gdocs.ShadingSuggestionState{},
+					}},
+				},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fs := range d.FormatSuggestions {
+		if fs.ID != "s.p" {
+			continue
+		}
+		if len(fs.Props) != 1 || fs.Props[0] != "alignment" {
+			t.Errorf("want only the property the state actually sets, got %v", fs.Props)
+		}
+		return
+	}
+	t.Error("the suggestion was dropped entirely")
 }

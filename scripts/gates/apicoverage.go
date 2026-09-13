@@ -203,15 +203,21 @@ func apiDiff(w io.Writer, _ []string) error {
 	}
 
 	fresh := &apiSnapshot{Fetched: time.Now().UTC().Format("2006-01-02")}
+	// See wireDir: the field snapshot covers the Docs types only, so that
+	// is the one document it is handed.
+	var docsDoc *discoveryDoc
 	for _, d := range discovery {
-		methods, err := fetchDiscovery(d.url)
+		doc, err := fetchDiscovery(d.url)
 		if err != nil {
 			return fmt.Errorf("%s %s: %w", d.api, d.version, err)
 		}
-		if len(methods) == 0 {
+		if len(doc.methods) == 0 {
 			return fmt.Errorf("%s %s published no methods; refusing to write that", d.api, d.version)
 		}
-		fresh.APIs = append(fresh.APIs, apiEntry{API: d.api, Version: d.version, Discovery: d.url, Methods: methods})
+		if d.api == "docs" {
+			docsDoc = doc
+		}
+		fresh.APIs = append(fresh.APIs, apiEntry{API: d.api, Version: d.version, Discovery: d.url, Methods: doc.methods})
 	}
 
 	index := func(s *apiSnapshot) map[string]apiMethod {
@@ -251,16 +257,28 @@ func apiDiff(w io.Writer, _ []string) error {
 		if _, err := fmt.Fprintf(w, "api diff: nothing moved; %s rewritten with today's date\n", apiMethodsFile); err != nil {
 			return err
 		}
-		return writeFieldSnapshot(w, root)
+		return writeFieldSnapshot(w, root, docsDoc)
 	}
 	if _, err := fmt.Fprintf(w, "%s\n\n%s rewritten. Every NEW method needs a verdict in %s before `make check` passes.\n",
 		strings.Join(lines, "\n"), apiMethodsFile, apiCoverageFile); err != nil {
 		return err
 	}
-	return writeFieldSnapshot(w, root)
+	return writeFieldSnapshot(w, root, docsDoc)
 }
 
-func fetchDiscovery(url string) ([]apiMethod, error) {
+// discoveryDoc is one fetch of one discovery document, decoded into both
+// halves the snapshots need.
+//
+// One fetch, because there were two: api-diff read the methods and then
+// writeFieldSnapshot read the schemas again from the same URL. The two
+// files it writes carry the same fetched date and are meant to describe
+// one reading of the API, and two GETs cannot promise that.
+type discoveryDoc struct {
+	methods []apiMethod
+	schemas []fieldSchema
+}
+
+func fetchDiscovery(url string) (*discoveryDoc, error) {
 	ctx, cancel := contextWithTimeout(30 * time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -277,16 +295,21 @@ func fetchDiscovery(url string) ([]apiMethod, error) {
 	}
 	var doc struct {
 		Resources map[string]json.RawMessage `json:"resources"`
+		Schemas   map[string]discoverySchema `json:"schemas"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&doc); err != nil {
 		return nil, err
 	}
-	var methods []apiMethod
-	if err := walkResources(doc.Resources, &methods); err != nil {
+	out := &discoveryDoc{}
+	if err := walkResources(doc.Resources, &out.methods); err != nil {
 		return nil, err
 	}
-	sort.Slice(methods, func(i, j int) bool { return methods[i].Method < methods[j].Method })
-	return methods, nil
+	sort.Slice(out.methods, func(i, j int) bool { return out.methods[i].Method < out.methods[j].Method })
+	for name, s := range doc.Schemas {
+		out.schemas = append(out.schemas, flattenSchema(name, s.Properties)...)
+	}
+	sort.Slice(out.schemas, func(i, j int) bool { return out.schemas[i].Name < out.schemas[j].Name })
+	return out, nil
 }
 
 // walkResources collects every method of every resource, at any depth:

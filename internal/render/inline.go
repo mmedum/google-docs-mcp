@@ -591,9 +591,22 @@ func markRestyle(text string, s span, o Options) string {
 		b.WriteString(text)
 	}
 	for _, c := range s.restyled {
-		b.WriteString("{>>s:" + c.ID + " suggests " + doc.PropList(c.Props) + "<<}")
+		b.WriteString(restyleNote(c, ""))
 	}
 	return b.String()
+}
+
+// restyleNote is the CriticMarkup note a pending restyling gets, spelled
+// once. target names what is being restyled where that is not the run
+// itself — "paragraph", "bullet" — and is empty for a run.
+//
+// The id is in it because that is what review_suggestion takes, so the
+// two callers cannot drift on the part a person copies out.
+func restyleNote(c doc.StyleChange, target string) string {
+	if target != "" {
+		target += " "
+	}
+	return "{>>s:" + c.ID + " suggests " + target + doc.PropList(c.Props) + "<<}"
 }
 
 // restyleAnnotation is the with_styles form, without ids: "suggested:
@@ -604,4 +617,32 @@ func restyleAnnotation(cs []doc.StyleChange) string {
 		return ""
 	}
 	return "{suggested: " + doc.PropList(props) + "}"
+}
+
+// markParagraphRestyle notes a pending suggested change to a paragraph's
+// own style or to its list membership, after the paragraph's text.
+//
+// Not the {== ==} highlight a run gets: a paragraph-level suggestion
+// covers the whole paragraph rather than a span of it, and wrapping the
+// line would put the marker around a heading's own # or a bullet's
+// marker. The note carries the suggestion id for the same reason the
+// run's does — it is what review_suggestion takes — and says what the
+// suggestion restyles, because "paragraph" and "bullet" are two
+// different things to accept or reject.
+//
+// The cell and row restylings the model also carries have no marker:
+// a table renders as markdown rows, and a note inside one would break
+// the row it sits in. list_suggestions reports those with their handles.
+func markParagraphRestyle(p *doc.Paragraph, o Options) string {
+	if !o.Suggestions || (len(p.StyleChanges) == 0 && len(p.BulletChanges) == 0) {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range p.StyleChanges {
+		b.WriteString(restyleNote(c, "paragraph"))
+	}
+	for _, c := range p.BulletChanges {
+		b.WriteString(restyleNote(c, "bullet"))
+	}
+	return b.String()
 }

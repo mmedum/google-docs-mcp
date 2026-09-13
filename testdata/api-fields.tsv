@@ -5,6 +5,13 @@
 # out	the property is published and this server deliberately does not model it
 # extra	the field is modelled and the public discovery document does not publish it
 # alias	the schema is modelled by the struct the reason names (property is *)
+# local	the struct in the FIRST column models no published schema at all (property is *)
+#
+# local is the only verdict whose first column names a Go struct rather
+# than a schema, and it is what makes the set of compared types part of
+# the rule: the gate walks internal/gdocs as well as the discovery
+# document, so a type renamed out of the way fails here instead of
+# quietly dropping out of the comparison.
 #
 # The rule the out rows are judged against: if a tool here WRITES a
 # field, the types must carry it, because a person should not be able to
@@ -24,6 +31,18 @@ PageBreak	*	alias	Break
 ColumnBreak	*	alias	Break
 HorizontalRule	*	alias	Break
 Equation	*	alias	Suggested
+#
+# The structs that model nothing Google publishes. Five of the six are
+# the Developer Preview comment and suggestion shapes, observed live and
+# absent from the public discovery document; the sixth is an embeddable
+# whose fields reach the wire through the elements that embed it, where
+# this gate does compare them.
+CommentThread	*	local	Developer Preview; the thread shape Document.comments carries
+Post	*	local	Developer Preview; one comment or suggestion post inside a thread
+PostAuthor	*	local	Developer Preview; the author of a Post
+SuggestionThread	*	local	Developer Preview; the thread shape Document.suggestions carries
+CommentAnchor	*	local	Developer Preview; the ranges DocumentTab.commentAnchors maps an anchor id to
+SuggestedStyle	*	local	an embeddable, not a schema; its tags are promoted into the inline elements that embed it, and are compared there
 #
 # Developer Preview: present in responses when commentsViewMode asks for
 # them, absent from the public discovery document.

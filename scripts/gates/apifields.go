@@ -7,7 +7,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -59,7 +58,9 @@ type fieldVerdict struct {
 // apiFields holds the wire types to the discovery document: for every
 // struct in internal/gdocs that shares a name with a published schema,
 // every published property is either modelled or written off with a
-// reason, and every modelled field is either published or written off.
+// reason, and every modelled field is either published or written off —
+// and every struct that shares its name with no schema at all says so in
+// a row, so that the set being compared is itself part of the rule.
 //
 // This gate exists because the types drifted and nothing said so. Issue
 // #46 was a suggestion the API recorded and this server could not see,
@@ -102,13 +103,6 @@ func apiFields(w io.Writer, _ []string) error {
 	}
 
 	problems, matched := fieldProblems(published, verdicts, modelled)
-	// A struct renamed out of the way would quietly stop being checked,
-	// so the number of schemas actually compared is part of the rule.
-	if matched < 80 {
-		problems = append(problems, fmt.Sprintf(
-			"only %d published schemas were matched to a struct in %s; either the package shrank or a rename "+
-				"has taken types out of this gate's sight (add an alias row if a type was renamed)", matched, wireDir))
-	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
@@ -128,67 +122,175 @@ func countFieldVerdicts(vs []fieldVerdict, kind string) int {
 	return n
 }
 
+// fieldDecisions is the hand-written file once it has been read and
+// judged: the rows that survived, indexed the way the three directions
+// below ask about them. Rejected rows are left out on purpose — keeping
+// one would let an invalid `out` excuse a missing field, and the gate
+// would report the row's own fault and nothing else.
+type fieldDecisions struct {
+	alias map[string]string // published schema -> the struct modelling it
+	// A struct some row accounts for: either an alias row names it as
+	// what models a schema, or a local row says it models none. The two
+	// are one set because the third direction asks one question of it.
+	accountedFor map[string]bool
+	accepted     map[string]bool // schema \t property \t verdict
+}
+
+func (d *fieldDecisions) written(schema, prop, kind string) bool {
+	return d.accepted[schema+"\t"+prop+"\t"+kind]
+}
+
+// structFor is the struct that models a schema: its own name unless an
+// alias row says otherwise.
+func (d *fieldDecisions) structFor(schema string) string {
+	if a, ok := d.alias[schema]; ok {
+		return a
+	}
+	return schema
+}
+
 // fieldProblems is the rule, over three lists rather than three files.
 // It returns the problems and how many published schemas it compared.
+//
+// Three directions, not two. The first two are per-property, over the
+// schemas that are matched to a struct. The third is over the structs
+// themselves: a wire type whose name no schema shares is either an alias
+// target or a local type written off with a reason. Without that
+// direction a renamed type simply stops being compared, and the only
+// thing standing between that and a green gate is a count.
 func fieldProblems(published map[string][]string, verdicts []fieldVerdict, modelled map[string]map[string]bool) ([]string, int) {
-	var problems []string
+	d, problems := readFieldDecisions(published, modelled, verdicts)
+	problems = append(problems, staleFieldRows(published, modelled, verdicts, d)...)
+	compared, matched := compareFields(published, modelled, d)
+	problems = append(problems, compared...)
+	problems = append(problems, unmatchedStructs(published, modelled, d)...)
+	return problems, matched
+}
 
-	// Schema-level rows first: an alias says which struct models a schema
-	// whose name this package does not use.
-	alias := map[string]string{}
+// readFieldDecisions judges each row on its own terms. It runs before
+// anything else because the property rows are read against the struct an
+// alias names.
+func readFieldDecisions(published map[string][]string, modelled map[string]map[string]bool, verdicts []fieldVerdict) (*fieldDecisions, []string) {
+	d := &fieldDecisions{
+		alias: map[string]string{}, accountedFor: map[string]bool{}, accepted: map[string]bool{},
+	}
+	var problems []string
+	problem := func(format string, args ...any) {
+		problems = append(problems, fmt.Sprintf(format, args...))
+	}
+	// withdrawn is the complaint every verdict but local shares.
+	withdrawn := func(v fieldVerdict) {
+		problem("%s:%d: %s is not a published schema any more; drop the row", apiFieldVerdict, v.line, v.Schema)
+	}
 	seen := map[string]int{}
 	for _, v := range verdicts {
 		key := v.Schema + "\t" + v.Property
 		if first, dup := seen[key]; dup {
-			problems = append(problems, fmt.Sprintf("%s:%d: %s %s already has a verdict on line %d",
-				apiFieldVerdict, v.line, v.Schema, v.Property, first))
+			problem("%s:%d: %s %s already has a verdict on line %d", apiFieldVerdict, v.line, v.Schema, v.Property, first)
 			continue
 		}
 		seen[key] = v.line
-		if _, ok := published[v.Schema]; !ok {
-			problems = append(problems, fmt.Sprintf("%s:%d: %s is not a published schema any more; drop the row",
-				apiFieldVerdict, v.line, v.Schema))
-			continue
-		}
 		if strings.TrimSpace(v.Reason) == "" {
-			problems = append(problems, fmt.Sprintf("%s:%d: %s %s is %s with no reason given",
-				apiFieldVerdict, v.line, v.Schema, v.Property, v.Verdict))
+			problem("%s:%d: %s %s is %s with no reason given", apiFieldVerdict, v.line, v.Schema, v.Property, v.Verdict)
 			continue
 		}
+		// local is the one verdict whose first column names a struct
+		// rather than a schema, so it is also the one that is fine with a
+		// name the discovery document does not carry.
+		_, isPublished := published[v.Schema]
 		switch v.Verdict {
 		case "alias":
-			if _, ok := modelled[v.Reason]; !ok {
-				problems = append(problems, fmt.Sprintf("%s:%d: %s is aliased to %q, which is not a struct in %s",
-					apiFieldVerdict, v.line, v.Schema, v.Reason, wireDir))
-				continue
+			switch _, isStruct := modelled[v.Reason]; {
+			case !isPublished:
+				withdrawn(v)
+			case v.Property != "*":
+				problem("%s:%d: %s is aliased as a whole schema; the property column must be *",
+					apiFieldVerdict, v.line, v.Schema)
+			case !isStruct:
+				problem("%s:%d: %s is aliased to %q, which is not a struct in %s",
+					apiFieldVerdict, v.line, v.Schema, v.Reason, wireDir)
+			default:
+				d.alias[v.Schema], d.accountedFor[v.Reason] = v.Reason, true
 			}
-			alias[v.Schema] = v.Reason
+		case "local":
+			switch _, isStruct := modelled[v.Schema]; {
+			case isPublished:
+				problem("%s:%d: %s is a published schema, so it is not local; drop the row",
+					apiFieldVerdict, v.line, v.Schema)
+			case v.Property != "*":
+				problem("%s:%d: %s is local as a whole type; the property column must be *",
+					apiFieldVerdict, v.line, v.Schema)
+			case !isStruct:
+				problem("%s:%d: %s is written off as local and is not a struct in %s; drop the row",
+					apiFieldVerdict, v.line, v.Schema, wireDir)
+			default:
+				d.accountedFor[v.Schema] = true
+			}
 		case "out", "extra":
-			if v.Property == "*" {
-				problems = append(problems, fmt.Sprintf("%s:%d: %s is %s for every property at once; %s is per-property",
-					apiFieldVerdict, v.line, v.Schema, v.Verdict, v.Verdict))
+			switch {
+			case !isPublished:
+				withdrawn(v)
+			case v.Property == "*":
+				problem("%s:%d: %s is %s for every property at once; %s is per-property",
+					apiFieldVerdict, v.line, v.Schema, v.Verdict, v.Verdict)
+			default:
+				d.accepted[key+"\t"+v.Verdict] = true
 			}
 		default:
-			problems = append(problems, fmt.Sprintf("%s:%d: verdict %q is none of out, extra or alias",
-				apiFieldVerdict, v.line, v.Verdict))
+			problem("%s:%d: verdict %q is none of out, extra, alias or local", apiFieldVerdict, v.line, v.Verdict)
 		}
 	}
+	return d, problems
+}
 
-	written := func(schema, prop, kind string) bool {
-		for _, v := range verdicts {
-			if v.Schema == schema && v.Property == prop && v.Verdict == kind {
-				return true
-			}
-		}
-		return false
+// staleFieldRows catches a row that has outlived the thing it describes.
+// api-coverage checks that for methods; without the same check here an
+// `out` row for a property Google has withdrawn, or one the types have
+// since grown, sits inert for good and still counts towards "N fields
+// left out on purpose".
+func staleFieldRows(published map[string][]string, modelled map[string]map[string]bool, verdicts []fieldVerdict, d *fieldDecisions) []string {
+	var problems []string
+	problem := func(format string, args ...any) {
+		problems = append(problems, fmt.Sprintf(format, args...))
 	}
+	for _, v := range verdicts {
+		if !d.written(v.Schema, v.Property, v.Verdict) {
+			continue
+		}
+		name := d.structFor(v.Schema)
+		tags, isModelled := modelled[name]
+		if !isModelled {
+			problem("%s:%d: %s is published and no struct models it, so a verdict on one of its properties decides nothing; drop the row",
+				apiFieldVerdict, v.line, v.Schema)
+			continue
+		}
+		isPublished := slices.Contains(published[v.Schema], v.Property)
+		switch {
+		case v.Verdict == "out" && !isPublished:
+			problem("%s:%d: %s.%s is written off and Google does not publish it any more; drop the row",
+				apiFieldVerdict, v.line, v.Schema, v.Property)
+		case v.Verdict == "out" && tags[v.Property]:
+			problem("%s:%d: %s.%s is written off and %s models it now; drop the row",
+				apiFieldVerdict, v.line, v.Schema, v.Property, structRef(name, v.Schema))
+		case v.Verdict == "extra" && !tags[v.Property]:
+			problem("%s:%d: %s.%s is declared an extra and no struct carries it any more; drop the row",
+				apiFieldVerdict, v.line, v.Schema, v.Property)
+		case v.Verdict == "extra" && isPublished:
+			problem("%s:%d: %s.%s is declared an extra and Google publishes it now; drop the row",
+				apiFieldVerdict, v.line, v.Schema, v.Property)
+		}
+	}
+	return problems
+}
 
+// compareFields is the first two directions, per property, over the
+// schemas that are matched to a struct. It also returns how many that
+// was, which the gate reports.
+func compareFields(published map[string][]string, modelled map[string]map[string]bool, d *fieldDecisions) ([]string, int) {
+	var problems []string
 	matched := 0
 	for _, schema := range slices.Sorted(mapKeys(published)) {
-		name := schema
-		if a, ok := alias[schema]; ok {
-			name = a
-		}
+		name := d.structFor(schema)
 		tags, ok := modelled[name]
 		if !ok {
 			// A schema this package does not model at all is a different
@@ -196,8 +298,10 @@ func fieldProblems(published map[string][]string, verdicts []fieldVerdict, model
 			continue
 		}
 		matched++
+		pub := map[string]bool{}
 		for _, prop := range published[schema] {
-			if tags[prop] || written(schema, prop, "out") {
+			pub[prop] = true
+			if tags[prop] || d.written(schema, prop, "out") {
 				continue
 			}
 			problems = append(problems, fmt.Sprintf(
@@ -207,12 +311,8 @@ func fieldProblems(published map[string][]string, verdicts []fieldVerdict, model
 		// And the other direction: a field we carry that Google does not
 		// publish is either a preview field or a mistake, and the file has
 		// to say which.
-		pub := map[string]bool{}
-		for _, p := range published[schema] {
-			pub[p] = true
-		}
 		for _, tag := range slices.Sorted(mapKeys(tags)) {
-			if pub[tag] || written(schema, tag, "extra") {
+			if pub[tag] || d.written(schema, tag, "extra") {
 				continue
 			}
 			problems = append(problems, fmt.Sprintf(
@@ -221,6 +321,27 @@ func fieldProblems(published map[string][]string, verdicts []fieldVerdict, model
 		}
 	}
 	return problems, matched
+}
+
+// unmatchedStructs is the third direction, over the structs rather than
+// the schemas. A type renamed out of the way matches no schema, so before
+// this the gate simply stopped comparing it and said ok — which is the
+// whole failure mode a name match has.
+func unmatchedStructs(published map[string][]string, modelled map[string]map[string]bool, d *fieldDecisions) []string {
+	var problems []string
+	for _, name := range slices.Sorted(mapKeys(modelled)) {
+		if len(modelled[name]) == 0 {
+			// Not a wire type: no field of it is ever on the wire.
+			continue
+		}
+		if _, ok := published[name]; ok || d.accountedFor[name] {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf(
+			"%s: %s is a struct in %s and no schema of that name is published; alias the schema it models to it, or add a local row saying it models none",
+			apiFieldVerdict, name, wireDir))
+	}
+	return problems
 }
 
 // structRef names the struct, saying so only when it is not just the
@@ -334,39 +455,6 @@ func jsonTag(f *ast.Field) string {
 	return name
 }
 
-// fetchSchemas reads the type half of a discovery document, where
-// fetchDiscovery reads the method half.
-func fetchSchemas(url string) ([]fieldSchema, error) {
-	ctx, cancel := contextWithTimeout(30 * time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("discovery returned %s", res.Status)
-	}
-	var doc struct {
-		Schemas map[string]struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-		} `json:"schemas"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&doc); err != nil {
-		return nil, err
-	}
-	out := make([]fieldSchema, 0, len(doc.Schemas))
-	for name, s := range doc.Schemas {
-		out = append(out, fieldSchema{Name: name, Properties: slices.Sorted(mapKeys(s.Properties))})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
 func readFieldSnapshot(path string) (*fieldSnapshot, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -402,10 +490,12 @@ func readFieldVerdicts(path string) ([]fieldVerdict, error) {
 	return out, nil
 }
 
-// writeFieldSnapshot refetches the schemas and rewrites the snapshot,
-// reporting what moved. Called by api-diff, which is the one command
-// here that touches the network.
-func writeFieldSnapshot(w io.Writer, root string) error {
+// writeFieldSnapshot rewrites the snapshot from the discovery documents
+// api-diff has already fetched, reporting what moved. Called by api-diff,
+// which is the one command here that touches the network — and which
+// hands the documents over rather than letting this refetch them, so that
+// the two snapshots it writes describe one reading of the API.
+func writeFieldSnapshot(w io.Writer, root string, docsDoc *discoveryDoc) error {
 	path := filepath.Join(root, apiFieldsFile)
 	old, err := readFieldSnapshot(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -420,14 +510,10 @@ func writeFieldSnapshot(w io.Writer, root string) error {
 			// See wireDir: only the Docs types are structs this gate can read.
 			continue
 		}
-		schemas, err := fetchSchemas(d.url)
-		if err != nil {
-			return fmt.Errorf("%s %s schemas: %w", d.api, d.version, err)
-		}
-		if len(schemas) == 0 {
+		if docsDoc == nil || len(docsDoc.schemas) == 0 {
 			return fmt.Errorf("%s %s published no schemas; refusing to write that", d.api, d.version)
 		}
-		fresh.APIs = append(fresh.APIs, fieldAPI{API: d.api, Version: d.version, Discovery: d.url, Schemas: schemas})
+		fresh.APIs = append(fresh.APIs, fieldAPI{API: d.api, Version: d.version, Discovery: d.url, Schemas: docsDoc.schemas})
 	}
 
 	index := func(s *fieldSnapshot) map[string]bool {
@@ -467,4 +553,45 @@ func writeFieldSnapshot(w io.Writer, root string) error {
 	_, err = fmt.Fprintf(w, "%s\n\n%s rewritten. Every NEW FIELD on a schema this server models needs the field or a row in %s.\n",
 		strings.Join(lines, "\n"), apiFieldsFile, apiFieldVerdict)
 	return err
+}
+
+// discoverySchema is as much of a discovery document's schema as this
+// gate reads: the property names, and the shape of any property that
+// carries its own properties rather than a $ref.
+type discoverySchema struct {
+	Type       string                     `json:"type"`
+	Properties map[string]discoverySchema `json:"properties"`
+	Items      *discoverySchema           `json:"items"`
+}
+
+// flattenSchema is one published schema and every object defined inline
+// inside it, each as a schema of its own named Parent.property.
+//
+// Docs v1 has none today — every nested type is a $ref to a named schema,
+// checked against the live document. Drive v3 is the one of the seven
+// documents these four servers read that does declare them, and there
+// reading only the top level collapsed 166 sub-properties into 21 names
+// and left the types modelling them matching no schema at all. The
+// descent is here too because the omission is invisible until an API
+// starts doing it, which is exactly how it bit the first time.
+//
+// Named rather than nested so that everything downstream — the alias
+// rows, the per-property verdicts, both directions of the comparison —
+// works on them unchanged.
+func flattenSchema(name string, props map[string]discoverySchema) []fieldSchema {
+	// A schema with no properties is still a published schema, so it is
+	// recorded rather than skipped.
+	out := []fieldSchema{{Name: name, Properties: slices.Sorted(mapKeys(props))}}
+	for _, prop := range slices.Sorted(mapKeys(props)) {
+		p := props[prop]
+		// An array of inline objects is its element's shape; a $ref has
+		// no properties here and is reached as its own schema.
+		if p.Type == "array" && p.Items != nil {
+			p = *p.Items
+		}
+		if p.Type == "object" && len(p.Properties) > 0 {
+			out = append(out, flattenSchema(name+"."+prop, p.Properties)...)
+		}
+	}
+	return out
 }

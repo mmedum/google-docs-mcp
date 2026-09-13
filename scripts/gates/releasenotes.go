@@ -42,8 +42,39 @@ func releaseNotes(w io.Writer, args []string) error {
 	if notes == "" {
 		return fmt.Errorf("no CHANGELOG section for %s in %s", version, file)
 	}
-	_, err = fmt.Fprintln(w, notes)
+	_, err = fmt.Fprintln(w, promoteHeadings(notes))
 	return err
+}
+
+// promoteHeadings lifts every heading in the section one level, because
+// the file and the page are two different documents.
+//
+// In CHANGELOG.md the version is an h2 and its change kinds are h3s
+// underneath it. On the release page the version heading is gone —
+// GitHub renders the tag name as the page's h1 — so an unaltered section
+// starts at h3 directly under an h1. That is a skipped rank, which the
+// W3C's heading guidance says to avoid, and it is what every release
+// page here looked like when the extractor was first written. Lifting
+// one level gives h1 then h2, with nothing missing in between, and needs
+// no wrapper heading repeating either the word "changelog" or the
+// version number GitHub is already showing.
+//
+// Fenced code is left alone: a `# comment` inside a shell block is not a
+// heading, and the verification snippets here are full of them. Only h3
+// and deeper are lifted, so this can never emit a second h1.
+func promoteHeadings(body string) string {
+	lines := strings.Split(body, "\n")
+	fenced := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			fenced = !fenced
+			continue
+		}
+		if !fenced && strings.HasPrefix(line, "###") {
+			lines[i] = line[1:]
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // sectionFor returns the body under `## [version]`, without the blank

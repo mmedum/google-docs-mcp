@@ -45,7 +45,7 @@ func TestReleaseNotesTakesOnlyItsOwnVersion(t *testing.T) {
 	if err := releaseNotes(&out, []string{"v1.1.2", relnotesFile(t)}); err != nil {
 		t.Fatalf("releaseNotes: %v", err)
 	}
-	const want = "### Added\n- The thing.\n\n### Changed\n- The other thing.\n"
+	const want = "## Added\n- The thing.\n\n## Changed\n- The other thing.\n"
 	if out.String() != want {
 		t.Errorf("notes =\n%q\nwant\n%q", out.String(), want)
 	}
@@ -76,7 +76,7 @@ func TestReleaseNotesStopsAtTheLinkFooter(t *testing.T) {
 	if strings.Contains(out.String(), "releases/tag") {
 		t.Errorf("the link footer was published as release notes:\n%s", out.String())
 	}
-	if got := out.String(); got != "### Fixed\n- An older thing.\n" {
+	if got := out.String(); got != "## Fixed\n- An older thing.\n" {
 		t.Errorf("notes = %q", got)
 	}
 }
@@ -105,5 +105,38 @@ func TestReleaseNotesIsRegisteredAndIsNotAGate(t *testing.T) {
 	}
 	if c.gate {
 		t.Error("release-notes is marked as a gate; it runs at release time, not in make check")
+	}
+}
+
+// The page and the file are different documents: GitHub renders the tag
+// name as the h1, so a section published unaltered starts at h3 under an
+// h1 and skips a rank.
+func TestReleaseNotesLiftHeadingsOneLevel(t *testing.T) {
+	var out bytes.Buffer
+	if err := releaseNotes(&out, []string{"v1.1.2", relnotesFile(t)}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "## Added") || !strings.Contains(got, "## Changed") {
+		t.Errorf("headings were not lifted:\n%s", got)
+	}
+	if strings.Contains(got, "### ") {
+		t.Errorf("an h3 survived, so the page still skips a rank:\n%s", got)
+	}
+	// Never a second h1: GitHub already renders one for the tag.
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "# ") {
+			t.Errorf("emitted an h1, which duplicates the tag heading: %q", line)
+		}
+	}
+}
+
+func TestPromoteHeadingsLeavesFencedCodeAlone(t *testing.T) {
+	const body = "### Added\n- a thing\n\n```bash\n# not a heading\n### also not a heading\n```\n\n#### Deeper\n"
+	got := promoteHeadings(body)
+	for _, want := range []string{"## Added", "# not a heading", "### also not a heading", "### Deeper"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("promoteHeadings dropped or mangled %q:\n%s", want, got)
+		}
 	}
 }

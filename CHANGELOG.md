@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format is
 follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
+## [Unreleased]
+
+### Fixed
+- The schema diff can see the tools that register behind a flag.
+  `delete_comment` and `delete_tab` register only under
+  `GDOCS_ENABLE_DESTRUCTIVE`, and the gate dumped a default build on both
+  sides, so neither appeared in either surface — a removed field or a new
+  required one on either was invisible, quietly, with every check green.
+  It is the case the gate exists for: a deployer who turned the flag on
+  is a client written against that surface. Both sides now dump the whole
+  registrable surface, and a test holds it, because a comment cannot.
+  Found while checking release readiness for an unrelated change.
+
 ## [1.1.1] - 2026-09-13
 
 ### Fixed

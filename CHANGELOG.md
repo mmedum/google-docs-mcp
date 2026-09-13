@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format is
 follows [Semantic Versioning](https://semver.org/). Tool removals, renames
 and new required fields are breaking; the schema diff in CI flags them.
 
-## [Unreleased]
+## [1.1.1] - 2026-09-13
 
 ### Fixed
 - `--version` reports one spelling whichever way the binary was built.

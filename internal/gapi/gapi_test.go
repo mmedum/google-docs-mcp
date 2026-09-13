@@ -79,7 +79,7 @@ func TestGetDocumentDecodesAndSendsParams(t *testing.T) {
 	if gotPath != "/v1/documents/abc" || gotAuth != "Bearer tok" {
 		t.Fatalf("path %q auth %q", gotPath, gotAuth)
 	}
-	for _, want := range []string{"includeTabsContent=true", "suggestionsViewMode=SUGGESTIONS_INLINE", "commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED"} {
+	for _, want := range []string{"includeTabsContent=true", "suggestionsViewMode=SUGGESTIONS_INLINE", "commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED", "prettyPrint=false"} {
 		if !strings.Contains(gotQuery, want) {
 			t.Fatalf("query %q lacks %q", gotQuery, want)
 		}
@@ -626,5 +626,76 @@ func TestExportRevisionErrors(t *testing.T) {
 	_, err = c.ExportRevision(context.Background(), "abc", "12", "text/markdown")
 	if !errors.Is(err, ErrUnexpected) || !strings.Contains(err.Error(), "evil.example") {
 		t.Fatalf("foreign host: %v", err)
+	}
+}
+
+// prettyPrint is a system parameter of every Google API, not a Docs
+// feature, so it is asked for once in `once` rather than in the query
+// each call builds. It started life in GetDocument's query, where the
+// Drive half of this client — exports, comments, revisions — was still
+// receiving indented JSON.
+func TestCompactJSONOnEveryRequest(t *testing.T) {
+	var queries []string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		_, _ = w.Write([]byte(`{"user":{"emailAddress":"a@b.test"}}`))
+	}))
+	// A Drive call, which is the half the original placement missed.
+	if _, err := c.About(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 1 || !strings.Contains(queries[0], "prettyPrint=false") {
+		t.Errorf("a Drive call should ask for compact JSON: %v", queries)
+	}
+}
+
+// An export asks for bytes, and a media URL carrying a JSON formatting
+// parameter reads as a mistake.
+func TestCompactJSONNotAskedForOnAnExport(t *testing.T) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"https://www.googleapis.com/drive/v3/files/x/export?mimeType=application%2Fpdf", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	askCompactJSON(req, "application/pdf")
+	if strings.Contains(req.URL.RawQuery, "prettyPrint") {
+		t.Errorf("an export was given a JSON formatting parameter: %q", req.URL.RawQuery)
+	}
+	// And a caller that has said so itself is not overruled.
+	req, err = http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"https://docs.googleapis.com/v1/documents/x?prettyPrint=true", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	askCompactJSON(req, "application/json")
+	if !strings.Contains(req.URL.RawQuery, "prettyPrint=true") {
+		t.Errorf("an explicit prettyPrint was overruled: %q", req.URL.RawQuery)
+	}
+}
+
+// A query this client did not build must reach Google as it came. An
+// opaque or signed URL — the download address an export operation hands
+// out — depends on its parameters keeping their order and their exact
+// escaping, and url.Values.Encode() preserves neither.
+func TestCompactJSONDoesNotRewriteAQueryItDidNotBuild(t *testing.T) {
+	const signed = "https://www.googleapis.com/drive/v3/x?z=last&a=first&sig=a%2Fb%2Bc%3D"
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, signed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	askCompactJSON(req, "application/json")
+	want := "z=last&a=first&sig=a%2Fb%2Bc%3D&prettyPrint=false"
+	if req.URL.RawQuery != want {
+		t.Errorf("query = %q, want the original untouched with one parameter appended:\n%s", req.URL.RawQuery, want)
+	}
+	// And a request with no query at all gets just the one parameter.
+	req, err = http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"https://docs.googleapis.com/v1/documents/x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	askCompactJSON(req, "application/json")
+	if req.URL.RawQuery != "prettyPrint=false" {
+		t.Errorf("query = %q", req.URL.RawQuery)
 	}
 }

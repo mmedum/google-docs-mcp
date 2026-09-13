@@ -245,3 +245,69 @@ func appendUnique(seen map[string]bool, dst []plan.Anchor, as ...plan.Anchor) []
 	}
 	return dst
 }
+
+// textRestylesIn lists the pending suggested text-style changes on the
+// runs overlapping [start, end) of a segment, one entry per suggestion
+// with the properties it sets there merged together.
+//
+// A free function, not a method: unlike anchorsIn, which reads the
+// per-fetch index segAnchors builds, there is nothing here to cache
+// against a fetch. If a format batch ever grows enough ops for the walk
+// to matter, the thing to copy is segAnchors, not to add a receiver
+// that goes unused.
+func textRestylesIn(seg *doc.Segment, start, end int64) []doc.StyleChange {
+	var found []doc.StyleChange
+	for _, b := range seg.AllBlocks() {
+		if b.Paragraph == nil {
+			continue
+		}
+		for _, r := range b.Paragraph.Runs {
+			if len(r.StyleChanges) > 0 && r.End > start && r.Start < end {
+				found = append(found, r.StyleChanges...)
+			}
+		}
+	}
+	return mergeByID(found)
+}
+
+// paraRestylesIn is textRestylesIn for a paragraph's own style: the
+// suggestion sits on the paragraph, so the whole block is the range.
+func paraRestylesIn(seg *doc.Segment, start, end int64) []doc.StyleChange {
+	var found []doc.StyleChange
+	for _, b := range seg.AllBlocks() {
+		if b.Paragraph == nil || len(b.Paragraph.StyleChanges) == 0 {
+			continue
+		}
+		if b.End > start && b.Start < end {
+			found = append(found, b.Paragraph.StyleChanges...)
+		}
+	}
+	return mergeByID(found)
+}
+
+// mergeByID merges changes by suggestion id in first-seen order. A
+// suggestion split across several runs is one entry, because it is one
+// suggestion.
+func mergeByID(cs []doc.StyleChange) []doc.StyleChange {
+	if len(cs) == 0 {
+		return nil
+	}
+	var out []doc.StyleChange
+	at := map[string]int{}
+	seen := map[string]bool{}
+	for _, c := range cs {
+		i, ok := at[c.ID]
+		if !ok {
+			i = len(out)
+			at[c.ID] = i
+			out = append(out, doc.StyleChange{ID: c.ID})
+		}
+		for _, p := range c.Props {
+			if key := c.ID + "\x00" + p; !seen[key] {
+				seen[key] = true
+				out[i].Props = append(out[i].Props, p)
+			}
+		}
+	}
+	return out
+}

@@ -1,0 +1,90 @@
+# One verdict per field of a Docs type this server models. A person
+# writes this file; nothing generates it. The published list lives in
+# api-fields.json, which `gates api-diff` writes and nobody edits.
+#
+# out	the property is published and this server deliberately does not model it
+# extra	the field is modelled and the public discovery document does not publish it
+# alias	the schema is modelled by the struct the reason names (property is *)
+# local	the struct in the FIRST column models no published schema at all (property is *)
+#
+# local is the only verdict whose first column names a Go struct rather
+# than a schema, and it is what makes the set of compared types part of
+# the rule: the gate walks internal/gdocs as well as the discovery
+# document, so a type renamed out of the way fails here instead of
+# quietly dropping out of the comparison.
+#
+# The rule the out rows are judged against: if a tool here WRITES a
+# field, the types must carry it, because a person should not be able to
+# set something no read will show them. Twelve SectionStyle fields, a
+# table's column widths and a row's pinned-header flag were all in that
+# state when this gate was written, and all of them are modelled now.
+# What is left below is read-only detail no tool writes.
+#
+# schema	property	verdict	reason
+# An alias row's reason is the struct that models the schema, the way a
+# used row's reason in api-coverage.tsv is the method that implements it.
+# One Break type covers the three schemas below: they publish identical
+# fields, and ParagraphElement tells them apart by which key is set. An
+# equation is read-only and carries nothing but its suggestion ids, so it
+# is the bare Suggested struct.
+PageBreak	*	alias	Break
+ColumnBreak	*	alias	Break
+HorizontalRule	*	alias	Break
+Equation	*	alias	Suggested
+#
+# The structs that model nothing Google publishes. Five of the six are
+# the Developer Preview comment and suggestion shapes, observed live and
+# absent from the public discovery document; the sixth is an embeddable
+# whose fields reach the wire through the elements that embed it, where
+# this gate does compare them.
+CommentThread	*	local	Developer Preview; the thread shape Document.comments carries
+Post	*	local	Developer Preview; one comment or suggestion post inside a thread
+PostAuthor	*	local	Developer Preview; the author of a Post
+SuggestionThread	*	local	Developer Preview; the thread shape Document.suggestions carries
+CommentAnchor	*	local	Developer Preview; the ranges DocumentTab.commentAnchors maps an anchor id to
+SuggestedStyle	*	local	an embeddable, not a schema; its tags are promoted into the inline elements that embed it, and are compared there
+#
+# Developer Preview: present in responses when commentsViewMode asks for
+# them, absent from the public discovery document.
+Document	comments	extra	Developer Preview; commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED returns comment threads
+Document	suggestions	extra	Developer Preview; suggestion threads, carrying the author and status list_suggestions merges in
+DocumentTab	commentAnchors	extra	Developer Preview; maps a comment anchor id to the ranges it covers
+#
+# Document-wide header and footer ids. A read reaches a header or footer
+# through the Headers/Footers maps, which are keyed by the same ids, so
+# reading them from the style as well would be a second spelling of one
+# fact. create_header and create_footer take the id from the batchUpdate
+# reply, never from here.
+DocumentStyle	defaultHeaderId	out	headers are reached through Document.headers, keyed by this id
+DocumentStyle	defaultFooterId	out	footers are reached through Document.footers, keyed by this id
+DocumentStyle	firstPageHeaderId	out	as defaultHeaderId; page_setup sets useFirstPageHeaderFooter, not the id
+DocumentStyle	firstPageFooterId	out	as defaultFooterId
+DocumentStyle	evenPageHeaderId	out	as defaultHeaderId; page_setup sets useEvenPageHeaderFooter, not the id
+DocumentStyle	evenPageFooterId	out	as defaultFooterId
+DocumentStyle	documentFormat	out	no tool reads or writes the document's format; format: raw carries it for anyone who needs it
+#
+# Image detail. insert_object sets a URI and a size; it does not crop,
+# rotate or recolour, and no read renders these.
+ImageProperties	angle	out	no tool rotates an image
+ImageProperties	brightness	out	no tool adjusts an image
+ImageProperties	contrast	out	no tool adjusts an image
+ImageProperties	transparency	out	no tool adjusts an image
+ImageProperties	cropProperties	out	no tool crops an image
+EmbeddedObject	marginTop	out	insert_object sets a size, not the margins around a floating object
+EmbeddedObject	marginBottom	out	as marginTop
+EmbeddedObject	marginLeft	out	as marginTop
+EmbeddedObject	marginRight	out	as marginTop
+EmbeddedObject	embeddedObjectBorder	out	no tool draws a border on an image
+PositionedObjectProperties	positioning	out	insert_object anchors a floating object to a paragraph and does not place it on the page
+#
+# List nesting levels. The bullets op picks one of three presets; it
+# never sets a level's own indents or glyph styling, and the renderer
+# reads Ordered and Glyph, which ListLevel already carries.
+NestingLevel	bulletAlignment	out	the bullets op sets a preset, not a level's alignment
+NestingLevel	indentStart	out	the bullets op sets a preset, not a level's indents
+NestingLevel	indentFirstLine	out	as indentStart
+NestingLevel	textStyle	out	the glyph's own styling; no read renders it and no tool sets it
+#
+# A link to a bookmark. This server models the deprecated bookmarkId,
+# which is what the API still sends, and nothing here creates bookmarks.
+Link	bookmark	out	no tool creates or follows bookmarks; bookmarkId is modelled for the links Google still sends

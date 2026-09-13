@@ -23,6 +23,141 @@ and new required fields are breaking; the schema diff in CI flags them.
   Watched failing four ways. The two-file split, and both traps it avoids,
   came from the chat server building the same gate first.
 
+### Added
+- An API-fields gate. `make api-fields` holds the wire types to the Docs
+  discovery document the way `api-coverage` holds the client to its
+  method list: the published schemas and properties in
+  `testdata/api-fields.json`, one hand-written row per exception in
+  `testdata/api-fields.tsv` (`out`, `extra` for a Developer Preview field
+  public discovery does not publish, `alias` for a schema modelled under
+  another name, `local` for a struct that models no published schema at
+  all), and the modelled side read out of `internal/gdocs` with `go/ast`,
+  promoting the tags of embedded structs. Three directions fail the
+  build: a published property nothing models, a modelled field nothing
+  publishes, and a struct that matches no schema and has no row. The
+  third is what makes the set being compared part of the rule — rename
+  `gdocs.SectionStyle` and the gate names the renamed type, where a
+  floor under the number of schemas matched did not, because it sat at
+  80 against a real 104. A row that has outlived what it describes — a
+  property Google has withdrawn, a field the types have since grown —
+  fails too, the way an `api-coverage` row does.
+
+  It was written because the types had drifted 40 fields from the API
+  without anything saying so — the suggestion field behind #46, and 39
+  more the spike that found it went on to count. Judging those 39 against
+  "if a tool writes a field, the types must carry it" added 16 of them:
+  twelve `SectionStyle` fields, a table's column widths and a row's
+  pinned-header flag, every one of which `layout_document` or `edit_table`
+  could already set and no read could report. The other 23 are read-only
+  detail with a reason each. `make api-diff` writes both snapshots, and
+  the snapshot descends into any object a discovery document defines
+  inline rather than as a `$ref`, recording it as a schema of its own
+  named `Parent.property`. Docs v1 has none — every nested type there is
+  a `$ref`, checked against the live document — but Drive v3 declares
+  twenty-one, and reading only the top level is how the sibling server's
+  `File.capabilities` went 46 fields unchecked. The descent is here so
+  that omission cannot start being true.
+
+### Fixed
+- Suggestions that only change formatting are no longer invisible. A
+  suggested restyling inserts and deletes nothing — the API records it as
+  a `suggestedTextStyleChanges` entry on the run — and `internal/gdocs`
+  had no field for it, so every read reported the document as holding no
+  suggestion: `list_suggestions` answered `0 pending suggestion(s)` in
+  the same session where the write had just returned a suggestion id,
+  `read_document format: raw` dropped the field while re-marshalling our
+  own wire types, and `include_suggestions` and `with_styles` showed
+  nothing. Reported as a silent write failure in #46; the write had
+  worked all along, and the reading of it was what lied.
+
+  All sixty-one `suggested*` fields the Docs discovery document publishes
+  are now carried, across twenty-two types, so a suggestion this server
+  cannot render is still one it cannot report as absent. `list_suggestions`
+  gains a `format` kind, a `formats` field saying what a suggestion
+  restyles (`text: bold`, `paragraph: alignment`) and a `restyled` field
+  quoting the text it covers, the way `inserted` and `deleted` already
+  quote theirs; a read marks one as
+  CriticMarkup `{==text==}{>>s:<id> suggests bold<<}`, a highlight rather
+  than an insertion, because nothing was added or removed. What a
+  suggestion sets is read from its `*SuggestionState`, never from the
+  style beside it: the API fills that with every inherited property, so
+  trusting it reports nine changes where a person asked for one. A state
+  that is present and names no property of its own is named by its stem:
+  Google publishes `EmbeddedDrawingPropertiesSuggestionState` with no
+  fields in it, so a suggested change to a drawing walks down to nothing
+  and would be a suggestion the read denies exists — it comes back as
+  `embeddedObject.embeddedDrawingProperties`. An empty property list
+  still means what it says, a state that sets nothing, and is still not
+  reported.
+- A suggestion that adds or removes a blank line is reported in the
+  direction it goes. `list_suggestions` decided insert from delete by
+  looking at the quoted text, which is trimmed of the trailing newline
+  for display — so a suggestion whose whole content is that newline
+  quoted as nothing either way, and an inserted blank line was reported
+  as a deletion. The kind now comes from which edit was recorded, and
+  the quoted text is display only.
+- A suggested restyling is reported once, not once per carrier. Google
+  splits a text run wherever the existing style changes, so one suggested
+  bold across a link or an already-italic word is recorded on three runs
+  — `list_suggestions` read back `(text: bold) (text: bold) (text: bold)`
+  and quoted only the first run's text. The carriers of one suggestion
+  now merge in the model, so `formats` has one entry per target and
+  `restyled` quotes the whole span; the sixty-character clip happens once
+  over that span rather than once per piece.
+- `with_styles` reports a pending change to a paragraph's own style. It
+  printed the paragraph's committed alignment and said nothing about a
+  suggestion to change it, while doing the right thing for a run — with
+  CriticMarkup off there is no marker to carry the suggestion, so the
+  annotation is the only place it can appear.
+- A suggested restyling of a table row is reported once, not once per
+  column. The model hangs a row's pending change on every cell so that a
+  guard on any cell can see it, and the reader was emitting one per cell
+  — invisible against a one-column fixture.
+- A response without tabs content keeps its suggestions. The Docs API
+  carries the same collections on the document itself when the caller
+  did not ask for tabs, and the suggestion reader read only the tabs, so
+  a list, an object or a document-style suggestion vanished on that
+  response shape while the document-wide ones were reported twice on the
+  other. Both shapes now go through one reading of what a tabless
+  response describes, `gdocs.LegacyTab`, which is also what `Parse` uses
+  — it was two lists before, and they disagreed in both directions.
+
+### Changed
+- `read_document format: raw` returns the bytes Google sent, not a
+  re-encoding of this server's wire types. Its schema promises "Docs API
+  JSON", and marshalling the types could only ever return the fields they
+  model — so the one read whose job is to show what the API said was the
+  least faithful read on the server. It dropped 39 published fields
+  across nine types (`SectionStyle` alone missing all four margins,
+  `columnProperties` and `pageNumberStart`), and it is how #46 came to be
+  filed against the write path at all: the raw read had dropped the field
+  that proved the write had worked. Elements now keep the bytes they were
+  decoded from; a document built in Go, with no bytes to keep, still
+  encodes from the types. Output stays compact, so `max_chars` still buys
+  the same amount of document.
+- Every request asks for compact JSON. Google indents by default, which
+  on a 150-page document is 7.44 MB on the wire against 2.96 MB without
+  it — 60% of the bytes for whitespace nothing reads, and, now that
+  elements keep what they decoded from, retained indentation as well. The
+  round trip costs 28 → 41 ms of decoding and 7.7 → 11.2 MB of heap for
+  the kept bytes on a document that size, against 4.5 MB less to
+  download. Those figures come from a prose-heavy document and are not a
+  bound: an element's bytes are held again inside every ancestor's, so a
+  deeply table-nested document retains its cells once per level. Asked for in the one place that builds an HTTP request, not
+  in `documents.get`'s query where it began: the Drive half of this
+  client — exports, comment threads, revisions — was still receiving
+  indented JSON, and a call added later should not have to remember.
+  Skipped when the request is not asking for JSON, because an export asks
+  for bytes.
+- A direct formatting change over a property a pending suggestion already
+  sets now comes back with a warning naming the suggestion and the
+  property. Google accepts such a request, replies with an empty result
+  and sometimes applies nothing — verified live: bold over a suggested
+  bold, and an alignment over the same suggested alignment, both leave
+  the document unchanged, while a font size set to the value a suggestion
+  names does land. The rule is inconsistent, so this warns rather than
+  refusing; `ops_applied` alone could not tell anyone which had happened.
+
 ## [1.0.1] - 2026-09-07
 
 ### Added

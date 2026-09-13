@@ -152,7 +152,7 @@ const (
 // do performs one logical request with rate limiting and retries and
 // returns the response body.
 func (c *Client) do(ctx context.Context, k reqKind, method, rawURL string, body []byte) ([]byte, error) {
-	return c.doAccept(ctx, k, method, rawURL, body, "application/json")
+	return c.doAccept(ctx, k, method, rawURL, body, acceptJSON)
 }
 
 // doAccept is do with an explicit Accept header (exports return bytes).
@@ -203,6 +203,49 @@ type transientError struct {
 func (t *transientError) Error() string { return t.err.Error() }
 func (t *transientError) Unwrap() error { return t.err }
 
+// acceptJSON is the Accept this client sends for every call that reads a
+// JSON response, and the value askCompactJSON tests for. One spelling,
+// because two literals agreeing is what decides whether a request asks
+// for compact JSON at all.
+const acceptJSON = "application/json"
+
+// askCompactJSON turns off the indentation Google adds by default.
+//
+// prettyPrint is a system parameter of every Google API, documented at
+// cloud.google.com/apis/docs/system-parameters, and it defaults to true:
+// a 150-page document is 7.44 MB indented against 2.96 MB without it. It
+// costs more than bandwidth now that StructuralElement keeps the bytes
+// it decoded from, because retained indentation is retained memory.
+//
+// Here rather than in GetDocument's query, where it started: the Drive
+// half of this client — exports, comments, revisions — was still asking
+// for indented JSON, and a call added later should not have to remember.
+// The three sibling servers set it in the same one place for the same
+// reason.
+//
+// Called after the allowlist check, which is what makes rewriting the
+// URL safe: every request reaching that point is one this client has
+// already decided it may send a credential to. Skipped for a request
+// that is not asking for JSON — an export asks for bytes, and a media
+// URL carrying a JSON formatting parameter reads as a mistake. A query
+// that names prettyPrint itself is left alone.
+func askCompactJSON(req *http.Request, accept string) {
+	if accept != acceptJSON {
+		return
+	}
+	// Appended rather than re-encoded. url.Values.Encode() sorts the
+	// keys and re-escapes every value, which would rewrite a query
+	// this client did not build — an opaque or signed URL a response
+	// handed out. Parsing to look is safe; only writing back is not.
+	if req.URL.Query().Has("prettyPrint") {
+		return
+	}
+	if req.URL.RawQuery != "" {
+		req.URL.RawQuery += "&"
+	}
+	req.URL.RawQuery += "prettyPrint=false"
+}
+
 func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, accept string) (*attemptResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -218,9 +261,10 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 		return nil, fmt.Errorf("%w: refusing to send credentials to %s", ErrUnexpected, req.URL.Host)
 	}
 	req.Header.Set("Accept", accept)
+	askCompactJSON(req, accept)
 	req.Header.Set("User-Agent", c.ua)
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", acceptJSON)
 	}
 	start := time.Now()
 	resp, err := c.httpc.Do(req)

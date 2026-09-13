@@ -104,6 +104,42 @@ and are preferred by the Makefile; install them with
   Nobody edits the JSON and nothing generates the TSV. Keeping the verb
   and path in the machine's file is the point: a sibling put them in the
   hand-kept one, where the only check on them was a target CI never ran.
+- **Every field Google publishes on a type we model has a verdict.**
+  `make api-fields` is the same pair of files one level down:
+  `testdata/api-fields.json` is every schema and property the Docs
+  discovery document publishes, and `testdata/api-fields.tsv` is one line
+  per exception — `out` for a published field this server deliberately
+  does not model, `extra` for a field it carries that public discovery
+  does not publish (the Developer Preview ones), `alias` for a schema
+  modelled under another name (`Break` covers `pageBreak`, `columnBreak`
+  and `horizontalRule`), and `local` for a struct that models no
+  published schema at all (the Developer Preview comment shapes, and the
+  `SuggestedStyle` embeddable whose tags reach the wire through the
+  elements that embed it). `local` is the one verdict whose first column
+  names a Go struct rather than a schema. The modelled side is read out
+  of `internal/gdocs` with `go/ast`, promoting the tags of embedded
+  structs, because a field promoted from `Suggested` is on the wire
+  exactly as if it had been declared.
+
+  Three directions fail the build: a field Google adds to a type we
+  model, a field we carry that nothing publishes, and a struct that
+  matches no schema and has no row saying why. The third is what makes
+  the set being compared part of the rule, and it is the reason there is
+  no floor under the number of schemas matched: there was one, at 80
+  against a real 104, and a rename that took a type out of the
+  comparison stayed well above it. A row that has outlived the thing it
+  describes fails too — an `out` row for a property Google has
+  withdrawn, or one the types have since grown.
+
+  The rule the `out` rows are judged against: **if a tool here writes a
+  field, the types must carry it**, because a person should not be able
+  to set something no read will show them. Twelve `SectionStyle` fields,
+  a table's column widths and a row's pinned-header flag were all in that
+  state when this gate was written — `layout_document` and `edit_table`
+  set them and no read could report them — and the gate is what said so.
+  Docs only: the Drive types are inline anonymous structs in
+  `internal/gapi/drive.go`, which this rule cannot see, and a gate that
+  claimed to cover them would be half met.
 - **Before a release, scan the history**: `LEAKCHECK_HISTORY=1 go test
   ./scripts/gates -run TestHistoryCarriesNoIdentifiers` reads every
   blob ever committed, which the ordinary run does not — a file that

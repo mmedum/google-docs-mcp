@@ -535,6 +535,15 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
 		p.Anchors = f.anchorsIn(r.Segment, r.Start, r.End, out.threads)
 	}
+	// A formatting op collides with a pending suggestion on the same
+	// property rather than destroying anything, so it gets the
+	// restylings instead of the anchors.
+	switch op.Kind {
+	case plan.OpTextStyle, plan.OpClearFormatting:
+		p.Restyled = textRestylesIn(r.Segment, r.Start, r.End)
+	case plan.OpParagraphStyle:
+		p.Restyled = paraRestylesIn(r.Segment, r.Start, r.End)
+	}
 	out.note(r.Tab.ID, r.Segment.ID, r.Start)
 	return nil
 }

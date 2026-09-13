@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -167,7 +168,14 @@ func (r *mdRenderer) paragraph(b *doc.Block) string {
 	}
 	if r.o.WithStyles {
 		line += paragraphAnnotation(p)
+		if !r.o.Suggestions {
+			// As the run path does: with CriticMarkup off there is no
+			// marker to carry the suggestion, and paragraphAnnotation has
+			// just printed the alignment a suggestion may be pending on.
+			line += restyleAnnotation(append(slices.Clone(p.StyleChanges), p.BulletChanges...))
+		}
 	}
+	line += markParagraphRestyle(p, r.o)
 	if line == "" && r.o.WithHandles {
 		return strings.TrimSpace(r.handle(b))
 	}

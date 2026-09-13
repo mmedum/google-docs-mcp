@@ -167,3 +167,24 @@ func TestClipRedactsBeforeTruncating(t *testing.T) {
 		t.Errorf("shown truncated before redacting: %q", got)
 	}
 }
+
+// TestAnAlreadyMaskedAddressIsStillRedacted is the trap two redactors in
+// series set for each other.
+//
+// Accounts runs upstream, where Google's text is parsed, and rewrites
+// ann@acme.example to …@acme.example. Transcript runs downstream, over
+// an artifact a person may paste. Its pattern needs a local part, and
+// "…" is not one — so once the upstream mask had run, the organisation
+// domain sailed through the very redactor whose doc says "a domain is an
+// organisation name, so it goes too". Masking more, upstream, had made
+// the artifact carry more.
+func TestAnAlreadyMaskedAddressIsStillRedacted(t *testing.T) {
+	const line = "The user ann@acme-corp.example does not have permission."
+	want := Transcript(line)
+	if got := Transcript(Accounts(line)); got != want {
+		t.Errorf("upstream masking changed what the transcript keeps:\n got  %q\n want %q", got, want)
+	}
+	if strings.Contains(Transcript(Accounts(line)), "acme-corp.example") {
+		t.Error("the organisation domain survived into the transcript")
+	}
+}

@@ -370,27 +370,28 @@ func cmdStatus(args []string) int {
 func printStatus(p *profile) {
 	cfg := p.cfg
 	outf("%s\n", version.Info())
-	outf("profile:         %s (%s)\n", cfg.Profile, p.dir)
+	outf("profile:        %s\n", cfg.Profile)
+	outf("config dir:     %s\n", p.dir)
+	outf("account:        %s\n", orUnknown(p.user.AccountEmail))
 	exists := "missing"
 	if _, err := os.Stat(p.clientSecretPath); err == nil {
 		exists = "present"
 	}
-	outf("client secret:   %s (%s)\n", p.clientSecretPath, exists)
+	outf("client secret:  %s (%s)\n", p.clientSecretPath, exists)
 	if _, src, err := p.store.Resolve(); err == nil {
-		outf("refresh token:   stored in %s\n", src)
+		outf("token store:    %s\n", src)
 	} else {
-		outf("refresh token:   none (%v)\n", err)
+		outf("token store:    none (%v)\n", err)
 	}
-	outf("account:         %s\n", orUnknown(p.user.AccountEmail))
 	if len(p.user.Scopes) > 0 {
-		outf("scopes at login: %s\n", strings.Join(p.user.Scopes, " "))
+		outf("scopes:         %s\n", strings.Join(p.user.Scopes, " "))
 	}
-	outf("preview:         %t\n", cfg.Preview)
-	outf("write modes:     %s (default %s)\n", joinModes(cfg.AvailableWriteModes()), cfg.DefaultWriteMode)
-	outf("read-only:       %t\n", cfg.ReadOnly)
-	outf("destructive:     %t\n", cfg.EnableDestructive)
-	outf("export dir:      %s\n", orUnknown(cfg.ExportDir))
-	outf("http timeout:    %s\n", cfg.HTTPTimeout)
+	outf("preview:        %t\n", cfg.Preview)
+	outf("write modes:    %s (default %s)\n", joinModes(cfg.AvailableWriteModes()), cfg.DefaultWriteMode)
+	outf("read-only:      %t\n", cfg.ReadOnly)
+	outf("destructive:    %t\n", cfg.EnableDestructive)
+	outf("export dir:     %s\n", orUnknown(cfg.ExportDir))
+	outf("http timeout:   %s\n", cfg.HTTPTimeout)
 }
 
 func cmdDoctor(args []string) int {
@@ -507,7 +508,7 @@ func cmdDoctor(args []string) int {
 // print added tomorrow is safe by default now; before, it was safe only
 // if its author remembered both rules.
 func redactText(s string) string {
-	s = redact.Address.ReplaceAllStringFunc(s, maskAddress)
+	s = redact.Accounts(s)
 	return maskClientID(s)
 }
 
@@ -526,23 +527,6 @@ func redactor(ref string) func(string) string {
 // stdout or stderr except through them.
 func outf(format string, args ...any) {
 	fmt.Print(redactText(fmt.Sprintf(format, args...)))
-}
-
-// maskAddress keeps the domain and drops the local part, because these
-// two halves answer different questions. `doctor` output is what the bug
-// form asks people to paste into a public issue, so the address itself —
-// the part that identifies a person, and that can be correlated or
-// spammed — must not survive. But the reason anyone reads this line is
-// "am I signed in as the right account?", and for someone with a work
-// and a personal Google account the domain is precisely what answers it.
-// Keeping the domain does mean a company domain appears in pasted
-// output; that is the deliberate half of the trade, not an oversight.
-func maskAddress(addr string) string {
-	local, domain, ok := strings.Cut(addr, "@")
-	if !ok || local == "" || domain == "" {
-		return addr
-	}
-	return "…@" + domain
 }
 
 // maskClientID removes a Google OAuth client id from a path. Nobody

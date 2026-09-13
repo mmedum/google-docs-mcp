@@ -7,6 +7,27 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- A `transcript` gate, which the two sibling servers had and this one
+  did not. The live driver and the eval harness may put a value into
+  their transcript only through a redacting helper, and the gate reads
+  their syntax trees to say so — 81 writes, each a literal, a count, or
+  through `shown`/`clip`/`redact.*`, with an allowlist carrying a reason
+  per entry for the rest.
+
+  It could not be copied from a sibling: theirs gate `os.Stdout`, because
+  their drivers print, and these log through `testing.T`, so a copied
+  gate would have had nothing to read and passed by construction. That is
+  worse than no gate, because it reports a guarantee nobody is holding.
+
+  Writing it found one: `s.t.Fatalf("harness step %s failed: %s", name,
+  b.String())`, where `b` held the tool response — document text, logged
+  whole, at exactly the moment somebody pastes the log into an issue.
+  Every neighbouring line went through `clip`. Fixed, and the gate now
+  refuses it: putting the call back fails, a new log line carrying the
+  same value fails, and pointing the gate at a directory with no drivers
+  in it fails rather than reporting nothing to do.
+
 ### Changed
 - `--dump-schemas` emits the whole registrable surface, so the schema
   diff compares like with like. `delete_comment` and `delete_tab`

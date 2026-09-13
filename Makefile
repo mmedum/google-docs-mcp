@@ -84,6 +84,10 @@ pins: ## Every action and every tool it installs is one exact version
 classes: ## The error classes the code emits are the ones it documents
 	@$(GO) run ./scripts/gates classes
 
+.PHONY: transcript
+transcript: ## The live driver and the evals put nothing in their transcript unredacted
+	@$(GO) run ./scripts/gates transcript
+
 .PHONY: parity
 parity: ## `make check` and CI run the same gates
 	@$(GO) run ./scripts/gates parity
@@ -101,7 +105,7 @@ api-diff: ## Refetch the discovery documents and rewrite the snapshot (network; 
 	@$(GO) run ./scripts/gates api-diff
 
 .PHONY: check
-check: fmt vet lint cover vuln licenses leaks pins classes api-coverage api-fields schema-diff smoke staleness parity ## Everything CI runs
+check: fmt vet lint cover vuln licenses leaks pins classes transcript api-coverage api-fields schema-diff smoke staleness parity ## Everything CI runs
 
 .PHONY: clean
 clean:

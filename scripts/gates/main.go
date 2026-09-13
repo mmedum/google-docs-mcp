@@ -79,6 +79,10 @@ func init() {
 			run: classes, args: "", gate: true,
 			doc: "the error classes the code emits are the ones it documents",
 		},
+		"transcript": {
+			run: transcript, args: "", gate: true,
+			doc: "the live driver and the evals put nothing in their transcript unredacted",
+		},
 		"parity": {
 			run: parity, args: "", gate: true,
 			doc: "`make check` and CI run the same gates",

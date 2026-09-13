@@ -53,10 +53,13 @@ signs:
     artifacts: checksum
     output: true
 
-changelog:
-  use: github
-  filters:
-    exclude: ["^docs:", "^test:", "^chore:"]
+# No changelog block, and no release.header or release.footer: the whole
+# release body is built by scripts/relnotes from the CHANGELOG.md section
+# matching the tag, and passed with --release-notes. goreleaser's
+# changelog pipe returns as soon as it sees that file, so a header or
+# footer configured here would never be appended — dead config that reads
+# like a promise. changelog.disable is worse still: it skips the pipe
+# before the file is read and publishes an empty body.
 
 release:
   # A tag is the decision; a draft nobody publishes is how releases go
@@ -64,6 +67,3 @@ release:
   # for anything carrying a suffix like -rc1.
   draft: false
   prerelease: auto
-  footer: |
-    Built by GoReleaser from the tag. Verify a download against
-    `checksums.txt`; every archive carries the binary, LICENSE and README.

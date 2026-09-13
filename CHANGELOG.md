@@ -7,6 +7,47 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- The release page now carries the release notes. `scripts/relnotes`
+  builds the whole body from the `CHANGELOG.md` section matching the tag
+  and the workflow passes it with `--release-notes`, so what a person
+  wrote for a release is what a reader of the release sees. It replaces a
+  machine list of full commit SHAs that included the `Release X.Y.Z`
+  commit itself and matched the changelog nowhere.
+
+  The body has to be built whole, footer included, because goreleaser
+  composes it nowhere else: `internal/pipe/changelog` returns as soon as
+  it sees a release-notes file, so `release.header` and `release.footer`
+  are never appended to one. Setting `changelog.disable` is worse — its
+  own documentation says it "will also ignore any changelog files passed
+  via `--release-notes`, and will render an empty changelog", which is
+  how a sibling server's release page came to show nothing but a footer.
+  Both were checked against goreleaser v2.18.1 before either was relied
+  on, and the dead `changelog:` and `footer:` config is gone rather than
+  left reading like a promise.
+
+  A tag whose section is missing or empty fails the release instead of
+  publishing one that says nothing.
+- `CODE_OF_CONDUCT.md`, Contributor Covenant 3.0 — the one community
+  health file GitHub's checklist names that this repository did not have.
+  Reports go through GitHub's private security advisory flow rather than
+  an address, because hard rule 1 keeps account emails out of the tree
+  and the `leaks` gate enforces it.
+
+### Changed
+- The README follows one skeleton, shared with the sibling servers and
+  checked against GitHub's own README guidance, the community profile
+  checklist and the standard-readme spec. What changed here: a short
+  description under the 120 characters the spec asks for, `Reporting a
+  problem` renamed to `Getting help` and moved out of the way of somebody
+  installing, a `How it works` section, a `Documentation` section
+  pointing at the three files under `docs/`, `Versioning` moved back with
+  the other reference sections, and a tail of
+  `Contributing → Security → Code of conduct → License`, each one line
+  linking the file it names. `Licence` is now `License`: it names the
+  `LICENSE` file and the `Apache-2.0` identifier, and British spelling
+  stays in the prose.
+
 ## [1.1.2] - 2026-09-13
 
 ### Added

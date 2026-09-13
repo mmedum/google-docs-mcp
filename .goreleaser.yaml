@@ -53,13 +53,14 @@ signs:
     artifacts: checksum
     output: true
 
-# No changelog block, and no release.header or release.footer: the whole
-# release body is built by scripts/relnotes from the CHANGELOG.md section
-# matching the tag, and passed with --release-notes. goreleaser's
-# changelog pipe returns as soon as it sees that file, so a header or
-# footer configured here would never be appended — dead config that reads
-# like a promise. changelog.disable is worse still: it skips the pipe
-# before the file is read and publishes an empty body.
+# No changelog block: the release body is the CHANGELOG.md section for the
+# tag, built by scripts/relnotes and passed with --release-notes, so a
+# generated commit list would only be a second, worse account of the same
+# release. Never set changelog.disable to get that effect — it is read in
+# the pipe's Skip method, before the notes file is loaded, and the body
+# collapses to this footer with nothing above it. The footer below still
+# applies: internal/pipe/release/body.go wraps ReleaseNotes in
+# release.header and release.footer on every path.
 
 release:
   # A tag is the decision; a draft nobody publishes is how releases go
@@ -67,3 +68,18 @@ release:
   # for anything carrying a suffix like -rc1.
   draft: false
   prerelease: auto
+  footer: |
+    ---
+
+    Built by GoReleaser from the tag. Every archive carries the binary,
+    LICENSE and README, and ships an SBOM beside it.
+
+    Verify a download before you run it:
+
+    ```bash
+    sha256sum -c checksums.txt --ignore-missing
+    cosign verify-blob checksums.txt --bundle checksums.txt.bundle \
+      --certificate-identity-regexp 'https://github\.com/mmedum/google-docs-mcp/' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    gh attestation verify google-docs-mcp_*.tar.gz --repo mmedum/google-docs-mcp
+    ```

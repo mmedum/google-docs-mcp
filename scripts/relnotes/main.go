@@ -9,14 +9,19 @@
 // itself, while the notes a person actually wrote sat in CHANGELOG.md
 // and reached nobody.
 //
-// The whole body is built here, footer included, because goreleaser
-// composes it nowhere else: internal/pipe/changelog returns as soon as
-// it sees a release-notes file, so release.header and release.footer are
-// never appended to one. Setting changelog.disable is worse — it skips
-// the pipe entirely and ignores the file, publishing an empty body. Both
-// were verified against goreleaser v2.18.1's source, and both are the
-// reason this tool emits the footer rather than leaving it in
-// .goreleaser.yaml where it would silently do nothing.
+// This emits the section and nothing else. The footer belongs in
+// .goreleaser.yaml, where it still works: internal/pipe/release/body.go
+// wraps ctx.ReleaseNotes in Config.Release.Header and
+// Config.Release.Footer on every path, --release-notes included. What
+// the changelog pipe's early return skips is the --release-header and
+// --release-footer *flags*, which is a different pair.
+//
+// The trap is changelog.disable. It is read in the pipe's Skip method,
+// which runs before Run, so ctx.ReleaseNotes is never set and the file
+// passed to --release-notes is never read: the body collapses to header
+// plus footer. That is not a guess — it is why a sibling server's
+// release page shows a footer and nothing above it while its workflow
+// passes --release-notes. Verified against goreleaser v2.18.1.
 package main
 
 import (
@@ -30,45 +35,23 @@ import (
 // heading matches a Keep a Changelog version heading: "## [1.1.2] - 2026-09-13".
 var heading = regexp.MustCompile(`(?m)^## \[([^\]]+)\]`)
 
-const footer = `Built by GoReleaser from the tag. Every archive carries the binary, LICENSE and README.
-
-Verify a download before running it:
-
-` + "```bash" + `
-sha256sum -c checksums.txt --ignore-missing
-cosign verify-blob checksums.txt --bundle checksums.txt.bundle \
-  --certificate-identity-regexp 'https://github\.com/%[1]s/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify %[2]s_*.tar.gz --repo %[1]s
-` + "```"
-
-const mcpbFooter = `
-
-` + "`.mcpb`" + ` is the Claude Desktop bundle: open it and Claude Desktop installs the
-server and asks for your OAuth client JSON, with no config file to edit. It does
-**not** log you in — install the binary as well and run ` + "`%[2]s login`" + ` once.
-Its SHA-256 is in the same signed ` + "`checksums.txt`" + `.`
-
 func main() {
 	var (
 		version   = flag.String("version", "", "tag being released, with or without the leading v")
 		changelog = flag.String("changelog", "CHANGELOG.md", "path to the changelog")
 		out       = flag.String("out", "", "file to write (default stdout)")
-		repo      = flag.String("repo", "", "owner/name, for the verification commands")
-		binary    = flag.String("binary", "", "binary name, for the verification commands")
-		mcpb      = flag.Bool("mcpb", false, "the release carries a Claude Desktop bundle")
 	)
 	flag.Parse()
 
-	if err := run(*version, *changelog, *out, *repo, *binary, *mcpb); err != nil {
+	if err := run(*version, *changelog, *out); err != nil {
 		fmt.Fprintln(os.Stderr, "relnotes:", err)
 		os.Exit(1)
 	}
 }
 
-func run(version, changelog, out, repo, binary string, mcpb bool) error {
-	if version == "" || repo == "" || binary == "" {
-		return fmt.Errorf("-version, -repo and -binary are all required")
+func run(version, changelog, out string) error {
+	if version == "" {
+		return fmt.Errorf("-version is required")
 	}
 	data, err := os.ReadFile(changelog)
 	if err != nil {
@@ -79,11 +62,7 @@ func run(version, changelog, out, repo, binary string, mcpb bool) error {
 		return err
 	}
 
-	body := section + "\n\n---\n\n" + fmt.Sprintf(footer, repo, binary)
-	if mcpb {
-		body += fmt.Sprintf(mcpbFooter, repo, binary)
-	}
-	body += "\n"
+	body := section + "\n"
 
 	if out == "" {
 		_, err := os.Stdout.WriteString(body)

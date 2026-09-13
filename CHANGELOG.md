@@ -15,16 +15,25 @@ and new required fields are breaking; the schema diff in CI flags them.
   machine list of full commit SHAs that included the `Release X.Y.Z`
   commit itself and matched the changelog nowhere.
 
-  The body has to be built whole, footer included, because goreleaser
-  composes it nowhere else: `internal/pipe/changelog` returns as soon as
-  it sees a release-notes file, so `release.header` and `release.footer`
-  are never appended to one. Setting `changelog.disable` is worse — its
-  own documentation says it "will also ignore any changelog files passed
-  via `--release-notes`, and will render an empty changelog", which is
-  how a sibling server's release page came to show nothing but a footer.
-  Both were checked against goreleaser v2.18.1 before either was relied
-  on, and the dead `changelog:` and `footer:` config is gone rather than
-  left reading like a promise.
+  The trap is `changelog.disable`. It looks like the way to stop the
+  commit list, and it is read in the changelog pipe's `Skip` method,
+  which runs before `Run` — so `ctx.ReleaseNotes` is never set, the file
+  passed to `--release-notes` is never read, and the body collapses to
+  the footer with nothing above it. That is not a hypothetical: a sibling
+  server carries `disable: true` and passes `--release-notes` in the same
+  workflow, and its release page shows a footer and nothing else. The
+  `changelog:` block is simply deleted here instead.
+
+  `release.footer` stays where it is and still works.
+  `internal/pipe/release/body.go` wraps `ReleaseNotes` in
+  `release.header` and `release.footer` on every path, `--release-notes`
+  included; the pair the changelog pipe's early return skips is the
+  `--release-header` and `--release-footer` *flags*, which is a different
+  thing. So `relnotes` emits the section alone, and the footer — one
+  shared wording across the servers — is configured once in
+  `.goreleaser.yaml`. All of it read out of goreleaser v2.18.1 rather
+  than inferred from the documentation, which does not cover the
+  interaction.
 
   A tag whose section is missing or empty fails the release instead of
   publishing one that says nothing.

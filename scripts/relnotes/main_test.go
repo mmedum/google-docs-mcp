@@ -73,42 +73,39 @@ func TestSectionRefusesAnAbsentVersion(t *testing.T) {
 	}
 }
 
-// The body must carry the notes AND the footer: goreleaser appends
-// neither header nor footer to a --release-notes file, so anything this
-// tool leaves out never reaches the release page.
-func TestRunWritesNotesAndFooter(t *testing.T) {
+// The body is the section and nothing else: the footer is
+// .goreleaser.yaml's release.footer, which body.go still wraps around
+// ctx.ReleaseNotes when --release-notes is used. Emitting one here too
+// would print it twice.
+func TestRunWritesTheSectionAlone(t *testing.T) {
 	dir := t.TempDir()
 	cl := dir + "/CHANGELOG.md"
 	if err := writeFile(cl, sample); err != nil {
 		t.Fatal(err)
 	}
 	out := dir + "/notes.md"
-	if err := run("v1.1.2", cl, out, "mmedum/google-docs-mcp", "google-docs-mcp", false); err != nil {
+	if err := run("v1.1.2", cl, out); err != nil {
 		t.Fatal(err)
 	}
 	body := readFile(t, out)
 
-	for _, want := range []string{"- The thing.", "sha256sum -c checksums.txt", "gh attestation verify", "mmedum/google-docs-mcp"} {
-		if !contains(body, want) {
-			t.Errorf("body is missing %q:\n%s", want, body)
-		}
+	if body != "### Added\n- The thing.\n\n### Changed\n- The other thing.\n" {
+		t.Errorf("body = %q", body)
 	}
-	if contains(body, ".mcpb") {
-		t.Error("the bundle paragraph appeared without -mcpb")
+	for _, unwanted := range []string{"sha256sum", "cosign", "gh attestation", "---"} {
+		if contains(body, unwanted) {
+			t.Errorf("body carries %q; the footer belongs to goreleaser", unwanted)
+		}
 	}
 }
 
-func TestRunAddsTheBundleParagraphOnlyWhenAsked(t *testing.T) {
+func TestRunRefusesATagWithNoSection(t *testing.T) {
 	dir := t.TempDir()
 	cl := dir + "/CHANGELOG.md"
 	if err := writeFile(cl, sample); err != nil {
 		t.Fatal(err)
 	}
-	out := dir + "/notes.md"
-	if err := run("v1.1.2", cl, out, "mmedum/google-chat-mcp", "google-chat-mcp", true); err != nil {
-		t.Fatal(err)
-	}
-	if !contains(readFile(t, out), ".mcpb") {
-		t.Error("-mcpb did not add the bundle paragraph")
+	if err := run("v9.9.9", cl, dir+"/notes.md"); err == nil {
+		t.Error("a tag with no section was accepted; the release would say nothing")
 	}
 }

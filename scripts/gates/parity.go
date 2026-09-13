@@ -206,11 +206,8 @@ func runLines(ci string) string {
 // mean the targets and the gates have stopped resembling each other,
 // which is its own problem.
 func makeTargetFor(gate string) string {
-	switch gate {
-	case "coverage":
+	if gate == "coverage" {
 		return "cover"
-	case "classes":
-		return "gate-classes"
 	}
 	return gate
 }

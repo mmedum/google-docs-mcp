@@ -84,21 +84,17 @@ func schemasAtTag(tag string) (out []byte, err error) {
 	return dumpSchemas(oldBin)
 }
 
-// dumpSchemas asks a build for its whole registrable surface, not a
-// default build's.
+// dumpSchemas asks a build for its schemas.
 //
-// delete_comment and delete_tab register only under
-// GDOCS_ENABLE_DESTRUCTIVE, so a default dump does not contain them and
-// this gate could not see them change. A tool behind a flag can lose a
-// field or gain a required one like any other, and a deployer who turned
-// the flag on is a client written against that surface. Both sides are
-// dumped the same way, which is the part that matters: the same
-// asymmetry in a sibling server reported its gated tools as newly added
-// on every run and could not report one being removed at all.
+// The binary decides what that means: --dump-schemas emits
+// tools.FullSurface, so both sides of the comparison carry every tool
+// that can register, including the ones behind a flag. That belongs in
+// the binary rather than here — a gate setting an environment variable
+// only fixes the gate, while every other reader of --dump-schemas keeps
+// the partial answer, and it has to be kept in step with a gate list it
+// cannot see.
 func dumpSchemas(bin string) ([]byte, error) {
-	cmd := exec.Command(bin, "--dump-schemas")
-	cmd.Env = append(os.Environ(), "GDOCS_ENABLE_DESTRUCTIVE=true")
-	out, err := cmd.Output()
+	out, err := exec.Command(bin, "--dump-schemas").Output()
 	if err != nil {
 		return nil, fmt.Errorf("%s --dump-schemas: %w", bin, err)
 	}

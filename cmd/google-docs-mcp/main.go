@@ -17,6 +17,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/mmedum/google-docs-mcp/internal/tools"
 	"io"
 	"log/slog"
 	"os"
@@ -164,7 +165,10 @@ func runServer(args []string) int {
 	slog.SetDefault(logger)
 
 	if dumpSchemas {
-		srv := server.New(server.Deps{Config: cfg, Logger: logger, Version: version.String()})
+		// The whole registrable surface, not this deployment's: the schema
+		// diff compares two dumps, and a tool behind a flag can lose a field
+		// or gain a required one like any other.
+		srv := server.New(server.Deps{Config: tools.FullSurface(cfg), Logger: logger, Version: version.String()})
 		if err := server.DumpSchemas(context.Background(), srv, os.Stdout, version.String()); err != nil {
 			return fail("dump schemas: %v", err)
 		}

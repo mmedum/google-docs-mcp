@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-09-13
+
 ### Added
 - A `transcript` gate, which the two sibling servers had and this one
   did not. The live driver and the eval harness may put a value into
@@ -43,8 +45,12 @@ and new required fields are breaking; the schema diff in CI flags them.
 - The `classes` gate's Make target is called `classes`, like the gate and
   like the other three servers, instead of `gate-classes`. The parity
   gate's rename map is one entry shorter, which its own comment asks for.
-
-## [Unreleased]
+- `golang.org/x/oauth2` is at v0.37.0 and `golang.org/x/time` at v0.16.0,
+  what dependabot proposed, applied on top of the work above rather than
+  merged from a branch predating it. oauth2 is not an ordinary dependency
+  here — it is the token refresh — so `make check` passing is not the
+  whole story: `doctor` was run against a real account and the refresh
+  token exchange succeeded, which is the path no unit test reaches.
 
 ## [1.1.1] - 2026-09-13
 

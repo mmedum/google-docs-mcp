@@ -51,8 +51,9 @@ and new required fields are breaking; the schema diff in CI flags them.
 - The README follows one skeleton, shared with the sibling servers and
   checked against GitHub's own README guidance, the community profile
   checklist and the standard-readme spec. What changed here: a short
-  description under the 120 characters the spec asks for, `Reporting a
-  problem` renamed to `Getting help` and moved out of the way of somebody
+  description under the 120 characters the spec asks for, `Why another Google Docs MCP` renamed to
+  `Why google-docs-mcp`, so the four servers name that section the same
+  way; `Reporting a problem` renamed to `Getting help` and moved out of the way of somebody
   installing, a `How it works` section, a `Documentation` section
   pointing at the three files under `docs/`, `Versioning` moved back with
   the other reference sections, and a tail of

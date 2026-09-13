@@ -18,7 +18,7 @@ the right granularity, edits in place without damaging what surrounds the
 edit, proposes changes as suggestions, comments on passages, and handles
 tables, tabs, headers, footnotes and formatting.
 
-## Why another Google Docs MCP
+## Why google-docs-mcp
 
 Existing servers hand the model raw UTF-16 indices, convert markdown in
 ways that silently corrupt documents, and anchor comments through the

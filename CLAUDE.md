@@ -16,8 +16,22 @@ tool surface, the addressing model, or the write path.
    URLs, account emails, Cloud project ids, OAuth client ids or secrets,
    and no content from real documents anywhere in the repository, in
    fixtures, in commit messages, or in logs. Fixtures are synthetic.
-2. **Stdout carries only MCP JSON-RPC frames.** Logs use `slog` to
-   stderr. Never `fmt.Println` on the server path.
+2. **Stdout carries only MCP JSON-RPC frames.** This is the protocol, not
+   a house preference. MCP's stdio transport says the server "MUST NOT
+   write anything to its `stdout` that is not a valid MCP message", and
+   "MAY write UTF-8 strings to its standard error (`stderr`) for logging
+   purposes" —
+   <https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>.
+   Logs use `slog` to stderr. A stray print corrupts the JSON-RPC stream
+   and the client silently stops working, which is why this is a hard
+   rule rather than a style note.
+
+   `forbidigo` enforces it: `fmt.Print*` and `os.Stdout` are forbidden
+   outside `main`, which names the process's streams once and passes them
+   down as `io.Writer`. `scripts/` is excluded, being maintainer tooling
+   rather than the server. Check the message text when verifying it — a
+   settings block that fails to load leaves forbidigo on its defaults,
+   firing, looking like it works.
 3. **The model never sees UTF-16 indices.** Targets are exact text,
    `heading_id`, or handles. Index math lives in `internal/doc` and (later)
    `internal/plan`.

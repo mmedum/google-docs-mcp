@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"github.com/mmedum/google-docs-mcp/internal/redact"
@@ -205,27 +206,55 @@ func TestNothingPrintsOutsideTheBoundary(t *testing.T) {
 
 }
 
-// A mistyped subcommand and a flag reach the default path the same way, and
-// the leading dash is all that tells them apart. Both directions are covered
-// because both are quiet when wrong: reject too much and every documented
-// flag stops working, reject too little and a typo starts the server and
-// reports success.
-func TestLooksLikeSubcommand(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		arg  string
-		want bool
-	}{
-		{"a mistyped subcommand", "statsu", true},
-		{"a subcommand that does not exist", "zzz-bogus", true},
-		{"the right word in the wrong case", "Status", true},
-		{"a flag the server parses", "--dump-schemas", false},
-		{"the single-dash spelling Go also accepts", "-version", false},
-		{"a flag carrying a value", "-profile=work", false},
-		{"no argument at all", "", false},
-	} {
-		if got := looksLikeSubcommand(tc.arg); got != tc.want {
-			t.Errorf("%s: looksLikeSubcommand(%q) = %t, want %t", tc.name, tc.arg, got, tc.want)
+// A mistyped subcommand and a flag reach the default path the same way,
+// and the leading dash is all that tells them apart.
+//
+// This drives run() rather than a predicate. The predicate version of
+// this test passed with the guard deleted from main entirely, which is
+// the whole reason main was reshaped to take its arguments and streams:
+// a test that cannot fail when the behaviour is removed is not holding
+// the behaviour.
+func TestAnUnknownCommandIsReported(t *testing.T) {
+	for _, arg := range []string{"statsu", "zzz-bogus", "Status"} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{arg}, &stdout, &stderr); code == 0 {
+			t.Errorf("%q exited 0; a typo is indistinguishable from a correct invocation", arg)
 		}
+		if !strings.Contains(stderr.String(), arg) {
+			t.Errorf("%q: stderr does not name the command: %s", arg, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "Usage:") {
+			t.Errorf("%q: no usage on stderr: %s", arg, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("%q wrote to stdout, which carries only MCP frames: %s", arg, stdout.String())
+		}
+	}
+}
+
+// The guard keys on a leading dash, which is one typo away from
+// rejecting a real flag. Every documented invocation that needs no
+// credentials is held here; rejecting too much is as quiet as rejecting
+// too little.
+func TestDocumentedInvocationsStillReachTheirCommand(t *testing.T) {
+	for _, arg := range []string{"--version", "-version", "--dump-schemas", "help", "--help", "-h"} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{arg}, &stdout, &stderr); code != 0 {
+			t.Errorf("%q exited %d, want 0: %s", arg, code, stderr.String())
+		}
+		if strings.Contains(stderr.String(), "unknown command") {
+			t.Errorf("%q was rejected as an unknown command", arg)
+		}
+	}
+}
+
+// No arguments at all is the server, not an unknown command.
+func TestNoArgumentsIsNotRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--version"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("sanity: --version exited %d", code)
+	}
+	if strings.Contains(stderr.String(), "unknown command") {
+		t.Error("an empty argument list was treated as a command")
 	}
 }

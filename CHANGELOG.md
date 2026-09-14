@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-09-14
+
 ### Added
 - `forbidigo` holds the rule that stdout carries only MCP JSON-RPC
   frames. That rule is in this repository's CLAUDE.md and in the MCP

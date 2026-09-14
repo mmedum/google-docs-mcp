@@ -42,20 +42,29 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/version"
 )
 
-func main() {
-	if len(os.Args) >= 2 {
-		switch os.Args[1] {
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+
+// run is main with its arguments and its two streams passed in, so the
+// dispatch can be exercised by a test instead of only by a person at a
+// terminal. main itself calls os.Exit, which no test survives — which is
+// why the unknown-command guard below first arrived with a test of an
+// extracted predicate rather than of its behaviour, and why deleting the
+// guard left every check green. The sibling servers were already shaped
+// this way, and their tests caught exactly that mutation.
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		switch args[0] {
 		case "login":
-			os.Exit(cmdLogin(os.Args[2:]))
+			return cmdLogin(args[1:], stdout, stderr)
 		case "logout":
-			os.Exit(cmdLogout(os.Args[2:]))
+			return cmdLogout(args[1:], stdout, stderr)
 		case "status":
-			os.Exit(cmdStatus(os.Args[2:]))
+			return cmdStatus(args[1:], stdout, stderr)
 		case "doctor":
-			os.Exit(cmdDoctor(os.Args[2:]))
+			return cmdDoctor(args[1:], stdout, stderr)
 		case "help", "-h", "--help":
-			usage(os.Stdout)
-			return
+			usage(stdout)
+			return 0
 		}
 
 		// Anything the switch did not recognise, and that is not a flag,
@@ -63,21 +72,14 @@ func main() {
 		// instead, which looks like a hang: it blocks on stdin and says
 		// nothing. The caller is then handed exit 0 whether it meant to
 		// serve or mistyped `status`, so nothing downstream can tell the
-		// two apart.
-		if looksLikeSubcommand(os.Args[1]) {
-			usage(os.Stderr)
-			os.Exit(fail("unknown command %q", os.Args[1]))
+		// two apart. A leading dash is all that separates them, so that
+		// is the whole rule.
+		if !strings.HasPrefix(args[0], "-") {
+			usage(stderr)
+			return fail(stderr, "unknown command %q", args[0])
 		}
 	}
-	os.Exit(runServer(os.Args[1:]))
-}
-
-// looksLikeSubcommand reports whether arg was meant as a subcommand rather
-// than a flag for the server. Both arrive the same way — as os.Args[1] the
-// switch above did not match — and the leading dash is the only thing that
-// separates them.
-func looksLikeSubcommand(arg string) bool {
-	return arg != "" && !strings.HasPrefix(arg, "-")
+	return runServer(args, stdout, stderr)
 }
 
 func usage(w io.Writer) {
@@ -97,8 +99,8 @@ accepts the matching flags (run one with -h).
 `)
 }
 
-func fail(format string, args ...any) int {
-	fmt.Fprintln(os.Stderr, "google-docs-mcp: "+redactText(fmt.Sprintf(format, args...)))
+func fail(w io.Writer, format string, args ...any) int {
+	_, _ = fmt.Fprintln(w, "google-docs-mcp: "+redactText(fmt.Sprintf(format, args...)))
 	return 1
 }
 
@@ -163,24 +165,24 @@ func (p *profile) tokenSource(ctx context.Context) (oauth2.TokenSource, credenti
 	return auth.TokenSource(ctx, oc, tok, p.cfg.HTTPTimeout), src, nil
 }
 
-func runServer(args []string) int {
+func runServer(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("google-docs-mcp", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	var showVersion, dumpSchemas bool
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.BoolVar(&dumpSchemas, "dump-schemas", false, "print tool schemas as JSON and exit")
 	cfg, err := loadConfig(fs, args)
 	if showVersion {
-		outf("%s\n", version.Info())
+		outf(stdout, "%s\n", version.Info())
 		return 0
 	}
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		return fail("%v", err)
+		return fail(stderr, "%v", err)
 	}
-	logger := config.NewLogger(cfg, os.Stderr)
+	logger := config.NewLogger(cfg, stderr)
 	slog.SetDefault(logger)
 
 	if dumpSchemas {
@@ -188,8 +190,8 @@ func runServer(args []string) int {
 		// diff compares two dumps, and a tool behind a flag can lose a field
 		// or gain a required one like any other.
 		srv := server.New(server.Deps{Config: tools.FullSurface(cfg), Logger: logger, Version: version.String()})
-		if err := server.DumpSchemas(context.Background(), srv, os.Stdout, version.String()); err != nil {
-			return fail("dump schemas: %v", err)
+		if err := server.DumpSchemas(context.Background(), srv, stdout, version.String()); err != nil {
+			return fail(stderr, "dump schemas: %v", err)
 		}
 		return 0
 	}
@@ -199,7 +201,7 @@ func runServer(args []string) int {
 
 	p, err := openProfile(cfg, func(msg string) { logger.Warn(msg) })
 	if err != nil {
-		return fail("%v", err)
+		return fail(stderr, "%v", err)
 	}
 	ts, src, err := p.tokenSource(ctx)
 	if err != nil {
@@ -233,7 +235,7 @@ func runServer(args []string) int {
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Logger: logger, Version: version.String()})
 	logger.Info("serving MCP over stdio", "version", version.String(), "preview", cfg.Preview, "read_only", cfg.ReadOnly, "default_write_mode", cfg.DefaultWriteMode)
 	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && !clientWentAway(err) {
-		return fail("server: %v", err)
+		return fail(stderr, "server: %v", err)
 	}
 	logger.Info("client disconnected; exiting")
 	return 0
@@ -266,7 +268,7 @@ const (
 
 // openCommand parses a subcommand's flags, loads the configuration and
 // opens the profile. A non-nil exit code means the caller should return it.
-func openCommand(name string, args []string, define func(*flag.FlagSet)) (*profile, *flag.FlagSet, *int) {
+func openCommand(name string, args []string, stderr io.Writer, define func(*flag.FlagSet)) (*profile, *flag.FlagSet, *int) {
 	fs := flag.NewFlagSet("google-docs-mcp "+name, flag.ContinueOnError)
 	if define != nil {
 		define(fs)
@@ -277,24 +279,26 @@ func openCommand(name string, args []string, define func(*flag.FlagSet)) (*profi
 		if errors.Is(err, flag.ErrHelp) {
 			code = 0
 		} else {
-			fail("%v", err)
+			fail(stderr, "%v", err)
 		}
 		return nil, fs, &code
 	}
-	p, err := openProfile(cfg, warnStderr)
+	p, err := openProfile(cfg, func(msg string) { warnStderr(stderr, msg) })
 	if err != nil {
-		code := fail("%v", err)
+		code := fail(stderr, "%v", err)
 		return nil, fs, &code
 	}
 	return p, fs, nil
 }
 
-func warnStderr(msg string) { fmt.Fprintln(os.Stderr, "warning: "+redactText(msg)) }
+func warnStderr(w io.Writer, msg string) {
+	_, _ = fmt.Fprintln(w, "warning: "+redactText(msg))
+}
 
-func cmdLogin(args []string) int {
+func cmdLogin(args []string, stdout, stderr io.Writer) int {
 	var noBrowser bool
 	var timeout time.Duration
-	p, _, code := openCommand("login", args, func(fs *flag.FlagSet) {
+	p, _, code := openCommand("login", args, stderr, func(fs *flag.FlagSet) {
 		fs.BoolVar(&noBrowser, "no-browser", false, "print the URL instead of opening a browser")
 		fs.DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for the browser")
 	})
@@ -303,7 +307,7 @@ func cmdLogin(args []string) int {
 	}
 	cfg := p.cfg
 	if _, err := os.Stat(p.clientSecretPath); err != nil {
-		return fail("OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", p.clientSecretPath)
+		return fail(stderr, "OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", p.clientSecretPath)
 	}
 	scopes := auth.Scopes(cfg.ReadOnly)
 	oc, err := auth.LoadClientSecret(p.clientSecretPath, scopes)
@@ -311,27 +315,27 @@ func cmdLogin(args []string) int {
 		// `login` is where this actually fails — bad JSON, the wrong
 		// client type, permissions — so it is the likelier route to a
 		// pasted client id than the `doctor` path that was fixed first.
-		return fail("%v", err)
+		return fail(stderr, "%v", err)
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	opts := auth.LoginOptions{Out: os.Stdout, Timeout: timeout, HTTPTimeout: cfg.HTTPTimeout}
+	opts := auth.LoginOptions{Out: stdout, Timeout: timeout, HTTPTimeout: cfg.HTTPTimeout}
 	if noBrowser {
 		opts.OpenBrowser = func(string) error { return auth.ErrNoBrowser }
 	}
 	tok, err := auth.Login(ctx, oc, opts)
 	if err != nil {
-		return fail("login failed: %v", err)
+		return fail(stderr, "login failed: %v", err)
 	}
 	src, err := p.store.Save(tok.RefreshToken)
 	if err != nil {
-		return fail("store token: %v", err)
+		return fail(stderr, "store token: %v", err)
 	}
 	email := ""
 	if info, err := auth.Inspect(ctx, nil, tok.AccessToken); err == nil {
 		email = info.Email
 		if missing := auth.HasScopes(info.Scopes, scopes); len(missing) > 0 {
-			warnStderr("Google granted fewer scopes than requested; missing: " + strings.Join(missing, ", ") + ". Re-run login and approve every checkbox.")
+			warnStderr(stderr, "Google granted fewer scopes than requested; missing: "+strings.Join(missing, ", ")+". Re-run login and approve every checkbox.")
 		}
 	}
 	if email == "" {
@@ -345,14 +349,14 @@ func cmdLogin(args []string) int {
 	p.user.TokenStore = string(src)
 	p.user.Scopes = scopes
 	if err := userconfig.Save(cfg.Profile, p.user); err != nil {
-		return fail("save profile: %v", err)
+		return fail(stderr, "save profile: %v", err)
 	}
-	outf("Logged in as %s (profile %q, token stored in %s).\n", orUnknown(email), cfg.Profile, src)
+	outf(stdout, "Logged in as %s (profile %q, token stored in %s).\n", orUnknown(email), cfg.Profile, src)
 	return 0
 }
 
-func cmdLogout(args []string) int {
-	p, _, code := openCommand("logout", args, nil)
+func cmdLogout(args []string, stdout, stderr io.Writer) int {
+	p, _, code := openCommand("logout", args, stderr, nil)
 	if code != nil {
 		return *code
 	}
@@ -362,69 +366,69 @@ func cmdLogout(args []string) int {
 	// override is outside this command's reach.
 	if tok, _, err := p.store.ResolveStored(); err == nil {
 		if err := auth.Revoke(ctx, nil, tok); err != nil {
-			warnStderr(fmt.Sprintf("could not revoke the token at Google (%v); it is still deleted locally", err))
+			warnStderr(stderr, fmt.Sprintf("could not revoke the token at Google (%v); it is still deleted locally", err))
 		}
 	}
 	if os.Getenv(credentials.EnvVar) != "" {
-		warnStderr(credentials.EnvVar + " is set; logout cannot remove or revoke it")
+		warnStderr(stderr, credentials.EnvVar+" is set; logout cannot remove or revoke it")
 	}
 	if err := p.store.Delete(); err != nil {
-		return fail("%v", err)
+		return fail(stderr, "%v", err)
 	}
 	if p.hasConfig {
 		p.user.AccountEmail, p.user.TokenStore, p.user.Scopes = "", "", nil
 		if err := userconfig.Save(p.cfg.Profile, p.user); err != nil {
-			return fail("save profile: %v", err)
+			return fail(stderr, "save profile: %v", err)
 		}
 	}
-	outf("Logged out of profile %q.\n", p.cfg.Profile)
+	outf(stdout, "Logged out of profile %q.\n", p.cfg.Profile)
 	return 0
 }
 
-func cmdStatus(args []string) int {
-	p, _, code := openCommand("status", args, nil)
+func cmdStatus(args []string, stdout, stderr io.Writer) int {
+	p, _, code := openCommand("status", args, stderr, nil)
 	if code != nil {
 		return *code
 	}
-	printStatus(p)
+	printStatus(stdout, p)
 	return 0
 }
 
-func printStatus(p *profile) {
+func printStatus(stdout io.Writer, p *profile) {
 	cfg := p.cfg
-	outf("%s\n", version.Info())
-	outf("profile:        %s\n", cfg.Profile)
-	outf("config dir:     %s\n", p.dir)
-	outf("account:        %s\n", orUnknown(p.user.AccountEmail))
+	outf(stdout, "%s\n", version.Info())
+	outf(stdout, "profile:        %s\n", cfg.Profile)
+	outf(stdout, "config dir:     %s\n", p.dir)
+	outf(stdout, "account:        %s\n", orUnknown(p.user.AccountEmail))
 	exists := "missing"
 	if _, err := os.Stat(p.clientSecretPath); err == nil {
 		exists = "present"
 	}
-	outf("client secret:  %s (%s)\n", p.clientSecretPath, exists)
+	outf(stdout, "client secret:  %s (%s)\n", p.clientSecretPath, exists)
 	if _, src, err := p.store.Resolve(); err == nil {
-		outf("token store:    %s\n", src)
+		outf(stdout, "token store:    %s\n", src)
 	} else {
-		outf("token store:    none (%v)\n", err)
+		outf(stdout, "token store:    none (%v)\n", err)
 	}
 	if len(p.user.Scopes) > 0 {
-		outf("scopes:         %s\n", strings.Join(p.user.Scopes, " "))
+		outf(stdout, "scopes:         %s\n", strings.Join(p.user.Scopes, " "))
 	}
-	outf("preview:        %t\n", cfg.Preview)
-	outf("write modes:    %s (default %s)\n", joinModes(cfg.AvailableWriteModes()), cfg.DefaultWriteMode)
-	outf("read-only:      %t\n", cfg.ReadOnly)
-	outf("destructive:    %t\n", cfg.EnableDestructive)
-	outf("export dir:     %s\n", orUnknown(cfg.ExportDir))
-	outf("http timeout:   %s\n", cfg.HTTPTimeout)
+	outf(stdout, "preview:        %t\n", cfg.Preview)
+	outf(stdout, "write modes:    %s (default %s)\n", joinModes(cfg.AvailableWriteModes()), cfg.DefaultWriteMode)
+	outf(stdout, "read-only:      %t\n", cfg.ReadOnly)
+	outf(stdout, "destructive:    %t\n", cfg.EnableDestructive)
+	outf(stdout, "export dir:     %s\n", orUnknown(cfg.ExportDir))
+	outf(stdout, "http timeout:   %s\n", cfg.HTTPTimeout)
 }
 
-func cmdDoctor(args []string) int {
-	p, fs, code := openCommand("doctor", args, nil)
+func cmdDoctor(args []string, stdout, stderr io.Writer) int {
+	p, fs, code := openCommand("doctor", args, stderr, nil)
 	if code != nil {
 		return *code
 	}
 	cfg := p.cfg
-	printStatus(p)
-	outf("\n")
+	printStatus(stdout, p)
+	outf(stdout, "\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -442,10 +446,10 @@ func cmdDoctor(args []string) int {
 	check := func(name string, err error, detail string) {
 		if err != nil {
 			failed++
-			outf("✘ %s: %v\n", name, hide(err.Error()))
+			outf(stdout, "✘ %s: %v\n", name, hide(err.Error()))
 			return
 		}
-		outf("✔ %s%s\n", name, detail)
+		outf(stdout, "✔ %s%s\n", name, detail)
 	}
 
 	ts, _, err := p.tokenSource(ctx)
@@ -499,17 +503,17 @@ func cmdDoctor(args []string) int {
 			case cfg.Preview:
 				check("Developer Preview (commentsViewMode)", perr, "")
 			default:
-				outf("• Developer Preview not available for this project yet (%s); suggestion mode and anchored comments stay off\n", gapi.Class(perr))
+				outf(stdout, "• Developer Preview not available for this project yet (%s); suggestion mode and anchored comments stay off\n", gapi.Class(perr))
 			}
 		}
 	} else {
-		outf("• pass a document id or URL to also test documents.get and the Developer Preview\n")
+		outf(stdout, "• pass a document id or URL to also test documents.get and the Developer Preview\n")
 	}
 	if failed > 0 {
-		outf("\n%d check(s) failed\n", failed)
+		outf(stdout, "\n%d check(s) failed\n", failed)
 		return 1
 	}
-	outf("\nall checks passed\n")
+	outf(stdout, "\nall checks passed\n")
 	return 0
 }
 
@@ -548,8 +552,8 @@ func redactor(ref string) func(string) string {
 
 // outf and failf are the two streams. Nothing in this file writes to
 // stdout or stderr except through them.
-func outf(format string, args ...any) {
-	fmt.Print(redactText(fmt.Sprintf(format, args...)))
+func outf(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprint(w, redactText(fmt.Sprintf(format, args...)))
 }
 
 // maskClientID removes a Google OAuth client id from a path. Nobody

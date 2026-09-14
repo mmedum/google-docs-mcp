@@ -57,8 +57,27 @@ func main() {
 			usage(os.Stdout)
 			return
 		}
+
+		// Anything the switch did not recognise, and that is not a flag,
+		// was meant to be a subcommand. Falling through starts the server
+		// instead, which looks like a hang: it blocks on stdin and says
+		// nothing. The caller is then handed exit 0 whether it meant to
+		// serve or mistyped `status`, so nothing downstream can tell the
+		// two apart.
+		if looksLikeSubcommand(os.Args[1]) {
+			usage(os.Stderr)
+			os.Exit(fail("unknown command %q", os.Args[1]))
+		}
 	}
 	os.Exit(runServer(os.Args[1:]))
+}
+
+// looksLikeSubcommand reports whether arg was meant as a subcommand rather
+// than a flag for the server. Both arrive the same way — as os.Args[1] the
+// switch above did not match — and the leading dash is the only thing that
+// separates them.
+func looksLikeSubcommand(arg string) bool {
+	return arg != "" && !strings.HasPrefix(arg, "-")
 }
 
 func usage(w io.Writer) {

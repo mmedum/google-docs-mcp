@@ -204,3 +204,28 @@ func TestNothingPrintsOutsideTheBoundary(t *testing.T) {
 	t.Logf("%d functions walked, %d stray prints", funcs, found)
 
 }
+
+// A mistyped subcommand and a flag reach the default path the same way, and
+// the leading dash is all that tells them apart. Both directions are covered
+// because both are quiet when wrong: reject too much and every documented
+// flag stops working, reject too little and a typo starts the server and
+// reports success.
+func TestLooksLikeSubcommand(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		arg  string
+		want bool
+	}{
+		{"a mistyped subcommand", "statsu", true},
+		{"a subcommand that does not exist", "zzz-bogus", true},
+		{"the right word in the wrong case", "Status", true},
+		{"a flag the server parses", "--dump-schemas", false},
+		{"the single-dash spelling Go also accepts", "-version", false},
+		{"a flag carrying a value", "-profile=work", false},
+		{"no argument at all", "", false},
+	} {
+		if got := looksLikeSubcommand(tc.arg); got != tc.want {
+			t.Errorf("%s: looksLikeSubcommand(%q) = %t, want %t", tc.name, tc.arg, got, tc.want)
+		}
+	}
+}

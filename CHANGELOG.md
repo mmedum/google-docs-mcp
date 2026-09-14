@@ -77,6 +77,26 @@ and new required fields are breaking; the schema diff in CI flags them.
   `LICENSE` file and the `Apache-2.0` identifier, and British spelling
   stays in the prose.
 
+### Fixed
+- A mistyped subcommand exits non-zero instead of starting the server.
+  `flag` stops at the first non-flag argument and returns `nil`, so a
+  stray word stayed in the argument list where nothing read it and the
+  default path ran the server: `google-docs-mcp statsu` printed
+  `serving MCP over stdio` and exited **0**. On a terminal that reads as
+  a hang, since the server then blocks on stdin and says nothing.
+
+  The exit code is the part that travels. Anything driving the binary — a
+  setup script, a health check, an agent writing its own client config —
+  takes 0 for "that worked", so a typo was indistinguishable from a
+  correct invocation until the server turned out not to be there.
+
+  A leading dash is the only thing separating a flag from a mistyped
+  subcommand, so the guard is exactly that, and every documented
+  invocation still reaches the server untouched. Contributed from
+  outside, after running the servers side by side and noticing that two
+  of the four already guarded this and two did not
+  ([#58](https://github.com/mmedum/google-docs-mcp/pull/58)).
+
 ## [1.1.2] - 2026-09-13
 
 ### Added

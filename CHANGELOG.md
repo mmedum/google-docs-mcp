@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-14
+
 ### Fixed
 - The export directory has to exist. Only a relative path was refused before, so
   an absolute one with a typo in it was accepted at startup and failed

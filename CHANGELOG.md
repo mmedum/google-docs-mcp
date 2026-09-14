@@ -7,6 +7,15 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+- The export directory has to exist. Only a relative path was refused before, so
+  an absolute one with a typo in it was accepted at startup and failed
+  much later, at the moment somebody tried to move a file — a long way
+  from the setting that caused it. `GDOCS_EXPORT_DIR` is now checked for being an
+  absolute path, existing, and being a directory, and each failure names
+  the setting. Unset is still allowed and still means the feature is off;
+  that is a decision, not a mistake.
+
 ## [1.1.3] - 2026-09-14
 
 ### Added

@@ -1,6 +1,6 @@
 # Architecture — google-docs-mcp
 
-**Status:** v1.1.4 (2026-09-13). Phases 0 to 4 are done (§16): auth, raw
+**Status:** v1.2.0 (2026-09-15). Phases 0 to 4 are done (§16): auth, raw
 client, model, renderer, reads, search, create, export, editing with
 minimal diffs in all three modes, formatting, suggestion review, comment
 threads on both backends, revision history and diffs, tables, tabs,

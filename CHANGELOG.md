@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-15
+
 ### Added
 - `status --json` prints the same state as one JSON object on stdout, so
   a script can read whether this server is authorised instead of parsing

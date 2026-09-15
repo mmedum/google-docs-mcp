@@ -7,6 +7,31 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- `status --json` prints the same state as one JSON object on stdout, so
+  a script can read whether this server is authorised instead of parsing
+  the text written for a person. `credentials.resolved` is the field to
+  branch on; `schema_version` changes only when a field is removed or its
+  meaning changes, never when one is added.
+
+  The design is an outside contributor's, taken from the Drive server
+  where it landed first, and the reason is a fault this repository has
+  already caused: a label moved under a release — `refresh token:` became
+  `token store:` — and a check written against the old one started
+  reading "not authorised" for an account that was fine. It fails
+  silently, and the usual response to "not authorised" is to run `login`,
+  which asks a person for consent they already gave.
+
+  One collector, two renderers, so the two cannot drift: the text output
+  is byte-identical to what the released binary prints, which is asserted
+  by diffing them rather than by reading.
+
+  **The account is masked at the collector, not on the way out.** The
+  text path redacts inside `outf`; the JSON encoder does not go through
+  it, so a struct written straight to the stream would have carried the
+  address in full. Held by a test that drives the collector and was
+  watched failing with the redaction removed.
+
 ## [1.1.4] - 2026-09-14
 
 ### Fixed

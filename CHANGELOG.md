@@ -7,6 +7,27 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+- The `pins` gate classifies every action, and an unknown one fails it.
+  The gate could only ever check the versions that were *written*; an
+  action that installs a tool and names no version at all is an absence,
+  and nothing could see it. That is not hypothetical — the Pipedrive
+  server's release failed on exactly this shape, with
+  `sigstore/cosign-installer` pinned by SHA and no `cosign-release`, so
+  the job took whatever cosign was newest and that cosign had changed its
+  default signing format. `download-syft` had the same hole one step
+  below it. **A SHA pins the wrapper, not the tool.**
+
+  This repository was not affected — it pins both — but nothing held
+  that. Every action is now in one of two tables, the installers with the
+  input that pins each one's tool and the actions that install nothing
+  with the reason, and an action in neither fails the gate, because being
+  unclassified is the state that let the other two through.
+
+  Watched failing on all three shapes before being trusted:
+  `cosign-release` removed, `syft-version` removed, and an unclassified
+  installer added.
+
 ## [1.2.0] - 2026-09-15
 
 ### Added

@@ -7,6 +7,7 @@
 //	google-docs-mcp login    authorize a Google account (opens a browser)
 //	google-docs-mcp logout   revoke and forget the stored token
 //	google-docs-mcp status   show the active profile and where the token lives
+//	                         (--json for the same state as one JSON object)
 //	google-docs-mcp doctor   run live checks against Google
 //	google-docs-mcp          run the MCP server (default)
 //	google-docs-mcp --version | --dump-schemas
@@ -92,7 +93,7 @@ Usage:
   google-docs-mcp                 run the MCP server over stdio
   google-docs-mcp login           authorize a Google account
   google-docs-mcp logout          revoke and delete the stored token
-  google-docs-mcp status          show profile, token location, settings
+  google-docs-mcp status [--json] show profile, token location, settings
   google-docs-mcp doctor [DOC]    live checks; DOC is an id or URL to read
   google-docs-mcp --version
   google-docs-mcp --dump-schemas  print tool schemas as JSON
@@ -389,39 +390,22 @@ func cmdLogout(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdStatus(args []string, stdout, stderr io.Writer) int {
-	p, _, code := openCommand("status", args, stderr, nil)
+	var asJSON bool
+	p, _, code := openCommand("status", args, stderr, func(fs *flag.FlagSet) {
+		fs.BoolVar(&asJSON, "json", false, "print the same state as one JSON object")
+	})
 	if code != nil {
 		return *code
 	}
-	printStatus(stdout, p)
+	r := newStatusReport(p)
+	if asJSON {
+		if err := r.writeJSON(stdout); err != nil {
+			return fail(stderr, "%v", err)
+		}
+		return 0
+	}
+	r.writeText(stdout)
 	return 0
-}
-
-func printStatus(stdout io.Writer, p *profile) {
-	cfg := p.cfg
-	outf(stdout, "%s\n", version.Info())
-	outf(stdout, "profile:        %s\n", cfg.Profile)
-	outf(stdout, "config dir:     %s\n", p.dir)
-	outf(stdout, "account:        %s\n", orUnknown(p.user.AccountEmail))
-	exists := "missing"
-	if _, err := os.Stat(p.clientSecretPath); err == nil {
-		exists = "present"
-	}
-	outf(stdout, "client secret:  %s (%s)\n", p.clientSecretPath, exists)
-	if _, src, err := p.store.Resolve(); err == nil {
-		outf(stdout, "token store:    %s\n", src)
-	} else {
-		outf(stdout, "token store:    none (%v)\n", err)
-	}
-	if len(p.user.Scopes) > 0 {
-		outf(stdout, "scopes:         %s\n", strings.Join(p.user.Scopes, " "))
-	}
-	outf(stdout, "preview:        %t\n", cfg.Preview)
-	outf(stdout, "write modes:    %s (default %s)\n", joinModes(cfg.AvailableWriteModes()), cfg.DefaultWriteMode)
-	outf(stdout, "read-only:      %t\n", cfg.ReadOnly)
-	outf(stdout, "destructive:    %t\n", cfg.EnableDestructive)
-	outf(stdout, "export dir:     %s\n", orUnknown(cfg.ExportDir))
-	outf(stdout, "http timeout:   %s\n", cfg.HTTPTimeout)
 }
 
 func cmdDoctor(args []string, stdout, stderr io.Writer) int {
@@ -430,7 +414,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 		return *code
 	}
 	cfg := p.cfg
-	printStatus(stdout, p)
+	newStatusReport(p).writeText(stdout)
 	outf(stdout, "\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -580,12 +564,4 @@ func orUnknown(s string) string {
 		return "(unset)"
 	}
 	return s
-}
-
-func joinModes(ms []config.WriteMode) string {
-	parts := make([]string, len(ms))
-	for i, m := range ms {
-		parts[i] = string(m)
-	}
-	return strings.Join(parts, "/")
 }

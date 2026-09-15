@@ -108,6 +108,14 @@ google-docs-mcp doctor https://docs.google.com/document/d/<some doc you can open
 The document is optional: `doctor` on its own checks credentials, scopes
 and API reachability, and reads the document when given one.
 
+`google-docs-mcp status --json` prints the same state as one JSON object
+on stdout, for a script that needs to know whether this server is
+authorised before starting it. `credentials.resolved` is the field to
+branch on, `schema_version` changes only when a field is removed or its
+meaning changes, and the account is masked to its domain exactly as the
+text output masks it. A label in the human output is free to be reworded
+in any release; the object is not.
+
 `login` opens a browser, completes Google's desktop OAuth flow on a
 loopback port, and stores the refresh token in your OS keyring (Secret
 Service, Keychain or Credential Manager), falling back to a 0600 file

@@ -220,3 +220,115 @@ func TestTheManifestIsTheJSONThePackerWrites(t *testing.T) {
 		t.Fatal("the stamped manifest does not carry the version")
 	}
 }
+
+// What the manifest claims about ITSELF: which document defines the
+// format it says it is, and whether that reference can move under it.
+// Neither `$schema` nor `support` was read until now.
+//
+// Every case below is well formed against the staged tree, and the last
+// passes every claim that holds the document against itself — a 0.2
+// manifest citing a 0.2 schema is stale and entirely consistent, which
+// is why the floor is a separate claim.
+func TestTheWaysAManifestMisdeclaresItself(t *testing.T) {
+	const pinned = "https://raw.githubusercontent.com/anthropics/mcpb/v2.1.2/schemas/mcpb-manifest-v0.3.schema.json"
+
+	// A commit SHA is the other ref that cannot move, and the stronger
+	// of the two: refusing it would push somebody back to a branch.
+	bySHA := good(t)
+	bySHA.Schema = "https://raw.githubusercontent.com/anthropics/mcpb/" +
+		"0123456789abcdef0123456789abcdef01234567/schemas/mcpb-manifest-v0.3.schema.json"
+	if problems := declarationProblems(bySHA); len(problems) > 0 {
+		t.Fatalf("a schema pinned to a commit was refused:\n%s", strings.Join(problems, "\n"))
+	}
+
+	cases := []struct {
+		name   string
+		breaks func(m *manifest)
+		want   string
+	}{
+		{"no $schema", func(m *manifest) { m.Schema = "" }, "no $schema"},
+		{
+			"the unpinned dist path",
+			func(m *manifest) {
+				m.Schema = "https://raw.githubusercontent.com/anthropics/mcpb/main/dist/mcpb-manifest.schema.json"
+			},
+			"not upstream's published",
+		},
+		{
+			"served from a branch",
+			func(m *manifest) {
+				m.Schema = "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json"
+			},
+			"can be re-pointed",
+		},
+		{
+			// What refusing branch NAMES passes: a tag upstream moves
+			// as it releases, which reads as pinned.
+			"a partial tag",
+			func(m *manifest) {
+				m.Schema = "https://raw.githubusercontent.com/anthropics/mcpb/v2.1/schemas/mcpb-manifest-v0.3.schema.json"
+			},
+			"can be re-pointed",
+		},
+		{
+			"the right file from another host",
+			func(m *manifest) { m.Schema = "https://example.invalid/schemas/mcpb-manifest-v0.3.schema.json" },
+			"not upstream's published",
+		},
+		{
+			"a version that disagrees with the schema it cites",
+			func(m *manifest) { m.Schema = pinned; m.ManifestVersion = "0.4" },
+			"cannot claim one version",
+		},
+		{
+			"stale, and entirely self-consistent",
+			func(m *manifest) {
+				m.Schema = "https://raw.githubusercontent.com/anthropics/mcpb/v2.1.2/schemas/mcpb-manifest-v0.2.schema.json"
+				m.ManifestVersion = "0.2"
+			},
+			"still a manifest a version behind",
+		},
+		{"no support URL", func(m *manifest) { m.Support = "" }, "no support URL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := good(t)
+			tc.breaks(&m)
+			problems := declarationProblems(m)
+			if len(problems) == 0 {
+				t.Fatalf("%s was accepted", tc.name)
+			}
+			if !strings.Contains(strings.Join(problems, "\n"), tc.want) {
+				t.Fatalf("wanted %q, got:\n%s", tc.want, strings.Join(problems, "\n"))
+			}
+		})
+	}
+}
+
+// The floor compares numbers, not text: "0.10" sorts before "0.3" as a
+// string, a bug that waits for the tenth minor version.
+func TestTheFloorComparesVersionsNumerically(t *testing.T) {
+	for _, c := range []struct {
+		version, floor string
+		want           bool
+	}{
+		{"0.3", "0.3", false},
+		{"0.2", "0.3", true},
+		{"0.10", "0.3", false},
+		{"0.9", "1.0", true},
+		{"nonsense", "0.3", true},
+	} {
+		if got := olderThan(c.version, c.floor); got != c.want {
+			t.Errorf("olderThan(%q, %q) = %v, want %v", c.version, c.floor, got, c.want)
+		}
+	}
+}
+
+// The committed manifest meets the floor, stated rather than read from
+// the file: a test taking its expected value from the thing under test
+// passes on whatever it finds there.
+func TestTheCommittedManifestMeetsTheFloor(t *testing.T) {
+	if got := good(t).ManifestVersion; got != "0.3" {
+		t.Fatalf("the committed manifest declares %q; this repository has checked 0.3", got)
+	}
+}

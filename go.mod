@@ -3,7 +3,7 @@ module github.com/mmedum/google-docs-mcp
 go 1.27.0
 
 require (
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/yuin/goldmark v1.8.6
 	github.com/zalando/go-keyring v0.2.8

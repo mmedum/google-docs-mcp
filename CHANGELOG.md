@@ -8,6 +8,49 @@ and new required fields are breaking; the schema diff in CI flags them.
 ## [Unreleased]
 
 ### Added
+
+- A **Claude Desktop bundle** (`.mcpb`) on every release, and the MCP
+  registry entry that points at it. This server shipped archives and
+  nothing else, so installing it meant hand-editing a config file and it
+  could not appear in the registry at all — the registry's `mcpb` package
+  type needs a bundle.
+
+  The bundle carries a macOS universal binary, a Windows one, both Linux
+  architectures and a launcher that picks between them from `uname -m`
+  and **execs** it — not a call, because the server talks MCP over that
+  process's stdio and a shell left in the middle would own the pipes. On
+  an unknown architecture it writes to stderr, never stdout, where a line
+  of English would corrupt the JSON-RPC stream before the first request
+  completes.
+
+  It is packed in the universal binary's post hook — the one point where
+  every binary exists and `checksums.txt` has not been written — and
+  named in **both** `checksum.extra_files` and `release.extra_files`.
+  Both, or it ships unsigned, or is hashed and never published, and
+  neither looks any different on the release page.
+
+- `make mcpb`, which holds the manifest against the bundle the packer
+  stages: every path the manifest names must be a file going in, every
+  `${user_config.x}` must be declared, every platform must spawn the file
+  staged FOR it, and the Linux launcher must choose between the packer's
+  own names. A schema catches none of those — each produces a bundle that
+  installs and then does nothing.
+
+- `gates registry-publish`, which builds the registry entry from the
+  release's **own `checksums.txt`**, so the hash describes the bytes that
+  were published. It runs from its own workflow with `id-token: write`
+  and `contents: read` and nothing else, and `mcp-publisher` is verified
+  with cosign before it is unpacked. A prerelease tag skips it: an entry
+  cannot be taken back.
+
+### Fixed
+
+- The release stamped the binary's version from `{{ .Tag }}`, so in a
+  `--snapshot` rehearsal the binary disagreed with everything else. It
+  comes from `{{ .Version }}` now, which is the same string on a real tag
+  and lets the bundle's version be checked in all five places before one.
+
+### Added
 - The `pins` gate classifies every action, and an unknown one fails it.
   The gate could only ever check the versions that were *written*; an
   action that installs a tool and names no version at all is an absence,

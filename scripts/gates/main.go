@@ -99,6 +99,18 @@ func init() {
 			run: apiFields, args: "", gate: true,
 			doc: "every published field of a type we model is modelled or written off",
 		},
+		"mcpb": {
+			run: mcpbCmd, gate: true,
+			doc: "the bundle manifest describes the bundle the packer stages",
+		},
+		"mcpb-pack": {
+			run: mcpbPackCmd, args: "DIST VERSION OUT",
+			doc: "pack the .mcpb from a built dist tree; runs at release time",
+		},
+		"registry-publish": {
+			run: registryPublishCmd, args: "VERSION CHECKSUMS",
+			doc: "the MCP registry entry, with the bundle's hash from the published checksums",
+		},
 		"api-diff": {
 			run: apiDiff, args: "",
 			doc: "refetch the discovery documents and rewrite the snapshot (network)",

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/dist/mcpb-manifest.schema.json",
+  "manifest_version": "0.2",
+  "name": "google-docs-mcp",
+  "display_name": "Google Docs",
+  "version": "0.0.0-dev",
+  "description": "Google Docs as MCP tools: read, edit, suggest and comment on documents.",
+  "long_description": "Read, edit, suggest and comment on Google Docs from your own account. Target content by quoting exact text, by heading id or by a stable handle \u2014 never by position, which is what makes an edit survive a document that changed under you. Every write takes a mode: suggest, direct or comment, and dry_run shows what would change before anything does.\n\nTHIS BUNDLE DOES NOT LOG YOU IN, and cannot. Google requires each user to bring their own OAuth Desktop client, so before the tools work you need to create one in a Google Cloud project, enable the Docs and Drive APIs, and run `google-docs-mcp login` once in a terminal. Installing this without that step produces a server that starts, lists its tools, and answers every call with \"not signed in\".",
+  "author": {
+    "name": "Mark Medum Bundgaard"
+  },
+  "homepage": "https://github.com/mmedum/google-docs-mcp",
+  "documentation": "https://github.com/mmedum/google-docs-mcp/blob/main/README.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mmedum/google-docs-mcp"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "google-docs",
+    "documents",
+    "editing",
+    "comments"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/google-docs-mcp-darwin",
+    "mcp_config": {
+      "command": "${__dirname}/server/google-docs-mcp-darwin",
+      "args": [],
+      "env": {
+        "GDOCS_PROFILE": "${user_config.profile}",
+        "GDOCS_READ_ONLY": "${user_config.read_only}",
+        "GDOCS_DEFAULT_WRITE_MODE": "${user_config.default_write_mode}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}/server/google-docs-mcp.exe"
+        },
+        "linux": {
+          "command": "${__dirname}/server/launch-linux.sh"
+        }
+      }
+    }
+  },
+  "user_config": {
+    "profile": {
+      "type": "string",
+      "title": "Profile",
+      "description": "Which stored login to use. Separate profiles keep separate tokens.",
+      "default": "default",
+      "required": false
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "Register only the read tools, and ask Google for read-only scopes so the API itself refuses a write.",
+      "default": false,
+      "required": false
+    },
+    "default_write_mode": {
+      "type": "string",
+      "title": "Default write mode",
+      "description": "\"suggest\", \"direct\" or \"comment\". What a write does when the call does not say.",
+      "default": "suggest",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ]
+  }
+}

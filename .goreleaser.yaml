@@ -7,7 +7,8 @@ before:
     - go mod tidy
 
 builds:
-  - main: ./cmd/google-docs-mcp
+  - id: google-docs-mcp
+    main: ./cmd/google-docs-mcp
     binary: google-docs-mcp
     env:
       - CGO_ENABLED=0
@@ -18,10 +19,37 @@ builds:
     # same tag produces byte-identical binaries.
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
-      - -s -w -X github.com/mmedum/google-docs-mcp/internal/version.Version={{.Tag}}
+    # {{ .Version }} rather than {{ .Tag }}: on a tag they are the same
+    # string either side of the `v`, which internal/version restores —
+    # but in a --snapshot rehearsal .Tag is the last tag while everything
+    # else carries the snapshot version, so the binary is the one place
+    # that disagrees and the bundle's five-way version check cannot be
+    # rehearsed.
+      - -s -w -X github.com/mmedum/google-docs-mcp/internal/version.Version={{ .Version }}
+
+# The macOS universal binary exists for the Claude Desktop bundle alone.
+# A manifest names a command per PLATFORM and has no key for the
+# architecture, so the macOS entry has to work on both. `ids` on the
+# archives keeps it out of them: a fourth macOS download on the release
+# page is a choice nobody should have to make.
+universal_binaries:
+  - id: google-docs-mcp-universal
+    ids: [google-docs-mcp]
+    replace: false
+    hooks:
+      # The one point in the pipeline where every binary exists and
+      # checksums.txt has not been written, which is what MAKES it
+      # possible for the bundle to be in that file and therefore under
+      # the signature. It is not what puts it there: goreleaser hashes
+      # the artifacts IT built, and a file a hook drops into dist/ is not
+      # one. `checksum.extra_files` covers it and `release.extra_files`
+      # uploads it — both, or the bundle ships unsigned, or is hashed and
+      # never published, looking no different either way.
+      post: go run ./scripts/gates mcpb-pack dist {{ .Version }} dist/google-docs-mcp_{{ .Version }}.mcpb
 
 archives:
-  - formats: [tar.gz]
+  - ids: [google-docs-mcp]
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
@@ -29,6 +57,13 @@ archives:
 
 checksum:
   name_template: checksums.txt
+  # The bundle is not an archive goreleaser built, so packing it in the
+  # post hook is only half of what puts it here — the checksum step
+  # covers its own artifacts, and a file a hook dropped into dist/ is not
+  # one. Naming it is the other half, and being in checksums.txt is what
+  # gets it signed, because the signature is over that file.
+  extra_files:
+    - glob: ./dist/*.mcpb
 
 # One SBOM per archive, so a deployer can see what is inside a binary
 # they did not build.
@@ -68,6 +103,11 @@ release:
   # for anything carrying a suffix like -rc1.
   draft: false
   prerelease: auto
+  # Checksummed is not uploaded. Without this the bundle is named in
+  # checksums.txt and absent from the release, which is a hash of
+  # something nobody can download.
+  extra_files:
+    - glob: ./dist/*.mcpb
   footer: |
     ---
 
@@ -83,3 +123,10 @@ release:
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
     gh attestation verify google-docs-mcp_*.tar.gz --repo mmedum/google-docs-mcp
     ```
+
+    `.mcpb` is the Claude Desktop bundle: open it and Claude Desktop
+    installs the server and asks for your settings, with no config file
+    to edit. It covers macOS, Windows and Linux on both architectures. It
+    does **not** log you in — install the binary as well, run
+    `google-docs-mcp login` once, and the bundle picks up the same
+    credentials. Its SHA-256 is in the same signed `checksums.txt`.

@@ -88,6 +88,18 @@ classes: ## The error classes the code emits are the ones it documents
 transcript: ## The live driver and the evals put nothing in their transcript unredacted
 	@$(GO) run ./scripts/gates transcript
 
+.PHONY: mcpb
+mcpb: ## The bundle manifest describes the bundle the packer stages
+	@$(GO) run ./scripts/gates mcpb
+
+# The other half of the bundle: the gate above needs only the staged
+# NAMES, which are static, so it runs on every commit. This needs the
+# binaries, so it runs at release time from the universal binary's post
+# hook in .goreleaser.yaml. Deliberately not in `check`.
+.PHONY: mcpb-pack
+mcpb-pack: ## Pack the .mcpb from a built dist tree (release; manual)
+	@$(GO) run ./scripts/gates mcpb-pack $(DIST) $(VERSION) $(MCPB_OUT)
+
 .PHONY: parity
 parity: ## `make check` and CI run the same gates
 	@$(GO) run ./scripts/gates parity
@@ -105,7 +117,7 @@ api-diff: ## Refetch the discovery documents and rewrite the snapshot (network; 
 	@$(GO) run ./scripts/gates api-diff
 
 .PHONY: check
-check: fmt vet lint cover vuln licenses leaks pins classes transcript api-coverage api-fields schema-diff smoke staleness parity ## Everything CI runs
+check: fmt vet lint cover vuln licenses leaks pins classes transcript api-coverage api-fields mcpb schema-diff smoke staleness parity ## Everything CI runs
 
 .PHONY: clean
 clean:

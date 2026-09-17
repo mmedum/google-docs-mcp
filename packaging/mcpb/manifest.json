@@ -1,6 +1,6 @@
 {
-  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/dist/mcpb-manifest.schema.json",
-  "manifest_version": "0.2",
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/v2.1.2/schemas/mcpb-manifest-v0.3.schema.json",
+  "manifest_version": "0.3",
   "name": "google-docs-mcp",
   "display_name": "Google Docs",
   "version": "0.0.0-dev",
@@ -15,6 +15,7 @@
     "type": "git",
     "url": "https://github.com/mmedum/google-docs-mcp"
   },
+  "support": "https://github.com/mmedum/google-docs-mcp/issues",
   "license": "Apache-2.0",
   "keywords": [
     "google-docs",

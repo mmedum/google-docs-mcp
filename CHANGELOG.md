@@ -7,6 +7,17 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-18
+
+### Fixed
+
+- The provenance attestation covers the `.mcpb` bundle. It named the
+  archives and `checksums.txt` and not the bundle, so
+  `gh attestation verify` on the bundle answered 404 while every archive
+  passed — the artifact most people install was the one without an
+  attestation of its own. It was covered only through its row in
+  `checksums.txt`, which is a claim about the checksum file.
+
 ## [1.3.0] - 2026-09-18
 
 ### Fixed

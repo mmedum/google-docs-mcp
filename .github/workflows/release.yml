@@ -70,7 +70,12 @@ jobs:
       # commit and this runner, checkable with `gh attestation verify`.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: "dist/*.tar.gz,dist/*.zip,dist/checksums.txt"
+          # The bundle is a subject in its own right. It was covered only
+          # through its row in checksums.txt, which is a claim about the
+          # checksum file rather than about the bundle: `gh attestation
+          # verify` on the .mcpb answered 404 while every archive passed.
+          # The bundle is what most people actually install.
+          subject-path: "dist/*.tar.gz,dist/*.zip,dist/*.mcpb,dist/checksums.txt"
 
   # The registry entry, in its own workflow so it can also be run by hand
   # against a tag that already shipped. publish-mcp.yml says why.

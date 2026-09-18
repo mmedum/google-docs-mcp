@@ -7,7 +7,45 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-18
+
+### Fixed
+
+- The registry entry is not built from an unverified checksum file.
+  `publish-mcp.yml` downloaded the published `checksums.txt` and fed it
+  to the gate that writes the entry, whose `fileSha256` comes out of that
+  file — the number a registry-driven client checks its download against.
+  The only `cosign verify-blob` in the job covered the `mcp-publisher`
+  tarball. Somebody able to replace a release asset could edit
+  `checksums.txt` beside it, and the dispatch path would copy their
+  digest into a registry that cannot take an entry back. The signature is
+  verified before the file is read, with the certificate identity pinned
+  to this repository's `release.yml` at the exact tag.
+
 ### Added
+
+- The bundle gate holds what the manifest says about ITSELF. `$schema`
+  and `support` were not decoded at all, so no check could read them —
+  and `$schema` named `main`, a branch upstream can amend under a
+  document that claims to conform to it. The filename pins the FORMAT;
+  the ref pins the BYTES, and only one of the two was pinned.
+
+  Four claims: `$schema` is upstream's published path at a ref that
+  cannot move — a full release tag or a commit SHA — the version in that
+  URL equals `manifest_version`, that version is not below the one this
+  repository has checked, and a `support` URL says where a failing
+  install is reported. The ref rule is an allow-list over the whole URL,
+  because refusing the branch names `main`, `master` and `HEAD` passes a
+  branch called anything else, a partial tag like `v2.1` that upstream
+  re-points as it releases, and the right filename served by somebody who
+  is not upstream.
+
+  The floor is the claim the other three structurally cannot make: they
+  hold the manifest against itself, and 0.2 beside a 0.2 schema is stale
+  and entirely self-consistent. Checked against the published schemas —
+  v0.2, v0.3 and v0.4 are served and v0.5 is not, and 0.4's only change
+  is a `uv` value in the `server.type` enum, which a `binary` server
+  gains nothing from.
 
 - A **Claude Desktop bundle** (`.mcpb`) on every release, and the MCP
   registry entry that points at it. This server shipped archives and

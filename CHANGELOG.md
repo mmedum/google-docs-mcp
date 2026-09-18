@@ -7,6 +7,21 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-18
+
+### Fixed
+
+- The registry entry is not built from an unverified checksum file.
+  `publish-mcp.yml` downloaded the published `checksums.txt` and fed it
+  to the gate that writes the entry, whose `fileSha256` comes out of that
+  file — the number a registry-driven client checks its download against.
+  The only `cosign verify-blob` in the job covered the `mcp-publisher`
+  tarball. Somebody able to replace a release asset could edit
+  `checksums.txt` beside it, and the dispatch path would copy their
+  digest into a registry that cannot take an entry back. The signature is
+  verified before the file is read, with the certificate identity pinned
+  to this repository's `release.yml` at the exact tag.
+
 ### Added
 
 - The bundle gate holds what the manifest says about ITSELF. `$schema`

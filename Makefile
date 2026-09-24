@@ -116,6 +116,13 @@ api-fields: ## Every published field of a type we model is modelled or written o
 api-diff: ## Refetch the discovery documents and rewrite the snapshot (network; not a gate)
 	@$(GO) run ./scripts/gates api-diff
 
+# The half a vendored schema cannot do for itself: a digest says these
+# bytes are the ones somebody reviewed, not that upstream still serves
+# them. Manual, and read at release time.
+.PHONY: schema-refetch
+schema-refetch: ## Check the vendored schemas against what their sources serve (network; not a gate)
+	@$(GO) run ./scripts/gates schema-refetch
+
 .PHONY: check
 check: fmt vet lint cover vuln licenses leaks pins classes transcript api-coverage api-fields mcpb schema-diff smoke staleness parity ## Everything CI runs
 

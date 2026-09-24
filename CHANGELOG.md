@@ -7,6 +7,32 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+
+- `make mcpb` and the registry gate validate their documents against the
+  schemas those documents cite, rather than only checking that the
+  `$schema` line is present, pinned and agreeing with the version beside
+  it. Those are claims about the REFERENCE; a document can cite exactly
+  the right file and not satisfy it. The registry entry is the expensive
+  direction — a rejected publish costs a dispatch against a tag that
+  already shipped, and an entry that is accepted and wrong cannot be
+  withdrawn — so the refusal sits on the path that builds it.
+
+  The manifest is validated as the RAW file rather than as the decoded
+  value, because the struct models the fields these checks read and a
+  re-encoded copy would drop the rest, which is the part a schema is
+  there to judge.
+
+  The schemas are vendored under `scripts/gates/schemas`, embedded so the
+  gate needs neither the network nor a particular working directory, and
+  each is pinned by a recorded SHA-256: without that, "make the document
+  pass" and "edit the schema" are the same amount of work.
+- `make schema-refetch`, which is what a vendored copy cannot do for
+  itself: a digest proves the bytes are the ones somebody reviewed, not
+  that upstream still serves them. It reports a difference and refuses,
+  and never rewrites anything, because a refresh is a decision somebody
+  makes after reading what changed.
+
 ## [1.3.1] - 2026-09-18
 
 ### Fixed

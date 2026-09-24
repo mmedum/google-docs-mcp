@@ -123,6 +123,22 @@ func mcpbGate() error {
 	}
 	problems := validateManifest(m, bundleFiles, launcherNames())
 
+	// And against the schema the manifest cites, which the declaration
+	// rules only name: a document can satisfy every claim about the
+	// REFERENCE without satisfying the schema itself.
+	//
+	// On the RAW file rather than on the decoded value, because this
+	// struct models the fields these checks read and a re-encoded copy
+	// would drop the rest — which is exactly the part a schema is there
+	// to judge.
+	raw, err := os.ReadFile(manifestPath) //nolint:gosec // a repository path from a constant
+	if err != nil {
+		return err
+	}
+	if err := validateDocument(mcpbSchemaFile, "the committed manifest", raw); err != nil {
+		problems = append(problems, err.Error())
+	}
+
 	// The version placeholder, so a committed manifest cannot claim a
 	// version that shipped.
 	if m.Version != placeholderVersion {

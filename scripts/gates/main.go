@@ -115,6 +115,10 @@ func init() {
 			run: apiDiff, args: "",
 			doc: "refetch the discovery documents and rewrite the snapshot (network)",
 		},
+		"schema-refetch": {
+			run: schemaRefetchCmd, args: "",
+			doc: "check the vendored schemas against what their sources serve (network)",
+		},
 	}
 }
 

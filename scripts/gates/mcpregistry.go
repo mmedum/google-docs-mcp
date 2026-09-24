@@ -199,6 +199,14 @@ func serverJSON(version, checksums string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Against the schema the entry cites, before anybody publishes it.
+	// The rules above hold the fields this repository fills in; this
+	// holds the document the registry reads. A rejected publish costs a
+	// dispatch against a tag that already shipped, and an entry that is
+	// accepted and wrong cannot be withdrawn.
+	if err := validateDocument(registrySchemaFile, "the registry entry", out); err != nil {
+		return err
+	}
 	_, err = fmt.Fprintln(stdout, string(out))
 	return err
 }

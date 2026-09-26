@@ -12,13 +12,13 @@ import (
 )
 
 // segText is the searchable form of one segment: every paragraph's
-// normalised characters in document order with their UTF-16 spans, as
+// normalized characters in document order with their UTF-16 spans, as
 // one string so the standard library's substring search does the work.
-// Paragraphs are separated by a newline, which no normalised needle
+// Paragraphs are separated by a newline, which no normalized needle
 // contains, so a match never crosses paragraphs. Built once per fetch
 // and segment, on first use.
 type segText struct {
-	units []unit     // normalised characters; a '\n' unit separates paragraphs
+	units []unit     // normalized characters; a '\n' unit separates paragraphs
 	text  string     // the units' runes, one rune per unit
 	paras []textPara // paragraph blocks in order with their unit ranges
 
@@ -102,7 +102,7 @@ func foldString(s string) string {
 	return strings.Map(unicode.ToLower, s)
 }
 
-// find lists every non-overlapping occurrence of a normalised needle in
+// find lists every non-overlapping occurrence of a normalized needle in
 // document order.
 func (x *segText) find(needle string, caseFold bool) []textHit {
 	if needle == "" {
@@ -159,7 +159,7 @@ func (f *Fetched) text(seg *doc.Segment) *segText {
 	return x
 }
 
-// findText lists the occurrences of a normalised needle in one segment.
+// findText lists the occurrences of a normalized needle in one segment.
 func (f *Fetched) findText(seg *doc.Segment, needle string, caseFold bool) []textHit {
 	return f.text(seg).find(needle, caseFold)
 }

@@ -7,7 +7,7 @@ import (
 )
 
 // Plain renders blocks [from, to) as plain text: no markdown markers,
-// headings and list items still recognisable, tables tab-separated.
+// headings and list items still recognizable, tables tab-separated.
 func Plain(seg *doc.Segment, from, to int, o Options) Result {
 	first := true
 	marks := marksFor(o.Marks, seg)

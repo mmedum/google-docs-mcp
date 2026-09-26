@@ -78,7 +78,7 @@ is no shared app and nothing to verify with Google.
 2. Enable the **Google Docs API** and the **Google Drive API**
    (APIs & Services → Library).
 3. Configure the OAuth consent screen (Google Auth Platform → Audience):
-   - **Internal** if your account is in a Google Workspace organisation.
+   - **Internal** if your account is in a Google Workspace organization.
      Tokens then never expire.
    - **External** with publishing status **Testing** for a consumer
      account. Add yourself as a test user. Google expires refresh tokens
@@ -110,7 +110,7 @@ and API reachability, and reads the document when given one.
 
 `google-docs-mcp status --json` prints the same state as one JSON object
 on stdout, for a script that needs to know whether this server is
-authorised before starting it. `credentials.resolved` is the field to
+authorized before starting it. `credentials.resolved` is the field to
 branch on, `schema_version` changes only when a field is removed or its
 meaning changes, and the account is masked to its domain exactly as the
 text output masks it. A label in the human output is free to be reworded
@@ -150,16 +150,16 @@ Suggestion mode (`mode: suggest`), comments anchored to a text range, and
 accepting or rejecting suggestions use Docs API features that are in the
 [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview).
 Apply with the form on that page, giving your Cloud project id. Once
-enabled for your project, set `GDOCS_PREVIEW=true`. The programme terms
-allow use inside your own organisation; do not offer a preview-enabled
+enabled for your project, set `GDOCS_PREVIEW=true`. The program terms
+allow use inside your own organization; do not offer a preview-enabled
 deployment to people outside it.
 
 **These features sit outside the version promise below.** They are the
 one part of this server built on an API Google may change or withdraw
 while it is in preview, and a change there is not something this project
-can absorb without changing behaviour. Everything reachable with
+can absorb without changing behavior. Everything reachable with
 `GDOCS_PREVIEW` unset follows semver as stated; the preview-gated
-features follow Google's preview programme, and if it moves, they move.
+features follow Google's preview program, and if it moves, they move.
 
 ## Connect a client
 
@@ -211,7 +211,7 @@ for the defaults.
 | `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. |
 | `list_revisions` | Version history: revision ids, times, authors. |
 | `diff_revisions` | Unified diff of Google's markdown or text export between two revisions. `read_document` reads an old `revision` whole. |
-| `edit_table` | `insert_table` (with a data grid), `set_cells` (minimal diff per cell), `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns` (fixed or even widths), `style_rows` (least height, page-break behaviour), `pin_header_rows`. Same modes and guard as text edits. |
+| `edit_table` | `insert_table` (with a data grid), `set_cells` (minimal diff per cell), `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns` (fixed or even widths), `style_rows` (least height, page-break behavior), `pin_header_rows`. Same modes and guard as text edits. |
 | `insert_object` | Insert an inline image from a public URL, a person chip, a rich-link chip or a date chip at a location; replace an image's source in place; or delete an object, including a floating image no text range covers. |
 | `layout_document` | `page` (size, margins, background, landscape, page numbering, first/even-page headers), `section` (the same for one section, plus 1–3 columns), `section_break`, and `named_style` to redefine `NORMAL_TEXT`, `TITLE`, `SUBTITLE` or `HEADING_1` … `HEADING_6` for a whole tab. |
 | `manage_tabs` | Add (with content), rename, move or nest tabs. Always direct: the API cannot suggest tab changes. |
@@ -238,7 +238,7 @@ the read tools are for scoped, budgeted reads.
 ### How edits are addressed
 
 The model never sees index numbers. A target is exact text quoted from a
-read (curly quotes, dashes and spacing are normalised; it must occur
+read (curly quotes, dashes and spacing are normalized; it must occur
 once, or `occurrence` / `within` disambiguates), a whole section by its
 stable `heading_id`, a block by handle (`p12`, valid for the revision it
 came from and re-checked on use), a table cell, or a named range, which
@@ -333,7 +333,7 @@ make check     # everything CI runs
 
 `make check` is the definition of done: formatting, `go vet` under every
 build tag, golangci-lint, race tests with a per-package coverage floor,
-`govulncheck`, a licence check, a secret scan, an API-coverage gate and
+`govulncheck`, a license check, a secret scan, an API-coverage gate and
 an API-fields gate that fail when a Google API method or field has no
 verdict on it, a schema diff against the released tool surface, a stdio
 smoke test, and a staleness gate that fails when this README, the docs or

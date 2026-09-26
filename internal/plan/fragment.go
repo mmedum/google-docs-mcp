@@ -107,7 +107,7 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 
 	c := &Compiled{Text: text, Length: doc.UTF16Len(text), Start: contentStart, End: cursor}
 	c.Requests = append(c.Requests, InsertText(text, at))
-	// Inserted text inherits the style of its neighbours; reset it.
+	// Inserted text inherits the style of its neighbors; reset it.
 	if cursor > contentStart {
 		c.Requests = append(c.Requests, ClearTextStyle(rng(contentStart, cursor)))
 	}

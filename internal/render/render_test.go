@@ -173,7 +173,7 @@ func TestEscapingAndEdgeCases(t *testing.T) {
 	if !strings.Contains(styled, "{font: Arial 11pt, background: #ffff00, small caps, superscript}") {
 		t.Errorf("style annotation wrong: %s", styled)
 	}
-	// Table cells escape pipes and a nested table is summarised.
+	// Table cells escape pipes and a nested table is summarized.
 	inner := &doc.Table{Handle: "tbl1:r1c1/tbl1", Rows: 1, Cols: 1}
 	tbl := &doc.Table{Handle: "tbl1", Rows: 1, Cols: 2}
 	cellA := &doc.Cell{Table: tbl, Row: 1, Col: 1, Handle: "tbl1:r1c1"}

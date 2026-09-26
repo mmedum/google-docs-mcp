@@ -69,7 +69,7 @@ func DeleteRange(r Rng) json.RawMessage {
 
 // TextStyleSpec is a set of character-formatting changes. Nil pointers
 // and empty strings mean "leave as is"; the string "none" clears a font,
-// colour or link.
+// color or link.
 type TextStyleSpec struct {
 	Bold          *bool
 	Italic        *bool
@@ -89,10 +89,10 @@ func (s TextStyleSpec) IsZero() bool { return s == TextStyleSpec{} }
 
 var baselines = map[string]bool{"SUPERSCRIPT": true, "SUBSCRIPT": true, "NONE": true}
 
-// Validate checks enum and colour values.
+// Validate checks enum and color values.
 func (s TextStyleSpec) Validate() error {
 	if !ValidColor(s.Foreground) || !ValidColor(s.Background) {
-		return fmt.Errorf("colours must be #rrggbb or none")
+		return fmt.Errorf("colors must be #rrggbb or none")
 	}
 	if s.Baseline != "" && !baselines[s.Baseline] {
 		return fmt.Errorf("baseline must be SUPERSCRIPT, SUBSCRIPT or NONE")
@@ -158,7 +158,7 @@ func (s TextStyleSpec) body() (map[string]any, []string) {
 	return style, fields
 }
 
-// colorJSON turns #rrggbb into the API colour object.
+// colorJSON turns #rrggbb into the API color object.
 func colorJSON(hex string) (map[string]any, bool) {
 	hex = strings.TrimPrefix(strings.ToLower(hex), "#")
 	if len(hex) != 6 {
@@ -204,7 +204,7 @@ func ClearTextStyle(r Rng) json.RawMessage {
 
 // BorderSpec is one edge as a caller writes it: "1pt solid #cccccc", or
 // "none" to clear it. Tokens come in any order; a missing width is 1pt, a
-// missing dash is solid and a missing colour is black, because the API
+// missing dash is solid and a missing color is black, because the API
 // draws nothing unless all three are set.
 type BorderSpec struct {
 	Raw string
@@ -235,7 +235,7 @@ func ParseBorder(raw string) (Border, bool, error) {
 		switch {
 		case strings.HasPrefix(tok, "#"):
 			if !ValidColor(tok) {
-				return b, true, fmt.Errorf("border colour %q must be #rrggbb", tok)
+				return b, true, fmt.Errorf("border color %q must be #rrggbb", tok)
 			}
 			b.Color = tok
 		case borderDashes[low] != "":
@@ -247,7 +247,7 @@ func ParseBorder(raw string) (Border, bool, error) {
 			}
 			b.WidthPt = v
 		default:
-			return b, true, fmt.Errorf("border %q: use a width like 1pt, a dash style (solid, dot, dash), a colour #rrggbb, or none", tok)
+			return b, true, fmt.Errorf("border %q: use a width like 1pt, a dash style (solid, dot, dash), a color #rrggbb, or none", tok)
 		}
 	}
 	return b, true, nil
@@ -505,7 +505,7 @@ func DeleteSuggestion(id string) json.RawMessage {
 	return raw(map[string]any{"deleteSuggestion": map[string]any{"suggestionId": id}})
 }
 
-// Kind returns the request type name of a marshalled request.
+// Kind returns the request type name of a marshaled request.
 func Kind(r json.RawMessage) string {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(r, &m); err != nil {

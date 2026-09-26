@@ -26,7 +26,7 @@ import (
 // revision's `(kept)`. That is a real cost, paid deliberately: a display
 // name has no reliable terminator. Directory names carry parentheses
 // ("Ann Petersen (Acme Corp)"), so stopping at the first `(` to save a
-// trailing timestamp left the organisation in the transcript — which is
+// trailing timestamp left the organization in the transcript — which is
 // the half hard rule 1 is actually about. Over-redaction is the safe
 // direction here, and nothing downstream depends on it: a step parses
 // the untouched text (see `shown`).
@@ -79,7 +79,7 @@ func Clip(s string, n int) string {
 //
 // The domain is the half a diagnosis uses: shared drives are a Workspace
 // feature and a personal account cannot create one, so @gmail.com and a
-// Workspace domain are two different sets of behaviour to explain. The
+// Workspace domain are two different sets of behavior to explain. The
 // local part answers nothing — it is never an input to any command here.
 func Account(addr string) string {
 	local, domain, ok := strings.Cut(addr, "@")

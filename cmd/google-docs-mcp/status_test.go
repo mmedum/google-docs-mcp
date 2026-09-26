@@ -78,7 +78,7 @@ func TestTheCollectorReportsAnUnresolvedCredential(t *testing.T) {
 
 // A caller's whole reason for reading this is to find out whether it can
 // start the server. Both answers have to be representable, and the
-// unauthorised one has to say why.
+// unauthorized one has to say why.
 func TestTheRefusalStateIsRepresentable(t *testing.T) {
 	reason := "credentials: no refresh token found; run `google-docs-mcp login`"
 	r := statusReport{
@@ -104,10 +104,10 @@ func TestTheRefusalStateIsRepresentable(t *testing.T) {
 	if s, _ := creds["reason"].(string); !strings.Contains(s, "login") {
 		t.Errorf("reason does not name the fix: %q", s)
 	}
-	// An absent object and an unauthorised one must be distinguishable,
+	// An absent object and an unauthorized one must be distinguishable,
 	// which a grep for a label in the text output cannot do.
 	if _, ok := creds["resolved"]; !ok {
-		t.Error("resolved is absent; a caller cannot tell that from unauthorised")
+		t.Error("resolved is absent; a caller cannot tell that from unauthorized")
 	}
 }
 

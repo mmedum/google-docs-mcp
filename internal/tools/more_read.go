@@ -11,7 +11,7 @@ import (
 // FindInput is the find_in_document call.
 type FindInput struct {
 	Document  string `json:"document" jsonschema:"document id or any docs.google.com URL"`
-	Query     string `json:"query" jsonschema:"text to find (normalised exact match) or a regular expression when regex is true"`
+	Query     string `json:"query" jsonschema:"text to find (normalized exact match) or a regular expression when regex is true"`
 	Regex     bool   `json:"regex,omitempty" jsonschema:"treat query as an RE2 regular expression"`
 	MatchCase bool   `json:"match_case,omitempty" jsonschema:"match case exactly; default case-insensitive"`
 	Tab       string `json:"tab,omitempty" jsonschema:"tab id, title or number; default the first tab"`

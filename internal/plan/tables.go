@@ -78,7 +78,7 @@ type ObjectParams struct {
 	// is removed by id rather than by deleting the text it sits in.
 	ID         string
 	Positioned bool
-	// Crop asks Google to centre-crop the new image into the old one's
+	// Crop asks Google to center-crop the new image into the old one's
 	// size instead of resizing the frame.
 	Crop bool
 }

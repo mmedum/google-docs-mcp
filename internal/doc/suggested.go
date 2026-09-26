@@ -162,7 +162,7 @@ func changesOf[T any](m map[string]T) []StyleChange {
 // fields the suggestion sets — and this reads the state. The API reports
 // the style as it would be once the suggestion is accepted, with every
 // inherited property filled in, so a suggestion to turn on bold arrives
-// carrying italic, underline, a size and a colour as well; the state is
+// carrying italic, underline, a size and a color as well; the state is
 // the only field that says which of them the person asked for.
 //
 // Reflection rather than a switch over the twenty-five state types and

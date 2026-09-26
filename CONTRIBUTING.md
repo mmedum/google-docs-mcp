@@ -46,7 +46,7 @@ test. Also:
 
 - Add or update tests (golden files with `go test ./internal/render -update`).
 - Update `README.md`, `docs/`, and `CHANGELOG.md` under `[Unreleased]`
-  when behaviour or the tool surface changes.
+  when behavior or the tool surface changes.
 - Run `./google-docs-mcp --dump-schemas` and check the diff; a removed
   tool or field, or a new required field, is a breaking change.
 

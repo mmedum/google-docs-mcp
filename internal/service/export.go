@@ -117,7 +117,7 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	return res, nil
 }
 
-// fileName turns a document title into a name a person can recognise in
+// fileName turns a document title into a name a person can recognize in
 // a directory listing.
 //
 // Two things an outside user hit, both in the sentence this replaces.

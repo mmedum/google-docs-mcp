@@ -13,7 +13,7 @@ import (
 
 // TargetInput points at content. Set exactly one selector.
 type TargetInput struct {
-	Text           string `json:"text,omitempty" jsonschema:"exact text to match, quoted verbatim from a read (curly quotes, dashes and spacing are normalised); must occur once unless occurrence or within narrows it"`
+	Text           string `json:"text,omitempty" jsonschema:"exact text to match, quoted verbatim from a read (curly quotes, dashes and spacing are normalized); must occur once unless occurrence or within narrows it"`
 	Occurrence     int    `json:"occurrence,omitempty" jsonschema:"which occurrence of text to use when it repeats, 1-based"`
 	Within         string `json:"within,omitempty" jsonschema:"restrict a text match to a block handle (p12), a heading_id, or heading:<heading text>"`
 	HeadingID      string `json:"heading_id,omitempty" jsonschema:"a whole section by its stable heading id from get_outline: the heading plus everything until the next heading of the same or higher level"`
@@ -87,8 +87,8 @@ type FormatOpInput struct {
 	SmallCaps           *bool       `json:"small_caps,omitempty"`
 	Font                string      `json:"font,omitempty" jsonschema:"font family name, or none to inherit"`
 	SizePt              float64     `json:"size_pt,omitempty" jsonschema:"font size in points"`
-	Color               string      `json:"color,omitempty" jsonschema:"text colour as #rrggbb, or none"`
-	Background          string      `json:"background,omitempty" jsonschema:"highlight colour as #rrggbb, or none"`
+	Color               string      `json:"color,omitempty" jsonschema:"text color as #rrggbb, or none"`
+	Background          string      `json:"background,omitempty" jsonschema:"highlight color as #rrggbb, or none"`
 	Link                string      `json:"link,omitempty" jsonschema:"URL to link the text to, or none to remove the link"`
 	Baseline            string      `json:"baseline,omitempty" jsonschema:"SUPERSCRIPT, SUBSCRIPT or NONE"`
 	NamedStyle          string      `json:"named_style,omitempty" jsonschema:"paragraph_style: NORMAL_TEXT, TITLE, SUBTITLE, HEADING_1 … HEADING_6"`
@@ -106,7 +106,7 @@ type FormatOpInput struct {
 	KeepLinesTogether   *bool       `json:"keep_lines_together,omitempty" jsonschema:"paragraph_style: keep the paragraph on one page"`
 	AvoidWidowAndOrphan *bool       `json:"avoid_widow_and_orphan,omitempty" jsonschema:"paragraph_style: keep single lines off page boundaries"`
 	Shading             string      `json:"shading,omitempty" jsonschema:"paragraph_style: paragraph background as #rrggbb, or none"`
-	Border              string      `json:"border,omitempty" jsonschema:"paragraph_style: all four edges, as a width, dash style and colour in any order, e.g. 1pt solid #cccccc; none removes them. Defaults when a part is left out: 1pt, solid, black"`
+	Border              string      `json:"border,omitempty" jsonschema:"paragraph_style: all four edges, as a width, dash style and color in any order, e.g. 1pt solid #cccccc; none removes them. Defaults when a part is left out: 1pt, solid, black"`
 	BorderTop           string      `json:"border_top,omitempty" jsonschema:"paragraph_style: the top edge alone, same form as border"`
 	BorderBottom        string      `json:"border_bottom,omitempty"`
 	BorderLeft          string      `json:"border_left,omitempty"`
@@ -166,7 +166,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "format_document",
 		Description: "Change formatting in a Google Doc without changing its text: text_style (bold, italic, underline, " +
-			"strikethrough, small caps, font, size, colour, highlight, link, superscript), paragraph_style (named style " +
+			"strikethrough, small caps, font, size, color, highlight, link, superscript), paragraph_style (named style " +
 			"such as HEADING_2 or NORMAL_TEXT, alignment, line spacing, spacing, indents), bullets (bullet, numbered, " +
 			"checkbox, or none), and clear_formatting. Targets work as in edit_document. This styles the passages you " +
 			"target: to restyle every paragraph carrying a style at once, and everything written with it later, " +
@@ -179,8 +179,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
 			t := o.Target
 			eo := service.EditOp{Kind: kind, Target: t.target()}
-			// Enum and colour validation lives in the planner; the tool only
-			// normalises case so people can write heading_2 or center.
+			// Enum and color validation lives in the planner; the tool only
+			// normalizes case so people can write heading_2 or center.
 			switch kind {
 			case plan.OpTextStyle:
 				eo.Text = plan.TextStyleSpec{Bold: o.Bold, Italic: o.Italic, Underline: o.Underline, Strikethrough: o.Strikethrough, SmallCaps: o.SmallCaps,

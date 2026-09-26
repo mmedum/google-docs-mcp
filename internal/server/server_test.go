@@ -514,7 +514,7 @@ func TestLayoutToolEndToEnd(t *testing.T) {
 			t.Errorf("layout text lacks %q:\n%s", want, textOf(res))
 		}
 	}
-	// A4 in points is recognised on the way back out, in get_document.
+	// A4 in points is recognized on the way back out, in get_document.
 	res = call(t, cs, "layout_document", map[string]any{"document": fixtureID, "ops": []map[string]any{{"op": "page"}}})
 	if !res.IsError || !strings.Contains(textOf(res), "page changes nothing") {
 		t.Fatalf("empty page op: %s", textOf(res))

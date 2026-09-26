@@ -24,7 +24,7 @@ func publishedFields() map[string][]string {
 	}
 }
 
-func modelledFields() map[string]map[string]bool {
+func modeledFields() map[string]map[string]bool {
 	return map[string]map[string]bool{
 		"TextRun":      {"content": true, "suggestedInsertionIds": true, "textStyle": true},
 		"SectionStyle": {"marginTop": true, "sectionType": true},
@@ -41,18 +41,18 @@ func TestFieldProblems(t *testing.T) {
 		name      string
 		published map[string][]string
 		verdicts  []fieldVerdict
-		modelled  map[string]map[string]bool
+		modeled   map[string]map[string]bool
 		want      string
 		// andAlso is the second thing the same input must report, for the
 		// cases where a bad row must not also silence a real problem.
 		andAlso string
 	}{
-		{name: "a matched set", published: publishedFields(), verdicts: ok, modelled: modelledFields(), want: ""},
+		{name: "a matched set", published: publishedFields(), verdicts: ok, modeled: modeledFields(), want: ""},
 		{
 			name:      "Google published a field nobody models or writes off",
 			published: withProp(publishedFields(), "TextRun", "somethingNew"),
 			verdicts:  ok,
-			modelled:  modelledFields(),
+			modeled:   modeledFields(),
 			want:      "TextRun.somethingNew is published and TextRun does not model it",
 		},
 		{
@@ -60,16 +60,16 @@ func TestFieldProblems(t *testing.T) {
 			published: withProp(publishedFields(), "TextRun", "somethingNew"),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "somethingNew", Verdict: "out", Reason: "no tool reads it", line: 2}),
-			modelled: modelledFields(),
-			want:     "",
+			modeled: modeledFields(),
+			want:    "",
 		},
 		{
 			name:      "written off with no reason at all",
 			published: withProp(publishedFields(), "TextRun", "somethingNew"),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "somethingNew", Verdict: "out", line: 2}),
-			modelled: modelledFields(),
-			want:     "is out with no reason given",
+			modeled: modeledFields(),
+			want:    "is out with no reason given",
 			// And the rejected row must not excuse the field it names.
 			// It used to: every row was searched, valid or not, so a row
 			// the gate had just complained about still counted as a
@@ -80,22 +80,22 @@ func TestFieldProblems(t *testing.T) {
 			name:      "a field we model that Google does not publish",
 			published: publishedFields(),
 			verdicts:  ok,
-			modelled:  withTag(modelledFields(), "TextRun", "inventedByUs"),
-			want:      "TextRun.inventedByUs is modelled and TextRun does not publish it",
+			modeled:   withTag(modeledFields(), "TextRun", "inventedByUs"),
+			want:      "TextRun.inventedByUs is modeled and TextRun does not publish it",
 		},
 		{
 			name:      "an unpublished field declared as a preview extra",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "inventedByUs", Verdict: "extra", Reason: "Developer Preview", line: 2}),
-			modelled: withTag(modelledFields(), "TextRun", "inventedByUs"),
-			want:     "",
+			modeled: withTag(modeledFields(), "TextRun", "inventedByUs"),
+			want:    "",
 		},
 		{
 			name:      "an alias naming a struct that does not exist",
 			published: publishedFields(),
 			verdicts:  []fieldVerdict{{Schema: "PageBreak", Property: "*", Verdict: "alias", Reason: "Fictional", line: 1}},
-			modelled:  modelledFields(),
+			modeled:   modeledFields(),
 			want:      `aliased to "Fictional", which is not a struct`,
 		},
 		{
@@ -103,36 +103,36 @@ func TestFieldProblems(t *testing.T) {
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "Telepathy", Property: "x", Verdict: "out", Reason: "invented", line: 2}),
-			modelled: modelledFields(),
-			want:     "is not a published schema any more",
+			modeled: modeledFields(),
+			want:    "is not a published schema any more",
 		},
 		{
 			name:      "the same field judged twice",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "PageBreak", Property: "*", Verdict: "alias", Reason: "Break", line: 9}),
-			modelled: modelledFields(),
-			want:     "already has a verdict on line",
+			modeled: modeledFields(),
+			want:    "already has a verdict on line",
 		},
 		{
 			name:      "a verdict that is none of the four",
 			published: publishedFields(),
 			verdicts:  []fieldVerdict{{Schema: "TextRun", Property: "content", Verdict: "probably", Reason: "who knows", line: 1}},
-			modelled:  modelledFields(),
+			modeled:   modeledFields(),
 			want:      "is none of out, extra, alias or local",
 		},
 		{
 			name:      "writing off every property of a schema at once",
 			published: publishedFields(),
 			verdicts:  []fieldVerdict{{Schema: "TextRun", Property: "*", Verdict: "out", Reason: "all of it", line: 1}},
-			modelled:  modelledFields(),
+			modeled:   modeledFields(),
 			want:      "is out for every property at once",
 		},
 		{
 			name:      "aliasing one property rather than the schema",
 			published: publishedFields(),
 			verdicts:  []fieldVerdict{{Schema: "PageBreak", Property: "textStyle", Verdict: "alias", Reason: "Break", line: 1}},
-			modelled:  modelledFields(),
+			modeled:   modeledFields(),
 			want:      "is aliased as a whole schema; the property column must be *",
 		},
 
@@ -142,7 +142,7 @@ func TestFieldProblems(t *testing.T) {
 			name:      "a struct that matches no schema and says nothing",
 			published: publishedFields(),
 			verdicts:  ok,
-			modelled:  withTag(modelledFields(), "Invented", "x"),
+			modeled:   withTag(modeledFields(), "Invented", "x"),
 			want:      "Invented is a struct in internal/gdocs and no schema of that name is published",
 		},
 		{
@@ -150,14 +150,14 @@ func TestFieldProblems(t *testing.T) {
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "Invented", Property: "*", Verdict: "local", Reason: "Developer Preview", line: 2}),
-			modelled: withTag(modelledFields(), "Invented", "x"),
-			want:     "",
+			modeled: withTag(modeledFields(), "Invented", "x"),
+			want:    "",
 		},
 		{
 			name:      "a struct carrying no wire field at all is not a wire type",
 			published: publishedFields(),
 			verdicts:  ok,
-			modelled:  withStruct(modelledFields(), "Helper"),
+			modeled:   withStruct(modeledFields(), "Helper"),
 			want:      "",
 		},
 		{
@@ -165,24 +165,24 @@ func TestFieldProblems(t *testing.T) {
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "*", Verdict: "local", Reason: "not really", line: 2}),
-			modelled: modelledFields(),
-			want:     "is a published schema, so it is not local",
+			modeled: modeledFields(),
+			want:    "is a published schema, so it is not local",
 		},
 		{
 			name:      "a local row naming no struct",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "Ghost", Property: "*", Verdict: "local", Reason: "Developer Preview", line: 2}),
-			modelled: modelledFields(),
-			want:     "is written off as local and is not a struct in",
+			modeled: modeledFields(),
+			want:    "is written off as local and is not a struct in",
 		},
 		{
 			name:      "a local row about one property",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "Invented", Property: "x", Verdict: "local", Reason: "Developer Preview", line: 2}),
-			modelled: withTag(modelledFields(), "Invented", "x"),
-			want:     "is local as a whole type; the property column must be *",
+			modeled: withTag(modeledFields(), "Invented", "x"),
+			want:    "is local as a whole type; the property column must be *",
 		},
 
 		// A row can outlive the thing it describes, the way an api-coverage
@@ -192,45 +192,45 @@ func TestFieldProblems(t *testing.T) {
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "withdrawn", Verdict: "out", Reason: "no tool reads it", line: 2}),
-			modelled: modelledFields(),
-			want:     "TextRun.withdrawn is written off and Google does not publish it any more",
+			modeled: modeledFields(),
+			want:    "TextRun.withdrawn is written off and Google does not publish it any more",
 		},
 		{
 			name:      "an out row for a field the types have since grown",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "content", Verdict: "out", Reason: "no tool reads it", line: 2}),
-			modelled: modelledFields(),
-			want:     "TextRun.content is written off and TextRun models it now",
+			modeled: modeledFields(),
+			want:    "TextRun.content is written off and TextRun models it now",
 		},
 		{
 			name:      "an extra row for a field Google now publishes",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "content", Verdict: "extra", Reason: "Developer Preview", line: 2}),
-			modelled: modelledFields(),
-			want:     "TextRun.content is declared an extra and Google publishes it now",
+			modeled: modeledFields(),
+			want:    "TextRun.content is declared an extra and Google publishes it now",
 		},
 		{
 			name:      "an extra row for a field nothing carries any more",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "dropped", Verdict: "extra", Reason: "Developer Preview", line: 2}),
-			modelled: modelledFields(),
-			want:     "TextRun.dropped is declared an extra and no struct carries it any more",
+			modeled: modeledFields(),
+			want:    "TextRun.dropped is declared an extra and no struct carries it any more",
 		},
 		{
 			name:      "a property verdict on a schema no struct models",
-			published: withProp(publishedFields(), "Unmodelled", "x"),
+			published: withProp(publishedFields(), "Unmodeled", "x"),
 			verdicts: append(slices.Clone(ok),
-				fieldVerdict{Schema: "Unmodelled", Property: "x", Verdict: "out", Reason: "no tool reads it", line: 2}),
-			modelled: modelledFields(),
-			want:     "Unmodelled is published and no struct models it",
+				fieldVerdict{Schema: "Unmodeled", Property: "x", Verdict: "out", Reason: "no tool reads it", line: 2}),
+			modeled: modeledFields(),
+			want:    "Unmodeled is published and no struct models it",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			problems, _ := fieldProblems(tc.published, tc.verdicts, tc.modelled)
+			problems, _ := fieldProblems(tc.published, tc.verdicts, tc.modeled)
 			joined := strings.Join(problems, "\n")
 			switch {
 			case tc.want == "" && len(problems) > 0:
@@ -251,14 +251,14 @@ func TestFieldProblems(t *testing.T) {
 // a real 104 let two dozen types leave the comparison quietly, and the
 // third direction in fieldProblems catches the rename itself instead.
 func TestAnAliasBringsASchemaIntoTheComparison(t *testing.T) {
-	_, matched := fieldProblems(publishedFields(), []fieldVerdict{}, modelledFields())
+	_, matched := fieldProblems(publishedFields(), []fieldVerdict{}, modeledFields())
 	if matched != 2 {
 		t.Fatalf("two of the three schemas match a struct by name; matched = %d", matched)
 	}
 	// With the alias row, the third is reached too.
 	_, matched = fieldProblems(publishedFields(),
 		[]fieldVerdict{{Schema: "PageBreak", Property: "*", Verdict: "alias", Reason: "Break", line: 1}},
-		modelledFields())
+		modeledFields())
 	if matched != 3 {
 		t.Fatalf("the alias should bring PageBreak into sight; matched = %d", matched)
 	}

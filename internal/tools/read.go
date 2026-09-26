@@ -44,7 +44,7 @@ type ReadInput struct {
 	ContinueFrom       string `json:"continue_from,omitempty" jsonschema:"the continue_from handle returned by a truncated read; resumes there"`
 	Format             string `json:"format,omitempty" jsonschema:"markdown (default), text, or raw (Docs API JSON for the scoped blocks)"`
 	WithHandles        *bool  `json:"with_handles,omitempty" jsonschema:"prefix every block with its handle like [p12] and headings with {heading_id}; on by default because handles are what an edit targets; pass false to save about 15% of the tokens"`
-	WithStyles         bool   `json:"with_styles,omitempty" jsonschema:"annotate fonts, sizes, colours, underline and alignment that markdown cannot express, e.g. {font: Arial 11pt, color: #c00}"`
+	WithStyles         bool   `json:"with_styles,omitempty" jsonschema:"annotate fonts, sizes, colors, underline and alignment that markdown cannot express, e.g. {font: Arial 11pt, color: #c00}"`
 	IncludeSuggestions bool   `json:"include_suggestions,omitempty" jsonschema:"show pending suggested edits as CriticMarkup: {++inserted++}, {--deleted--} and {==restyled==} for a formatting-only suggestion, each followed by {>>s:<suggestion id><<}; default shows the committed text without them"`
 	IncludeComments    bool   `json:"include_comments,omitempty" jsonschema:"mark commented passages with {>>c:<comment id><<} right after the text they cover and list those threads below the content"`
 	MaxChars           int    `json:"max_chars,omitempty" jsonschema:"output budget in characters, cut at a block boundary; default 20000, maximum 400000"`
@@ -58,7 +58,7 @@ func registerRead(s *mcp.Server, d Deps) {
 			"last modification, paragraph and word counts, pending suggestion count, and this server's capabilities " +
 			"(whether suggestion mode is available, the default write mode, read-only). Per tab it also reports what no " +
 			"read of the text shows: page setup, floating images, named ranges, and the named style definitions the " +
-			"tab's paragraphs carry (the font, size, colour and spacing every heading or body paragraph inherits, with " +
+			"tab's paragraphs carry (the font, size, color and spacing every heading or body paragraph inherits, with " +
 			"how many paragraphs of that tab carry each, headers and footnotes included; layout_document's named_style " +
 			"op redefines those definitions). " +
 			"Cheap; call it first when handed a " +

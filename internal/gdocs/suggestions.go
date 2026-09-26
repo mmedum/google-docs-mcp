@@ -9,7 +9,7 @@ package gdocs
 // suggestion is accepted, and it says nothing about what changed, so
 // only the matching state tells you which fields the suggestion
 // actually sets. A suggestion that turns on bold arrives with italic,
-// underline, a font size and a colour all filled in and every one of
+// underline, a font size and a color all filled in and every one of
 // them inherited — reading the style without the state reports a
 // suggestion to change nine properties where a person asked for one.
 //

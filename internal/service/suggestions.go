@@ -225,7 +225,7 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		return nil, err
 	}
 	if !s.opts.Preview {
-		return nil, Errorf("unavailable", "accepting or rejecting suggestions needs Developer Preview enrolment (GDOCS_PREVIEW=true)")
+		return nil, Errorf("unavailable", "accepting or rejecting suggestions needs Developer Preview enrollment (GDOCS_PREVIEW=true)")
 	}
 	action := strings.ToLower(strings.TrimSpace(req.Action))
 	switch action {

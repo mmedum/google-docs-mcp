@@ -109,7 +109,7 @@ api-coverage: ## Every published API method has a verdict, and every call has a 
 	@$(GO) run ./scripts/gates api-coverage
 
 .PHONY: api-fields
-api-fields: ## Every published field of a type we model is modelled or written off
+api-fields: ## Every published field of a type we model is modeled or written off
 	@$(GO) run ./scripts/gates api-fields
 
 .PHONY: api-diff

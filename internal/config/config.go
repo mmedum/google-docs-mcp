@@ -82,7 +82,7 @@ type Config struct {
 	ClientSecretPath  string
 }
 
-// AvailableWriteModes lists the modes this configuration can honour.
+// AvailableWriteModes lists the modes this configuration can honor.
 func (c Config) AvailableWriteModes() []WriteMode {
 	if c.Preview {
 		return []WriteMode{WriteSuggest, WriteDirect, WriteComment}

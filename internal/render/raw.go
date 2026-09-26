@@ -12,7 +12,7 @@ import (
 // JSON array, cut at element boundaries when over budget.
 //
 // The bytes the API sent, where the element still has them, rather than
-// a re-encoding of the wire types. Marshalling those can only return the
+// a re-encoding of the wire types. Marshaling those can only return the
 // fields they model, which made this — the one read whose whole job is
 // to show what Google said — the least trustworthy read on the server:
 // #46 was filed on a raw read that had silently dropped the field

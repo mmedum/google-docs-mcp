@@ -110,7 +110,7 @@ func TestEvals(t *testing.T) {
 }
 
 // writeReport rebuilds report.md from whatever ran, so a filtered run
-// still leaves a readable artefact.
+// still leaves a readable artifact.
 func writeReport(t *testing.T) {
 	t.Helper()
 	if len(results) == 0 {

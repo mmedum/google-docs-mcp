@@ -50,7 +50,7 @@ folder management, moving files, sharing, trashing, copying.
   indented and 2.96 MB without it, and the indentation is retained memory
   now that elements keep their bytes. Skipped for a request that is not
   asking for JSON, because an export asks for bytes.
-- **The API moved in our favour in July 2026.** The Docs API now has
+- **The API moved in our favor in July 2026.** The Docs API now has
   `writeControl.writeMode: SUGGEST` (every request in the batch becomes a
   suggested edit), `insertComment` anchored to a real `Range`,
   `acceptSuggestion`/`rejectSuggestion`, and a `commentsViewMode` on
@@ -77,9 +77,9 @@ folder management, moving files, sharing, trashing, copying.
 | Only `suggestionsViewMode=SUGGESTIONS_INLINE` yields indices valid for a later `batchUpdate`. | The canonical index space is the inline view. |
 | Every heading paragraph carries a stable, read-only `headingId`. | Sections are addressed by `headingId`. |
 | Deleting a range removes whatever is anchored inside it: comment anchors, suggestions, inline objects. Suggested deletions leave the text in place until accepted. | Overwrite guard (§7.3); suggestion mode is the safe default. |
-| Quotas: 300 reads/min/user, 60 writes/min/user (Docs). | Client-side token buckets below those limits; backoff honouring `Retry-After`. |
+| Quotas: 300 reads/min/user, 60 writes/min/user (Docs). | Client-side token buckets below those limits; backoff honoring `Retry-After`. |
 | Scopes: `documents` is *sensitive*, `drive` is *restricted*, `drive.file` cannot reach documents the app didn't create or open. | We need `documents` + `drive`. Fine for a per-user OAuth app that each deployer owns; no central app, no Google verification. |
-| An **External** OAuth app in **Testing** gets 7-day refresh tokens. The rule is defined only for External apps; an **Internal** (Workspace) consent screen is exempt by construction. | The setup guide covers both: Internal for Workspace organisations, Testing with weekly re-login for consumer accounts (§10). |
+| An **External** OAuth app in **Testing** gets 7-day refresh tokens. The rule is defined only for External apps; an **Internal** (Workspace) consent screen is exempt by construction. | The setup guide covers both: Internal for Workspace organizations, Testing with weekly re-login for consumer accounts (§10). |
 | Images: `insertInlineImage` needs a publicly fetchable URL. | URL only; no upload path. |
 | Preview features are absent from the discovery doc and from `google.golang.org/api/docs/v1`, and importing that module pulls in gRPC, OpenTelemetry and the cloud auth stack. | Thin raw REST client with our own wire types in `internal/gdocs`; the generated module is not a dependency (§5). |
 | Claude Code truncates tool results above 25 000 tokens and warns at 10 000. | Reads are scoped and budgeted by default, with continuation handles. |
@@ -90,7 +90,7 @@ Equations and drawings (read-only), charts, inserting a table of
 contents, reading the *structure* of an old revision (only exports),
 turning Drive-API comment anchors into ranges (opaque), rendering
 Drive-API comments inline in the UI, suggestion mode and anchored
-comments **without** preview enrolment, images from private URLs.
+comments **without** preview enrollment, images from private URLs.
 
 ## 3. Requirements distilled from other servers' failures
 
@@ -101,7 +101,7 @@ comments **without** preview enrolment, images from private URLs.
    from a view that claims to be complete (#638, #1085, #1084).
 4. Markdown conversion tested per construct, failing loudly on what it
    can't express (a-bonus #149).
-5. Tabs honoured on every write (piotr-agier #114).
+5. Tabs honored on every write (piotr-agier #114).
 6. Strict, boring JSON Schemas: flat structs with an `op`/`action` enum,
    no `oneOf`, no vendor keywords, no dots in tool names.
 7. Comments that anchor (preview `insertComment`), Drive API as the
@@ -133,7 +133,7 @@ comments **without** preview enrolment, images from private URLs.
    must match once, with `occurrence` and a scope to disambiguate. This
    is the contract Anthropic's editor tool, Claude Code's Edit, Notion's
    MCP and the Aider/OpenAI edit benchmarks converge on. Prose
-   normalisation (smart quotes, NBSP, whitespace runs) makes it robust.
+   normalization (smart quotes, NBSP, whitespace runs) makes it robust.
 4. **Stable IDs where Google gives them, short handles where it doesn't.**
    Headings by `headingId`; other blocks by ordinal handles (`p12`,
    `tbl3`) that the server remembers from the last read and re-checks.
@@ -171,7 +171,7 @@ internal/gapi/            raw REST client: client.go (retry, limiter, slog), doc
                           drive.go (about, files; later comments, revisions, export), errors.go
                           (APIError + sentinel classes). No MCP imports.
 internal/doc/             model: parse docs.Document → Tree; UTF-16 index math; handles; Target → Range
-                          resolution; normalised text search; section derivation; anchored-content index
+                          resolution; normalized text search; section derivation; anchored-content index
 internal/render/          Tree → markdown / text / outline; style annotations; CriticMarkup for
                           suggestions; comment markers; budget + continuation
 internal/markdown/        goldmark AST → Fragment (neutral block/inline IR); unsupported-construct errors
@@ -225,7 +225,7 @@ Document
   first tab's body (`tab2/p12`, `header/p1`, `footnote3/p1`). Headings
   also carry `heading_id`.
 - **Handle memory**: per document, the service keeps the revision id and
-  `handle → normalised text` of the last read in this process. Unchanged
+  `handle → normalized text` of the last read in this process. Unchanged
   revision → exact; changed revision → re-locate by stored text (unique
   match required) → else `[stale]`. An unknown handle is `[unknown]` with
   "read the section first". The stateless fingerprinted alternative
@@ -258,7 +258,7 @@ a later call reach the same passage, where a handle is only valid for the
 revision it came from. A name several ranges share is refused as a target
 (the id names one), and `get_document` lists both.
 
-Text matching normalises curly quotes, NBSP and whitespace runs on both
+Text matching normalizes curly quotes, NBSP and whitespace runs on both
 sides. Errors carry the fix: `[ambiguous] "Q3" matches 4 times in the
 body; add occurrence or within`, `[stale] p12 was "…" when read and no
 longer exists; re-read the section`.
@@ -275,7 +275,7 @@ longer exists; re-read the section`.
   visible before it is changed. Google reports only explicitly set run
   properties, so this is exactly the deviation from what the paragraph
   inherits — and the corollary is that inherited formatting is invisible
-  in a read: a heading whose `HEADING_2` definition is blue and centred
+  in a read: a heading whose `HEADING_2` definition is blue and centered
   reads as plain markdown, which is what `get_document`'s named style
   lines are for, once per tab instead of once per heading. Verified live),
   `include_suggestions` (CriticMarkup `{++ins++}` / `{--del--}` with
@@ -320,11 +320,11 @@ Every write tool takes ordered `ops[]`, `mode` (`suggest` | `direct` |
 **Modes.** `direct` applies the compiled requests. `suggest` applies the
 same requests with `writeMode: SUGGEST` (preview); an explicit
 `mode: suggest` without preview is `[unavailable] suggestion mode needs
-Developer Preview enrolment; use comment or direct`. `comment` compiles
+Developer Preview enrollment; use comment or direct`. `comment` compiles
 each op into a comment on the resolved range instead of a mutation:
 `replace` → "Proposed change:" plus the new text (with a word-level diff
 summary for long ranges), `delete` → "Proposed deletion", `insert` →
-anchored to the neighbouring block with "Insert after this:", format ops
+anchored to the neighboring block with "Insert after this:", format ops
 → "Proposed formatting: Heading 2". With preview the comment is anchored
 by `insertComment`; without it, it is a Drive comment carrying the quoted
 text (§8). Nothing in the document changes in `comment` mode, so the
@@ -337,7 +337,7 @@ guard below only reports.
    against the new text at word granularity (character fallback for short
    ranges) and emit `deleteContentRange` + `insertText` only for changed
    hunks. Inserted hunks inherit the style of the preceding text
-   (documented API behaviour); explicit markdown emphasis in the new
+   (documented API behavior); explicit markdown emphasis in the new
    content is applied on top. When the replacement changes paragraph
    structure (a paragraph becomes three bullets), the planner falls back
    to whole-range replacement and says so.
@@ -380,7 +380,7 @@ Refused with `[unsupported] <construct> at line N`: images (use
 quotes, horizontal rules.
 
 What markdown cannot say goes through `format_document`: fonts, sizes,
-colours, alignment, spacing, indents, named styles on existing text,
+colors, alignment, spacing, indents, named styles on existing text,
 bullet presets, clearing formatting.
 
 ## 8. Collaboration and history
@@ -500,7 +500,7 @@ block count and continuation in a header comment; write tools return
 both, and their JSON carries everything their text does, the rendered
 preview included. Measured in the Phase 3 evals (§14).
 
-## 10. Auth, enrolment, config, process model
+## 10. Auth, enrollment, config, process model
 
 - **Google account and Cloud project.** Each deployer runs this server
   under a Google Cloud project they own. The project may be shared with
@@ -509,22 +509,22 @@ preview included. Measured in the Phase 3 evals (§14).
   documented in the README and verified by `doctor`: create or pick the
   project; enable the Google
   Docs API and Google Drive API; configure the OAuth consent screen
-  (**Internal** for a Workspace organisation, which avoids the 7-day
+  (**Internal** for a Workspace organization, which avoids the 7-day
   token expiry; **External + Testing** with the user added as a test user
   for consumer accounts, with weekly `login`); add the four scopes; create
   a **Desktop app** OAuth client; download its `client_secret.json`; run
   `google-docs-mcp login --client-secret <path>`.
-- **Developer Preview enrolment** (for suggestion mode, anchored
+- **Developer Preview enrollment** (for suggestion mode, anchored
   comments, accept/reject; **decided: yes** for the maintainer's project;
-  every other deployer enrols their own). Per Google's programme page:
+  every other deployer enrolls their own). Per Google's program page:
   apply with the application form linked from
   https://developers.google.com/workspace/preview, providing "your Google
   Workspace account and Google Cloud project information"; access is
   granted "through your Google Cloud project(s)" and by adding the
-  account to a programme Google Group; "the whole process should be done
-  within a couple of days"; the programme "provides access to all the
+  account to a program Google Group; "the whole process should be done
+  within a couple of days"; the program "provides access to all the
   features", not per feature. The terms allow use inside the enrolling
-  organisation and forbid granting "end users access, outside my domain
+  organization and forbid granting "end users access, outside my domain
   or company" to applications built on pre-GA APIs. Publishing this
   server's source is not that; anyone else would need their own enrolled
   project, and the README must say so.
@@ -551,14 +551,14 @@ preview included. Measured in the Phase 3 evals (§14).
   credential check). On failure log to stderr and **keep serving**; every
   tool then returns `[auth] … run google-docs-mcp login`. `doctor` does the
   full interactive check: token age, consent type, scopes, preview
-  enrolment (a `documents.get` with `commentsViewMode` on a doc id you
+  enrollment (a `documents.get` with `commentsViewMode` on a doc id you
   pass), quota headroom.
 - **Transport**: stdio (**decided**).
 
 ## 11. Reliability
 
 - Retries: reads retry on 429/5xx/network with exponential backoff and
-  jitter, cap 30 s, max 5, honouring `Retry-After`. `batchUpdate` retries
+  jitter, cap 30 s, max 5, honoring `Retry-After`. `batchUpdate` retries
   only on 429/503 received before any response bytes; an unknown
   outcome is `[ambiguous_outcome] the edit may have been applied;
   re-read` — a different word from `[ambiguous]`, which means the target
@@ -573,7 +573,7 @@ preview included. Measured in the Phase 3 evals (§14).
 - Logging: `slog` to stderr, text or JSON. Stdout carries only JSON-RPC.
 - Performance (Phase 3). Everything derived from one fetch is derived
   once: the handle memory, the located comment threads, and per segment
-  a searchable text (every paragraph's normalised characters in one
+  a searchable text (every paragraph's normalized characters in one
   string, so a text target or a quoted comment is one `strings.Index`
   pass; a match maps back to indices through a byte offset per
   paragraph, not per rune) and a sorted anchor list. Handles and cells
@@ -601,7 +601,7 @@ preview included. Measured in the Phase 3 evals (§14).
 **Nothing internal leaves the owner's machine or enters the repository**
 (**decided**).
 
-- The repository never contains organisation names, document ids or
+- The repository never contains organization names, document ids or
   URLs, account emails, Cloud project ids, OAuth client ids or secrets,
   or content from real documents. There is no default project or client
   baked in; the binary is useless until a deployer supplies their own.
@@ -649,16 +649,16 @@ accounts. That sets these requirements:
   env-first.
 - **Setup guide** in the README, per-deployer, in the order `doctor`
   checks it: Cloud project → APIs → consent screen (Internal vs Testing)
-  → Desktop OAuth client → `login` → `doctor`. Preview enrolment is a
-  separate, optional section that states the programme terms: use inside
-  your own organisation only, enrol your own project.
+  → Desktop OAuth client → `login` → `doctor`. Preview enrollment is a
+  separate, optional section that states the program terms: use inside
+  your own organization only, enroll your own project.
 - **Versioning.** Semantic versions; `CHANGELOG.md` in Keep a Changelog
   form; the schema-dump diff in CI classifies tool removals, renames, and
   required-field additions as breaking (major after 1.0, minor before).
-- **Documentation set.** README (setup, tool catalogue, safety model),
+- **Documentation set.** README (setup, tool catalog, safety model),
   `docs/architecture.md` (this file), `docs/configuration.md`,
   `docs/security.md` (threat model, scopes, what is stored where),
-  `CONTRIBUTING.md`, `SECURITY.md` (reporting), `CHANGELOG.md`. Licence:
+  `CONTRIBUTING.md`, `SECURITY.md` (reporting), `CHANGELOG.md`. License:
   Apache-2.0 (already in the repository).
 - **Support matrix.** Keyring backends per platform with the file
   fallback; `os.UserConfigDir()` paths; Windows paths in export-dir
@@ -674,15 +674,15 @@ accounts. That sets these requirements:
   property tests; minimal-diff tests (unchanged spans keep their
   offsets); overwrite-guard tests; renderer and planner golden files;
   markdown fragment tests per construct plus the refusal list; text
-  normalisation cases.
+  normalization cases.
 - **Schema-dump gate**: `--dump-schemas` via an in-memory client
   session; CI diffs against the previous tag.
 - **Integration** (`//go:build integration`, `GDOCS_TEST_FOLDER_ID` in a
   scratch folder, never a real working document): creates a document per
   test, applies ops, reads back, asserts, trashes. Includes the preview
   checks (suggest mode visible in the UI, anchored comments), run
-  manually until enrolment exists in CI.
-- **Stdio smoke**: initialise, list tools, `get_document` on a scratch id.
+  manually until enrollment exists in CI.
+- **Stdio smoke**: initialize, list tools, `get_document` on a scratch id.
 - **Agent evals** (`internal/evals`, `-tags=evals`, Phase 3): thirteen tasks
   through Claude Code headless (`claude -p` with only this server's
   tools), each against a scratch document the harness seeds through the
@@ -739,7 +739,7 @@ accounts. That sets these requirements:
 | Decision | Consequence in the design |
 |---|---|
 | Deployer-owned Cloud project (may be shared with other tools) with a dedicated OAuth client; the repository is isolated and distributed for other people | §10, §13; setup guide covers Workspace (Internal) and consumer (Testing) accounts; no baked-in identifiers |
-| Enrol in Developer Preview | Spike A first; `mode: suggest` default; anchored comments; accept/reject |
+| Enroll in Developer Preview | Spike A first; `mode: suggest` default; anchored comments; accept/reject |
 | Edits happen live in shared documents; never overwrite; full history | Minimal-diff replace, overwrite guard, history tools in Phase 2, comment threads complete by default |
 | The person chooses how changes land: suggestion, direct edit, or comment | `mode` on every write with a configured default; `comment` mode works without preview; no silent downgrades |
 | Paragraph handles: short labels remembered by the server (option A) | `p12`-style handles with per-document handle memory (§6) |
@@ -793,7 +793,7 @@ beside them the server emits four — `insertComment`, `acceptSuggestion`,
 `rejectSuggestion`, `deleteSuggestion` — and deliberately not the other
 four (`addCommentReply`, `updateCommentPost`, `deleteComment`,
 `deleteCommentReply`), because every thread operation goes through the
-Drive API, which is GA and serves deployments without preview enrolment.
+Drive API, which is GA and serves deployments without preview enrollment.
 What was added:
 
 - **Page and section layout.** A new `layout_document` tool: `page`
@@ -804,11 +804,11 @@ What was added:
   arguments in common, and a flat op struct holding both would double
   that schema. Lengths are points everywhere, and `get_document` names
   the standard page sizes on the way back so the model need not
-  recognise 612×792.
+  recognize 612×792.
 - **Column and row sizing.** `edit_table` gains `style_columns`
   (`updateTableColumnProperties`, fixed or evenly distributed) and
   `style_rows` (`updateTableRowStyle`: least height and page-break
-  behaviour, but not `tableHeader`, which the API refuses — see §18).
+  behavior, but not `tableHeader`, which the API refuses — see §18).
   `pin_header_rows` remains the way to repeat a header row.
 - **Images.** `insert_object` gains `action: replace` (`replaceImage`)
   and `action: delete`. Delete is where the model of an object matters:
@@ -827,13 +827,13 @@ What was added:
 - **Comments and suggestions.** `reply_comment` gains `action: edit`
   (Drive `comments.update` / `replies.update`), and `review_suggestion`
   gains `discard` (`deleteSuggestion`, preview). The Docs preview
-  equivalents of the comment edits were refused in favour of the Drive
+  equivalents of the comment edits were refused in favor of the Drive
   path, per the existing rule that thread operations use one backend.
 
 **What "everything" means here.** Every GA member of the `Request` union
 is emitted, and every field of those requests that the API accepts on a
 write. Text style: bold, italic, underline, strikethrough, small caps,
-baseline, size, family, both colours, links. Paragraph style: named
+baseline, size, family, both colors, links. Paragraph style: named
 style, alignment, content direction, spacing mode, line spacing, space
 above and below, all three indents, keep-with-next, keep-lines-together,
 widow and orphan control, page break before, shading, and all five
@@ -886,7 +886,7 @@ six rounds of live probing (§18, spike B) did not find the rule: bold
 over a suggested bold is dropped, an alignment over the same suggested
 alignment is dropped, but a font size set to exactly the value a pending
 suggestion names does land. Nothing in the reference, the suggestions
-how-to or the issue tracker describes the behaviour at all. Until it is
+how-to or the issue tracker describes the behavior at all. Until it is
 known the server warns and names the suggestion rather than refusing,
 because a refusal would block the writes that work. Worth reporting
 upstream; the probe is in the repository so the answer can be rechecked
@@ -946,14 +946,14 @@ checked rather than assumed.
 
 | Convention | Verdict | Effect |
 |---|---|---|
-| Exact-text targets (Anthropic text editor tool; Claude Code Edit; Notion MCP `update_content`; Aider: removing line numbers took GPT-4 Turbo from 20% to 61%; OpenAI `apply_patch`) | Confirmed | `text` is the primary target; normalisation added (SWE-Edit brittleness). |
+| Exact-text targets (Anthropic text editor tool; Claude Code Edit; Notion MCP `update_content`; Aider: removing line numbers took GPT-4 Turbo from 20% to 61%; OpenAI `apply_patch`) | Confirmed | `text` is the primary target; normalization added (SWE-Edit brittleness). |
 | Google `headingId` is stable | Confirmed (Docs API reference) | Sections by `heading_id`. |
 | Inserted text inherits the preceding text's style; newline copies paragraph style incl. bullets | Confirmed (InsertTextRequest reference) | Minimal-diff replace is safe for formatting. |
 | Fingerprinted block handles | No evidence; Anthropic advises against cryptic ids | Plain ordinals + server memory; open in §17. |
 | Per-block handle prefix on every read | Confirmed costly (≈ +27% tokens for `[b12-7f3a] `, ≈ +15% for `[p12] `) | Opt-in. |
 | Markdown in/out | Mixed (Anthropic: measure it; Google added md export for this use) | Markdown for new content; in-place ops for existing; evaluated in Phase 3. |
 | CriticMarkup for suggestions | Confirmed convention (MultiMarkdown-6); used by the adeu docx MCP | Kept. |
-| Preview programme terms | Confirmed (programme FAQ) | In-organisation use allowed; README states others need their own enrolment. |
+| Preview program terms | Confirmed (program FAQ) | In-organization use allowed; README states others need their own enrollment. |
 | Preview features work as documented (spike A, 2026-09-03, live against a scratch document in an enrolled project) | Confirmed: `commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED` accepted; `writeMode: SUGGEST` returns `suggestionResponses[].createdSuggestionIds` and the inline view carries the id on the run; `insertComment` with a `range` returns a `commentThread`; `rejectSuggestion` removes the suggestion. Response shapes differ from the reference page: a comment thread has `commentId`, `anchorId`, `headPost{postId, content, contentHtml, author{displayName, me, user}, createTime, updateTime, commentAction}`, `status` (OPEN) and `plainTextQuote`, with **no range**; a suggestion thread has `suggestionId`, `headPost`, `status`, `summaryText` ("Add: …") and `summaryHtml`, also without a range. | Phase 2 maps comments to blocks by `plainTextQuote` (plus `anchorId` when the UI exposes it) and maps suggestions to ranges through the inline run ids, not through the thread objects. The `comments`/`suggestions` keys are absent until one exists. |
 | Keyring with env-only fallback (inherited) | Refuted as precedent: `gh` falls back to a 0600 file; `gcloud` uses plaintext files; go-keyring has no fallback | Keyring → file (warned) → env. |
 | Loopback + PKCE OAuth (inherited) | Confirmed (Google native-app guide; OOB blocked since 2023-01-31) | Kept. |
@@ -983,7 +983,7 @@ checked rather than assumed.
 | `deleteTab` fails when the tab has children (my assumption) | Refuted: child tabs are deleted with it | `delete_tab` warns; a document keeps at least one tab. |
 | `comments.*` need the `fields` parameter (Drive guide) | Confirmed for comments (an omitted `fields` is an error); the replies pages list no parameters | Sent on every call. |
 | `TableRowStyle.tableHeader` can be set, since it is in the schema | Refuted live (2026-09-03): `updateTableRowStyle` answers `400 INVALID_ARGUMENT: Unallowed field: tableHeader`, though `minRowHeight` and `preventOverflow` in the same request are accepted | `style_rows` carries neither the field nor a flag for it; `pin_header_rows` is how a header row is set, and the op's "changes nothing" message says so. A schema field is not proof the field mask accepts it. |
-| `DocumentStyle.background` takes the colour object `colorJSON` builds, as `TextStyle.foregroundColor` does (my assumption) | Refuted (discovery document): `foregroundColor` is an `OptionalColor` — `{color: {rgbColor}}` — but `background` is a `Background`, whose own `color` field is that `OptionalColor`, so the payload nests one level deeper | `background` is built as `{"color": <OptionalColor>}`; caught in review before any live call, since a wrong shape fails the whole atomic batch. |
+| `DocumentStyle.background` takes the color object `colorJSON` builds, as `TextStyle.foregroundColor` does (my assumption) | Refuted (discovery document): `foregroundColor` is an `OptionalColor` — `{color: {rgbColor}}` — but `background` is a `Background`, whose own `color` field is that `OptionalColor`, so the payload nests one level deeper | `background` is built as `{"color": <OptionalColor>}`; caught in review before any live call, since a wrong shape fails the whole atomic batch. |
 | A section's type can be changed on an existing section | Refuted (discovery document): `SectionStyle.sectionType` is **"Output only"**; only `insertSectionBreak` sets it | `section` neither sends nor accepts `section_type`; passing it is refused with the reason, and the type is chosen by the `section_break` that made the section. |
 | A field mask names only the leaves it changes (as `updateTextStyle` does) | Refined for `updateNamedStyle`: the reference says "to update the text style to bold, set `fields` to include `text_style` **and** `text_style.bold`" — the mask is rooted at the named style, so the parent counts too. **Confirmed live** (2026-09-03) through the HTML export: after redefining `HEADING_2`, both headings render as `<h2 style="…color:#1a73e8;font-size:18pt;padding-top:20pt…">` without either being styled individually | The mask carries `textStyle` and `paragraphStyle` beside each leaf. A redefined named style is invisible to `with_styles` (it moves the paragraph default too), so `get_document` reports the definitions themselves (§7.2) and `export_document format: html` checks how they resolve — see docs/development.md. |
 | `TableRowStyle.minHeight` and `SectionType: ONE_COLUMN \| TWO_COLUMN \| THREE_COLUMN` (a summary of the reference page) | Refuted against the discovery document (`docs.googleapis.com/$discovery/rest?version=v1`, 2026-09-03): the field is `minRowHeight` (with `preventOverflow` and `tableHeader` beside it), and `insertSectionBreak` takes only `CONTINUOUS` or `NEXT_PAGE` — columns are `SectionStyle.columnProperties` | Wire names taken from the discovery document, not from a prose summary; columns are set on the section, not by its type. |
@@ -991,19 +991,19 @@ checked rather than assumed.
 | `deleteSuggestion` is the same as `rejectSuggestion` (my assumption) | Refuted: reject declines a suggestion and any editor may; delete removes it and returns 403 to anyone but its author | Exposed as a third action, `discard`, with the author rule in its description. |
 | A named range can serve as a durable target where a handle cannot | Confirmed (NamedRange reference: Google keeps the range with its content across edits) | `named_range` is a Target (§7.1); a name several ranges share is refused as a target, since a target must mean one range. |
 | A fragment inserted into an empty paragraph keeps that paragraph's style (Phase 1 `Inline` rule) | Refuted by the follow-up path: a new header, footer, footnote or tab starts as one empty paragraph, so `# Title` content came out as normal text; an inline insertion into a non-empty paragraph must still keep its style | `FragmentOptions.Fill`: an empty paragraph takes the fragment's style. |
-| Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalised units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalised string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
+| Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalized units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalized string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
 | `TabProperties.index` is the tab's 0-based position among its siblings, so a requested 1-based position converts with `-1` (the API reference, applied to both add and move) | **Refuted for `move`, live 2026-09-03.** For `add` the index is 0-based as documented, but a move inserts the tab at that index with the tab *still in its old slot* and removes it afterwards, so moving one later lands it a place short, and moving it to the very next position does nothing while reporting success. Four probes: 3→1 gave 1; 1→3 gave 2; 2→3 gave 2; 4→2 gave 2 | `moveTabRequest` raises the index by one when the tab is moving later within the same parent (`siblingIndex`). Moving earlier, and moving under a different parent, are unchanged. The bug hid because every earlier test moved a tab to position 1, where the two readings agree. |
-| `read_document with_styles` shows a run's formatting | Confirmed, and sharpened live 2026-09-03: Google returns only the properties a run sets itself, so the annotation already *is* the deviation from what the run inherits. A read of a document whose `HEADING_2` had just been redefined blue, centred and single-spaced annotated nothing at all | No per-run comparison to build (an earlier plan of mine, dropped). Inherited formatting is reported once per tab by `get_document` instead of once per paragraph. |
+| `read_document with_styles` shows a run's formatting | Confirmed, and sharpened live 2026-09-03: Google returns only the properties a run sets itself, so the annotation already *is* the deviation from what the run inherits. A read of a document whose `HEADING_2` had just been redefined blue, centered and single-spaced annotated nothing at all | No per-run comparison to build (an earlier plan of mine, dropped). Inherited formatting is reported once per tab by `get_document` instead of once per paragraph. |
 | Giving the MCP SDK a logger logs whole JSON-RPC frames, so debug logging leaks documents (my assumption, and the reason the logger was attached only at debug) | Refuted by reading go-sdk v1.7.0, 2026-09-05: the SDK logs at exactly two call sites — a transport-level `jsonrpc2 internal error` and one handler warning — and never a frame. The conditional stays anyway, because at info the SDK adds two lines of session chatter per session to every client's log file | Per-call logging is ours: `logCalls` middleware records method, tool name, outcome and duration at debug, which is [OWASP's "when, where, who and what"](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) without the payload — its exclusion list covers tokens and personal data, and a person's document is both. `TestDebugLogsCarryNoDocumentData` fails the build if a log line ever carries the fixture's id, title or text, so the bug form can ask for a debug log without asking the reporter to audit it. A handler wrapper to floor the SDK's own level was written and thrown away: twenty lines to suppress two, where a conditional already existed. |
 | `errors.Is(err, io.EOF)` catches the end of a stdio session | Refuted, reproduced 2026-09-05: the SDK reports a closed connection as JSON-RPC **-32004** with the EOF only as message text (`server is closing: EOF`), so `errors.Is` never matched and the process exited **1** on an ordinary client disconnect — which a host reports as a crash. The smoke test could not see it because it slept before closing stdin, and with the sleep the exit is 0 | `clientWentAway` matches `jsonrpc.Error` codes -32004 and -32003; `jsonrpc.Error` is a public alias of the SDK's internal wire type, so the code is comparable without sniffing message text. The smoke test closes stdin abruptly as a second case, and fails against the previous binary. |
 | Scrubbing a result where it is read keeps the transcript clean (the live driver's port to Go) | Refuted on the port's first run, 2026-09-05: the driver's `call` returned the scrubbed text, so a step that parsed the document URL out of `get_document` fed `https://docs.google.com/document/d/<scratch>/edit` back to `insertRichLink` and Google answered `400 The URL is invalid`. The Python it was ported from scrubbed in the print helper, so the fault arrived with the port | Scrubbing lives in `shown`, the one helper every transcript line goes through; a step parses the untouched text. A redaction on the read path corrupts whatever the caller feeds back. |
-| The host allowlist's port handling is incidental — `googleHost` could take `url.URL.Hostname()` and drop the port as noise | Checked 2026-09-05 after a sibling server hit the other side of it: it is passed `Host`, port and all, so `docs.googleapis.com:8443` matches nothing and the request is refused. Fail-closed is the right direction here and not a formality — `ExportRevision` follows the `downloadUri` out of an operation's **response body** with the access token attached, so this check decides whether a credential leaves the machine | Pinned: the test covers ports on allowed hosts, and the comment says not to switch to `Hostname()`. Where a check that governs token egress is going to be wrong, it should be wrong towards refusing. |
+| The host allowlist's port handling is incidental — `googleHost` could take `url.URL.Hostname()` and drop the port as noise | Checked 2026-09-05 after a sibling server hit the other side of it: it is passed `Host`, port and all, so `docs.googleapis.com:8443` matches nothing and the request is refused. Fail-closed is the right direction here and not a formality — `ExportRevision` follows the `downloadUri` out of an operation's **response body** with the access token attached, so this check decides whether a credential leaves the machine | Pinned: the test covers ports on allowed hosts, and the comment says not to switch to `Hostname()`. Where a check that governs token egress is going to be wrong, it should be wrong toward refusing. |
 | HTTP status is enough to classify a Google error; the reason string refines it at most (the mapping's shape since Phase 0 — status first, one reason-based exception for scopes) | Refuted 2026-09-05 against the [Drive error guide](https://developers.google.com/workspace/drive/api/guides/handle-errors), after the google-drive-mcp session hit the same class of bug from the other side: Drive answers throttling with **403** — `rateLimitExceeded`, `userRateLimitExceeded`, `sharingRateLimitExceeded`, `dailyLimitExceeded` — and prescribes exponential backoff for it. Reading the status first made those `[forbidden]`, so a throttled read was never retried and the model was told to go looking for permissions that do not exist. The same page lists 403 reasons on our own surface that mean "cannot", not "may not": `downloadRestrictedForRevision`, `fileNotExportable`, `storageQuotaExceeded`, `appNotAuthorizedToFile` | `throttled` classifies the four quota reasons as `ErrRateLimited` before the generic 403, and `once` makes them transient so reads back off (writes still repeat only on 429 or 503, which prove nothing was applied). Every reason now appears in `APIError.Error()`, so a refusal the classifier cannot improve on still reaches the model with Google's own word for it. No reason has been *observed* live on this surface — the change is what the documented reasons mean, not a bug seen in the wild. |
 | The write-retry rule ("only 429 and 503, which prove nothing was applied") covers every write | Refuted in review 2026-09-05: the guard tested `k == kindWrite`, and Drive writes carry their own kind (`kindDriveWrite`, added for a separate rate limiter), so creating a comment or a reply was retried on **any** 5xx — a 500 arriving after Drive had created the comment left two. The classification change above would have widened it to throttling 403s as well. Neither was ever observed; the test that would have caught it existed only for document batches | The guard is `k != kindRead`, and the new test drives `CreateComment` through 403/500/503/429 (it fails against the old guard on exactly the 403 and the 500). A rule stated for "writes" is tested through every kind of write. |
 | A security document is a description of the code (implicit in keeping one) | Refuted 2026-09-05 by auditing §12 and docs/security.md line by line against the code, after a sibling server found its own security page promising a deadline the code did not keep. Two claims here were false in opposite directions: the page said "logs carry ids (truncated), revisions" in one row and "no document data at any level" in another, and the code did the first — `ShortID` put six characters of the id and the whole revision id into debug lines, and the conflict path logged an id at info. The test that was supposed to hold the guarantee passed because it searched for the *whole* id, and because the service's logger was not the logger it read | Ids are gone from every log line, including the path (`/v1/documents/…/x`); `ShortID` is documented as filename-only. The test reads the service's logger too, drives the conflict path, and looks for the id, its first six characters, and the revision. It catches two leaks against the previous code. Where the two rows disagreed, the stronger one is now true rather than the weaker one being written down. |
-| The wire types can be kept in step with the API by reading them carefully | Refuted by the whole of #46. The types had drifted 40 fields from the discovery document — the suggestion field that started the issue, and 39 more nobody had counted — and the repository already had an evidence-log row saying the types had drifted, which is a document, not a control. | The `api-fields` gate in `scripts/gates`, the method gate's pair of files one level down: the discovery document's schemas and properties in `testdata/api-fields.json`, one hand-written row per exception in `testdata/api-fields.tsv`, and the modelled side read out of `internal/gdocs` with `go/ast`, embedded tags promoted. Three directions fail: a published property nothing models, a modelled field nothing publishes, and a struct in `internal/gdocs` that matches no schema and has no row saying why. Judging the 39 against "if a tool writes it, the types must carry it" added 16 fields — twelve of `SectionStyle`, a table's column widths, a row's pinned-header flag — and wrote off 23 read-only ones with reasons. Proven to bite: dropping `SectionStyle.marginTop` fails the gate. |
-| `format: raw` returns the Docs API's JSON, as its tool schema says | Refuted on 2026-09-12, by the same issue. `render.Raw` marshalled `internal/gdocs` structs, so the one read whose whole job is to show what Google said could only ever show the fields this server already models — and it silently dropped the rest. That is not a corner case: nine types model fewer fields than the API publishes, 39 in total, worst of them `SectionStyle` at 14 (every margin, `columnProperties`, `pageNumberStart`). It is also how #46 came to be filed against the write path: the raw read had dropped the field proving the write had worked, so the reporter read an empty `textStyle` as a no-op. | `StructuralElement` keeps the bytes it decoded from (`UnmarshalJSON` plus `RawJSON()`), and `render.Raw` returns those, compacted, falling back to marshalling the types for an element built in Go. `Block.Wire` had exactly one consumer, so the change is one field, one method and one branch — smaller than modelling the 39 fields, and it ends the class rather than one instance. Measured on a 150-page document: retained bytes are 1.03× the body (the nested elements inside table cells account for 8%, and `format: raw` never reads them), decode 28 → 41 ms, heap 7.7 → 11.2 MB. That document is prose-heavy, and the figure is not a bound: an element's bytes are held again inside every ancestor's, so a deeply table-nested document retains its cells once per level of nesting. The 8% is what that costs on this fixture, not what it can cost. Paid for by asking Google to stop indenting: `prettyPrint=false` on `documents.get` takes the same document from 7.44 MB to 2.96 MB on the wire, verified live. |
-| Counting the types a name-matching gate compares is enough to notice one leaving the comparison | Refuted 2026-09-13 by reading the gate's own numbers. `api-fields` skipped any struct whose name no published schema shared, and guarded that with a floor of 80 against a real 104 — two dozen types could leave the comparison before the count complained, and the six that had already left (five Developer Preview comment shapes and the `SuggestedStyle` embeddable) were invisible from the day the gate was written. A repo-wide rename of `gdocs.SectionStyle` took its fourteen properties out of the comparison and the gate printed ok. The evidence-log row above said the count made a rename impossible to miss, which is the same shape of mistake the gate exists to catch: a claim with nothing testing it. | The comparison runs in three directions, the third over the structs rather than the schemas: every struct carrying a JSON tag matches a published schema, is named by an `alias` row, or has a `local` row saying it models none. A rename now fails on the renamed type itself, so the floor is gone rather than raised. The same pass checks a row against what it describes — an `out` row for a property Google has withdrawn or one the types have since grown, an `extra` row for a field now published — because a stale row is a verdict nobody re-read. Proven by mutation: deleting the third direction, deleting the staleness pass, or restoring the old search that honoured rejected rows each turns a test red. |
+| The wire types can be kept in step with the API by reading them carefully | Refuted by the whole of #46. The types had drifted 40 fields from the discovery document — the suggestion field that started the issue, and 39 more nobody had counted — and the repository already had an evidence-log row saying the types had drifted, which is a document, not a control. | The `api-fields` gate in `scripts/gates`, the method gate's pair of files one level down: the discovery document's schemas and properties in `testdata/api-fields.json`, one hand-written row per exception in `testdata/api-fields.tsv`, and the modeled side read out of `internal/gdocs` with `go/ast`, embedded tags promoted. Three directions fail: a published property nothing models, a modeled field nothing publishes, and a struct in `internal/gdocs` that matches no schema and has no row saying why. Judging the 39 against "if a tool writes it, the types must carry it" added 16 fields — twelve of `SectionStyle`, a table's column widths, a row's pinned-header flag — and wrote off 23 read-only ones with reasons. Proven to bite: dropping `SectionStyle.marginTop` fails the gate. |
+| `format: raw` returns the Docs API's JSON, as its tool schema says | Refuted on 2026-09-12, by the same issue. `render.Raw` marshaled `internal/gdocs` structs, so the one read whose whole job is to show what Google said could only ever show the fields this server already models — and it silently dropped the rest. That is not a corner case: nine types model fewer fields than the API publishes, 39 in total, worst of them `SectionStyle` at 14 (every margin, `columnProperties`, `pageNumberStart`). It is also how #46 came to be filed against the write path: the raw read had dropped the field proving the write had worked, so the reporter read an empty `textStyle` as a no-op. | `StructuralElement` keeps the bytes it decoded from (`UnmarshalJSON` plus `RawJSON()`), and `render.Raw` returns those, compacted, falling back to marshaling the types for an element built in Go. `Block.Wire` had exactly one consumer, so the change is one field, one method and one branch — smaller than modeling the 39 fields, and it ends the class rather than one instance. Measured on a 150-page document: retained bytes are 1.03× the body (the nested elements inside table cells account for 8%, and `format: raw` never reads them), decode 28 → 41 ms, heap 7.7 → 11.2 MB. That document is prose-heavy, and the figure is not a bound: an element's bytes are held again inside every ancestor's, so a deeply table-nested document retains its cells once per level of nesting. The 8% is what that costs on this fixture, not what it can cost. Paid for by asking Google to stop indenting: `prettyPrint=false` on `documents.get` takes the same document from 7.44 MB to 2.96 MB on the wire, verified live. |
+| Counting the types a name-matching gate compares is enough to notice one leaving the comparison | Refuted 2026-09-13 by reading the gate's own numbers. `api-fields` skipped any struct whose name no published schema shared, and guarded that with a floor of 80 against a real 104 — two dozen types could leave the comparison before the count complained, and the six that had already left (five Developer Preview comment shapes and the `SuggestedStyle` embeddable) were invisible from the day the gate was written. A repo-wide rename of `gdocs.SectionStyle` took its fourteen properties out of the comparison and the gate printed ok. The evidence-log row above said the count made a rename impossible to miss, which is the same shape of mistake the gate exists to catch: a claim with nothing testing it. | The comparison runs in three directions, the third over the structs rather than the schemas: every struct carrying a JSON tag matches a published schema, is named by an `alias` row, or has a `local` row saying it models none. A rename now fails on the renamed type itself, so the floor is gone rather than raised. The same pass checks a row against what it describes — an `out` row for a property Google has withdrawn or one the types have since grown, an `extra` row for a field now published — because a stale row is a verdict nobody re-read. Proven by mutation: deleting the third direction, deleting the staleness pass, or restoring the old search that honored rejected rows each turns a test red. |
 | The wire types need only the `suggested*Ids` fields, because a suggestion is an insertion or a deletion | Refuted live on 2026-09-12 (issue #46, spike B in `internal/gapi/rawsuggest_integration_test.go`). A `SUGGEST`-mode `updateTextStyle` records a `suggestedTextStyleChanges` entry keyed by suggestion id, and `internal/gdocs` had no field for it — nor for the other fifty-nine `suggested*` fields the discovery document lists across twenty-two types. So the suggestion existed and every read this server offers said it did not: `format: raw` re-marshals our own types and dropped it, `list_suggestions` walked insert/delete ids and answered "0 pending suggestion(s)" in the same session where the write had returned a suggestion id, and `include_suggestions` and `with_styles` showed nothing. The report was filed as a silent write no-op; the write had worked. | All sixty-one `suggested*` fields, taken from the discovery document rather than typed by hand, and a `SuggestedStyle` embeddable for the ten inline elements that carry a text style. The properties come from the `*SuggestionState` pair, walked by reflection over the API's own `<property>Suggested` convention: reading the style instead reports a suggestion to change nine properties where a person asked for one, because the style is the style as it would be *after* accepting. |
 | A direct formatting change over a pending suggested formatting change applies normally | Refuted, then only half-explained. Verified live 2026-09-12: suggesting bold and then setting bold directly leaves the run unbolded, and suggesting alignment `CENTER` then setting `CENTER` directly leaves the paragraph unaligned — the batch is accepted and its reply is empty. This, not the suggested insertion the issue blamed, is what made step 3 of #46 look like a no-op: it was step 2 having succeeded. But the rule is not "the same property": a font size suggested at 20pt and then set directly to 20pt *does* land, and an alignment set to a value the suggestion does not name lands too. A suggested insertion turned out to be irrelevant — a direct restyling of one applies whether the range covers the inserted run exactly, part of it, or straddles it and real text. | `guardRestyle` in `internal/plan` **warns** and names the suggestion and the property, in direct mode only. Not a refusal: the observed rule is inconsistent, so refusing would block writes that work. What the person needs either way is the thing `ops_applied` cannot tell them — that a pending suggestion is sitting on the property they just set. Worth reporting upstream; left open in §17. |
 | A comment beside a version keeps it pinned (the fix after the cosign 3 failure) | Refuted twice over: this repository had `goreleaser-action` pinned by SHA and asked for `~> v2`, and a sibling narrowed the same value to `~> v2.18.0` and recorded that in its evidence log **as the fix**, with a comment saying which half of the pin mattered. A `~>` value resolves to the highest match, so both still floated | The `pins` gate in `scripts/gates`: every action a full commit SHA, every tool version exactly one version, and a failure when it finds no workflows or no versions at all. Verified against `~> v2`, `~> v2.18.0`, `latest` and `v2`. A rule a comment cannot hold is a rule that needs a test. |
@@ -1025,10 +1025,10 @@ checked rather than assumed.
 | Resource templates with a shared prefix shadow each other (my worry) | Refuted in go-sdk v1.7.0: a template matches through an anchored RFC 6570 regexp in which `{var}` excludes `/`, so `gdocs://{document}` does not match `gdocs://id/outline`; an unmatched URI is resource-not-found (code -32602 since SEP-2164) | Three templates registered side by side; handlers parse the URI themselves. |
 | Pinning `shell: bash` on the steps that need it fixes the Windows runner (applied 2026-09-05, after PowerShell turned `-coverprofile=cov.out` into a file called `cov`) | Incomplete, found 2026-09-06: a sibling repository took the coverage half of that finding and skipped the shell half, reasoning that a shell fix applies to a shell gate and its own gate was Go. Its Windows job then failed with `open cov.out: The system cannot find the file specified` — the mangling is on the `run` line, not on the gate. Verified against GitHub's workflow-syntax reference: `defaults.run` applies to every `run` step in the workflow, a job-level block overrides it and a step's own `shell` overrides both; none of them reach a `uses:` step; and an explicit bash runs as `bash --noprofile --norc -eo pipefail {0}` where the implicit non-Windows default is `bash -e {0}`, so pinning it also turns `pipefail` on for Linux and macOS | `defaults: run: shell: bash` at workflow level in all three workflows rather than per step: the runner hands every `run` block to a shell, so this is not a property of steps that look shell-ish, and a default set at that level is inherited by a job somebody adds later. `TestWorkflowsPinTheShell` asserts the block in every workflow and asserts a floor on how many files it read, because the block is unforgettable inside a file and entirely forgettable in the next one. A matrix job whose work happens inside a `uses:` step is outside what any of this promises. |
 | The pins check covers every tool a wrapper installs, because `versionKeys` names them | Refuted 2026-09-06 while checking whether anything was out of date: the list carried `gitleaks-version`, which is not an input `gitleaks-action` has ever had — it reads `GITLEAKS_VERSION` from the environment instead. The key had never matched a line, so gitleaks was the one wrapper-installed tool the check did not cover, and the list read as though it did. The action's README settles the smaller question: its default is "a hard-coded version number" rather than `latest`, so the SHA did already pin the scanner — this is a hole in the *check*, not a floating dependency like the cosign one | `GITLEAKS_VERSION: "8.30.1"` named in `ci.yml` so which scanner ran is a line in the workflow rather than a constant inside a five-megabyte bundle, and the key corrected in `versionKeys`, which now matches five versions rather than four. The floor counts what was found rather than trusting the list, which is the only reason this was visible at all. |
-| Redacting a transcript by shape covers what needs covering, and a hand-written table of rendered lines is a fair test of it | Refuted twice on 2026-09-06. First on scope: an id, a URL and an address have a shape, but a person's name has none, and `userLabel` renders an owner as `Name <address>` into `get_document`, `list_revisions` and `search_documents` — so the transcript carried the signed-in account's own name on every run. Names can only be caught by **position**, which works here because this project's own renderers wrote every one of them. Then on the test: the table of positions was typed rather than taken from the renderers, and had already drifted — it asserted that a comment line's trailing timestamp survives, when `threadLine` always appends the quote and body, so the rule preserving that timestamp could never fire on real output, and `list_suggestions` was a fifth position the redactor's own comment did not name | Five positions, each case in `internal/redact/redact_test.go` taken from the renderer's format string. A person is redacted to end of line and the tail goes with them — a display name has no reliable terminator, and stopping at the first `(` to save a timestamp left the organisation in `Ann Petersen (Acme Corp)`. That cost is asserted in a test of its own rather than left as a remark. The redactor moved to a file with no build tag so `make check` runs its tests; the coverage exemption that hid it is gone, and an exemption naming a package `go list` does not return is now a test failure — which is how the stale `internal/evals` entry beside it was found. |
+| Redacting a transcript by shape covers what needs covering, and a hand-written table of rendered lines is a fair test of it | Refuted twice on 2026-09-06. First on scope: an id, a URL and an address have a shape, but a person's name has none, and `userLabel` renders an owner as `Name <address>` into `get_document`, `list_revisions` and `search_documents` — so the transcript carried the signed-in account's own name on every run. Names can only be caught by **position**, which works here because this project's own renderers wrote every one of them. Then on the test: the table of positions was typed rather than taken from the renderers, and had already drifted — it asserted that a comment line's trailing timestamp survives, when `threadLine` always appends the quote and body, so the rule preserving that timestamp could never fire on real output, and `list_suggestions` was a fifth position the redactor's own comment did not name | Five positions, each case in `internal/redact/redact_test.go` taken from the renderer's format string. A person is redacted to end of line and the tail goes with them — a display name has no reliable terminator, and stopping at the first `(` to save a timestamp left the organization in `Ann Petersen (Acme Corp)`. That cost is asserted in a test of its own rather than left as a remark. The redactor moved to a file with no build tag so `make check` runs its tests; the coverage exemption that hid it is gone, and an exemption naming a package `go list` does not return is now a test failure — which is how the stale `internal/evals` entry beside it was found. |
 | A gate over the repository sees the repository | Refuted 2026-09-06: `leakcheck` enumerated with `git ls-files`, which lists the index, so a file that existed but had never been staged was outside the scan entirely. A working tree carrying an address at a real domain passed `make check`; the same file failed the moment it was staged. The gate's own name says *committed*, and the thing it needs to catch is the file about to be. The same read also skipped rather than failed when `git ls-files` errored | `--cached --others --exclude-standard`, so the scan covers what the next `git add -A` would sweep in, and a failure to list is fatal. Two more gates now hold the redactor's funnel, which was true only by habit: `TestDriversDoNotPrint` walks the syntax of both driver packages and refuses `fmt.Print*`, and `TestEveryPlaceAPersonIsWrittenIsKnown` counts the person-writing sites in the renderers, so a new one fails the build rather than quietly reaching a pasted transcript. Both were watched to fail before being trusted. |
 | The identifier scan reads every file it enumerates | Refuted 2026-09-06, an hour after the row above: it enumerated correctly and then skipped any file holding a NUL byte, because the rules are regexes over text. So an 8 MB `gates` binary — `go build ./scripts/gates` drops one at the root under the directory's name, and `git add -A` swept it in — passed the gate, `make check` and eight green CI checks, carrying 66 `/home/mark/...` paths because it was built without `-trimpath`. The diff stat was the only witness. The history scan skipped it for the same reason, so neither half could see it. A sibling has three of them on a public `main`, 18 MiB packed against 447 KiB for all the source | The scan says what it can about a file it cannot read: `leaks` refuses a binary that starts with an executable's magic number (ELF, PE, Mach-O, fat Mach-O) or exceeds a megabyte, and it refuses it while the file is still untracked, so it fails before `git add -A` can sweep it in. Watched against a real `go build` output at the root, and watched to pass with the rule removed. Deliberately not overridable by a marker comment: a binary cannot carry one, and the way past should be an edit somebody reviews |
 | A check written to catch a hand-maintained list going stale is itself safe from that | Refuted three times in one change, 2026-09-06. The redaction gates were reviewed and each had grown its own typed list: the sources of tool text named four functions and missed `okStruct` and all six of the eval harness's, so the rule was inert over the package its own comment claimed to cover; the person-field census said `Email` where the Drive wire type says `EmailAddress`, so the four reads inside `userLabel` — the one function that renders an address, and the function the sibling assertion exists to guard — were invisible to it; and the driver directories were two, while a third build-tagged driver printed a document URL outside them. Two of the three had drifted before the commit landed | Sources of tool text are the transitive closure of whatever reaches the SDK's `CallTool`; person fields are read from the wire and model type declarations, with the derivation itself asserted to contain `EmailAddress` and `Author`; the coverage floor derives its zero-statement exemptions from `go list` so two hand entries deleted themselves. A closure over *assignment* was tried for the person fields and rejected — it propagated through names like `User` until it counted fifteen hundred reads, which is recorded here because the failed attempt is the part that transfers. |
-| `changelog.disable` is how you stop goreleaser inventing a commit list when you pass your own `--release-notes`, and a `release.footer` will still wrap it | Half refuted, 2026-09-13, and the half that was wrong was wrong in a way a summary of the documentation would never have caught — it took reading goreleaser v2.18.1. **`changelog.disable` is fatal here**: it is evaluated in the changelog pipe's `Skip`, which runs before `Run`, so `ctx.ReleaseNotes` is never assigned and the file named by `--release-notes` is never opened. The body collapses to header plus footer. `google-chat-mcp` carries `disable: true` **and** passes `--release-notes` in the same workflow, and its release page is a footer with nothing above it — the bug shipped and nobody read the page. **The footer half was the opposite of what was first written here**: `internal/pipe/release/body.go` renders `{{ Header }}{{ ReleaseNotes }}{{ Footer }}` from `Config.Release.Header` and `Config.Release.Footer`, on every path, `--release-notes` included. The early return in the changelog pipe skips only `ctx.ReleaseFooterFile`/`ReleaseFooterTmpl`, which are the `--release-footer` *flags* — a different pair with confusingly similar names, and the reason the first reading of this went the wrong way | `gates release-notes` prints the `CHANGELOG.md` section for the tag and nothing else — the sibling servers' command, adopted rather than reinvented, after a separate `scripts/relnotes` binary had been built here and thrown away for being a fifth answer to a solved question. The footer stays in `.goreleaser.yaml` where it works, one shared wording per server. The `changelog:` block is deleted rather than disabled. A tag whose section is missing or empty fails the release rather than publishing silence, asserted in `scripts/gates`, along with the link-footer stop. The lesson worth keeping is not about goreleaser: a documentation summary said header and footer were "reasonable to infer" as composable and the source said one of them is not, so the config was briefly built on the inference — verify at the source, and prefer the sibling's *observed behaviour* over any reading, because chat's empty release page was the evidence that settled it |
-| The sibling with the tidiest README is the one to copy | Half refuted, 2026-09-13. `google-chat-mcp` has the best *skeleton* — the shortest intro and the only correct tail, `Security → Code of conduct → License`, each a line linking its own file, License last as the standard-readme spec requires — and it is the one repository of six holding every file GitHub's community profile names. But measured against GitHub's own "About READMEs", it answers three of the five questions it lists and misses two that a sibling already answered: *why the project is useful* (docs' `Why another Google Docs MCP`) and *where users can get help* (docs' `Reporting a problem`). standard-readme also requires a `Contributing` section, which chat buries inside `Development`, and asks for a description under 120 characters, which all six exceeded — 152 to 273 | One skeleton across all six repositories, taken from chat's shape and completed from the sources rather than from any one sibling: short description under 120 characters, then `Why`, `Install`, `Set up`, `Connect a client`, `Tools`, `Safety`, `How it works`, `Getting help`, `Versioning`, `Development`, `Documentation`, `Contributing`, `Security`, `Code of conduct`, `License`. No table of contents: standard-readme asks for one over 100 lines, and GitHub now renders an outline menu from the headings, so a hand-maintained copy of the heading list is a fact that can go stale for no gain. `Licence` becomes `License`, which names the `LICENSE` file and the `Apache-2.0` identifier; British spelling stays in the prose |
+| `changelog.disable` is how you stop goreleaser inventing a commit list when you pass your own `--release-notes`, and a `release.footer` will still wrap it | Half refuted, 2026-09-13, and the half that was wrong was wrong in a way a summary of the documentation would never have caught — it took reading goreleaser v2.18.1. **`changelog.disable` is fatal here**: it is evaluated in the changelog pipe's `Skip`, which runs before `Run`, so `ctx.ReleaseNotes` is never assigned and the file named by `--release-notes` is never opened. The body collapses to header plus footer. `google-chat-mcp` carries `disable: true` **and** passes `--release-notes` in the same workflow, and its release page is a footer with nothing above it — the bug shipped and nobody read the page. **The footer half was the opposite of what was first written here**: `internal/pipe/release/body.go` renders `{{ Header }}{{ ReleaseNotes }}{{ Footer }}` from `Config.Release.Header` and `Config.Release.Footer`, on every path, `--release-notes` included. The early return in the changelog pipe skips only `ctx.ReleaseFooterFile`/`ReleaseFooterTmpl`, which are the `--release-footer` *flags* — a different pair with confusingly similar names, and the reason the first reading of this went the wrong way | `gates release-notes` prints the `CHANGELOG.md` section for the tag and nothing else — the sibling servers' command, adopted rather than reinvented, after a separate `scripts/relnotes` binary had been built here and thrown away for being a fifth answer to a solved question. The footer stays in `.goreleaser.yaml` where it works, one shared wording per server. The `changelog:` block is deleted rather than disabled. A tag whose section is missing or empty fails the release rather than publishing silence, asserted in `scripts/gates`, along with the link-footer stop. The lesson worth keeping is not about goreleaser: a documentation summary said header and footer were "reasonable to infer" as composable and the source said one of them is not, so the config was briefly built on the inference — verify at the source, and prefer the sibling's *observed behavior* over any reading, because chat's empty release page was the evidence that settled it |
+| The sibling with the tidiest README is the one to copy | Half refuted, 2026-09-13. `google-chat-mcp` has the best *skeleton* — the shortest intro and the only correct tail, `Security → Code of conduct → License`, each a line linking its own file, License last as the standard-readme spec requires — and it is the one repository of six holding every file GitHub's community profile names. But measured against GitHub's own "About READMEs", it answers three of the five questions it lists and misses two that a sibling already answered: *why the project is useful* (docs' `Why another Google Docs MCP`) and *where users can get help* (docs' `Reporting a problem`). standard-readme also requires a `Contributing` section, which chat buries inside `Development`, and asks for a description under 120 characters, which all six exceeded — 152 to 273 | One skeleton across all six repositories, taken from chat's shape and completed from the sources rather than from any one sibling: short description under 120 characters, then `Why`, `Install`, `Set up`, `Connect a client`, `Tools`, `Safety`, `How it works`, `Getting help`, `Versioning`, `Development`, `Documentation`, `Contributing`, `Security`, `Code of conduct`, `License`. No table of contents: standard-readme asks for one over 100 lines, and GitHub now renders an outline menu from the headings, so a hand-maintained copy of the heading list is a fact that can go stale for no gain. `Licence` becomes `License`, which names the `LICENSE` file and the `Apache-2.0` identifier. Prose was British until 2026-09-25, when every repository moved to American English |
 | The bundle manifest's `$schema` is pinned because it names a versioned file | **Half refuted, 2026-09-17, against the published schemas.** The filename pins the FORMAT; the REF pins the bytes, and this one named `main` — a branch upstream can amend under a document that claims to conform to it. Fetched `mcpb-manifest-v0.2`, `v0.3` and `v0.4`, which are served, and `v0.5`, which is not; the copy at tag `v2.1.2` is byte-identical to `main` today, which is the argument for the tag rather than against it. 0.4 is not adopted: its only difference from 0.3 is a `uv` value in the `server.type` enum, and this bundle's type is `binary` | `$schema` names the tag, and the gate holds the whole URL — upstream's path at a full release tag or a commit SHA. An allow-list, because refusing the branch NAMES passes a partial tag like `v2.1`, which upstream re-points as it releases. Plus a floor under `manifest_version`, which is the claim the others cannot make: 0.2 beside a 0.2 schema is stale and self-consistent |

@@ -261,7 +261,7 @@ type DocumentStyle struct {
 	UseCustomHeaderFooterMgns bool        `json:"useCustomHeaderFooterMargins,omitempty"`
 }
 
-// Background is a solid page colour.
+// Background is a solid page color.
 type Background struct {
 	Color *OptionalColor `json:"color,omitempty"`
 }
@@ -454,12 +454,12 @@ type WeightedFontFamily struct {
 	Weight     int64  `json:"weight,omitempty"`
 }
 
-// OptionalColor wraps a colour that may be unset.
+// OptionalColor wraps a color that may be unset.
 type OptionalColor struct {
 	Color *Color `json:"color,omitempty"`
 }
 
-// Color is an RGB colour.
+// Color is an RGB color.
 type Color struct {
 	RgbColor *RgbColor `json:"rgbColor,omitempty"`
 }

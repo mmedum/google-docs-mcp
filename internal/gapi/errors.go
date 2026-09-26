@@ -74,7 +74,7 @@ func (e *APIError) Error() string {
 // off can help — the per-minute limits refill, the daily project quota
 // does not.
 //
-// Keys are normalised by reasonKey. The Drive guide spells these
+// Keys are normalized by reasonKey. The Drive guide spells these
 // camelCase in the legacy `error.errors[]` envelope, while a
 // google.rpc.ErrorInfo detail spells the same condition UPPER_SNAKE, and
 // parseAPIError prefers the detail — so a lookup on the literal string

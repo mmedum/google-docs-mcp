@@ -40,7 +40,7 @@ func TestPageRequest(t *testing.T) {
 		t.Errorf("margin left = %v", m)
 	}
 	// DocumentStyle.background wraps an OptionalColor, which itself wraps
-	// the colour: background.color.color.rgbColor.
+	// the color: background.color.color.rgbColor.
 	bg := style["background"].(map[string]any)["color"].(map[string]any)["color"].(map[string]any)
 	if _, ok := bg["rgbColor"]; !ok {
 		t.Errorf("background = %v", style["background"])
@@ -57,7 +57,7 @@ func TestPageAndSectionValidation(t *testing.T) {
 		{"empty page", "", func() error { return PageSpec{}.Validate() }},
 		{"half a page size", "set together", func() error { return PageSpec{WidthPt: 595}.Validate() }},
 		{"huge page", "0 and 4000", func() error { return PageSpec{WidthPt: big, HeightPt: big}.Validate() }},
-		{"bad colour", "#rrggbb", func() error { return PageSpec{Background: "blue"}.Validate() }},
+		{"bad color", "#rrggbb", func() error { return PageSpec{Background: "blue"}.Validate() }},
 		{"negative margin", "0 and 720", func() error {
 			return PageSpec{PageMargins: PageMargins{TopPt: floatp(-1)}}.Validate()
 		}},

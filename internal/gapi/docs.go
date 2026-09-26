@@ -61,7 +61,7 @@ type WriteControl struct {
 }
 
 // BatchUpdateRequest is the body of documents.batchUpdate. Requests are
-// pre-marshalled so GA and preview request types share one path.
+// pre-marshaled so GA and preview request types share one path.
 type BatchUpdateRequest struct {
 	Requests     []json.RawMessage `json:"requests"`
 	WriteControl *WriteControl     `json:"writeControl,omitempty"`

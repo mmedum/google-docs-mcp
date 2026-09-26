@@ -26,7 +26,7 @@ type LayoutOpInput struct {
 	MarginRightPt         *float64 `json:"margin_right_pt,omitempty" jsonschema:"page and section: right margin in points"`
 	MarginHeaderPt        *float64 `json:"margin_header_pt,omitempty" jsonschema:"page: distance from the top of the page to the header"`
 	MarginFooterPt        *float64 `json:"margin_footer_pt,omitempty" jsonschema:"page: distance from the bottom of the page to the footer"`
-	Background            string   `json:"background,omitempty" jsonschema:"page: page colour as #rrggbb, or none"`
+	Background            string   `json:"background,omitempty" jsonschema:"page: page color as #rrggbb, or none"`
 	Landscape             *bool    `json:"landscape,omitempty" jsonschema:"page and section: turn the page on its side"`
 	PageNumberStart       *int     `json:"page_number_start,omitempty" jsonschema:"page and section: the number the first page carries"`
 	FirstPageHeaderFooter *bool    `json:"first_page_header_footer,omitempty" jsonschema:"page and section: give the first page its own header and footer"`
@@ -46,8 +46,8 @@ type LayoutOpInput struct {
 	SmallCaps           *bool    `json:"small_caps,omitempty"`
 	Font                string   `json:"font,omitempty" jsonschema:"named_style: font family name, or none to inherit"`
 	SizePt              float64  `json:"size_pt,omitempty" jsonschema:"named_style: font size in points"`
-	Color               string   `json:"color,omitempty" jsonschema:"named_style: text colour as #rrggbb, or none"`
-	TextBackground      string   `json:"text_background,omitempty" jsonschema:"named_style: highlight colour as #rrggbb, or none"`
+	Color               string   `json:"color,omitempty" jsonschema:"named_style: text color as #rrggbb, or none"`
+	TextBackground      string   `json:"text_background,omitempty" jsonschema:"named_style: highlight color as #rrggbb, or none"`
 	Alignment           string   `json:"alignment,omitempty" jsonschema:"named_style: START, CENTER, END, JUSTIFIED"`
 	LineSpacing         float64  `json:"line_spacing,omitempty" jsonschema:"named_style: percent, 100 = single"`
 	SpaceAbovePt        *float64 `json:"space_above_pt,omitempty"`
@@ -62,7 +62,7 @@ type LayoutOpInput struct {
 	KeepLinesTogether   *bool    `json:"keep_lines_together,omitempty"`
 	AvoidWidowAndOrphan *bool    `json:"avoid_widow_and_orphan,omitempty"`
 	Shading             string   `json:"shading,omitempty" jsonschema:"named_style: paragraph background as #rrggbb, or none"`
-	Border              string   `json:"border,omitempty" jsonschema:"named_style: all four edges as a width, dash style and colour in any order, e.g. 1pt solid #cccccc; none removes them"`
+	Border              string   `json:"border,omitempty" jsonschema:"named_style: all four edges as a width, dash style and color in any order, e.g. 1pt solid #cccccc; none removes them"`
 	BorderTop           string   `json:"border_top,omitempty"`
 	BorderBottom        string   `json:"border_bottom,omitempty"`
 	BorderLeft          string   `json:"border_left,omitempty"`
@@ -143,7 +143,7 @@ func registerLayout(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "layout_document",
 		Description: "Change how a Google Doc is laid out rather than what it says. Ops: page (page size, margins, " +
-			"background colour, landscape, where page numbering starts, whether the first and even pages get their own " +
+			"background color, landscape, where page numbering starts, whether the first and even pages get their own " +
 			"header and footer), section (the same for one section, plus 1-3 columns with an optional separating line " +
 			"and the gap between them), section_break (start a new section at a location, continuous or on the next " +
 			"page), and named_style (redefine NORMAL_TEXT, TITLE, SUBTITLE or HEADING_1 … HEADING_6 for the whole tab, " +

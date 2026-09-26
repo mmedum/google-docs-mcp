@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-26
+
 ### Added
 
 - `make mcpb` and the registry gate validate their documents against the

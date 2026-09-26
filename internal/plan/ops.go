@@ -477,7 +477,7 @@ func (op *Op) sets() []string {
 // guardRestyle warns when a direct formatting change touches a property
 // a pending suggestion on the same range already sets.
 //
-// A warning rather than a refusal, because Google's behaviour here is
+// A warning rather than a refusal, because Google's behavior here is
 // not one rule. Verified live on 2026-09-12: suggesting bold and then
 // applying bold directly leaves the run unbolded, and the same holds for
 // a paragraph alignment suggested and then applied with the same value —
@@ -867,7 +867,7 @@ func describeText(s TextStyleSpec) string {
 		parts = append(parts, fmt.Sprintf("%gpt", s.SizePt))
 	}
 	if s.Foreground != "" {
-		parts = append(parts, "colour "+s.Foreground)
+		parts = append(parts, "color "+s.Foreground)
 	}
 	if s.Background != "" {
 		parts = append(parts, "background "+s.Background)

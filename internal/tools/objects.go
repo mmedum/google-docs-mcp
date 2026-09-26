@@ -16,7 +16,7 @@ type ObjectInput struct {
 	Action         string        `json:"action,omitempty" jsonschema:"insert (default), replace to swap an image's source in place, or delete to remove an object"`
 	Kind           string        `json:"kind,omitempty" jsonschema:"insert: image, person, rich_link, or date"`
 	Object         string        `json:"object,omitempty" jsonschema:"replace and delete: the object's id as a read shows it, e.g. kix.img1"`
-	Crop           bool          `json:"crop,omitempty" jsonschema:"replace: centre-crop the new image into the old one's frame instead of resizing the frame to it"`
+	Crop           bool          `json:"crop,omitempty" jsonschema:"replace: center-crop the new image into the old one's frame instead of resizing the frame to it"`
 	Tab            string        `json:"tab,omitempty" jsonschema:"replace and delete: tab id, title or number; default the first tab"`
 	Location       LocationInput `json:"location,omitempty" jsonschema:"insert: where the object goes — after or before a block, start or end of a paragraph, or end of the body"`
 	URL            string        `json:"url,omitempty" jsonschema:"image: a publicly fetchable PNG, JPEG or GIF URL (under 50 MB, 25 megapixels); rich_link: the URL of a Google Drive file, Calendar event or YouTube video"`
@@ -42,7 +42,7 @@ func registerObjects(s *mcp.Server, d Deps) {
 			"image from a public URL (optionally sized in points), a person chip (email), a rich-link chip to a Google " +
 			"resource (Drive file, Calendar event, YouTube video), or a date chip at a location; objects go inline in a " +
 			"paragraph, so use edit_document for the surrounding text. action replace swaps an existing image's source " +
-			"while it keeps its place and size (crop centre-crops the new image instead of resizing the frame). action " +
+			"while it keeps its place and size (crop center-crops the new image instead of resizing the frame). action " +
 			"delete removes an object, including a floating image, which no text range covers and no edit_document " +
 			"delete can reach. Both name the object by the id a read shows, like kix.img1. Same mode, dry_run, " +
 			"expect_revision and force semantics as edit_document; deleting an inline object that also carries a " +

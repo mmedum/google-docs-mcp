@@ -242,7 +242,7 @@ func TestCommentModeProposals(t *testing.T) {
 		"Proposed change to “old words”:\n\nnew words",
 		"Proposed deletion of “gone”.",
 		"Proposed insertion at after p4:\n\nadded",
-		"Proposed formatting for “word”: bold, not italic, font Arial, 11pt, colour #ff0000, link https://x.",
+		"Proposed formatting for “word”: bold, not italic, font Arial, 11pt, color #ff0000, link https://x.",
 		"Proposed paragraph style for “para”: heading 2, aligned center, line spacing 150%, indent 36pt, keep with next.",
 		"Proposed: make this a numbered list.",
 		"Proposed: replace every “a” with “b” in this tab.",

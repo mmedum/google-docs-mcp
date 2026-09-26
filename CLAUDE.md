@@ -12,7 +12,7 @@ tool surface, the addressing model, or the write path.
 
 ## Hard rules
 
-1. **Nothing internal, ever.** No organisation names, document ids or
+1. **Nothing internal, ever.** No organization names, document ids or
    URLs, account emails, Cloud project ids, OAuth client ids or secrets,
    and no content from real documents anywhere in the repository, in
    fixtures, in commit messages, or in logs. Fixtures are synthetic.
@@ -82,9 +82,9 @@ tool surface, the addressing model, or the write path.
 
 `make check` (gofmt; four vet passes — untagged plus `integration`,
 `live` and `evals`; golangci-lint;
-race tests with the 80% floor; govulncheck; a licence check; a schema
+race tests with the 80% floor; govulncheck; a license check; a schema
 diff against the last tag; the stdio smoke test; and the staleness check
-of README/docs/CHANGELOG against the code) plus tests for new behaviour, `/simplify` and
+of README/docs/CHANGELOG against the code) plus tests for new behavior, `/simplify` and
 `/code-review high` on the changed files with findings resolved or
 explained, and a look at `--dump-schemas` for breaking changes. Commit
 at each milestone with a message that says what and why. Phases end

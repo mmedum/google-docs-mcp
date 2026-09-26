@@ -52,7 +52,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 // dispatch can be exercised by a test instead of only by a person at a
 // terminal. main itself calls os.Exit, which no test survives — which is
 // why the unknown-command guard below first arrived with a test of an
-// extracted predicate rather than of its behaviour, and why deleting the
+// extracted predicate rather than of its behavior, and why deleting the
 // guard left every check green. The sibling servers were already shaped
 // this way, and their tests caught exactly that mutation.
 func run(args []string, stdout, stderr io.Writer) int {
@@ -71,7 +71,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 
-		// Anything the switch did not recognise, and that is not a flag,
+		// Anything the switch did not recognize, and that is not a flag,
 		// was meant to be a subcommand. Falling through starts the server
 		// instead, which looks like a hang: it blocks on stdin and says
 		// nothing. The caller is then handed exit 0 whether it meant to

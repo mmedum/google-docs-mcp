@@ -20,13 +20,13 @@ const statusSchemaVersion = 1
 // parses.
 //
 // One collector, two renderers, because the alternative drifts. A script
-// that wants to know whether this server is authorised otherwise has to
+// that wants to know whether this server is authorized otherwise has to
 // read the text, and the text is written for a person: the field that
 // answers the question is a label with a value beside it, and a label is
 // free to be reworded in any release. This repository has already done
 // that to somebody — `refresh token:` became `token store:` under a
 // release, and a check written against the old label started reading
-// "not authorised" for an account that was fine.
+// "not authorized" for an account that was fine.
 //
 // Nothing here contacts Google. It reports what is configured and where
 // the token is, which is the question a launcher asks before starting
@@ -54,7 +54,7 @@ type statusCredentials struct {
 	// Resolved is the one field worth branching on: true means a refresh
 	// token was found, false means every tool will answer [auth] until
 	// `login` succeeds. It is always present, so an absent or
-	// unparseable object is distinguishable from an unauthorised one —
+	// unparseable object is distinguishable from an unauthorized one —
 	// which a grep for a label in the text output cannot do.
 	Resolved bool `json:"resolved"`
 	// TokenStore is where the token came from — "keyring", "file" or
@@ -173,7 +173,7 @@ func (r statusReport) writeJSON(w io.Writer) error {
 
 // orNil turns an unset string into the JSON null that says so. An empty
 // string would be a value, and a caller cannot tell a value it does not
-// recognise from one that is not there.
+// recognize from one that is not there.
 func orNil(s string) *string {
 	if s == "" {
 		return nil

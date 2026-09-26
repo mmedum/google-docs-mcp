@@ -33,6 +33,13 @@ and new required fields are breaking; the schema diff in CI flags them.
   and never rewrites anything, because a refresh is a decision somebody
   makes after reading what changed.
 
+### Changed
+
+- Tool descriptions, error messages and docs use American spelling:
+  "organization", "color", "canceled", "license". Tool names, input
+  and output fields and enum values are unchanged, so no caller needs to
+  act.
+
 ## [1.3.1] - 2026-09-18
 
 ### Fixed
@@ -150,7 +157,7 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ### Added
 - `status --json` prints the same state as one JSON object on stdout, so
-  a script can read whether this server is authorised instead of parsing
+  a script can read whether this server is authorized instead of parsing
   the text written for a person. `credentials.resolved` is the field to
   branch on; `schema_version` changes only when a field is removed or its
   meaning changes, never when one is added.
@@ -159,8 +166,8 @@ and new required fields are breaking; the schema diff in CI flags them.
   where it landed first, and the reason is a fault this repository has
   already caused: a label moved under a release — `refresh token:` became
   `token store:` — and a check written against the old one started
-  reading "not authorised" for an account that was fine. It fails
-  silently, and the usual response to "not authorised" is to run `login`,
+  reading "not authorized" for an account that was fine. It fails
+  silently, and the usual response to "not authorized" is to run `login`,
   which asks a person for consent they already gave.
 
   One collector, two renderers, so the two cannot drift: the text output
@@ -262,9 +269,9 @@ and new required fields are breaking; the schema diff in CI flags them.
   survives, so nothing about the dispatch could be tested — and the
   unknown-command guard added in the previous change proved it: deleting
   the guard from `main` left every check green, because the test that
-  came with it tested an extracted predicate rather than the behaviour.
-  A test that cannot fail when the behaviour is removed is not holding
-  the behaviour, which is the fault this repository's evidence log
+  came with it tested an extracted predicate rather than the behavior.
+  A test that cannot fail when the behavior is removed is not holding
+  the behavior, which is the fault this repository's evidence log
   already records twice under a different name.
 
   The guard is now inline, as it is in the siblings, the predicate helper
@@ -346,7 +353,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   Writing it found one: `s.t.Fatalf("harness step %s failed: %s", name,
   b.String())`, where `b` held the tool response — document text, logged
   whole, at exactly the moment somebody pastes the log into an issue.
-  Every neighbouring line went through `clip`. Fixed, and the gate now
+  Every neighboring line went through `clip`. Fixed, and the gate now
   refuses it: putting the call back fails, a new log line carrying the
   same value fails, and pointing the gate at a directory with no drivers
   in it fails rather than reporting nothing to do.
@@ -386,7 +393,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   five servers side by side.
   The release stamp now carries the tag itself rather than goreleaser's
   v-stripped form, so the two sources agree at the source; the
-  normalisation stays for a version passed by hand to `make`.
+  normalization stays for a version passed by hand to `make`.
 - `status` prints the same lines, in the same order, with the same
   labels as the three sibling servers, once a profile is configured (the
   not-yet-signed-in message still differs between them). They had drifted into four shapes
@@ -397,7 +404,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   removed, the domain kept. The domain is the half a diagnosis uses —
   shared drives are a Workspace feature and a personal account cannot
   create one, so `@gmail.com` and a Workspace domain are two different
-  sets of behaviour to explain — while the local part answers nothing.
+  sets of behavior to explain — while the local part answers nothing.
   It is never an input to any command here, and this output is what the
   issue form asks people to paste. One server showed it in full, one
   masked the domain as well (which hid the useful half), and two sat in
@@ -437,11 +444,11 @@ and new required fields are breaking; the schema diff in CI flags them.
   method list: the published schemas and properties in
   `testdata/api-fields.json`, one hand-written row per exception in
   `testdata/api-fields.tsv` (`out`, `extra` for a Developer Preview field
-  public discovery does not publish, `alias` for a schema modelled under
+  public discovery does not publish, `alias` for a schema modeled under
   another name, `local` for a struct that models no published schema at
-  all), and the modelled side read out of `internal/gdocs` with `go/ast`,
+  all), and the modeled side read out of `internal/gdocs` with `go/ast`,
   promoting the tags of embedded structs. Three directions fail the
-  build: a published property nothing models, a modelled field nothing
+  build: a published property nothing models, a modeled field nothing
   publishes, and a struct that matches no schema and has no row. The
   third is what makes the set being compared part of the rule — rename
   `gdocs.SectionStyle` and the gate names the renamed type, where a
@@ -469,7 +476,7 @@ and new required fields are breaking; the schema diff in CI flags them.
 ### Changed
 - `read_document format: raw` returns the bytes Google sent, not a
   re-encoding of this server's wire types. Its schema promises "Docs API
-  JSON", and marshalling the types could only ever return the fields they
+  JSON", and marshaling the types could only ever return the fields they
   model — so the one read whose job is to show what the API said was the
   least faithful read on the server. It dropped 39 published fields
   across nine types (`SectionStyle` alone missing all four margins,
@@ -509,7 +516,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   had no field for it, so every read reported the document as holding no
   suggestion: `list_suggestions` answered `0 pending suggestion(s)` in
   the same session where the write had just returned a suggestion id,
-  `read_document format: raw` dropped the field while re-marshalling our
+  `read_document format: raw` dropped the field while re-marshaling our
   own wire types, and `include_suggestions` and `with_styles` showed
   nothing. Reported as a silent write failure in #46; the write had
   worked all along, and the reading of it was what lied.
@@ -672,7 +679,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   itself passed — in an unsorted literal, which is every case that would
   actually happen. It sorts a copy first, and the test fails against the
   old version.
-- The README carries badges — CI, latest release, Go reference, licence —
+- The README carries badges — CI, latest release, Go reference, license —
   and no longer states a version in prose. The status line said v0.5.0
   five releases after v0.5.0, and the first fix was a gate to keep the
   copy correct; the better one was to delete the copy. A release badge
@@ -685,7 +692,7 @@ and new required fields are breaking; the schema diff in CI flags them.
 - Documentation corrections the gate could not see: `CLAUDE.md`'s map of
   where things go named 13 of 20 packages, missing `internal/redact` and
   every gate package; the definition of done described a `make check`
-  without its licence check or schema diff and with one vet pass where
+  without its license check or schema diff and with one vet pass where
   there are four; a 0.9.5 entry named a file that stopped existing inside
   0.9.5; and §16's live-driver step counts predated the run before
   v1.0.0.
@@ -717,7 +724,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   not.
 
 ### Changed
-- 1.0.0 is a promise about compatibility, not new behaviour: no code
+- 1.0.0 is a promise about compatibility, not new behavior: no code
   changed from 0.9.5. The §16 gates that had guarded this version — use
   in anger, and an eval round with another client — are retired in the
   design document with the reasons, rather than left to lapse.
@@ -829,8 +836,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 ## [0.9.4] - 2026-09-05
 
 ### Changed
-- CI no longer cancels a superseded run **on `main`**. Cancelling one on
-  a branch costs nothing, but cancelling on the default branch leaves a
+- CI no longer cancels a superseded run **on `main`**. Canceling one on
+  a branch costs nothing, but canceling on the default branch leaves a
   merged commit with no verdict, and whoever bisects later finds a green
   history with a hole in it.
 - Two gates are Go rather than bash, and have tests of their own. The
@@ -860,7 +867,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   required field would break every existing caller while a refusal cannot
   be skipped by a client in an auto-approve mode.
 - `make check` runs `licenses` and `schema-diff` too. Both were available
-  and neither was in the gate a person actually runs — the licence check
+  and neither was in the gate a person actually runs — the license check
   matters for a binary other people install, and the schema diff only
   fails on breaking changes, so it costs nothing between releases. The
   whole set now takes about fifteen seconds.
@@ -911,7 +918,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   to attach, so the promise is the one that had to become true. Ids are
   gone from every line, the request path logs as `/v1/documents/…/x`,
   and `ShortID` is documented as being for a filename a person has to
-  recognise, never for a log.
+  recognize, never for a log.
 - The test that guaranteed this could not see two of the three leaks: it
   read the server's logger while the service wrote to its own, and it
   searched for the whole id rather than the prefix that was actually
@@ -1020,7 +1027,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   repeated on them, since only 429 and 503 prove nothing was applied.
   The daily project quota classifies the same way but is not retried,
   because backing off does not free it. Both spellings of a reason are
-  recognised — Drive's camelCase `userRateLimitExceeded` and the
+  recognized — Drive's camelCase `userRateLimitExceeded` and the
   UPPER_SNAKE form a `google.rpc.ErrorInfo` detail would carry.
 - A comment could be posted twice. The rule that a write is repeated only
   on 429 or 503 — the answers that prove nothing was applied — was written
@@ -1054,7 +1061,7 @@ and new required fields are breaking; the schema diff in CI flags them.
 - Releases could not publish: signing failed with "create bundle file:
   open : no such file or directory". Pinning the actions moved
   `cosign-installer` to its v4, which installs cosign 3, and cosign 3
-  dropped `--output-signature` and `--output-certificate` in favour of
+  dropped `--output-signature` and `--output-certificate` in favor of
   `--bundle`. The signature is now `checksums.txt.bundle`, carrying
   everything a verifier needs, and the README's `cosign verify-blob`
   matches. The versions those actions install are pinned too — a SHA on
@@ -1172,7 +1179,7 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ### Added
 - `get_document` reports each tab's named style definitions — the font,
-  size, colour, alignment and spacing that `NORMAL_TEXT`, `TITLE`,
+  size, color, alignment and spacing that `NORMAL_TEXT`, `TITLE`,
   `SUBTITLE` and `HEADING_1` … `HEADING_6` give every paragraph carrying
   them — with how many paragraphs of that tab carry each, headers and
   footnotes included, since redefining a style changes the whole tab.
@@ -1412,7 +1419,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   `mode: suggest | direct | comment`, dry runs, revision guards with one
   automatic re-plan, and an overwrite guard that refuses direct deletion
   of ranges holding comments, suggestions, images or footnotes unless
-  forced. Targets are exact text (normalised), stable heading ids,
+  forced. Targets are exact text (normalized), stable heading ids,
   handles checked against the last read, or cells.
 - `find_in_document`, `search_documents`, `create_document`,
   `export_document`, `list_suggestions`, `review_suggestion`.

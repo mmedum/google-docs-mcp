@@ -23,6 +23,8 @@ linters:
     - makezero
     - forbidigo
   settings:
+    misspell:
+      locale: US
     forbidigo:
       analyze-types: true
       forbid:

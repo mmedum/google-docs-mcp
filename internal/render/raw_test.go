@@ -10,11 +10,11 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/render"
 )
 
-// unmodelled is a response carrying fields internal/gdocs does not
+// unmodeled is a response carrying fields internal/gdocs does not
 // model: two the API really publishes and this server really drops
 // (sectionStyle.marginTop, tableRow.tableRowStyle), and one invented, to
 // stand for every field Google adds after this test was written.
-const unmodelled = `{
+const unmodeled = `{
   "documentId": "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX",
   "revisionId": "r",
   "tabs": [{
@@ -57,7 +57,7 @@ const unmodelled = `{
 // field that proved the write had worked.
 func TestRawReturnsTheAPIsBytes(t *testing.T) {
 	var w gdocs.Document
-	if err := json.Unmarshal([]byte(unmodelled), &w); err != nil {
+	if err := json.Unmarshal([]byte(unmodeled), &w); err != nil {
 		t.Fatal(err)
 	}
 	d, err := doc.Parse(&w)
@@ -136,7 +136,7 @@ func TestRawFallsBackToTheWireTypes(t *testing.T) {
 // has always had, now that the strings come from somewhere else.
 func TestRawBudgetCutsAtElementBoundaries(t *testing.T) {
 	var w gdocs.Document
-	if err := json.Unmarshal([]byte(unmodelled), &w); err != nil {
+	if err := json.Unmarshal([]byte(unmodeled), &w); err != nil {
 		t.Fatal(err)
 	}
 	d, err := doc.Parse(&w)

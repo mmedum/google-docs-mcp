@@ -149,7 +149,7 @@ func (s *Service) runRounds(ctx context.Context, req EditRequest, later [][]Edit
 }
 
 // fold merges what a later batch produced into the call's result, apart
-// from the ops it counts and summarises, which each caller folds its own
+// from the ops it counts and summarizes, which each caller folds its own
 // way.
 func fold(dst, src *EditResult) {
 	dst.RevisionID = src.RevisionID

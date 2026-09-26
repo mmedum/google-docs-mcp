@@ -176,7 +176,7 @@ func TestRequestBuilders(t *testing.T) {
 	}
 	fg := ts.body["textStyle"].(map[string]any)["foregroundColor"].(map[string]any)["color"].(map[string]any)["rgbColor"].(map[string]any)
 	if fg["red"] != 1.0 || fg["green"] != nil {
-		t.Fatalf("colour = %v", fg)
+		t.Fatalf("color = %v", fg)
 	}
 	ps := view(t, checks["updateParagraphStyle"])
 	if ps.body["fields"] != "namedStyleType,alignment,lineSpacing,spaceAbove,keepWithNext,pageBreakBefore" {

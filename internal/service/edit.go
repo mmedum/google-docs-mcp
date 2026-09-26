@@ -348,7 +348,7 @@ func (s *Service) mode(m string) (plan.Mode, error) {
 		return plan.Mode(m), nil
 	case plan.ModeSuggest:
 		if !s.opts.Preview {
-			return "", Errorf("unavailable", "suggestion mode needs Developer Preview enrolment (GDOCS_PREVIEW=true); use mode comment or direct")
+			return "", Errorf("unavailable", "suggestion mode needs Developer Preview enrollment (GDOCS_PREVIEW=true); use mode comment or direct")
 		}
 		return plan.ModeSuggest, nil
 	}

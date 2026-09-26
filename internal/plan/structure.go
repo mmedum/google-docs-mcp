@@ -111,7 +111,7 @@ func (s CellStyleSpec) IsZero() bool { return s == CellStyleSpec{} }
 
 var cellAlignments = map[string]bool{"TOP": true, "MIDDLE": true, "BOTTOM": true}
 
-// Validate checks enum and colour values.
+// Validate checks enum and color values.
 func (s CellStyleSpec) Validate() error {
 	if !ValidColor(s.Background) {
 		return fmt.Errorf("background must be #rrggbb or none")
@@ -209,7 +209,7 @@ func UpdateTableRowStyle(table Loc, rows []int, minHeightPt *float64, preventOve
 }
 
 // ReplaceImage swaps an image's source, keeping its place in the text.
-// Crop asks Google to centre-crop the new image into the old one's
+// Crop asks Google to center-crop the new image into the old one's
 // frame instead of resizing the frame to it.
 func ReplaceImage(objectID, uri string, crop bool, tabID string) json.RawMessage {
 	req := map[string]any{"imageObjectId": objectID, "uri": uri}

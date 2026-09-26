@@ -46,7 +46,7 @@ func (r *mdRenderer) render(from, to int) Result {
 		switch {
 		case prev == nil:
 			sep = ""
-		case tightNeighbours(prev, b), prevEmpty:
+		case tightNeighbors(prev, b), prevEmpty:
 			sep = "\n"
 		}
 		prev, prevEmpty = b, chunk == ""
@@ -107,9 +107,9 @@ func listMarker(b *doc.Block) string {
 	return "- "
 }
 
-// tightNeighbours reports whether two blocks belong to the same list run
+// tightNeighbors reports whether two blocks belong to the same list run
 // and should be separated by a single newline.
-func tightNeighbours(a, b *doc.Block) bool {
+func tightNeighbors(a, b *doc.Block) bool {
 	return a.Paragraph != nil && b.Paragraph != nil && a.Paragraph.Bullet != nil && b.Paragraph.Bullet != nil
 }
 

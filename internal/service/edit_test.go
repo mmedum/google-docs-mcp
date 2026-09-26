@@ -82,10 +82,10 @@ func TestResolveTargetText(t *testing.T) {
 	if err != nil || r.Start != 94 || r.End != 106 || r.Text != "Second point" || r.Block.Handle != "p7" || r.IsBlock {
 		t.Fatalf("text target: %+v %v", r, err)
 	}
-	// Normalised quotes and case fallback.
+	// Normalized quotes and case fallback.
 	r, err = svc.ResolveTarget(f, Target{Text: `and "quoted"`})
 	if err != nil || r.Block.Handle != "p13" || r.Text != "and “quoted”" {
-		t.Fatalf("normalised: %+v %v", r, err)
+		t.Fatalf("normalized: %+v %v", r, err)
 	}
 	r, err = svc.ResolveTarget(f, Target{Text: "REVENUE GREW"})
 	if err != nil || r.Start != 29 || r.End != 41 {

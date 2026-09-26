@@ -3,8 +3,8 @@
 # api-fields.json, which `gates api-diff` writes and nobody edits.
 #
 # out	the property is published and this server deliberately does not model it
-# extra	the field is modelled and the public discovery document does not publish it
-# alias	the schema is modelled by the struct the reason names (property is *)
+# extra	the field is modeled and the public discovery document does not publish it
+# alias	the schema is modeled by the struct the reason names (property is *)
 # local	the struct in the FIRST column models no published schema at all (property is *)
 #
 # local is the only verdict whose first column names a Go struct rather
@@ -17,7 +17,7 @@
 # field, the types must carry it, because a person should not be able to
 # set something no read will show them. Twelve SectionStyle fields, a
 # table's column widths and a row's pinned-header flag were all in that
-# state when this gate was written, and all of them are modelled now.
+# state when this gate was written, and all of them are modeled now.
 # What is left below is read-only detail no tool writes.
 #
 # schema	property	verdict	reason
@@ -64,7 +64,7 @@ DocumentStyle	evenPageFooterId	out	as defaultFooterId
 DocumentStyle	documentFormat	out	no tool reads or writes the document's format; format: raw carries it for anyone who needs it
 #
 # Image detail. insert_object sets a URI and a size; it does not crop,
-# rotate or recolour, and no read renders these.
+# rotate or recolor, and no read renders these.
 ImageProperties	angle	out	no tool rotates an image
 ImageProperties	brightness	out	no tool adjusts an image
 ImageProperties	contrast	out	no tool adjusts an image
@@ -87,4 +87,4 @@ NestingLevel	textStyle	out	the glyph's own styling; no read renders it and no to
 #
 # A link to a bookmark. This server models the deprecated bookmarkId,
 # which is what the API still sends, and nothing here creates bookmarks.
-Link	bookmark	out	no tool creates or follows bookmarks; bookmarkId is modelled for the links Google still sends
+Link	bookmark	out	no tool creates or follows bookmarks; bookmarkId is modeled for the links Google still sends

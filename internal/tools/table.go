@@ -46,7 +46,7 @@ type TableOpInput struct {
 	PaddingBottomPt *float64       `json:"padding_bottom_pt,omitempty"`
 	PaddingLeftPt   *float64       `json:"padding_left_pt,omitempty"`
 	PaddingRightPt  *float64       `json:"padding_right_pt,omitempty"`
-	Border          string         `json:"border,omitempty" jsonschema:"style_cells: all four edges as a width, dash style and colour in any order, e.g. 1pt solid #cccccc; none removes them. Defaults when a part is left out: 1pt, solid, black"`
+	Border          string         `json:"border,omitempty" jsonschema:"style_cells: all four edges as a width, dash style and color in any order, e.g. 1pt solid #cccccc; none removes them. Defaults when a part is left out: 1pt, solid, black"`
 	BorderTop       string         `json:"border_top,omitempty" jsonschema:"style_cells: the top edge alone, same form as border"`
 	BorderBottom    string         `json:"border_bottom,omitempty"`
 	BorderLeft      string         `json:"border_left,omitempty"`

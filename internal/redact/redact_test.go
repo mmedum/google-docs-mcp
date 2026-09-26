@@ -67,9 +67,9 @@ func TestTranscriptKeepsPeopleAndDocumentsOut(t *testing.T) {
 		},
 		{
 			// The reason a person is redacted to end of line rather than
-			// to the first "(": a directory renders the organisation
+			// to the first "(": a directory renders the organization
 			// inside the name, and stopping early left it behind.
-			"a name carrying an organisation",
+			"a name carrying an organization",
 			"- c9 [t3] by Ann Petersen (Acme Corp): see above\n",
 			"- c9 [t3] by <person>\n",
 		},
@@ -174,9 +174,9 @@ func TestClipRedactsBeforeTruncating(t *testing.T) {
 // Accounts runs upstream, where Google's text is parsed, and rewrites
 // ann@acme.example to …@acme.example. Transcript runs downstream, over
 // an artifact a person may paste. Its pattern needs a local part, and
-// "…" is not one — so once the upstream mask had run, the organisation
+// "…" is not one — so once the upstream mask had run, the organization
 // domain sailed through the very redactor whose doc says "a domain is an
-// organisation name, so it goes too". Masking more, upstream, had made
+// organization name, so it goes too". Masking more, upstream, had made
 // the artifact carry more.
 func TestAnAlreadyMaskedAddressIsStillRedacted(t *testing.T) {
 	const line = "The user ann@acme-corp.example does not have permission."
@@ -185,6 +185,6 @@ func TestAnAlreadyMaskedAddressIsStillRedacted(t *testing.T) {
 		t.Errorf("upstream masking changed what the transcript keeps:\n got  %q\n want %q", got, want)
 	}
 	if strings.Contains(Transcript(Accounts(line)), "acme-corp.example") {
-		t.Error("the organisation domain survived into the transcript")
+		t.Error("the organization domain survived into the transcript")
 	}
 }

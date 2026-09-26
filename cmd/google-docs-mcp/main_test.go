@@ -30,7 +30,7 @@ func TestClientWentAway(t *testing.T) {
 		{"client closing", &jsonrpc.Error{Code: -32003, Message: "client is closing"}, true},
 		{"wrapped in context, as Run returns it", errWrap(&jsonrpc.Error{Code: -32004, Message: "server is closing: EOF"}), true},
 		{"plain EOF", io.EOF, true},
-		{"cancelled context", context.Canceled, true},
+		{"canceled context", context.Canceled, true},
 		{"a real protocol failure is not a disconnect", &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "internal error"}, false},
 		{"any other error", errors.New("transport exploded"), false},
 		// Matching the message text instead of the code would call this a
@@ -212,8 +212,8 @@ func TestNothingPrintsOutsideTheBoundary(t *testing.T) {
 // This drives run() rather than a predicate. The predicate version of
 // this test passed with the guard deleted from main entirely, which is
 // the whole reason main was reshaped to take its arguments and streams:
-// a test that cannot fail when the behaviour is removed is not holding
-// the behaviour.
+// a test that cannot fail when the behavior is removed is not holding
+// the behavior.
 func TestAnUnknownCommandIsReported(t *testing.T) {
 	for _, arg := range []string{"statsu", "zzz-bogus", "Status"} {
 		var stdout, stderr bytes.Buffer

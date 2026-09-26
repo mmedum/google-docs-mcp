@@ -57,7 +57,7 @@ func (s *Segment) SectionByHeadingID(id string) (Section, bool) {
 }
 
 // SectionsByHeading finds sections whose heading text matches after
-// normalisation, optionally restricted to a level (0 = any).
+// normalization, optionally restricted to a level (0 = any).
 func (s *Segment) SectionsByHeading(text string, level int) []Section {
 	want := Normalize(text)
 	var out []Section

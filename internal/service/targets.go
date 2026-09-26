@@ -188,7 +188,7 @@ func (s *Service) checkedIndex(f *Fetched, seg *doc.Segment, handle string) (int
 	return topLevelIndex(seg, handle)
 }
 
-// resolveText finds an exact (normalised) text match inside paragraphs:
+// resolveText finds an exact (normalized) text match inside paragraphs:
 // case-sensitively first, case-insensitively when that finds nothing.
 func (s *Service) resolveText(f *Fetched, tab *doc.Tab, seg *doc.Segment, t Target) (*TargetRange, error) {
 	needle := doc.Normalize(t.Text)
@@ -274,7 +274,7 @@ type unit struct {
 	start, end int64
 }
 
-// appendUnits adds a paragraph's text runs to dst as normalised
+// appendUnits adds a paragraph's text runs to dst as normalized
 // characters with whitespace runs collapsed, keeping the original
 // offsets so matches map back to API indices. Trailing whitespace (the
 // paragraph newline) is dropped so it never matches.

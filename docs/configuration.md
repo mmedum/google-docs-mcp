@@ -50,7 +50,7 @@ google-docs-mcp --dump-schemas
 API, and, given a document, the Docs API and whether Developer Preview is
 enabled for the project.
 
-## Startup behaviour
+## Startup behavior
 
 The server always starts. If no credentials are stored or the token is
 rejected, it logs a warning and every tool returns an `[auth]` error that

@@ -43,7 +43,7 @@ type command struct {
 var commands map[string]command
 
 // init populates the registry rather than a var literal, because parity
-// reads it and Go will not let a map initialiser refer to a function
+// reads it and Go will not let a map initializer refer to a function
 // that refers back to the map.
 func init() {
 	commands = map[string]command{
@@ -97,7 +97,7 @@ func init() {
 		},
 		"api-fields": {
 			run: apiFields, args: "", gate: true,
-			doc: "every published field of a type we model is modelled or written off",
+			doc: "every published field of a type we model is modeled or written off",
 		},
 		"mcpb": {
 			run: mcpbCmd, gate: true,

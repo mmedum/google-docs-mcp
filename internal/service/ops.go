@@ -13,7 +13,7 @@ import (
 	"github.com/mmedum/google-docs-mcp/internal/render"
 )
 
-// TabInfo summarises one tab.
+// TabInfo summarizes one tab.
 type TabInfo struct {
 	Number    int    `json:"number"`
 	ID        string `json:"id,omitempty"`
@@ -253,7 +253,7 @@ func (t TabInfo) writeExtras(b *strings.Builder) {
 }
 
 // pageName says which standard page a size is, so the model need not
-// recognise 612×792 as US Letter.
+// recognize 612×792 as US Letter.
 func pageName(p *doc.PageSetup) string {
 	switch {
 	case p.WidthPt == 0:

@@ -344,7 +344,7 @@ func parseRetryAfter(v string) time.Duration {
 var idInPath = regexp.MustCompile(`/(documents|files)/([^/?]+)`)
 
 // ShortID shortens a document or file id. It is for a filename a person
-// has to recognise, never for a log: §12 promises a log carries nothing
+// has to recognize, never for a log: §12 promises a log carries nothing
 // about the document, and six characters of an id is still six
 // characters of an id.
 //

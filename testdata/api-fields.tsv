@@ -36,9 +36,9 @@ Equation	*	alias	Suggested
 # elements that embed it, where this gate does compare them.
 SuggestedStyle	*	local	an embeddable, not a schema; its tags are promoted into the inline elements that embed it, and are compared there
 #
-# The comment and suggestion shapes left Developer Preview and entered
-# the public discovery document in 2026-09. These fields came with them
-# and no tool reads them yet.
+# The comment and suggestion shapes entered the public discovery
+# document in 2026-09, still marked Developer Preview. These fields came
+# with them and no tool reads them yet.
 Document	commentsViewMode	out	the request sets the mode; the response echoing it adds nothing
 Post	assigneeEmail	out	published 2026-09; no tool reports an assignment yet
 Post	contentHtml	out	published 2026-09; the plain content is what a tool shows

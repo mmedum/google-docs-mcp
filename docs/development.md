@@ -110,11 +110,10 @@ and are preferred by the Makefile; install them with
   discovery document publishes, and `testdata/api-fields.tsv` is one line
   per exception — `out` for a published field this server deliberately
   does not model, `extra` for a field it carries that public discovery
-  does not publish (the Developer Preview ones), `alias` for a schema
-  modeled under another name (`Break` covers `pageBreak`, `columnBreak`
-  and `horizontalRule`), and `local` for a struct that models no
-  published schema at all (the Developer Preview comment shapes, and the
-  `SuggestedStyle` embeddable whose tags reach the wire through the
+  does not publish, `alias` for a schema modeled under another name
+  (`Break` covers `pageBreak`, `columnBreak` and `horizontalRule`), and
+  `local` for a struct that models no published schema at all (the
+  `SuggestedStyle` embeddable, whose tags reach the wire through the
   elements that embed it). `local` is the one verdict whose first column
   names a Go struct rather than a schema. The modeled side is read out
   of `internal/gdocs` with `go/ast`, promoting the tags of embedded

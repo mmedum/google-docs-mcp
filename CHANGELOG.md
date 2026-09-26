@@ -7,6 +7,14 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+
+- The docs no longer say the comment and suggestion features left
+  Developer Preview. Google now publishes their shapes in the public
+  discovery document, but still marks them preview. `GDOCS_PREVIEW` still
+  gates suggestion mode, anchored comments and `review_suggestion`, and
+  still needs an enrolled Cloud project.
+
 ## [1.4.0] - 2026-09-26
 
 ### Added

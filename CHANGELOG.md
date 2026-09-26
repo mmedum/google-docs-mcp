@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-27
+
 ### Changed
 
 - The docs no longer say the comment and suggestion features left

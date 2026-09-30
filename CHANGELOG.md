@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-30
+
 ### Added
 
 - The server asks the person through the client before `delete_tab`, `delete_comment`, `review_suggestion` with `all: true`, and a forced `edit_document`, `edit_table` or `insert_object` that destroys comments, suggestions, images or footnotes. A call they did not confirm is `[blocked]`.

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/internal/config"
-	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/config"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 // writable builds a service whose handle memory holds the fixture, as it
@@ -339,7 +339,7 @@ func TestEditSuggestAndModes(t *testing.T) {
 
 func TestGuardBlocksDirect(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := context.Background()
+	ctx := accepting(context.Background())
 	api.comments = []*gapi.DriveComment{{ID: "dc1", Content: "hmm", QuotedFileContent: &gapi.QuotedText{Value: "Second point"}}}
 	var se *Error
 	_, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p7"}}}})
@@ -543,7 +543,7 @@ func TestFormatOps(t *testing.T) {
 
 func TestFindSearchCreateExportSuggestions(t *testing.T) {
 	svc, api := writable(t, true)
-	ctx := context.Background()
+	ctx := accepting(context.Background())
 	fr, err := svc.Find(ctx, FindRequest{Document: fixtureID, Query: "point"})
 	if err != nil || fr.Total != 3 || fr.Matches[0].Handle != "p5" || fr.Matches[1].Handle != "p6" || !strings.Contains(fr.Matches[2].Context, "«point»") {
 		t.Fatalf("find: %+v %v", fr, err)

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mmedum/google-docs-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mmedum/google-docs-mcp/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/mmedum/google-docs-mcp?sort=semver)](https://github.com/mmedum/google-docs-mcp/releases/latest)
-[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-docs-mcp.svg)](https://pkg.go.dev/github.com/mmedum/google-docs-mcp)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-docs-mcp/v2.svg)](https://pkg.go.dev/github.com/mmedum/google-docs-mcp/v2)
 [![License: Apache 2.0](https://img.shields.io/github/license/mmedum/google-docs-mcp)](./LICENSE)
 
 Google Docs as MCP tools. Read, edit, suggest and comment on documents from Claude or any MCP client.
@@ -40,7 +40,7 @@ which they deliberately do not.
 ## Install
 
 ```bash
-go install github.com/mmedum/google-docs-mcp/cmd/google-docs-mcp@latest
+go install github.com/mmedum/google-docs-mcp/v2/cmd/google-docs-mcp@latest
 ```
 
 That puts `google-docs-mcp` in `$(go env GOPATH)/bin`, which is the path
@@ -218,8 +218,14 @@ for the defaults.
 
 Two more tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:
 `delete_comment` (a thread or one reply) and `delete_tab` (a tab with its
-content and child tabs). Both carry the destructive annotation and ask the
-client to involve the person.
+content and child tabs). Both carry the destructive annotation.
+
+Before those two deletes, before a forced edit that destroys comments,
+suggestions, images or footnotes, and before reviewing every pending
+suggestion at once, the server asks the person through the client when it
+can, and names what would go. A call they did not confirm comes back
+`[blocked]`. `GDOCS_REQUIRE_PROMPT=true` refuses those writes when the
+client cannot ask.
 
 Documents are identified by id or any `docs.google.com` URL.
 

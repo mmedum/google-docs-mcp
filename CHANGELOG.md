@@ -7,6 +7,20 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-30
+
+### Added
+
+- The server asks the person through the client before `delete_tab`, `delete_comment`, `review_suggestion` with `all: true`, and a forced `edit_document`, `edit_table` or `insert_object` that destroys comments, suggestions, images or footnotes. A call they did not confirm is `[blocked]`.
+- `GDOCS_REQUIRE_PROMPT` refuses those writes when the client cannot ask.
+- `dry_run` on `delete_tab`, `delete_comment`, `review_suggestion` and `add_comment`.
+- `blocked` is listed in the error vocabulary; the guard already returned it.
+
+### Changed
+
+- **Breaking:** the Go module path is `github.com/mmedum/google-docs-mcp/v2`.
+- `export_document` is annotated as a non-destructive write instead of read-only, since it writes a local file.
+
 ## [1.4.1] - 2026-09-27
 
 ### Changed

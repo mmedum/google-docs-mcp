@@ -8,7 +8,7 @@ import (
 
 func TestManageTabs(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := context.Background()
+	ctx := accepting(context.Background())
 	api.replies = []string{`{"replies":[{"addDocumentTab":{"tabProperties":{"tabId":"t.new","title":"Appendix"}}}],"writeControl":{"requiredRevisionId":"rev-0002"}}`}
 	res, err := svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "add", Title: "Appendix", Position: 2, Parent: "Notes", Emoji: "📎"})
 	if err != nil || res.TabID != "t.new" || res.Title != "Appendix" || res.RevisionID != "rev-0002" || len(res.Warnings) != 0 {

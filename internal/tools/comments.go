@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
 // ListCommentsInput selects comment threads.
@@ -22,6 +22,7 @@ type AddCommentInput struct {
 	Content        string       `json:"content" jsonschema:"the comment text (plain text, up to 2048 bytes)"`
 	Assignee       string       `json:"assignee,omitempty" jsonschema:"email address to assign the comment to (Developer Preview only)"`
 	ExpectRevision string       `json:"expect_revision,omitempty" jsonschema:"fail if the document is no longer at this revision id"`
+	DryRun         bool         `json:"dry_run,omitempty" jsonschema:"resolve the target and stop before posting"`
 }
 
 // ReplyInput continues a thread.
@@ -39,6 +40,7 @@ type DeleteCommentInput struct {
 	CommentID string `json:"comment_id" jsonschema:"thread id from list_comments"`
 	ReplyID   string `json:"reply_id,omitempty" jsonschema:"delete only this reply of the thread"`
 	Confirm   string `json:"confirm_comment_id,omitempty" jsonschema:"repeat comment_id exactly; the deletion is refused without it"`
+	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"look the comment up and stop before the write"`
 }
 
 func registerCommentsRead(s *mcp.Server, d Deps) {
@@ -64,10 +66,12 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 		Description: "Post a comment on a Google Doc. With a target (exact text, heading_id, handle or cell) the comment " +
 			"is pinned to that passage when Developer Preview is on; without preview it quotes the text and the editor " +
 			"shows it unanchored, which the result says. Without a target it is a comment on the document as a whole. " +
-			"Nothing in the document text changes. To propose an edit as a comment, use edit_document with mode comment.",
+			"Nothing in the document text changes. To propose an edit as a comment, use edit_document with mode comment. " +
+			"dry_run resolves the target and stops before posting.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in AddCommentInput) (*mcp.CallToolResult, *service.AddCommentResult, error) {
-		res, err := d.Service.AddComment(ctx, service.AddCommentRequest{Document: in.Document, Target: in.Target.target(), Content: in.Content, Assignee: in.Assignee, ExpectRevision: in.ExpectRevision})
+		res, err := d.Service.AddComment(ctx, service.AddCommentRequest{Document: in.Document, Target: in.Target.target(), Content: in.Content,
+			Assignee: in.Assignee, ExpectRevision: in.ExpectRevision, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
@@ -92,18 +96,20 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 	if !d.Config.EnableDestructive {
 		return
 	}
-	mcp.AddTool(s, &mcp.Tool{
+	addAsking(s, d, &mcp.Tool{
 		Name: "delete_comment",
 		Description: "Delete a comment thread, or one reply of it, from a Google Doc. Only the author can delete; a " +
-			"resolved thread is usually the better outcome (reply_comment with action resolve). Ask the person " +
-			"first, and pass confirm_comment_id repeating comment_id exactly, or the call is refused.",
+			"resolved thread is usually the better outcome (reply_comment with action resolve). Pass " +
+			"confirm_comment_id repeating comment_id exactly, or the call is refused; dry_run looks the comment up " +
+			"and stops.",
 		Annotations: destructive,
 		Meta:        destructiveMeta,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteCommentInput) (*mcp.CallToolResult, *service.DeleteCommentResult, error) {
+	}, "", func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteCommentInput) (*mcp.CallToolResult, *service.DeleteCommentResult, error) {
 		if err := confirmTarget("comment_id", in.CommentID, in.Confirm); err != nil {
 			return nil, nil, fail(err)
 		}
-		res, err := d.Service.DeleteComment(ctx, service.DeleteCommentRequest{Document: in.Document, CommentID: in.CommentID, ReplyID: in.ReplyID})
+		res, err := d.Service.DeleteComment(ctx, service.DeleteCommentRequest{Document: in.Document, CommentID: in.CommentID,
+			ReplyID: in.ReplyID, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

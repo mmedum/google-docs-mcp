@@ -9,8 +9,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/internal/config"
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/config"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
 // Deps are what the tools need.
@@ -18,6 +18,10 @@ type Deps struct {
 	Service *service.Service
 	Config  config.Config
 	Logger  *slog.Logger
+
+	// asking is how the tools that ask put their question to the person;
+	// Register makes it.
+	asking *asking
 }
 
 // FullSurface is the configuration under which every tool registers.
@@ -47,6 +51,8 @@ func Register(s *mcp.Server, d Deps) {
 	if d.Logger == nil {
 		d.Logger = slog.New(slog.DiscardHandler)
 	}
+	d.asking = newAsking(d.Logger)
+	s.AddReceivingMiddleware(askFailures(d.asking))
 	registerRead(s, d)
 	registerMoreRead(s, d)
 	registerCommentsRead(s, d)
@@ -104,4 +110,7 @@ var (
 	// the person.
 	destructive     = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
 	destructiveMeta = mcp.Meta{"anthropic/requiresUserInteraction": true}
+	// localWrite marks a tool that reads Google and writes only a local
+	// file, in the one directory the person configured.
+	localWrite = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
 )

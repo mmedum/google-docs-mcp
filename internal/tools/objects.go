@@ -6,8 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/internal/plan"
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
 // ObjectInput is the insert_object call.
@@ -36,7 +36,7 @@ type ObjectInput struct {
 }
 
 func registerObjects(s *mcp.Server, d Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addAsking(s, d, &mcp.Tool{
 		Name: "insert_object",
 		Description: "Insert, replace or delete a non-text object in a Google Doc. action insert (default) adds an " +
 			"image from a public URL (optionally sized in points), a person chip (email), a rich-link chip to a Google " +
@@ -48,7 +48,7 @@ func registerObjects(s *mcp.Server, d Deps) {
 			"expect_revision and force semantics as edit_document; deleting an inline object that also carries a " +
 			"comment or a suggestion is refused in direct mode unless forced. Suggestion mode tracks the insertion.",
 		Annotations: writeSafe,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ObjectInput) (*mcp.CallToolResult, *service.EditResult, error) {
+	}, "When force lets a delete destroy a comment or a suggestion", func(ctx context.Context, _ *mcp.CallToolRequest, in ObjectInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		obj := &plan.ObjectParams{Kind: strings.ToLower(strings.TrimSpace(in.Kind)), URL: strings.TrimSpace(in.URL), WidthPt: in.WidthPt, HeightPt: in.HeightPt,
 			Name: strings.TrimSpace(in.Name), Email: strings.TrimSpace(in.Email), Title: strings.TrimSpace(in.Title),
 			ID: strings.TrimSpace(in.Object), Crop: in.Crop}

@@ -79,7 +79,11 @@ type Config struct {
 	EnableDestructive bool
 	ExportDir         string
 	HTTPTimeout       time.Duration
-	ClientSecretPath  string
+	// RequirePrompt refuses the writes that ask the person when the
+	// client cannot ask, rather than letting the call's own arguments
+	// stand in for the person.
+	RequirePrompt    bool
+	ClientSecretPath string
 }
 
 // AvailableWriteModes lists the modes this configuration can honor.
@@ -102,6 +106,7 @@ type Settings struct {
 	EnableDestructive string
 	ExportDir         string
 	HTTPTimeout       string
+	RequirePrompt     string
 	ClientSecretPath  string
 }
 
@@ -127,6 +132,8 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register destructive tools (delete comment, delete tab)")
 	def(&s.ExportDir, "export-dir", "EXPORT_DIR", "", "directory binary exports may be written to (unset disables them)")
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-request timeout for Google API calls")
+	def(&s.RequirePrompt, "require-prompt", "REQUIRE_PROMPT", "false",
+		"refuse the writes that ask the person when the client cannot ask them")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
 	return s
 }
@@ -168,6 +175,9 @@ func (s *Settings) Build() (Config, error) {
 		errs = append(errs, err)
 	}
 	if c.EnableDestructive, err = parseBool("enable-destructive", s.EnableDestructive); err != nil {
+		errs = append(errs, err)
+	}
+	if c.RequirePrompt, err = parseBool("require-prompt", s.RequirePrompt); err != nil {
 		errs = append(errs, err)
 	}
 

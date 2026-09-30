@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
 )
 
 // ExportRequest converts a document.

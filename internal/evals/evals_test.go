@@ -5,7 +5,7 @@ package evals
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/mmedum/google-docs-mcp/internal/redact"
+	"github.com/mmedum/google-docs-mcp/v2/internal/redact"
 	"os"
 	"path/filepath"
 	"sort"

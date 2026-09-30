@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
 )
 
 // SearchRequest looks for documents in Drive.

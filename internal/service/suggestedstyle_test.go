@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/config"
-	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/config"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 // restyledFixture is the fixture with one pending suggested text-style

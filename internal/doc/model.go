@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
 )
 
 // Document is a parsed documents.get response.
@@ -578,6 +578,23 @@ func (d *Document) AllBlocks() []*Block {
 		}
 	}
 	return out
+}
+
+// Descendants counts the tabs nested under the tab id, at any depth.
+func (d *Document) Descendants(id string) int {
+	under := map[string]bool{id: true}
+	n := 0
+	for grew := true; grew; {
+		grew = false
+		for _, t := range d.Tabs {
+			if !under[t.ID] && under[t.ParentID] {
+				under[t.ID] = true
+				n++
+				grew = true
+			}
+		}
+	}
+	return n
 }
 
 // Tab finds a tab by id, then by title (case-insensitive), then by

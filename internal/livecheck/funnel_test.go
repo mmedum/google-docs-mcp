@@ -243,8 +243,8 @@ func allowed(lines map[string][]string, fset *token.FileSet, arg ast.Expr) bool 
 func TestEveryPlaceAPersonIsWrittenIsKnown(t *testing.T) {
 	root := moduleRoot(t)
 	const (
-		wantUserLabel = 5  // service: ops.go x2, history.go, search.go x2
-		wantPerson    = 32 // every read of a person field in the three packages
+		wantUserLabel = 7  // service: ops.go x2, history.go, search.go x2, comments.go x2 (delete_comment's question)
+		wantPerson    = 34 // every read of a person field in the three packages
 	)
 
 	dirs := []string{"internal/service", "internal/render", "internal/plan"}

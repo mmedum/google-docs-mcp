@@ -1,6 +1,7 @@
 # Architecture — google-docs-mcp
 
-**Status:** v1.4.1 (2026-09-27). Phases 0 to 4 are done (§16): auth, raw
+**Status:** v2.0.0 (2026-09-30). It asks the person before six writes
+(§12a). Phases 0 to 4 are done (§16): auth, raw
 client, model, renderer, reads, search, create, export, editing with
 minimal diffs in all three modes, formatting, suggestion review, comment
 threads on both backends, revision history and diffs, tables, tabs,
@@ -448,22 +449,22 @@ registers only readOnly rows and requests readonly scopes.
 | `get_outline` | Heading tree with `heading_id`, handles, sizes | readOnly | 0 |
 | `read_document` | Scoped, budgeted markdown/text/raw view; `with_styles`; `revision_id` | readOnly | 0 |
 | `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
-| `export_document` | pdf/docx/md/html/txt | readOnly | 1 |
+| `export_document` | pdf/docx/md/html/txt; writes a local file, so it is a non-destructive write that read-only mode still registers | destructive=false | 1, 2.0 |
 | `create_document` | Title, optional markdown body | — | 1 |
 | `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2, 4 |
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
 | `list_suggestions` | Pending suggestions with handles and authors | readOnly | 1 |
-| `review_suggestion` | accept / reject / discard (preview; discard is author-only) | — | 1, 4 |
+| `review_suggestion` | accept / reject / discard (preview; discard is author-only); `all` asks the person; dry_run | — | 1, 4, 2.0 |
 | `list_comments` | Full threads: replies, resolved, deleted, quoted text, handles | readOnly | 2 |
-| `add_comment` | Anchored to a Target (preview) or quoted (Drive); no target = document-level | — | 2 |
+| `add_comment` | Anchored to a Target (preview) or quoted (Drive); no target = document-level; dry_run | — | 2, 2.0 |
 | `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only) | — | 2, 4 |
-| `delete_comment` | Gated; a thread or one reply | destructive | 2 |
+| `delete_comment` | Gated; a thread or one reply; asks the person; dry_run | destructive | 2, 2.0 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
 | `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | — | 2, 4 |
 | `insert_object` | `action: insert \| replace \| delete`; insert takes `kind: image \| person \| rich_link \| date` at a Location, replace swaps an image's source, delete removes an object by id (the only way to remove a floating one) | — | 2, 4 |
 | `layout_document` | ops: `page`, `section`, `section_break`, `named_style` | — | 4 |
 | `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | — | 2 |
-| `delete_tab` | Gated; child tabs go with it | destructive | 2 |
+| `delete_tab` | Gated; child tabs go with it; asks the person; dry_run | destructive | 2, 2.0 |
 
 \* `edit_document` changes text by design; it is not gated. The layers
 this server controls are the write mode the person chose, the overwrite
@@ -632,6 +633,62 @@ preview included. Measured in the Phase 3 evals (§14).
   `[class]` prefix is our convention; the actionable message is what the
   guidance asks for.
 
+## 12a. Asking the person
+
+Six writes are put to the person through the client before they are
+made, as an MCP form elicitation with no fields: accepting is the
+confirmation. They are the ones this server cannot undo, or that destroy
+other people's work in a document:
+
+- `delete_tab` and `delete_comment`, which are also gated and take a
+  retyped target. Version history keeps a deleted tab's text, but this
+  server cannot bring it back; a deleted comment keeps its thread with
+  the words removed.
+- `edit_document`, `edit_table` and `insert_object` when `force` lets a
+  direct edit destroy comment anchors, suggestions, images or footnotes.
+  The question lists each forced op and what it destroys, as the guard
+  found it. `force` on an edit that destroys nothing asks nothing.
+- `review_suggestion` with `all: true`, which applies or discards every
+  pending proposal at once, other people's included. The question counts
+  them and the answer is bound to their ids, so one proposed while the
+  person reads is not reviewed unseen.
+
+`add_comment` with an assignee does not ask: it works only under
+Developer Preview, and whether Google notifies the assignee is not
+established. `replace_all` does not ask either; it is bounded to one tab
+and the guard holds it like any other direct delete.
+
+The mechanism is the one the sibling servers run, ported rather than
+depended on. A tool asks by being registered through `asked`, which puts
+a person on the context; the service asks after every read, guard and
+dry run, just before the write, and a dry run asks nothing. On protocol
+2026-07-28 the first call returns the question and a signed
+`requestState`, and the call comes back with the answer; before it, the
+SDK asks inside the call. The state is an HMAC over the tool, the
+arguments and what the question binds, with a key drawn per process, a
+nonce spent once, and a five-minute expiry when it travels through the
+client. Any answer but accept is refused before the call reads
+anything, and what the question showed is checked again on the
+answering round, so a comment edited in between is refused rather than
+deleted unseen.
+
+The person is asked before anything is written, so a forced op in a
+later batch — one that waits for a grid change in the same call to land
+— is refused instead of asked about after the fact; it runs as a call of
+its own. An accepted answer covers its question as often as the call
+reaches it, so a write re-planned once after a revision conflict asks
+the same question and goes through, and a different question does not.
+The stage that makes a failed reply `[ambiguous_outcome]` is set only
+when an answer is matched, not when the call arrives with one.
+
+A client that cannot ask gets no question, and the arguments are the
+guard as before; the tool descriptions tell the model to ask the person
+itself in that case. `GDOCS_REQUIRE_PROMPT=true` refuses those writes
+instead. A refusal is `[blocked]`, which the guard already used for a
+direct edit it would not make without `force` and which is now in the
+documented vocabulary; a confirmed write whose result never came back is
+`[ambiguous_outcome]`.
+
 ## 13. Distribution and setup
 
 The server is published for other people to run against their own Google
@@ -639,7 +696,7 @@ accounts. That sets these requirements:
 
 - **Artifacts.** goreleaser builds for linux, macOS and Windows on amd64
   and arm64, with checksums; `go install
-  github.com/mmedum/google-docs-mcp/cmd/google-docs-mcp@latest` as the
+  github.com/mmedum/google-docs-mcp/v2/cmd/google-docs-mcp@latest` as the
   second path. A Docker image is not a v1 target: the loopback OAuth flow
   and the keyring both assume the user's desktop. Homebrew tap later.
 - **Client configuration** documented for Claude Code (`claude mcp add
@@ -877,6 +934,14 @@ change while it is in preview, and the prose of a tool's text output,
 because it is written for a model and will be reworded when a model
 reads it badly. The schema diff in CI is what holds the rest.
 
+**2.0.0 — asking the person (2026-09-30).** §12a. The module path moves
+to `/v2`: a caller that runs unattended under `GDOCS_REQUIRE_PROMPT`, or
+through a client that declines, is now refused where it used to write.
+`delete_tab`, `delete_comment`, `review_suggestion` and `add_comment`
+gain `dry_run`, and `export_document` is annotated as the local write it
+is. The questions, the signed state and `quoted()` are ported from the
+sibling that last fixed them.
+
 ## 17. Open decisions
 
 **When exactly does Google drop a direct formatting change?** A direct
@@ -946,6 +1011,10 @@ checked rather than assumed.
 
 | Convention | Verdict | Effect |
 |---|---|---|
+| Asking the person works against Google (2026-09-30) | Confirmed live: the live driver, now a client that can be asked, declined a `delete_comment` (refused, the comment still listed), then accepted it (deleted); a forced `delete_rows` over a pending suggestion, two `delete_tab` calls and `review_suggestion` with `all` each asked once and went through on accept; the four new dry runs left the revision where it was | The driver answers every question and fails a step that should have asked and did not. |
+| An empty form is a valid elicitation, and the SDK skips structured output for a result that asks (2026-09-30) | Adopted from the siblings that verified them: the specification's schema puts no minimum on `properties`; go-sdk v1.8.0 `mcp/server.go` does not marshal the output when `InputRequests` is set | `asked` returns the input request with a zero output. |
+| `blocked` is part of the error vocabulary (2026-09-30) | Refuted: the guard returned `[blocked]` through an `Error` literal the `classes` gate does not scan, so the class was emitted and documented nowhere | Listed in `service.Classes`, with what it asks the reader to do. |
+| `export_document` is read-only (2026-09-30) | Refuted: it writes a file under `GDOCS_EXPORT_DIR` | Annotated a non-destructive write; read-only mode still registers it, since it changes nothing in Google. |
 | Exact-text targets (Anthropic text editor tool; Claude Code Edit; Notion MCP `update_content`; Aider: removing line numbers took GPT-4 Turbo from 20% to 61%; OpenAI `apply_patch`) | Confirmed | `text` is the primary target; normalization added (SWE-Edit brittleness). |
 | Google `headingId` is stable | Confirmed (Docs API reference) | Sections by `heading_id`. |
 | Inserted text inherits the preceding text's style; newline copies paragraph style incl. bullets | Confirmed (InsertTextRequest reference) | Minimal-diff replace is safe for formatting. |

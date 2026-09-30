@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 // p11 holds an inline image and a footnote reference: "See " [img] " chart" [fn] " and the site".
@@ -186,7 +186,7 @@ func TestDeleteOnlyRootTabRefused(t *testing.T) {
 	if classOf(err) != "invalid" || !strings.Contains(messageOf(err), "top-level tab") {
 		t.Fatalf("only root tab: %v", err)
 	}
-	res, err := svc.DeleteTab(context.Background(), TabRequest{Document: fixtureID, Tab: "Notes"})
+	res, err := svc.DeleteTab(accepting(context.Background()), TabRequest{Document: fixtureID, Tab: "Notes"})
 	if err != nil || res.TabID != "t.1" {
 		t.Fatalf("child tab: %+v %v", res, err)
 	}

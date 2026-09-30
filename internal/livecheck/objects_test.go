@@ -67,6 +67,7 @@ func liveTabs(t *testing.T, d *driver, doc string) {
 	if d.destructive && parent != "" {
 		t.Cleanup(func() {
 			d.ok("delete the parent tab, child and all", "delete_tab", map[string]any{"document": doc, "tab": parent, "confirm_tab": parent})
+			d.wasAsked("delete the parent tab", "The 1 tab nested under it goes with it.")
 		})
 	}
 	d.ok("nest tab under parent", "manage_tabs", map[string]any{"document": doc, "action": "move", "tab": "Appendix A", "parent": "Parent"})

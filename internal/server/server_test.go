@@ -12,12 +12,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/internal/config"
-	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/internal/server"
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/config"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/server"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
 const fixtureID = "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX"
@@ -129,6 +129,13 @@ func connect(t *testing.T, api *fakeAPI) *mcp.ClientSession {
 
 func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSession {
 	t.Helper()
+	return connectClient(t, api, cfg, "", nil)
+}
+
+// connectClient is connectWith with the client's options and the
+// protocol it offers; an empty protocol is the SDK's own choice.
+func connectClient(t *testing.T, api *fakeAPI, cfg config.Config, protocol string, o *mcp.ClientOptions) *mcp.ClientSession {
+	t.Helper()
 	svc := service.New(api, service.Options{Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
 	// Seed the handle memory as a read would, so tools may target handles.
 	_, _ = svc.Fetch(context.Background(), fixtureID)
@@ -140,7 +147,8 @@ func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSessi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ss.Close() })
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, o).
+		Connect(ctx, ct, &mcp.ClientSessionOptions{ProtocolVersion: protocol})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +181,7 @@ func TestListToolsAndSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	readTools := map[string]bool{"get_document": true, "get_outline": true, "read_document": true, "find_in_document": true, "search_documents": true, "export_document": true, "list_suggestions": true,
+	readTools := map[string]bool{"get_document": true, "get_outline": true, "read_document": true, "find_in_document": true, "search_documents": true, "list_suggestions": true,
 		"list_comments": true, "list_revisions": true, "diff_revisions": true}
 	var names []string
 	for _, tool := range res.Tools {
@@ -227,12 +235,14 @@ func TestListToolsAndSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// export_document writes only a local file, so it stays in a
+	// read-only deployment without being annotated read-only.
 	for _, tool := range res.Tools {
-		if !readTools[tool.Name] {
+		if !readTools[tool.Name] && tool.Name != "export_document" {
 			t.Errorf("read-only server exposes %s", tool.Name)
 		}
 	}
-	if len(res.Tools) != len(readTools) {
+	if len(res.Tools) != len(readTools)+1 {
 		t.Fatalf("read-only tools = %d", len(res.Tools))
 	}
 }

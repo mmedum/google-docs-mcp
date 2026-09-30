@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
 )
 
 func TestListCommentsLocatesAndRenders(t *testing.T) {
@@ -120,8 +120,9 @@ func TestAddComment(t *testing.T) {
 
 func TestReplyAndDeleteComment(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := context.Background()
-	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x"}, {ID: "c2", Content: "y", Resolved: true}, {ID: "c3", Deleted: true}}
+	ctx := accepting(context.Background())
+	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x"}, {ID: "c2", Content: "y", Resolved: true,
+		Replies: []*gapi.DriveReply{{ID: "r7", Content: "done"}}}, {ID: "c3", Deleted: true}}
 	res, err := svc.Reply(ctx, ReplyRequest{Document: fixtureID, CommentID: "c1", Content: "thanks"})
 	if err != nil || res.Action != "reply" || res.ReplyID != "r1" || res.Resolved || api.posted[0] != "c1:thanks:" {
 		t.Fatalf("reply: %+v %v %v", res, err, api.posted)

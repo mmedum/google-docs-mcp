@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 // Suggestion is one pending suggested edit.
@@ -208,6 +209,7 @@ type ReviewRequest struct {
 	IDs            []string
 	All            bool
 	ExpectRevision string
+	DryRun         bool
 }
 
 // ReviewResult reports what was reviewed.
@@ -216,6 +218,7 @@ type ReviewResult struct {
 	Action     string   `json:"action"`
 	IDs        []string `json:"ids"`
 	Remaining  int      `json:"remaining"`
+	DryRun     bool     `json:"dry_run,omitempty"`
 	Text       string   `json:"-"`
 }
 
@@ -277,9 +280,23 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 			reqs = append(reqs, plan.DeleteSuggestion(id))
 		}
 	}
+	verb := action + "ed"
+	if action == "discard" {
+		verb = "discarded"
+	}
+	if req.DryRun {
+		out := &ReviewResult{Action: action, IDs: ids, RevisionID: list.RevisionID, Remaining: len(all) - len(ids), DryRun: true}
+		out.Text = fmt.Sprintf("dry run: would have %s %d suggestion(s); %d would remain pending (revision %s)", verb, len(ids), out.Remaining, out.RevisionID)
+		return out, nil
+	}
 	f, err := s.Fetch(ctx, req.Document)
 	if err != nil {
 		return nil, err
+	}
+	if req.All && asks(ctx) {
+		if err := ask(ctx, render.AskReviewAll(f.Doc.ID, f.Doc.Title, action, ids)); err != nil {
+			return nil, err
+		}
 	}
 	f.Doc.RevisionID = list.RevisionID // guard against the revision the list came from
 	_, revision, err := s.batchUpdate(ctx, f, reqs, "")
@@ -289,10 +306,6 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	}
 	out := &ReviewResult{Action: action, IDs: ids, RevisionID: revision}
 	out.Remaining = len(all) - len(ids)
-	verb := action + "ed"
-	if action == "discard" {
-		verb = "discarded"
-	}
 	out.Text = fmt.Sprintf("%s %d suggestion(s); %d remain pending (revision %s)", verb, len(ids), out.Remaining, out.RevisionID)
 	return out, nil
 }

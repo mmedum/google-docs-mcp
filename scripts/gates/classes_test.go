@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -33,5 +34,20 @@ func TestHasDuplicate(t *testing.T) {
 				t.Errorf("hasDuplicate(%v) = %v, want %v", c.xs, got, c.want)
 			}
 		})
+	}
+}
+
+// Both ways the server builds a classed error are read: a class that
+// reached the model only through an Error literal went undocumented.
+func TestErrorfClassReadsBothForms(t *testing.T) {
+	src := `return Errorf("invalid", "x")
+	return &Error{Class: "blocked", Message: m}
+	return &Error{Class:"unsupported"}`
+	var got []string
+	for _, m := range errorfClass.FindAllStringSubmatch(src, -1) {
+		got = append(got, m[1])
+	}
+	if strings.Join(got, ",") != "invalid,blocked,unsupported" {
+		t.Errorf("found %v", got)
 	}
 }

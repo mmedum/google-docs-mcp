@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
 // TabInput is the manage_tabs call.
@@ -27,6 +27,7 @@ type DeleteTabInput struct {
 	Tab            string `json:"tab" jsonschema:"the tab to delete, by id, title or number; its child tabs go with it"`
 	ConfirmTab     string `json:"confirm_tab,omitempty" jsonschema:"repeat the tab exactly; the deletion is refused without it"`
 	ExpectRevision string `json:"expect_revision,omitempty"`
+	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"resolve the tab and stop before the write"`
 }
 
 func registerTabs(s *mcp.Server, d Deps) {
@@ -49,18 +50,18 @@ func registerTabs(s *mcp.Server, d Deps) {
 	if !d.Config.EnableDestructive {
 		return
 	}
-	mcp.AddTool(s, &mcp.Tool{
+	addAsking(s, d, &mcp.Tool{
 		Name: "delete_tab",
 		Description: "Delete a tab of a Google Doc together with everything in it and any child tabs. Irreversible " +
-			"through this server (version history keeps the content). Ask the person first; a document keeps at " +
-			"least one tab. Pass confirm_tab repeating the tab exactly, or the call is refused.",
+			"through this server (version history keeps the content). A document keeps at least one tab. Pass " +
+			"confirm_tab repeating the tab exactly, or the call is refused; dry_run resolves the tab and stops.",
 		Annotations: destructive,
 		Meta:        destructiveMeta,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteTabInput) (*mcp.CallToolResult, *service.TabResult, error) {
+	}, "", func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteTabInput) (*mcp.CallToolResult, *service.TabResult, error) {
 		if err := confirmTarget("tab", in.Tab, in.ConfirmTab); err != nil {
 			return nil, nil, fail(err)
 		}
-		res, err := d.Service.DeleteTab(ctx, service.TabRequest{Document: in.Document, Tab: in.Tab, ExpectRevision: in.ExpectRevision})
+		res, err := d.Service.DeleteTab(ctx, service.TabRequest{Document: in.Document, Tab: in.Tab, ExpectRevision: in.ExpectRevision, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

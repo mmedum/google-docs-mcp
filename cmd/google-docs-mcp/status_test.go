@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/internal/config"
-	"github.com/mmedum/google-docs-mcp/internal/credentials"
-	"github.com/mmedum/google-docs-mcp/internal/userconfig"
+	"github.com/mmedum/google-docs-mcp/v2/internal/config"
+	"github.com/mmedum/google-docs-mcp/v2/internal/credentials"
+	"github.com/mmedum/google-docs-mcp/v2/internal/userconfig"
 )
 
 // The JSON path does not go through outf, which is where the text path

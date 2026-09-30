@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 // compact strips the indentation of a dry run's request dump.
@@ -256,7 +256,7 @@ func TestInsertTablePositionsAndFills(t *testing.T) {
 
 func TestDeleteRowsGuardAndSegments(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := context.Background()
+	ctx := accepting(context.Background())
 	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x", QuotedFileContent: &gapi.QuotedText{Value: "Alpha"}}}
 	_, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{{Kind: plan.OpDeleteRows, Table: &TableOp{Table: "tbl1", RowList: []int{2}}}}})
 	if classOf(err) != "blocked" || !strings.Contains(messageOf(err), "1 comment (c1)") {

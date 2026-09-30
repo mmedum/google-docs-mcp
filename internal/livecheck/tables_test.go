@@ -55,8 +55,10 @@ func liveTables(t *testing.T, d *driver, doc string) {
 	_, _, refused := d.call("delete row 3", "edit_table", map[string]any{"document": doc, "mode": "direct", "ops": []any{
 		map[string]any{"op": "delete_rows", "table": tbl, "row_numbers": []any{3}}}})
 	if refused {
+		d.person.answer("accept")
 		d.ok("delete row 3, forced", "edit_table", map[string]any{"document": doc, "mode": "direct", "force": true, "ops": []any{
 			map[string]any{"op": "delete_rows", "table": tbl, "row_numbers": []any{3}}}})
+		d.wasAsked("delete row 3, forced", "edit_table: run a forced edit on")
 	} else if d.preview {
 		t.Log("row 3 held no suggestion, so the guard had nothing to refuse")
 	}

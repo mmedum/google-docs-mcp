@@ -6,8 +6,8 @@ import (
 	"unicode"
 	"unicode/utf16"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 // Target points at content. Exactly one selector is used: text,

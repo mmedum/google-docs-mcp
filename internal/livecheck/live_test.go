@@ -18,12 +18,14 @@ package livecheck
 
 import (
 	"context"
-	"github.com/mmedum/google-docs-mcp/internal/redact"
+	"github.com/mmedum/google-docs-mcp/v2/internal/redact"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -36,6 +38,50 @@ type driver struct {
 	ctx         context.Context
 	destructive bool
 	preview     bool
+	// person answers the questions the server asks: accept, unless a
+	// step says otherwise.
+	person *person
+}
+
+// person is the client's answer to every question the server puts,
+// and the questions it was asked since a step last looked.
+type person struct {
+	mu        sync.Mutex
+	action    string
+	questions []string
+}
+
+func (p *person) handle(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.questions = append(p.questions, req.Params.Message)
+	return &mcp.ElicitResult{Action: p.action}, nil
+}
+
+// answer sets the next answer and forgets what was asked.
+func (p *person) answer(action string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.action, p.questions = action, nil
+}
+
+// asked is what was asked since the last answer was set.
+func (p *person) asked() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.questions)
+}
+
+// wasAsked fails the step unless exactly one question was put since the
+// answer was last set, saying want. The question is not logged: it
+// quotes the document.
+func (d *driver) wasAsked(label, want string) {
+	d.t.Helper()
+	qs := d.person.asked()
+	if len(qs) != 1 || !strings.Contains(qs[0], want) {
+		d.t.Errorf("%s: %d questions, the first %q", label, len(qs), shown(strings.Join(qs, " | "), 300))
+	}
+	d.person.answer("accept")
 }
 
 // start builds nothing and assumes `make build`: the point is to drive
@@ -57,7 +103,8 @@ func start(t *testing.T) *driver {
 	cmd.Env = env
 	cmd.Stderr = os.Stderr
 	ctx := context.Background()
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "livecheck", Version: "0"}, nil).
+	p := &person{action: "accept"}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "livecheck", Version: "0"}, &mcp.ClientOptions{ElicitationHandler: p.handle}).
 		Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -66,6 +113,7 @@ func start(t *testing.T) *driver {
 	d := &driver{t: t, cs: cs, ctx: ctx,
 		destructive: truthy(os.Getenv("GDOCS_ENABLE_DESTRUCTIVE")),
 		preview:     os.Getenv("GDOCS_PREVIEW") != "false",
+		person:      p,
 	}
 	return d
 }

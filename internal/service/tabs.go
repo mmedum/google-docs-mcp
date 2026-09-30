@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 // TabRequest manages tabs. Tab operations are always direct edits: the
@@ -22,6 +23,7 @@ type TabRequest struct {
 	Emoji          string
 	Content        string // add: initial markdown content
 	ExpectRevision string
+	DryRun         bool // delete: resolve the tab and stop before the write
 }
 
 // TabResult reports the tab change.
@@ -30,6 +32,7 @@ type TabResult struct {
 	TabID      string   `json:"tab_id,omitempty"`
 	Title      string   `json:"title,omitempty"`
 	RevisionID string   `json:"revision_id"`
+	DryRun     bool     `json:"dry_run,omitempty"`
 	Warnings   []string `json:"warnings,omitempty"`
 	Text       string   `json:"-"`
 }
@@ -92,6 +95,17 @@ func (s *Service) tabChange(ctx context.Context, req TabRequest, action string, 
 	request, err := build(f, req, res)
 	if err != nil {
 		return nil, err
+	}
+	if req.DryRun {
+		res.DryRun = true
+		res.Text = tabText(res)
+		return res, nil
+	}
+	if action == "delete" && asks(ctx) {
+		q := render.AskDeleteTab(f.Doc.ID, f.Doc.Title, res.TabID, res.Title, f.Doc.Descendants(res.TabID))
+		if err := ask(ctx, q); err != nil {
+			return nil, err
+		}
 	}
 	env, revision, err := s.batchUpdate(ctx, f, []json.RawMessage{request}, "")
 	if err != nil {
@@ -226,11 +240,8 @@ func deleteTabRequest(f *Fetched, req TabRequest, res *TabResult) (json.RawMessa
 		return nil, Errorf("invalid", "a document keeps at least one top-level tab; delete the content instead")
 	}
 	res.TabID, res.Title = tab.ID, tab.Title
-	for _, t := range f.Doc.Tabs {
-		if t.ParentID == tab.ID {
-			res.Warnings = append(res.Warnings, "child tabs were deleted with it")
-			break
-		}
+	if f.Doc.Descendants(tab.ID) > 0 {
+		res.Warnings = append(res.Warnings, "child tabs go with it")
 	}
 	return plan.DeleteTab(tab.ID), nil
 }
@@ -263,7 +274,11 @@ func tabText(res *TabResult) string {
 	case "move":
 		fmt.Fprintf(&sb, "moved tab %s (%q)", res.TabID, res.Title)
 	case "delete":
-		fmt.Fprintf(&sb, "deleted tab %s (%q)", res.TabID, res.Title)
+		verb := "deleted"
+		if res.DryRun {
+			verb = "dry run: would delete"
+		}
+		fmt.Fprintf(&sb, "%s tab %s (%q)", verb, res.TabID, res.Title)
 	}
 	fmt.Fprintf(&sb, "; revision %s", res.RevisionID)
 	for _, w := range res.Warnings {

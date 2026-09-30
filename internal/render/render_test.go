@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/internal/render"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")

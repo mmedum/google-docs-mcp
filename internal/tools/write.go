@@ -7,8 +7,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/internal/plan"
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
 // TargetInput points at content. Set exactly one selector.
@@ -126,7 +126,7 @@ type FormatInput struct {
 }
 
 func registerWrite(s *mcp.Server, d Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addAsking(s, d, &mcp.Tool{
 		Name: "edit_document",
 		Description: "Change the text of a Google Doc with one atomic batch of operations. Address content by exact text " +
 			"(quoted from a read), by heading_id or heading (a whole section), by block handle, or by cell; never by " +
@@ -141,7 +141,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"comments, suggestions, images or footnotes unless force is set. Use dry_run to preview the plan. " +
 			"Returns the new revision id, suggestion or comment ids, and a rendered preview of the edited region.",
 		Annotations: writeSafe,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in EditInput) (*mcp.CallToolResult, *service.EditResult, error) {
+	}, "When force lets a direct edit destroy comments, suggestions, images or footnotes", func(ctx context.Context, _ *mcp.CallToolRequest, in EditInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
@@ -156,7 +156,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 			}
 			ops = append(ops, eo)
 		}
-		res, err := d.Service.Edit(ctx, service.EditRequest{Document: in.Document, Ops: ops, Mode: in.Mode, DryRun: in.DryRun, ExpectRevision: in.ExpectRevision, Force: in.Force})
+		res, err := d.Service.Edit(ctx, service.EditRequest{Document: in.Document, Ops: ops, Mode: in.Mode, DryRun: in.DryRun,
+			ExpectRevision: in.ExpectRevision, Force: in.Force})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
@@ -227,15 +228,17 @@ func registerWrite(s *mcp.Server, d Deps) {
 		return text(msg), res, nil
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addAsking(s, d, &mcp.Tool{
 		Name: "review_suggestion",
 		Description: "Accept, reject or discard pending suggested edits by id (from list_suggestions) or all of them. " +
 			"Needs Developer Preview. Accepting applies the suggested text; rejecting declines it, which any editor may " +
 			"do; discarding removes the suggestion outright, which Google allows only its author. Pass expect_revision " +
-			"to refuse if the document changed since the list was read.",
+			"to refuse if the document changed since the list was read. dry_run resolves the suggestions and stops " +
+			"before the write.",
 		Annotations: writeSafe,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReviewInput) (*mcp.CallToolResult, *service.ReviewResult, error) {
-		res, err := d.Service.Review(ctx, service.ReviewRequest{Document: in.Document, Action: in.Action, IDs: in.IDs, All: in.All, ExpectRevision: in.ExpectRevision})
+	}, "With all: true", func(ctx context.Context, _ *mcp.CallToolRequest, in ReviewInput) (*mcp.CallToolResult, *service.ReviewResult, error) {
+		res, err := d.Service.Review(ctx, service.ReviewRequest{Document: in.Document, Action: in.Action, IDs: in.IDs, All: in.All,
+			ExpectRevision: in.ExpectRevision, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
@@ -257,4 +260,5 @@ type ReviewInput struct {
 	IDs            []string `json:"ids,omitempty" jsonschema:"suggestion ids from list_suggestions"`
 	All            bool     `json:"all,omitempty" jsonschema:"act on every pending suggestion"`
 	ExpectRevision string   `json:"expect_revision,omitempty"`
+	DryRun         bool     `json:"dry_run,omitempty" jsonschema:"resolve the suggestions and stop before the write"`
 }

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 func floatp(f float64) *float64 { return &f }

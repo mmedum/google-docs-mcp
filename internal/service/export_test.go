@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
 )
 
 // The exported filename, which an outside user read in their own

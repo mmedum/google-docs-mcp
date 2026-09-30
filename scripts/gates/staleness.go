@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/auth"
+	"github.com/mmedum/google-docs-mcp/v2/internal/auth"
 )
 
 var (

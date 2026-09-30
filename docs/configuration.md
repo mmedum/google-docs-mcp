@@ -17,6 +17,7 @@ given explicitly wins over the environment.
 | `GDOCS_DEFAULT_WRITE_MODE` | `suggest` with preview, else `direct` | `suggest`, `direct` or `comment`. Setting `suggest` without preview refuses to start. |
 | `GDOCS_READ_ONLY` | `false` | Register only read tools; `login` requests read-only scopes. |
 | `GDOCS_ENABLE_DESTRUCTIVE` | `false` | Register destructive tools (delete comment, delete tab). |
+| `GDOCS_REQUIRE_PROMPT` | `false` | Refuse the writes that ask the person when the client cannot ask them, rather than making them on the arguments alone. |
 | `GDOCS_EXPORT_DIR` | unset | Absolute directory binary exports may be written to. Unset disables them. |
 | `GDOCS_HTTP_TIMEOUT` | `60s` | Per-request timeout for Google API calls (1s–10m). |
 
@@ -56,3 +57,15 @@ The server always starts. If no credentials are stored or the token is
 rejected, it logs a warning and every tool returns an `[auth]` error that
 says to run `login`. Exiting instead would make the client show "failed to
 connect" without the model ever learning why.
+
+## Asking the person
+
+Before six writes the server asks the person through the client, when the
+client can: `delete_tab`, `delete_comment`, `review_suggestion` with
+`all: true`, and `edit_document`, `edit_table` or `insert_object` when
+`force` lets a direct edit destroy comments, suggestions, images or
+footnotes. The question names what would go; accepting it is the
+confirmation. A call the person did not confirm comes back `[blocked]`
+and nothing is changed. A dry run asks nothing. A client that cannot ask
+gets no question unless `GDOCS_REQUIRE_PROMPT` is set, which refuses
+those writes instead.

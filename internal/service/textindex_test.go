@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
 )
 
 func TestFindTextWithinParagraphs(t *testing.T) {

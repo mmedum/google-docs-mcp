@@ -49,10 +49,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/internal/auth"
-	"github.com/mmedum/google-docs-mcp/internal/credentials"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/internal/userconfig"
+	"github.com/mmedum/google-docs-mcp/v2/internal/auth"
+	"github.com/mmedum/google-docs-mcp/v2/internal/credentials"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/userconfig"
 )
 
 func probeClient(t *testing.T) *Client {

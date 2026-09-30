@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
 )
 
 // View modes for documents.get.

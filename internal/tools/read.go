@@ -5,8 +5,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/internal/render"
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
 // MaxMaxChars caps a caller's budget.

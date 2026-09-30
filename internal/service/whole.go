@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/render"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 // WholeResult is a whole-document read: every tab's body as markdown.

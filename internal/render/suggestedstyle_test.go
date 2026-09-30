@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/render"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 // restyled builds a one-paragraph segment where the middle run carries a

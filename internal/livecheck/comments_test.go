@@ -39,7 +39,17 @@ func liveComments(t *testing.T, d *driver, doc string) {
 		"document": doc, "with_handles": true, "include_comments": true, "heading": "Background"})
 
 	if d.destructive && comment != "" {
-		d.ok("delete comment", "delete_comment", map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment})
+		del := map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment}
+		d.ok("delete comment, dry run", "delete_comment", map[string]any{"document": doc, "comment_id": comment,
+			"confirm_comment_id": comment, "dry_run": true})
+		d.person.answer("decline")
+		d.refused("delete comment, declined", "delete_comment", del, "not confirmed by the person")
+		d.wasAsked("delete comment, declined", "delete_comment: delete a comment thread on")
+		if listed := d.ok("the declined comment is still there", "list_comments", map[string]any{"document": doc}); !strings.Contains(listed, comment) {
+			t.Error("a declined delete_comment deleted the comment")
+		}
+		d.ok("delete comment", "delete_comment", del)
+		d.wasAsked("delete comment", "`Rewritten by the live test.`")
 	}
 }
 

@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/internal/auth"
-	"github.com/mmedum/google-docs-mcp/internal/credentials"
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/userconfig"
+	"github.com/mmedum/google-docs-mcp/v2/internal/auth"
+	"github.com/mmedum/google-docs-mcp/v2/internal/credentials"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/userconfig"
 )
 
 func liveClient(t *testing.T) *gapi.Client {

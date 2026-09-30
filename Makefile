@@ -3,7 +3,7 @@
 GO       ?= go
 BIN      ?= ./google-docs-mcp
 VERSION  ?= dev
-PKG       = github.com/mmedum/google-docs-mcp
+PKG       = github.com/mmedum/google-docs-mcp/v2
 LDFLAGS   = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
 COVER_MIN ?= 80
 GOBIN    := $(shell $(GO) env GOPATH)/bin

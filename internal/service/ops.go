@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/config"
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/render"
+	"github.com/mmedum/google-docs-mcp/v2/internal/config"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 // TabInfo summarizes one tab.

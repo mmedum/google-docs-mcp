@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
-	"github.com/mmedum/google-docs-mcp/internal/render"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 type replyEnvelope struct {

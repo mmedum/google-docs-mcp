@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
-	"github.com/mmedum/google-docs-mcp/internal/render"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 // ListCommentsRequest selects comment threads.
@@ -104,6 +104,7 @@ type AddCommentRequest struct {
 	Content        string
 	Assignee       string
 	ExpectRevision string
+	DryRun         bool
 }
 
 // AddCommentResult reports the new thread.
@@ -113,6 +114,7 @@ type AddCommentResult struct {
 	Handle     string   `json:"handle,omitempty"`
 	Quote      string   `json:"quote,omitempty"`
 	Anchored   bool     `json:"anchored"`
+	DryRun     bool     `json:"dry_run,omitempty"`
 	Warnings   []string `json:"warnings,omitempty"`
 	Text       string   `json:"-"`
 }
@@ -150,6 +152,20 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 		} else if len(r.Blocks) > 0 {
 			res.Handle = r.Blocks[0].Handle
 		}
+	}
+	if req.DryRun {
+		res.DryRun, res.Anchored = true, s.opts.Preview && r != nil
+		if strings.TrimSpace(req.Assignee) != "" && !res.Anchored {
+			res.Warnings = append(res.Warnings, "assignee is only supported with Developer Preview; the comment would be posted without one")
+		}
+		res.Text = "dry run: would post a comment"
+		if res.Handle != "" {
+			res.Text += fmt.Sprintf(" on %s (%q)", res.Handle, doc.Clip(res.Quote, 60))
+		}
+		for _, w := range res.Warnings {
+			res.Text += "\nwarning: " + w
+		}
+		return res, nil
 	}
 	if s.opts.Preview && r != nil {
 		err = s.postAnchoredComment(ctx, f, r.Rng(), content, strings.TrimSpace(req.Assignee), res)
@@ -344,17 +360,50 @@ func (s *Service) commentRef(ctx context.Context, docRef, commentID string) (str
 	return id, commentID, thread, nil
 }
 
+// askDeleteComment puts the deletion of a thread, or of one reply in it,
+// to the person, with what they wrote.
+// The document's title comes from Drive rather than a fetch of the
+// document, which this tool otherwise never reads.
+func (s *Service) askDeleteComment(ctx context.Context, id string, thread *gapi.DriveComment, replyID string) error {
+	file, err := s.api.GetFile(ctx, id)
+	if err != nil {
+		return wrapAPI(err, "document")
+	}
+	if r := liveReply(thread, replyID); r != nil {
+		return ask(ctx, render.AskDeleteComment(id, file.Name, thread.ID, true, userLabel(r.Author), r.Content, nil))
+	}
+	var replies []string
+	for _, r := range thread.Replies {
+		if r != nil && !r.Deleted {
+			replies = append(replies, r.Content)
+		}
+	}
+	return ask(ctx, render.AskDeleteComment(id, file.Name, thread.ID, false, userLabel(thread.Author), thread.Content, replies))
+}
+
+// liveReply is the thread's reply of that id that is not deleted, or nil.
+func liveReply(thread *gapi.DriveComment, id string) *gapi.DriveReply {
+	for _, r := range thread.Replies {
+		if id != "" && r != nil && !r.Deleted && r.ID == id {
+			return r
+		}
+	}
+	return nil
+}
+
 // DeleteCommentRequest removes a thread or one reply.
 type DeleteCommentRequest struct {
 	Document  string
 	CommentID string
 	ReplyID   string
+	DryRun    bool
 }
 
 // DeleteCommentResult reports the deletion.
 type DeleteCommentResult struct {
 	CommentID string `json:"comment_id"`
 	ReplyID   string `json:"reply_id,omitempty"`
+	DryRun    bool   `json:"dry_run,omitempty"`
 	Text      string `json:"-"`
 }
 
@@ -364,11 +413,27 @@ func (s *Service) DeleteComment(ctx context.Context, req DeleteCommentRequest) (
 	if err := s.requireDestructive(); err != nil {
 		return nil, err
 	}
-	id, commentID, _, err := s.commentRef(ctx, req.Document, req.CommentID)
+	id, commentID, thread, err := s.commentRef(ctx, req.Document, req.CommentID)
 	if err != nil {
 		return nil, err
 	}
 	res := &DeleteCommentResult{CommentID: commentID, ReplyID: strings.TrimSpace(req.ReplyID)}
+	if res.ReplyID != "" && liveReply(thread, res.ReplyID) == nil {
+		return nil, Errorf("not_found", "comment %s has no reply %s; ids come from list_comments", commentID, res.ReplyID)
+	}
+	if req.DryRun {
+		res.DryRun = true
+		res.Text = fmt.Sprintf("dry run: would delete comment %s", commentID)
+		if res.ReplyID != "" {
+			res.Text = fmt.Sprintf("dry run: would delete reply %s of comment %s", res.ReplyID, commentID)
+		}
+		return res, nil
+	}
+	if asks(ctx) {
+		if err := s.askDeleteComment(ctx, id, thread, res.ReplyID); err != nil {
+			return nil, err
+		}
+	}
 	if res.ReplyID != "" {
 		if err := s.api.DeleteReply(ctx, id, commentID, res.ReplyID); err != nil {
 			return nil, wrapWriteError(err)

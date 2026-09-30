@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
 )
 
 func TestStripDataURIs(t *testing.T) {

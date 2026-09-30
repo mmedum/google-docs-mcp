@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
 // FindInput is the find_in_document call.
@@ -73,7 +73,7 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 			"max_chars); pdf, docx, odt, rtf and epub are written as files under the server's export directory and " +
 			"the path is returned. The markdown export is Google's own rendering, useful for a faithful whole-document " +
 			"dump; read_document is better for working with sections.",
-		Annotations: readOnly,
+		Annotations: localWrite,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ExportInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.Export(ctx, service.ExportRequest{Document: in.Document, Format: in.Format, MaxChars: in.MaxChars})
 		if err != nil {

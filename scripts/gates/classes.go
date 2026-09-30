@@ -9,12 +9,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/service"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/service"
 )
 
-// errorfClass finds the class literal in a service.Errorf call.
-var errorfClass = regexp.MustCompile(`Errorf\("([a-z_]+)"`)
+// errorfClass finds the class literal in a service.Errorf call, and in
+// an Error built directly: `blocked` reached the model for months through
+// `&Error{Class: "blocked"}`, which a scan of Errorf alone never saw.
+var errorfClass = regexp.MustCompile(`(?:Errorf\(|Class:\s*)"([a-z_]+)"`)
 
 // classes holds the design's oldest claim — that errors reach a model as
 // `[class] message` from a fixed vocabulary — against the source rather
@@ -68,7 +70,7 @@ func classes(w io.Writer, _ []string) error {
 			if !slices.Contains(known, m[1]) {
 				rel, _ := filepath.Rel(root, path)
 				problems = append(problems, fmt.Sprintf(
-					"%s: Errorf(%q) is not in service.Classes; add it there with what it asks the "+
+					"%s: class %q is not in service.Classes; add it there with what it asks the "+
 						"reader to do, or use an existing class", rel, m[1]))
 			}
 		}

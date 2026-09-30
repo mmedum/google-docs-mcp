@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/internal/config"
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/config"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 // API is the subset of the Google client the service uses.
@@ -118,6 +118,7 @@ func Errorf(class, format string, args ...any) *Error {
 //	rate_limited       a quota; the message says whether waiting helps
 //	server             Google failed after retries; try again shortly
 //	network            Google could not be reached
+//	blocked            a guard or the person refused the write; nothing changed
 //	ambiguous_outcome  a write whose result is unknown; go and look
 //	unexpected         a failure this server did not anticipate
 //
@@ -129,7 +130,7 @@ func Classes() []string {
 	return []string{
 		"auth", "forbidden", "not_found", "unknown", "stale", "ambiguous",
 		"conflict", "invalid", "unsupported", "unavailable", "rate_limited",
-		"server", "network", "ambiguous_outcome", "unexpected",
+		"server", "network", "blocked", "ambiguous_outcome", "unexpected",
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
 )
 
 // Raw renders blocks [from, to) as the API's structural elements: one

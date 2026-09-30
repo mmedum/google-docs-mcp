@@ -10,8 +10,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
 )
 
 // FixturePath returns the absolute path of testdata/sample.json.

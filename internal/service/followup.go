@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
-	"github.com/mmedum/google-docs-mcp/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 // Follow-ups are the later batches of an edit, each planned against the
@@ -133,7 +133,7 @@ func (s *Service) runRounds(ctx context.Context, req EditRequest, later [][]Edit
 			}
 			s.Remember(f)
 		}
-		res, after, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: ops, Force: req.Force})
+		res, after, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: ops, Force: req.Force, round: true})
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("the earlier ops were applied but %s failed: %s", opNumbers(later[i:]), messageOf(err)))
 			return nil

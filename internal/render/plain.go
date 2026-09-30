@@ -3,7 +3,7 @@ package render
 import (
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
 )
 
 // Plain renders blocks [from, to) as plain text: no markdown markers,

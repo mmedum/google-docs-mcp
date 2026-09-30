@@ -1,5 +1,5 @@
 // Package version exposes the build-time version string. Set with
-// -ldflags "-X github.com/mmedum/google-docs-mcp/internal/version.Version=v1.2.3".
+// -ldflags "-X github.com/mmedum/google-docs-mcp/v2/internal/version.Version=v1.2.3".
 package version
 
 import (

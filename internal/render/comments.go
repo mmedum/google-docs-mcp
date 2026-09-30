@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
 )
 
 // Thread is a comment thread. It is shown twice: as one line in the

@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +28,10 @@ func TestRulesCatchPlantedIdentifiers(t *testing.T) {
 		{"real address", "contact alice@acme.co.uk for access", true}, // leakcheck:allow
 		{"documentation address", "owner o@example.test signed in", false},
 		{"test domain", "a@b.test", false},
+		// The reserved names are whole domains or final labels. One that
+		// only starts or contains like them is a domain someone can own.
+		{"real domain named like a reserved one", "a@example.dk", true},                                 // leakcheck:allow
+		{"reserved label inside a real domain", "a@corp.test.com", true},                                // leakcheck:allow
 		{"subject id", "sub 109876543210987654321 logged in", true},                                     // leakcheck:allow
 		{"client id", "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com", true}, // leakcheck:allow gitleaks:allow
 		{"api host on its own", "https://docs.googleapis.com/v1/documents", false},
@@ -151,5 +157,53 @@ func TestLeaksCatchesAPlantedBinary(t *testing.T) {
 	if !strings.Contains(err.Error(), "planted-binary-for-test") ||
 		!strings.Contains(err.Error(), "compiled executable") {
 		t.Errorf("the failure does not name the file and why: %v", err)
+	}
+}
+
+// fakeRepo makes a git checkout of n files in a temporary directory and
+// moves the test into it, so the whole gate runs over a tree the test
+// controls.
+func fakeRepo(t *testing.T, n int, extra map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		t.Skipf("git init: %v %s", err, out)
+	}
+	files := map[string]string{"go.mod": "module fake\n"}
+	for i := range n - 1 {
+		files[fmt.Sprintf("f%02d.txt", i)] = "nothing here\n"
+	}
+	maps.Copy(files, extra)
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+}
+
+// A gate that reads almost nothing passes everything, so too small a
+// tree is a failure rather than a clean result.
+func TestLeaksRefusesATreeTooSmallToBeTheRepository(t *testing.T) {
+	fakeRepo(t, 5, nil)
+	err := leaks(io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "only 5 files") {
+		t.Fatalf("leaks over a 5-file tree = %v, want the \"only 5 files\" refusal", err)
+	}
+}
+
+// The text rules through the whole gate, not just findLeaks: a planted
+// address is reported with the file that carries it, and the same tree
+// without it passes.
+func TestLeaksCatchesAPlantedAddress(t *testing.T) {
+	fakeRepo(t, 25, map[string]string{"notes.md": "ask someone@acme.co.uk\n"}) // leakcheck:allow
+	err := leaks(io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "notes.md: address at a real domain") {
+		t.Fatalf("leaks with a planted address = %v, want it named in notes.md", err)
+	}
+	fakeRepo(t, 25, map[string]string{"notes.md": "ask someone@example.test\n"})
+	var out bytes.Buffer
+	if err := leaks(&out, nil); err != nil || out.String() != "leaks ok: 26 files scanned\n" {
+		t.Fatalf("leaks over a clean tree = %v, output %q, want \"leaks ok: 26 files scanned\"", err, out.String())
 	}
 }

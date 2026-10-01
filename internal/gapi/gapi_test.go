@@ -734,3 +734,80 @@ func TestCompactJSONDoesNotRewriteAQueryItDidNotBuild(t *testing.T) {
 		t.Errorf("query = %q", req.URL.RawQuery)
 	}
 }
+
+// countingTransport answers every request with err, or with an empty
+// JSON object when err is nil, and counts what reached it.
+type countingTransport struct {
+	n   *int32
+	err error
+}
+
+func (c countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	atomic.AddInt32(c.n, 1)
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &http.Response{StatusCode: 200, Body: http.NoBody, Header: http.Header{}, Request: r}, nil
+}
+
+// With no AllowURL the token goes only to Google over HTTPS: plain HTTP
+// to a Google host is refused before the transport sees the request.
+func TestDefaultAllowlistSendsCredentialsOnlyOverHTTPSToGoogle(t *testing.T) {
+	for _, tc := range []struct {
+		base    string
+		reached int32
+	}{
+		{"https://docs.googleapis.com", 1},
+		{"http://docs.googleapis.com", 0},
+		{"https://docs.example.test", 0},
+	} {
+		var n int32
+		c := New(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "tok"}), Options{
+			BaseTransport: countingTransport{n: &n},
+			DocsBaseURL:   tc.base,
+			Retry:         RetryPolicy{MaxAttempts: 1, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
+		})
+		_, err := c.GetDocument(context.Background(), "abc", GetOptions{})
+		if n != tc.reached {
+			t.Errorf("%s: transport reached %d times, want %d (err %v)", tc.base, n, tc.reached, err)
+		}
+		if tc.reached == 0 && !errors.Is(err, ErrUnexpected) {
+			t.Errorf("%s: err %v, want the refusal", tc.base, err)
+		}
+	}
+}
+
+// A network failure is retried on a read and never on a write, which
+// may have reached Google before the connection broke.
+func TestNetworkFailureRetriesReadsOnly(t *testing.T) {
+	newClient := func(n *int32) *Client {
+		return New(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "tok"}), Options{
+			BaseTransport: countingTransport{n: n, err: errors.New("connection reset by peer")},
+			Retry:         RetryPolicy{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
+			Sleep:         func(context.Context, time.Duration) error { return nil },
+		})
+	}
+	var reads, writes int32
+	if _, err := newClient(&reads).About(context.Background()); reads != 3 || Class(err) != "network" {
+		t.Errorf("read: attempts %d, class %q, want 3 and network (err %v)", reads, Class(err), err)
+	}
+	_, err := newClient(&writes).CreateComment(context.Background(), "abc", "hi", "")
+	if writes != 1 || Class(err) != "ambiguous_outcome" {
+		t.Errorf("write: attempts %d, class %q, want 1 and ambiguous_outcome (err %v)", writes, Class(err), err)
+	}
+}
+
+// Every 5xx is transient on a read, the first of them included.
+func TestReadRetriesOnInternalError(t *testing.T) {
+	var n int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			googleError(w, 500, "internal", "INTERNAL", "")
+			return
+		}
+		_, _ = w.Write([]byte(`{"user":{"emailAddress":"a@b.test"}}`))
+	}))
+	if _, err := c.About(context.Background()); err != nil || n != 2 {
+		t.Fatalf("attempts %d, err %v, want 2 and success", n, err)
+	}
+}

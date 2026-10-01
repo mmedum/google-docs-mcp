@@ -188,7 +188,7 @@ func TestDailyLimitIsNotRetried(t *testing.T) {
 	}
 }
 
-// A write is not repeated on a throttling 403: only 429 and 503 prove
+// A write is not repeated on a throttling 403: only a 429 proves
 // nothing was applied, and that rule is older than this classification.
 func TestThrottling403DoesNotRetryWrites(t *testing.T) {
 	var n int32
@@ -202,20 +202,22 @@ func TestThrottling403DoesNotRetryWrites(t *testing.T) {
 	}
 }
 
-// A Drive comment is a create, so the write rule covers it too: only 429
-// and 503 prove nothing was posted. Retrying a throttling 403 or a 500
-// here would post the comment twice.
-func TestDriveWriteRetriesOnlyOn429And503(t *testing.T) {
+// A Drive comment is a create, so the write rule covers it too: only a
+// 429 proves nothing was posted. A 5xx, 503 included, may arrive after
+// Drive created the comment, so it is never repeated and is reported as
+// a write whose outcome is unknown.
+func TestDriveWriteRetriesOnlyOn429(t *testing.T) {
 	for _, tc := range []struct {
 		label    string
 		status   int
 		reason   string
 		attempts int32
+		class    string
 	}{
-		{"throttling 403", 403, "userRateLimitExceeded", 1},
-		{"server error", 500, "", 1},
-		{"service unavailable", 503, "", 2},
-		{"too many requests", 429, "", 2},
+		{"throttling 403", 403, "userRateLimitExceeded", 1, "rate_limited"},
+		{"server error", 500, "", 1, "ambiguous_outcome"},
+		{"service unavailable", 503, "", 1, "ambiguous_outcome"},
+		{"too many requests", 429, "", 2, ""},
 	} {
 		var n int32
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -229,9 +231,26 @@ func TestDriveWriteRetriesOnlyOn429And503(t *testing.T) {
 		if n != tc.attempts {
 			t.Errorf("%s: attempts %d, want %d (err %v)", tc.label, n, tc.attempts, err)
 		}
-		if tc.attempts == 1 && err == nil {
-			t.Errorf("%s: expected an error", tc.label)
+		if tc.class != "" && Class(err) != tc.class {
+			t.Errorf("%s: class %q, want %q (err %v)", tc.label, Class(err), tc.class, err)
 		}
+	}
+}
+
+// A delete answered 503 may have deleted. Repeating it would turn that
+// into a 404 and report a comment this call removed as never there.
+func TestDeleteAfterServerErrorIsNotRepeated(t *testing.T) {
+	var n int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			googleError(w, 503, "unavailable", "UNAVAILABLE", "")
+			return
+		}
+		googleError(w, 404, "not found", "NOT_FOUND", "")
+	}))
+	err := c.DeleteComment(context.Background(), "abc", "c1")
+	if n != 1 || Class(err) != "ambiguous_outcome" {
+		t.Fatalf("attempts %d, class %q, want 1 and ambiguous_outcome (err %v)", n, Class(err), err)
 	}
 }
 
@@ -277,11 +296,16 @@ func TestReadGivesUpAfterMaxAttempts(t *testing.T) {
 	}
 }
 
-func TestWriteRetriesOnlyOn429And503(t *testing.T) {
+// Google's code.proto says of UNAVAILABLE that it is "not always safe to
+// retry non-idempotent operations", so a 503 on a batch is not repeated.
+// A repeat of an applied batch fails its revision check, and the
+// re-plan that follows would apply the edit twice.
+func TestWriteRetriesOnlyOn429(t *testing.T) {
 	for _, tc := range []struct {
 		status   int
 		attempts int32
-	}{{429, 2}, {503, 2}, {500, 1}, {502, 1}} {
+		class    string
+	}{{429, 2, ""}, {503, 1, "ambiguous_outcome"}, {500, 1, "ambiguous_outcome"}, {502, 1, "ambiguous_outcome"}} {
 		var n int32
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if atomic.AddInt32(&n, 1) == 1 {
@@ -294,9 +318,20 @@ func TestWriteRetriesOnlyOn429And503(t *testing.T) {
 		if n != tc.attempts {
 			t.Errorf("status %d: attempts %d, want %d (err %v)", tc.status, n, tc.attempts, err)
 		}
-		if tc.attempts == 1 && err == nil {
-			t.Errorf("status %d: expected error", tc.status)
+		if tc.class != "" && Class(err) != tc.class {
+			t.Errorf("status %d: class %q, want %q (err %v)", tc.status, Class(err), tc.class, err)
 		}
+	}
+	// documents.create has no revision guard at all: a repeat is a
+	// second document.
+	var n int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&n, 1)
+		googleError(w, 503, "unavailable", "UNAVAILABLE", "")
+	}))
+	_, err := c.CreateDocument(context.Background(), "t")
+	if n != 1 || Class(err) != "ambiguous_outcome" {
+		t.Errorf("create after 503: attempts %d, class %q, want 1 and ambiguous_outcome (err %v)", n, Class(err), err)
 	}
 }
 

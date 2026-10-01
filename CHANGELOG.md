@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-01
+
 ### Fixed
 
 - A write that fails with a 5xx, 503 included, is no longer repeated; it is `[ambiguous_outcome]` and says to read before trying again. A repeated edit could apply twice, and a repeated create or comment duplicated.

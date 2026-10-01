@@ -223,6 +223,13 @@ func Classes() []string {
 // service.Classes is the whole vocabulary this server speaks.
 func Class(err error) string {
 	switch {
+	case errors.Is(err, ErrAmbiguous):
+		// First, because it wraps the server or network error that made
+		// the outcome unknown. Not "ambiguous": that word is taken by a
+		// target matching several things, which asks the caller to
+		// choose. This one says the write may or may not have landed,
+		// which asks them to look.
+		return "ambiguous_outcome"
 	case errors.Is(err, ErrMissingScope):
 		return "forbidden"
 	case errors.Is(err, ErrUnauthorized):
@@ -239,11 +246,6 @@ func Class(err error) string {
 		return "conflict"
 	case errors.Is(err, ErrInvalid):
 		return "invalid"
-	case errors.Is(err, ErrAmbiguous):
-		// Not "ambiguous": that word is taken by a target matching
-		// several things, which asks the caller to choose. This one says
-		// the write may or may not have landed, which asks them to look.
-		return "ambiguous_outcome"
 	case errors.Is(err, ErrNetwork):
 		return "network"
 	}

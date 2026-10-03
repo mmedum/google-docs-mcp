@@ -18,9 +18,6 @@ import (
 // and each of them has to see it.
 func TestStyleOnlySuggestionIsVisible(t *testing.T) {
 	d := start(t)
-	if !d.preview {
-		t.Skip("suggestion mode needs Developer Preview (GDOCS_PREVIEW=true)")
-	}
 	_, sc := d.okStruct("create", "create_document", map[string]any{
 		"title":   "google-docs-mcp style-only suggestion (safe to delete)",
 		"content": "# Style-only suggestion\n\nClean sentence one here.\n\nClean sentence two here."})

@@ -70,7 +70,7 @@ type EditOpInput struct {
 type EditInput struct {
 	Document       string        `json:"document" jsonschema:"document id or any docs.google.com URL"`
 	Ops            []EditOpInput `json:"ops" jsonschema:"operations applied together as one atomic batch; targets are resolved against the document as it is now"`
-	Mode           string        `json:"mode,omitempty" jsonschema:"suggest (tracked changes a person accepts; needs preview), direct (edit the text), or comment (post each change as a comment on the passage, changing nothing); default from get_document capabilities"`
+	Mode           string        `json:"mode,omitempty" jsonschema:"suggest (tracked changes a person accepts), direct (edit the text), or comment (post each change as a comment on the passage, changing nothing); default from get_document capabilities"`
 	DryRun         bool          `json:"dry_run,omitempty" jsonschema:"resolve and plan everything, show the exact requests and the current text of the region, but send nothing"`
 	ExpectRevision string        `json:"expect_revision,omitempty" jsonschema:"fail if the document is no longer at this revision id"`
 	Force          bool          `json:"force,omitempty" jsonschema:"direct mode only: allow deleting ranges that hold comment anchors, pending suggestions, images or footnotes; ask the person first"`
@@ -231,7 +231,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 	addAsking(s, d, &mcp.Tool{
 		Name: "review_suggestion",
 		Description: "Accept, reject or discard pending suggested edits by id (from list_suggestions) or all of them. " +
-			"Needs Developer Preview. Accepting applies the suggested text; rejecting declines it, which any editor may " +
+			"Accepting applies the suggested text; rejecting declines it, which any editor may " +
 			"do; discarding removes the suggestion outright, which Google allows only its author. Pass expect_revision " +
 			"to refuse if the document changed since the list was read. dry_run resolves the suggestions and stops " +
 			"before the write.",

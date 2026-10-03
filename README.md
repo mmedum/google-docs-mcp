@@ -144,22 +144,16 @@ If `ssh` says `bind: Address already in use`, stop the login with Ctrl-C
 and start it again to draw a different port. `--timeout` sets how long
 `login` waits; the default is five minutes.
 
-### Optional: Developer Preview
+### Comments and suggestions
 
-Suggestion mode (`mode: suggest`), comments anchored to a text range, and
-accepting or rejecting suggestions use Docs API features that are in the
-[Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview).
-Apply with the form on that page, giving your Cloud project id. Once
-enabled for your project, set `GDOCS_PREVIEW=true`. The program terms
-allow use inside your own organization; do not offer a preview-enabled
-deployment to people outside it.
-
-**These features sit outside the version promise below.** They are the
-one part of this server built on an API Google may change or withdraw
-while it is in preview, and a change there is not something this project
-can absorb without changing behavior. Everything reachable with
-`GDOCS_PREVIEW` unset follows semver as stated; the preview-gated
-features follow Google's preview program, and if it moves, they move.
+Suggestion mode (`mode: suggest`), comments pinned to a text range, and
+accepting or rejecting suggestions use Docs API features Google made
+[generally available](https://developers.google.com/workspace/docs/release-notes)
+on 2026-09-30, rolling out over up to fifteen days. No enrollment is
+needed. If Google refuses them for a document, reads still work, comments
+are posted through Drive quoting the text instead of pinned to it, and
+suggestion mode is refused rather than sent; `get_document` says which.
+`GDOCS_PREVIEW` is deprecated and ignored.
 
 ## Connect a client
 
@@ -205,9 +199,9 @@ for the defaults.
 | `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. |
 | `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing. |
-| `review_suggestion` | Accept, reject or discard suggestions by id or all (Developer Preview). |
+| `review_suggestion` | Accept, reject or discard suggestions by id or all. |
 | `list_comments` | Comment threads with every reply, resolved and deleted state, quoted text and the block they sit on. |
-| `add_comment` | Comment on a passage (pinned with Developer Preview, quoted otherwise) or on the document. |
+| `add_comment` | Comment on a passage (pinned to it) or on the document. |
 | `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. |
 | `list_revisions` | Version history: revision ids, times, authors. |
 | `diff_revisions` | Unified diff of Google's markdown or text export between two revisions. `read_document` reads an old `revision` whole. |
@@ -318,9 +312,8 @@ major version. New tools and new optional arguments are minor. The
 schema diff in CI is what enforces it, and it runs on every pull
 request — the tool surface cannot change without the diff naming it.
 
-The two exclusions, both stated so they are decisions rather than
-surprises: the Developer Preview features above, and the exact prose of
-a tool's text output, which is written for a model to read and will be
+The one exclusion, stated so it is a decision rather than a surprise:
+the exact prose of a tool's text output, which is written for a model to read and will be
 reworded when a model reads it badly. The `structuredContent` a tool
 returns is covered; the sentence wrapped around it is not.
 

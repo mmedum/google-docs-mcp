@@ -28,7 +28,7 @@ func (l *largeAPI) GetDocument(context.Context, string, gapi.GetOptions) (*gapi.
 // never advances, so the cache serves every read after the first.
 func largeService(b *testing.B, spec doctest.LargeSpec) (*Service, *Fetched) {
 	b.Helper()
-	svc := New(&largeAPI{wire: doctest.Large(spec)}, Options{Preview: true})
+	svc := New(&largeAPI{wire: doctest.Large(spec)}, Options{})
 	fixed := time.Unix(1000, 0)
 	svc.now = func() time.Time { return fixed }
 	f, err := svc.Fetch(context.Background(), doctest.LargeID)

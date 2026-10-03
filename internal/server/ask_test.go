@@ -56,9 +56,9 @@ func askFixture(t *testing.T) *fakeAPI {
 	}}
 }
 
-// everything is every tool, with Developer Preview for review.
+// everything is every tool.
 func everything() config.Config {
-	return tools.FullSurface(config.Config{DefaultWriteMode: config.WriteDirect, Preview: true})
+	return tools.FullSurface(config.Config{DefaultWriteMode: config.WriteDirect})
 }
 
 // connectAsking connects a client on protocol to a server over a fresh

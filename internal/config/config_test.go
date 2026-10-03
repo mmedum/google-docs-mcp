@@ -25,19 +25,22 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Profile != "default" || c.LogLevel != LogInfo || c.LogFormat != LogText || c.Preview || c.ReadOnly || c.EnableDestructive {
+	if c.Profile != "default" || c.LogLevel != LogInfo || c.LogFormat != LogText || c.ReadOnly || c.EnableDestructive {
 		t.Fatalf("defaults wrong: %+v", c)
 	}
-	if c.DefaultWriteMode != WriteDirect || c.HTTPTimeout != 60*time.Second || c.ExportDir != "" {
+	if c.DefaultWriteMode != WriteSuggest || c.HTTPTimeout != 60*time.Second || c.ExportDir != "" {
 		t.Fatalf("defaults wrong: %+v", c)
 	}
-	if got := c.AvailableWriteModes(); len(got) != 2 || got[0] != WriteDirect {
+	if got := WriteModes(); len(got) != 3 || got[0] != WriteSuggest {
 		t.Fatalf("modes = %v", got)
+	}
+	if len(c.Warnings) != 0 {
+		t.Fatalf("warnings = %v", c.Warnings)
 	}
 }
 
 func TestEnvThenFlagPrecedence(t *testing.T) {
-	env := map[string]string{"GDOCS_LOG_LEVEL": "debug", "GDOCS_PREVIEW": "yes", "GDOCS_PROFILE": "Work"}
+	env := map[string]string{"GDOCS_LOG_LEVEL": "debug", "GDOCS_DEFAULT_WRITE_MODE": "comment", "GDOCS_PROFILE": "Work"}
 	c, err := build(t, env, "--log-level=warn")
 	if err != nil {
 		t.Fatal(err)
@@ -45,11 +48,36 @@ func TestEnvThenFlagPrecedence(t *testing.T) {
 	if c.LogLevel != LogWarn {
 		t.Fatalf("flag should override env: %v", c.LogLevel)
 	}
-	if !c.Preview || c.DefaultWriteMode != WriteSuggest || c.Profile != "work" {
+	if c.DefaultWriteMode != WriteComment || c.Profile != "work" {
 		t.Fatalf("env not applied: %+v", c)
 	}
-	if got := c.AvailableWriteModes(); len(got) != 3 || got[0] != WriteSuggest {
-		t.Fatalf("modes = %v", got)
+}
+
+// An existing configuration that still sets the retired preview switch
+// starts, says the switch does nothing, and changes nothing else.
+func TestPreviewIsDeprecated(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		args []string
+	}{
+		{"env", map[string]string{"GDOCS_PREVIEW": "true"}, nil},
+		{"env false", map[string]string{"GDOCS_PREVIEW": "false"}, nil},
+		{"flag", nil, []string{"--preview=true"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := build(t, tc.env, tc.args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "GDOCS_PREVIEW (--preview) is deprecated and ignored: comments and suggestions are generally available"
+			if len(c.Warnings) != 1 || c.Warnings[0] != want {
+				t.Fatalf("warnings = %q", c.Warnings)
+			}
+			if c.DefaultWriteMode != WriteSuggest {
+				t.Fatalf("default write mode = %q", c.DefaultWriteMode)
+			}
+		})
 	}
 }
 
@@ -63,7 +91,6 @@ func TestValidation(t *testing.T) {
 		{"bad format", map[string]string{"GDOCS_LOG_FORMAT": "xml"}, "log format"},
 		{"bad bool", map[string]string{"GDOCS_READ_ONLY": "maybe"}, "read-only"},
 		{"bad mode", map[string]string{"GDOCS_DEFAULT_WRITE_MODE": "yolo"}, "default write mode"},
-		{"suggest without preview", map[string]string{"GDOCS_DEFAULT_WRITE_MODE": "suggest"}, "Developer Preview"},
 		{"relative export dir", map[string]string{"GDOCS_EXPORT_DIR": "exports"}, "absolute"},
 		{"bad timeout", map[string]string{"GDOCS_HTTP_TIMEOUT": "soon"}, "http timeout"},
 		{"huge timeout", map[string]string{"GDOCS_HTTP_TIMEOUT": "1h"}, "between"},
@@ -89,7 +116,7 @@ func TestExplicitModesAndDirs(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	c, err := build(t, map[string]string{"GDOCS_PREVIEW": "1", "GDOCS_DEFAULT_WRITE_MODE": "comment", "GDOCS_EXPORT_DIR": dir + string(filepath.Separator), "GDOCS_ENABLE_DESTRUCTIVE": "on"})
+	c, err := build(t, map[string]string{"GDOCS_DEFAULT_WRITE_MODE": "comment", "GDOCS_EXPORT_DIR": dir + string(filepath.Separator), "GDOCS_ENABLE_DESTRUCTIVE": "on"})
 	if err != nil {
 		t.Fatal(err)
 	}

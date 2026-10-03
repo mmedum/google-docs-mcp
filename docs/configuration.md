@@ -13,8 +13,8 @@ given explicitly wins over the environment.
 | `GDOCS_CONFIG_DIR` | OS config dir + `google-docs-mcp` | Where profiles live. |
 | `GDOCS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr. |
 | `GDOCS_LOG_FORMAT` | `text` | `text` or `json`. |
-| `GDOCS_PREVIEW` | `false` | Enable Developer Preview features (suggestion mode, anchored comments, comments in `documents.get`). Needs an enrolled Cloud project. |
-| `GDOCS_DEFAULT_WRITE_MODE` | `suggest` with preview, else `direct` | `suggest`, `direct` or `comment`. Setting `suggest` without preview refuses to start. |
+| `GDOCS_PREVIEW` | unset | Deprecated and ignored; setting it logs a warning. Comments and suggestions are generally available. |
+| `GDOCS_DEFAULT_WRITE_MODE` | `suggest` | `suggest`, `direct` or `comment`. |
 | `GDOCS_READ_ONLY` | `false` | Register only read tools; `login` requests read-only scopes. |
 | `GDOCS_ENABLE_DESTRUCTIVE` | `false` | Register destructive tools (delete comment, delete tab). |
 | `GDOCS_REQUIRE_PROMPT` | `false` | Refuse the writes that ask the person when the client cannot ask them, rather than making them on the arguments alone. |
@@ -48,8 +48,8 @@ google-docs-mcp --dump-schemas
 ```
 
 `doctor` checks credentials, the token exchange, granted scopes, the Drive
-API, and, given a document, the Docs API and whether Developer Preview is
-enabled for the project.
+API, and, given a document, the Docs API and whether Google answers it with
+comments included, which suggestion mode and pinned comments need.
 
 ## Startup behavior
 

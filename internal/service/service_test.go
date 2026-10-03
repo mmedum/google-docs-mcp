@@ -19,14 +19,23 @@ import (
 
 const fixtureID = "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX"
 
+// viewRefused is how the fake refuses the comments view.
+var viewRefused = &gapi.APIError{Status: 400, Message: "Invalid value at 'comments_view_mode'"}
+
 type fakeAPI struct {
 	raw        []byte
 	afterBatch []byte // served once a batch has been sent, when set
 	getCalls   int
 	getErr     error
-	fileErr    error
-	file       *gapi.File
-	lastOpts   gapi.GetOptions
+	// viewErr refuses a read that asks for the comments view (usually
+	// viewRefused), as a
+	// project the comment features have not reached may.
+	viewErr error
+	// viewErrAfterBatch does the same once a batch has been sent.
+	viewErrAfterBatch error
+	fileErr           error
+	file              *gapi.File
+	lastOpts          gapi.GetOptions
 
 	batches         []*gapi.BatchUpdateRequest
 	batchErrs       []error
@@ -155,6 +164,12 @@ func (f *fakeAPI) GetDocument(_ context.Context, id string, o gapi.GetOptions) (
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
+	if f.viewErr != nil && o.CommentsViewMode != "" {
+		return nil, f.viewErr
+	}
+	if f.viewErrAfterBatch != nil && len(f.batches) > 0 && o.CommentsViewMode != "" {
+		return nil, f.viewErrAfterBatch
+	}
 	if id != fixtureID {
 		return nil, &gapi.APIError{Status: 404, Message: "not found"}
 	}
@@ -186,7 +201,7 @@ func (f *fakeAPI) GetFile(_ context.Context, id string) (*gapi.File, error) {
 func newService(t *testing.T) (*Service, *fakeAPI) {
 	t.Helper()
 	api := &fakeAPI{raw: doctest.RawFixture(t)}
-	svc := New(api, Options{Preview: false, DefaultWriteMode: config.WriteDirect})
+	svc := New(api, Options{DefaultWriteMode: config.WriteDirect})
 	return svc, api
 }
 
@@ -198,7 +213,7 @@ func TestFetchCacheAndHandles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Doc.Title != "Quarterly Report" || api.lastOpts.SuggestionsViewMode != gapi.SuggestionsInline || api.lastOpts.CommentsViewMode != "" {
+	if f.Doc.Title != "Quarterly Report" || api.lastOpts.SuggestionsViewMode != gapi.SuggestionsInline || api.lastOpts.CommentsViewMode != gapi.CommentsIncluded || !f.CommentsView {
 		t.Fatalf("fetch options wrong: %+v", api.lastOpts)
 	}
 	if _, err := svc.Fetch(context.Background(), fixtureID); err != nil || api.getCalls != 1 {
@@ -221,14 +236,49 @@ func TestFetchCacheAndHandles(t *testing.T) {
 	}
 }
 
-func TestFetchPreviewRequestsComments(t *testing.T) {
-	api := &fakeAPI{raw: doctest.RawFixture(t)}
-	svc := New(api, Options{Preview: true})
-	if _, err := svc.Fetch(context.Background(), fixtureID); err != nil {
-		t.Fatal(err)
+// A project the comment features have not reached may refuse the
+// comments view; the read still works, without it.
+func TestFetchFallsBackWhenCommentsViewRefused(t *testing.T) {
+	for _, refusal := range []*gapi.APIError{
+		viewRefused,
+		{Status: 403, Message: "The caller does not have permission"},
+	} {
+		t.Run(refusal.Message, func(t *testing.T) {
+			api := &fakeAPI{raw: doctest.RawFixture(t), viewErr: refusal}
+			svc := New(api, Options{})
+			f, err := svc.Fetch(context.Background(), fixtureID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f.CommentsView || api.getCalls != 2 || api.lastOpts.CommentsViewMode != "" || f.Doc.Title != "Quarterly Report" {
+				t.Fatalf("view=%t calls=%d opts=%+v", f.CommentsView, api.getCalls, api.lastOpts)
+			}
+		})
 	}
-	if api.lastOpts.CommentsViewMode != gapi.CommentsIncluded {
-		t.Fatalf("preview should request comments: %+v", api.lastOpts)
+}
+
+// A refusal about the document itself fails the retry too, and the
+// read reports it; a failure of another class is not retried.
+func TestFetchDoesNotHideDocumentErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err   error
+		class string
+		calls int
+	}{
+		{&gapi.APIError{Status: 403, Message: "The caller does not have permission"}, "forbidden", 2},
+		// A missing scope is about the token, not the view; asking again
+		// without the view would only send the same refusal twice.
+		{&gapi.APIError{Status: 403, Reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT", Message: "x"}, "forbidden", 1},
+		{&gapi.APIError{Status: 404, Message: "not found"}, "not_found", 1},
+		{&gapi.APIError{Status: 503, Message: "backend"}, "server", 1},
+	} {
+		t.Run(tc.class, func(t *testing.T) {
+			api := &fakeAPI{raw: doctest.RawFixture(t), getErr: tc.err}
+			_, err := New(api, Options{}).Fetch(context.Background(), fixtureID)
+			if classOf(err) != tc.class || api.getCalls != tc.calls {
+				t.Fatalf("err=%v calls=%d", err, api.getCalls)
+			}
+		})
 	}
 }
 
@@ -277,6 +327,23 @@ func TestFetchErrors(t *testing.T) {
 	}
 }
 
+// When Google refuses the comments view, get_document says so and stops
+// offering suggestion mode, which the edit path would refuse.
+func TestInfoCommentsViewRefused(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t), viewErr: viewRefused}
+	info, err := New(api, Options{DefaultWriteMode: config.WriteDirect}).Info(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := info.Capabilities
+	if strings.Join(c.WriteModes, "/") != "direct/comment" || c.CommentsView || c.Preview {
+		t.Fatalf("capabilities: %+v", c)
+	}
+	if !strings.Contains(info.Text, "Google refused the comments view for this document: suggestion mode is unavailable and comments are posted unanchored") {
+		t.Fatalf("text: %s", info.Text)
+	}
+}
+
 func TestInfo(t *testing.T) {
 	svc, api := newService(t)
 	info, err := svc.Info(context.Background(), fixtureID)
@@ -286,8 +353,12 @@ func TestInfo(t *testing.T) {
 	if info.Title != "Quarterly Report" || len(info.Tabs) != 2 || info.Tabs[0].Headings != 3 || info.Owner != "Owner <owner@example.test>" || info.LastModifiedBy != "editor@example.test" {
 		t.Fatalf("info wrong: %+v", info)
 	}
-	if info.CanEdit == nil || !*info.CanEdit || info.Stats.Tables != 1 || info.Capabilities.DefaultWriteMode != "direct" || len(info.Capabilities.WriteModes) != 2 {
+	if info.CanEdit == nil || !*info.CanEdit || info.Stats.Tables != 1 || info.Capabilities.DefaultWriteMode != "direct" ||
+		strings.Join(info.Capabilities.WriteModes, "/") != "suggest/direct/comment" || !info.Capabilities.CommentsView || !info.Capabilities.Preview {
 		t.Fatalf("info wrong: %+v", info)
+	}
+	if strings.Contains(info.Text, "refused the comments view") {
+		t.Fatalf("text claims a refusal: %s", info.Text)
 	}
 	// A tab reports the named styles its paragraphs carry, so the model
 	// can see what layout_document named_style would rewrite. HEADING_3

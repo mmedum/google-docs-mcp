@@ -141,6 +141,19 @@ func TestEmptySectionReplaceInsertsParagraph(t *testing.T) {
 	}
 }
 
+// A conflict re-reads the document, and that read decides suggest mode
+// afresh: a batch is never sent as SUGGEST on a read without the
+// comments view.
+func TestSuggestRecheckedOnConflict(t *testing.T) {
+	svc, api := writable(t, true)
+	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The provided revision id does not match the current revision"}}
+	api.viewErrAfterBatch = viewRefused
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "suggest", Ops: []EditOp{{Kind: plan.OpReplace, Target: &Target{Text: "First point"}, Content: "First item"}}})
+	if classOf(err) != "unavailable" || len(api.batches) != 1 {
+		t.Fatalf("suggest after a re-read without the view: %v (batches %d)", err, len(api.batches))
+	}
+}
+
 func TestExpectRevisionRecheckedOnConflict(t *testing.T) {
 	svc, api := writable(t, false)
 	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The provided revision id does not match the current revision"}}

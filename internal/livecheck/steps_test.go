@@ -31,9 +31,6 @@ Closing line with a [link](https://example.com).`
 // an order where each step leaves the state the next one needs.
 func TestLive(t *testing.T) {
 	d := start(t)
-	if !d.preview {
-		t.Log("=== preview off: suggest-mode steps are expected to be refused with [unavailable]; comments go through Drive ===")
-	}
 
 	// ---- create and read ------------------------------------------------
 	_, sc := d.okStruct("create", "create_document", map[string]any{
@@ -66,13 +63,8 @@ func TestLive(t *testing.T) {
 		map[string]any{"op": "replace", "target": map[string]any{"text": "three"}, "content": "four"},
 		map[string]any{"op": "delete", "target": map[string]any{"text": "Second point"}},
 	}}
-	var suggestions []string
-	if d.preview {
-		_, sc := d.okStruct("suggest edit", "edit_document", suggestArgs)
-		suggestions = strs(sc, "suggestion_ids")
-	} else {
-		d.refused("suggest edit without preview", "edit_document", suggestArgs, "Developer Preview")
-	}
+	_, ssc := d.okStruct("suggest edit", "edit_document", suggestArgs)
+	suggestions := strs(ssc, "suggestion_ids")
 
 	d.ok("comment mode", "edit_document", map[string]any{"document": doc, "mode": "comment", "ops": []any{
 		map[string]any{"op": "replace", "target": map[string]any{"text": "Send the summary"}, "content": "Send the summary to the board"},
@@ -113,7 +105,7 @@ func TestLive(t *testing.T) {
 
 	d.ok("export md", "export_document", map[string]any{"document": doc, "format": "md", "max_chars": 1500})
 	d.ok("read with suggestions", "read_document", map[string]any{"document": doc, "with_handles": true, "include_suggestions": true})
-	if d.preview && len(suggestions) > 1 {
+	if len(suggestions) > 1 {
 		d.ok("accept the first suggestion", "review_suggestion", map[string]any{
 			"document": doc, "action": "accept", "ids": []any{suggestions[0]}})
 	}

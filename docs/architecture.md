@@ -1,14 +1,17 @@
 # Architecture — google-docs-mcp
 
-**Status:** v2.0.1 (2026-10-01): a write that may have landed is
-reported as `[ambiguous_outcome]` instead of being repeated. It asks the person before six writes
-(§12a). Phases 0 to 4 are done (§16): auth, raw
+**Status:** v2.1.0 (2026-10-03). Comments and suggestions are generally
+available and detected per read rather than gated on a flag (§18). Since
+v2.0.1 a write that may have landed is reported as `[ambiguous_outcome]`
+instead of being repeated. It asks the person before six writes (§12a).
+Phases 0 to 4 are done (§16): auth, raw
 client, model, renderer, reads, search, create, export, editing with
 minimal diffs in all three modes, formatting, suggestion review, comment
 threads on both backends, revision history and diffs, tables, tabs,
 headers, footers, footnotes, images and chips, resources, and the agent
 evals. The tool surface covers every GA member of the Docs `Request`
-union plus four preview members. One design decision is open (§17): the
+union plus the four comment and suggestion members it needs (GA since
+2026-09-30, §18). One design decision is open (§17): the
 rule by which Google discards a direct formatting change that collides
 with a pending suggested one, which six rounds of live probing did not
 settle. Every convention here was
@@ -91,8 +94,7 @@ folder management, moving files, sharing, trashing, copying.
 Equations and drawings (read-only), charts, inserting a table of
 contents, reading the *structure* of an old revision (only exports),
 turning Drive-API comment anchors into ranges (opaque), rendering
-Drive-API comments inline in the UI, suggestion mode and anchored
-comments **without** preview enrollment, images from private URLs.
+Drive-API comments inline in the UI, images from private URLs.
 
 ## 3. Requirements distilled from other servers' failures
 
@@ -106,7 +108,7 @@ comments **without** preview enrollment, images from private URLs.
 5. Tabs honored on every write (piotr-agier #114).
 6. Strict, boring JSON Schemas: flat structs with an `op`/`action` enum,
    no `oneOf`, no vendor keywords, no dots in tool names.
-7. Comments that anchor (preview `insertComment`), Drive API as the
+7. Comments that anchor (`insertComment`), Drive API as the
    documented degraded fallback.
 8. Suggestion mode as a first-class write mode, plus accept/reject.
 9. Optimistic concurrency on every write.
@@ -124,10 +126,10 @@ comments **without** preview enrollment, images from private URLs.
    provenance is preserved by construction.
 2. **The user chooses how changes land.** Every write takes
    `mode: suggest | direct | comment`. `suggest` makes the batch a set of
-   tracked changes for a human to accept (preview). `direct` edits the
+   tracked changes for a human to accept. `direct` edits the
    text. `comment` does not touch the text at all: the proposed change is
-   posted as a comment anchored to the passage, which works without
-   preview. The default is configured per deployment
+   posted as a comment anchored to the passage, or through Drive quoting
+   it where Google refuses the comments view. The default is configured per deployment
    (`GDOCS_DEFAULT_WRITE_MODE`) and overridden per call when the person
    asks for it; the server never silently substitutes one mode for
    another.
@@ -153,7 +155,7 @@ comments **without** preview enrollment, images from private URLs.
    resolved and replies) are Phase 2, not polish.
 8. **Raw REST with our own wire types.** Responses decode into
    `internal/gdocs` structs that mirror the API's JSON; requests are
-   built by us, GA and preview alike, and sent with an `oauth2`
+   built by us and sent with an `oauth2`
    transport. The generated `google.golang.org/api` module is not used:
    it brings gRPC, OpenTelemetry and the cloud auth stack into a binary
    that only needs JSON.
@@ -166,7 +168,7 @@ cmd/google-docs-mcp/      main: login / logout / status / doctor subcommands, se
 internal/config/          GDOCS_* env with flags bound to the same names; typed enums; validated at start
 internal/credentials/     refresh token: OS keyring → 0600 file under os.UserConfigDir() with a logged
                           warning (gh pattern) → GDOCS_REFRESH_TOKEN env override
-internal/userconfig/      non-secret pointer file: client_secret path, account email, preview flag
+internal/userconfig/      non-secret pointer file: client_secret path, account email
 internal/auth/            loopback OAuth (127.0.0.1:<random>, PKCE), scope sets (full / readonly)
 internal/gdocs/           Docs API wire types (the JSON we read), no dependencies
 internal/gapi/            raw REST client: client.go (retry, limiter, slog), docs.go (get/batchUpdate),
@@ -212,14 +214,17 @@ Document
                       properties from its suggestion state, handle. A restyling
                       adds and removes nothing, so no walk over insert/delete
                       ids can find one (§18, #46)
-  Anchors             every comment range (preview) / quoted-text match (GA), suggestion range,
+  Anchors             every comment range (comments view) / quoted-text match (Drive), suggestion range,
                       inline object and footnote reference, indexed by segment range
   Revision            revisionId of the fetch this tree came from
 ```
 
 - Built from `documents.get?includeTabsContent=true&suggestionsViewMode=
-  SUGGESTIONS_INLINE` (+ `commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`
-  when preview is on). The only index space we compute against.
+  SUGGESTIONS_INLINE&commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`. A
+  refusal of the comments view (`invalid` or `forbidden`) is retried
+  without it, and `Fetched.CommentsView` records which answer came back;
+  a refusal about the document fails the retry too. The only index space
+  we compute against.
 - Offsets the model sees are Unicode code points; the server converts to
   UTF-16 at the boundary.
 - **Handles**: `p<n>` paragraphs, `tbl<n>` tables (cells `tbl3:r2c3`),
@@ -320,15 +325,16 @@ Every write tool takes ordered `ops[]`, `mode` (`suggest` | `direct` |
 `expect_revision`, and `force` (default false).
 
 **Modes.** `direct` applies the compiled requests. `suggest` applies the
-same requests with `writeMode: SUGGEST` (preview); an explicit
-`mode: suggest` without preview is `[unavailable] suggestion mode needs
-Developer Preview enrollment; use comment or direct`. `comment` compiles
+same requests with `writeMode: SUGGEST`; on a read where Google refused
+the comments view it is `[unavailable]` with comment or direct named
+instead, because a project the feature has not reached might apply the
+batch directly, which is the overwrite the person asked to avoid. `comment` compiles
 each op into a comment on the resolved range instead of a mutation:
 `replace` → "Proposed change:" plus the new text (with a word-level diff
 summary for long ranges), `delete` → "Proposed deletion", `insert` →
 anchored to the neighboring block with "Insert after this:", format ops
-→ "Proposed formatting: Heading 2". With preview the comment is anchored
-by `insertComment`; without it, it is a Drive comment carrying the quoted
+→ "Proposed formatting: Heading 2". The comment is anchored by
+`insertComment`; where the comments view was refused, it is a Drive comment carrying the quoted
 text (§8). Nothing in the document changes in `comment` mode, so the
 guard below only reports.
 
@@ -389,17 +395,17 @@ bullet presets, clearing formatting.
 
 **Comments, two backends behind one tool surface.**
 
-| | Preview (Docs API) | GA (Drive API v3) |
+| | Docs API (comments view) | Drive API v3 |
 |---|---|---|
 | list | `documents.get` with `commentsViewMode` → threads plus the tab's `commentAnchors` map (anchor id → ranges) → handles | `comments.list` (replies, resolved state, `includeDeleted` opt-in) → `quotedFileContent`; server matches the quote to a block, best effort |
 | add | `insertComment` with a Range → anchored in the UI | `comments.create` with `quotedFileContent` → **unanchored** in the UI (stated in the description and in `warnings`) |
-| reply / resolve / reopen | `replies.create` with `action` (GA works for every deployment; the preview's `addCommentReply` adds nothing for replies) | `replies.create` with `action` |
+| reply / resolve / reopen | `replies.create` with `action` (one backend for thread operations; `addCommentReply` adds nothing for replies) | `replies.create` with `action` |
 | delete | gated, `comments.delete` / `replies.delete` | gated |
 
 `list_comments` always lists through the Drive API, which carries every
 reply with author, time and action, resolved and deleted state for every
-deployment, and locates each thread through the preview anchors when the
-fetch carried them, else by its quoted text (a quote that matches once).
+deployment, and locates each thread through the comments view's anchors
+when the fetch carried them, else by its quoted text (a quote that matches once).
 Resolved threads are included by default, deleted ones on request.
 Resolution is reversible (`reopen`); deletion is gated. The guard, reads
 with `include_comments` and the listing share one located thread list
@@ -416,8 +422,8 @@ API fills with every inherited property. Reads mark one as CriticMarkup
 `{==text==}{>>s:<id> suggests bold<<}`: a highlight, because nothing was
 added or removed. A direct formatting change over a property a pending
 suggestion already sets comes back with a warning (§18). `review_suggestion`
-(`action: accept | reject`, ids or `all`) and `mode: suggest` need
-preview. In SUGGEST mode the API refuses `AddDocumentTab`,
+(`action: accept | reject`, ids or `all`) goes to Google whatever the
+read said; `mode: suggest` needs the comments view (§7). In SUGGEST mode the API refuses `AddDocumentTab`,
 `CreateNamedRange`, `DeleteFooter`, `DeleteHeader`, `DeleteNamedRange`,
 `DeleteTab`, `UpdateDocumentTabProperties`, `UpdateTableColumnProperties`,
 and cannot suggest document-format or header/footer settings; the planner
@@ -446,7 +452,7 @@ registers only readOnly rows and requests readonly scopes.
 | Tool | Purpose | Annotations | Phase |
 |---|---|---|---|
 | `search_documents` | Locate a Doc by title or content (Drive search restricted to Docs); returns id, title, modified, owner | readOnly | 1 |
-| `get_document` | Title, tabs, revision, owner, counts, capabilities (preview on/off, available write modes, configured default); per tab the page setup, floating objects, named ranges and the named style definitions its paragraphs carry | readOnly, idempotent | 0, 4 |
+| `get_document` | Title, tabs, revision, owner, counts, capabilities (comments view, available write modes, configured default); per tab the page setup, floating objects, named ranges and the named style definitions its paragraphs carry | readOnly, idempotent | 0, 4 |
 | `get_outline` | Heading tree with `heading_id`, handles, sizes | readOnly | 0 |
 | `read_document` | Scoped, budgeted markdown/text/raw view; `with_styles`; `revision_id` | readOnly | 0 |
 | `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
@@ -455,9 +461,9 @@ registers only readOnly rows and requests readonly scopes.
 | `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2, 4 |
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
 | `list_suggestions` | Pending suggestions with handles and authors | readOnly | 1 |
-| `review_suggestion` | accept / reject / discard (preview; discard is author-only); `all` asks the person; dry_run | — | 1, 4, 2.0 |
+| `review_suggestion` | accept / reject / discard (discard is author-only); `all` asks the person; dry_run | — | 1, 4, 2.0 |
 | `list_comments` | Full threads: replies, resolved, deleted, quoted text, handles | readOnly | 2 |
-| `add_comment` | Anchored to a Target (preview) or quoted (Drive); no target = document-level; dry_run | — | 2, 2.0 |
+| `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | — | 2, 2.0 |
 | `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only) | — | 2, 4 |
 | `delete_comment` | Gated; a thread or one reply; asks the person; dry_run | destructive | 2, 2.0 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
@@ -516,20 +522,9 @@ preview included. Measured in the Phase 3 evals (§14).
   for consumer accounts, with weekly `login`); add the four scopes; create
   a **Desktop app** OAuth client; download its `client_secret.json`; run
   `google-docs-mcp login --client-secret <path>`.
-- **Developer Preview enrollment** (for suggestion mode, anchored
-  comments, accept/reject; **decided: yes** for the maintainer's project;
-  every other deployer enrolls their own). Per Google's program page:
-  apply with the application form linked from
-  https://developers.google.com/workspace/preview, providing "your Google
-  Workspace account and Google Cloud project information"; access is
-  granted "through your Google Cloud project(s)" and by adding the
-  account to a program Google Group; "the whole process should be done
-  within a couple of days"; the program "provides access to all the
-  features", not per feature. The terms allow use inside the enrolling
-  organization and forbid granting "end users access, outside my domain
-  or company" to applications built on pre-GA APIs. Publishing this
-  server's source is not that; anyone else would need their own enrolled
-  project, and the README must say so.
+- **No enrollment.** Suggestion mode, anchored comments and
+  accept/reject were Developer Preview until Google made them generally
+  available on 2026-09-30 (§18); no deployer enrolls anything.
 - **OAuth flow**: Google's documented desktop flow, loopback
   `127.0.0.1:<random port>` with PKCE (OOB has been blocked since 2023).
 - **Refresh token storage**, in the order `gh` uses: OS keyring; on error
@@ -542,19 +537,19 @@ preview included. Measured in the Phase 3 evals (§14).
   `[forbidden] missing scope …; re-run google-docs-mcp login`.
 - **Config**: `GDOCS_*` env is the source of truth; each setting also has
   a flag bound to the same name. Settings: `GDOCS_LOG_LEVEL`,
-  `GDOCS_LOG_FORMAT`, `GDOCS_PREVIEW`, `GDOCS_DEFAULT_WRITE_MODE`
-  (`suggest` | `direct` | `comment`; if set to `suggest` without preview
-  the server refuses to start rather than downgrade), `GDOCS_READ_ONLY`,
+  `GDOCS_LOG_FORMAT`, `GDOCS_DEFAULT_WRITE_MODE`
+  (`suggest` | `direct` | `comment`, default `suggest`), `GDOCS_READ_ONLY`,
   `GDOCS_ENABLE_DESTRUCTIVE`, `GDOCS_EXPORT_DIR`, `GDOCS_HTTP_TIMEOUT`,
   `GDOCS_PROFILE` (named config directory, so a person with two Google
   accounts runs two server entries). Operational flags: `--version`,
-  `--dump-schemas`.
+  `--dump-schemas`. `GDOCS_PREVIEW` and `--preview` are accepted,
+  ignored and logged as deprecated, so an existing configuration starts.
 - **Startup**: refresh the access token once (the scope-agnostic
   credential check). On failure log to stderr and **keep serving**; every
   tool then returns `[auth] … run google-docs-mcp login`. `doctor` does the
-  full interactive check: token age, consent type, scopes, preview
-  enrollment (a `documents.get` with `commentsViewMode` on a doc id you
-  pass), quota headroom.
+  full interactive check: token age, consent type, scopes, the comments
+  view (a `documents.get` with `commentsViewMode` on a doc id you pass),
+  quota headroom.
 - **Transport**: stdio (**decided**).
 
 ## 11. Reliability
@@ -654,9 +649,8 @@ other people's work in a document:
   them and the answer is bound to their ids, so one proposed while the
   person reads is not reviewed unseen.
 
-`add_comment` with an assignee does not ask: it works only under
-Developer Preview, and whether Google notifies the assignee is not
-established. `replace_all` does not ask either; it is bounded to one tab
+`add_comment` with an assignee does not ask: it works only on a pinned
+comment, and whether Google notifies the assignee is not established. `replace_all` does not ask either; it is bounded to one tab
 and the guard holds it like any other direct delete.
 
 The mechanism is the one the sibling servers run, ported rather than
@@ -707,9 +701,7 @@ accounts. That sets these requirements:
   env-first.
 - **Setup guide** in the README, per-deployer, in the order `doctor`
   checks it: Cloud project → APIs → consent screen (Internal vs Testing)
-  → Desktop OAuth client → `login` → `doctor`. Preview enrollment is a
-  separate, optional section that states the program terms: use inside
-  your own organization only, enroll your own project.
+  → Desktop OAuth client → `login` → `doctor`.
 - **Versioning.** Semantic versions; `CHANGELOG.md` in Keep a Changelog
   form; the schema-dump diff in CI classifies tool removals, renames, and
   required-field additions as breaking (major after 1.0, minor before).
@@ -797,9 +789,9 @@ accounts. That sets these requirements:
 | Decision | Consequence in the design |
 |---|---|
 | Deployer-owned Cloud project (may be shared with other tools) with a dedicated OAuth client; the repository is isolated and distributed for other people | §10, §13; setup guide covers Workspace (Internal) and consumer (Testing) accounts; no baked-in identifiers |
-| Enroll in Developer Preview | Spike A first; `mode: suggest` default; anchored comments; accept/reject |
+| Enroll in Developer Preview (superseded 2026-10-03: the features are GA, §18) | Spike A first; `mode: suggest` default; anchored comments; accept/reject |
 | Edits happen live in shared documents; never overwrite; full history | Minimal-diff replace, overwrite guard, history tools in Phase 2, comment threads complete by default |
-| The person chooses how changes land: suggestion, direct edit, or comment | `mode` on every write with a configured default; `comment` mode works without preview; no silent downgrades |
+| The person chooses how changes land: suggestion, direct edit, or comment | `mode` on every write with a configured default; `comment` mode works where the comments view is refused; no silent downgrades |
 | Paragraph handles: short labels remembered by the server (option A) | `p12`-style handles with per-document handle memory (§6) |
 | Markdown for new content only; existing content edited in place | `with_styles` reads, format ops, no whole-document round trips |
 | One document, every capability; no folder/move/share/trash/copy | Tool table trimmed; `search_documents` is locate-only |
@@ -929,11 +921,10 @@ installed. Half a gate met honestly is better than a whole one claimed;
 the clause is retired rather than quietly ignored.
 
 What replaced them is narrower and enforceable: the version promise is
-written down in the README with its two exclusions named — the
-Developer Preview features, because they are built on an API Google may
-change while it is in preview, and the prose of a tool's text output,
-because it is written for a model and will be reworded when a model
-reads it badly. The schema diff in CI is what holds the rest.
+written down in the README with its exclusion named — the prose of a
+tool's text output, because it is written for a model and will be
+reworded when a model reads it badly. A second, the Developer Preview
+features, went when Google made them generally available (§18). The schema diff in CI is what holds the rest.
 
 **2.0.0 — asking the person (2026-09-30).** §12a. The module path moves
 to `/v2`: a caller that runs unattended under `GDOCS_REQUIRE_PROMPT`, or
@@ -1059,6 +1050,7 @@ checked rather than assumed.
 | `TableRowStyle.minHeight` and `SectionType: ONE_COLUMN \| TWO_COLUMN \| THREE_COLUMN` (a summary of the reference page) | Refuted against the discovery document (`docs.googleapis.com/$discovery/rest?version=v1`, 2026-09-03): the field is `minRowHeight` (with `preventOverflow` and `tableHeader` beside it), and `insertSectionBreak` takes only `CONTINUOUS` or `NEXT_PAGE` — columns are `SectionStyle.columnProperties` | Wire names taken from the discovery document, not from a prose summary; columns are set on the section, not by its type. |
 | `updateCommentPost`, `deleteComment`, `deleteCommentReply`, `deleteSuggestion` in the Docs API | Confirmed present but **Developer Preview only** (Request reference); Drive `comments.update` and `replies.update` are GA | Editing a comment goes through Drive like every other thread operation; only `deleteSuggestion`, which has no Drive equivalent, is preview-gated. |
 | The comment and suggestion features left Developer Preview when their shapes appeared in the public discovery document (2026-09) | **Refuted 2026-09-27.** The discovery document (revision 20260921) publishes `commentsViewMode`, `WriteControl.writeMode`, the comment and suggestion requests and the thread types, but every one of them is still labeled "[Developer Preview]". The `documents.get` reference, the suggestions guide (updated 2026-09-03) and the preview program page still list them as preview, and the Docs release notes carry no GA entry after the 2026-07-07 preview launch. Requests carry no preview marker (no header, no label): access comes from the Cloud project's enrollment. A live probe with `GDOCS_PREVIEW=false` from the maintainer's enrolled project got every call accepted — `commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`, `writeMode: SUGGEST` for text and style, an anchored `insertComment`, and accept, reject and delete of a suggestion — so the flag only decides what this server sends; it proves nothing about a project that is not enrolled. | `GDOCS_PREVIEW` keeps gating all of it: suggestion mode, anchored comments, the comments view on `documents.get`, and `review_suggestion`. Re-check when the "[Developer Preview]" labels leave the discovery document or the release notes announce GA. |
+| The comment and suggestion features are generally available, so `GDOCS_PREVIEW` can go (the Google Workspace Developer Preview Program's announcement, 2026-10-02) | **Confirmed from documentation 2026-10-03, not live.** The Docs API release notes list "Generally Available" on 2026-09-30: "You can now programmatically read, create, and manage comments and suggestions in Google Docs". The suggestions guide (updated 2026-09-30) labels nothing preview. The Workspace Updates post says available to every Workspace and personal account, no admin control, with "Gradual rollout (up to 15 days for feature visibility) starting on September 30, 2026"; only Google's own hosted Docs MCP server keeps comments in preview. The discovery document (revision 20260928, two days before GA) still labels every one of these fields and requests "[Developer Preview]". A live probe would prove nothing from the maintainer's project, which is enrolled (row above), and no unenrolled project was set up for one. | `GDOCS_PREVIEW` and `--preview` are deprecated and ignored; the default write mode is `suggest`. Because the verdict rests on documentation and a rollout, the server detects instead of trusting: every read asks for the comments view and, refused with `invalid` or `forbidden`, asks again without it (§5). That read's `CommentsView` decides whether a comment is pinned or goes through Drive, and suggestion mode is refused on a read without it, since a project the feature has not reached might apply a SUGGEST batch directly. `review_suggestion` is not gated: a refusal there destroys nothing. The `preview` capability and status field stay one release, mirroring the detection. The cost: every read now carries the document's comment threads, which only preview deployments paid for before; on a heavily commented document that is a real share of each `documents.get`, unmeasured. Re-check when the discovery document drops the labels; the `api-fields` exceptions written against them stay until then. |
 | `deleteSuggestion` is the same as `rejectSuggestion` (my assumption) | Refuted: reject declines a suggestion and any editor may; delete removes it and returns 403 to anyone but its author | Exposed as a third action, `discard`, with the author rule in its description. |
 | A named range can serve as a durable target where a handle cannot | Confirmed (NamedRange reference: Google keeps the range with its content across edits) | `named_range` is a Target (§7.1); a name several ranges share is refused as a target, since a target must mean one range. |
 | A fragment inserted into an empty paragraph keeps that paragraph's style (Phase 1 `Inline` rule) | Refuted by the follow-up path: a new header, footer, footnote or tab starts as one empty paragraph, so `# Title` content came out as normal text; an inline insertion into a non-empty paragraph must still keep its style | `FragmentOptions.Fill`: an empty paragraph takes the fragment's style. |

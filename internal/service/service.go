@@ -41,7 +41,6 @@ type API interface {
 
 // Options configure the service.
 type Options struct {
-	Preview          bool
 	ReadOnly         bool
 	Destructive      bool
 	DefaultWriteMode config.WriteMode
@@ -142,6 +141,10 @@ type Fetched struct {
 	Doc       *doc.Document
 	Wire      *gdocs.Document
 	FetchedAt time.Time
+	// CommentsView says Google answered with comments included, which
+	// is how this server learns that the comment and suggestion
+	// features reach this project for this document.
+	CommentsView bool
 
 	threadsOnce sync.Once
 	threads     []CommentThread
@@ -192,18 +195,27 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 		}
 	}
 
-	opts := gapi.GetOptions{SuggestionsViewMode: gapi.SuggestionsInline}
-	if s.opts.Preview {
-		opts.CommentsViewMode = gapi.CommentsIncluded
-	}
+	opts := gapi.GetOptions{SuggestionsViewMode: gapi.SuggestionsInline, CommentsViewMode: gapi.CommentsIncluded}
 	res, err := s.api.GetDocument(ctx, id, opts)
+	commentsView := err == nil
+	if errors.Is(err, gapi.ErrInvalid) || errors.Is(err, gapi.ErrForbidden) {
+		// Google made comments and suggestions generally available on
+		// 2026-09-30 with a rollout of up to fifteen days, and a project
+		// it has not reached may refuse the comments view. The read
+		// itself must not fail for that, so it is asked again without
+		// it; a refusal that is about the document fails both times.
+		s.log.DebugContext(ctx, "comments view refused; reading without it", "class", gapi.Class(err))
+		opts.CommentsViewMode = ""
+		res, err = s.api.GetDocument(ctx, id, opts)
+	}
 	if err != nil {
 		return nil, wrapAPI(err, "document")
 	}
-	f, err := s.adopt(res.Document)
+	f, err := s.parse(res.Document, commentsView)
 	if err != nil {
 		return nil, err
 	}
+	s.cacheFetched(f)
 	if !fresh {
 		s.Remember(f)
 	}
@@ -213,23 +225,36 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 	return f, nil
 }
 
-// adopt parses a wire document and caches it, evicting stale entries so
-// a long session does not keep every document it ever touched.
-func (s *Service) adopt(w *gdocs.Document) (*Fetched, error) {
+// CommentsViewRefused opens every message about a read Google answered
+// without comments.
+const CommentsViewRefused = "Google refused the comments view for this document"
+
+// canSuggest is the one rule for suggestion mode. A project the comment
+// features have not reached might apply a SUGGEST batch as a direct
+// edit, which would overwrite what the person asked to propose, so only
+// a read Google answered with comments allows it.
+func (f *Fetched) canSuggest() bool { return f.CommentsView }
+
+// parse builds a Fetched from a wire document without caching it.
+func (s *Service) parse(w *gdocs.Document, commentsView bool) (*Fetched, error) {
 	parsed, err := doc.Parse(w)
 	if err != nil {
 		return nil, &Error{Class: "unexpected", Message: err.Error(), Err: err}
 	}
-	f := &Fetched{Doc: parsed, Wire: w, FetchedAt: s.now()}
+	return &Fetched{Doc: parsed, Wire: w, FetchedAt: s.now(), CommentsView: commentsView}, nil
+}
+
+// cacheFetched caches a complete read, evicting stale entries so a long
+// session does not keep every document it ever touched.
+func (s *Service) cacheFetched(f *Fetched) {
 	s.mu.Lock()
 	for id, c := range s.cache {
 		if s.now().Sub(c.FetchedAt) >= s.opts.CacheTTL {
 			delete(s.cache, id)
 		}
 	}
-	s.cache[parsed.ID] = f
+	s.cache[f.Doc.ID] = f
 	s.mu.Unlock()
-	return f, nil
 }
 
 // Remember records what every handle points at in a document the caller

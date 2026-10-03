@@ -84,7 +84,7 @@ func binPath(t *testing.T) string {
 func connect(t *testing.T) *server {
 	t.Helper()
 	cmd := exec.Command(binPath(t))
-	cmd.Env = append(os.Environ(), "GDOCS_LOG_LEVEL=warn", "GDOCS_PREVIEW="+previewFlag())
+	cmd.Env = append(os.Environ(), "GDOCS_LOG_LEVEL=warn")
 	ctx := context.Background()
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "evals", Version: "0"}, nil).
 		Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
@@ -93,13 +93,6 @@ func connect(t *testing.T) *server {
 	}
 	t.Cleanup(func() { _ = cs.Close() })
 	return &server{t: t, cs: cs, ctx: ctx}
-}
-
-func previewFlag() string {
-	if v := os.Getenv("GDOCS_PREVIEW"); v != "" {
-		return v
-	}
-	return "true"
 }
 
 // must runs a tool for seeding or scoring. A failure here is the

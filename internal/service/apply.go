@@ -116,13 +116,14 @@ func decodeReplies(raw json.RawMessage) replyEnvelope {
 	return env
 }
 
-// applyProposals posts comment-mode proposals through the preview API
-// when available (anchored) or the Drive API (quoted, unanchored).
+// applyProposals posts comment-mode proposals through the Docs API when
+// the read had the comments view (anchored), else the Drive API (quoted,
+// unanchored).
 func (s *Service) applyProposals(ctx context.Context, f *Fetched, proposals []plan.Proposal, result *EditResult) error {
 	if len(proposals) == 0 {
 		return nil
 	}
-	if s.opts.Preview {
+	if f.CommentsView {
 		reqs := make([]json.RawMessage, 0, len(proposals))
 		for _, p := range proposals {
 			reqs = append(reqs, plan.InsertComment(p.Content, p.Range, ""))
@@ -145,7 +146,7 @@ func (s *Service) applyProposals(ctx context.Context, f *Fetched, proposals []pl
 		}
 		result.CommentIDs = append(result.CommentIDs, c.ID)
 	}
-	result.Warnings = append(result.Warnings, "comments were posted through the Drive API: they quote the text but are not pinned to it in the editor (Developer Preview anchors them)")
+	result.Warnings = append(result.Warnings, "comments were posted through the Drive API: they quote the text but are not pinned to it in the editor ("+CommentsViewRefused+")")
 	return nil
 }
 

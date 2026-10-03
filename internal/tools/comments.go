@@ -20,7 +20,7 @@ type AddCommentInput struct {
 	Document       string       `json:"document" jsonschema:"document id or any docs.google.com URL"`
 	Target         *TargetInput `json:"target,omitempty" jsonschema:"the text, section, block or cell to comment on; omit for a comment on the document as a whole"`
 	Content        string       `json:"content" jsonschema:"the comment text (plain text, up to 2048 bytes)"`
-	Assignee       string       `json:"assignee,omitempty" jsonschema:"email address to assign the comment to (Developer Preview only)"`
+	Assignee       string       `json:"assignee,omitempty" jsonschema:"email address to assign the comment to (pinned comments only)"`
 	ExpectRevision string       `json:"expect_revision,omitempty" jsonschema:"fail if the document is no longer at this revision id"`
 	DryRun         bool         `json:"dry_run,omitempty" jsonschema:"resolve the target and stop before posting"`
 }
@@ -64,8 +64,8 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "add_comment",
 		Description: "Post a comment on a Google Doc. With a target (exact text, heading_id, handle or cell) the comment " +
-			"is pinned to that passage when Developer Preview is on; without preview it quotes the text and the editor " +
-			"shows it unanchored, which the result says. Without a target it is a comment on the document as a whole. " +
+			"is pinned to that passage; if Google refuses the comments view for the document it quotes the text instead " +
+			"and the editor shows it unanchored, which the result says. Without a target it is a comment on the document as a whole. " +
 			"Nothing in the document text changes. To propose an edit as a comment, use edit_document with mode comment. " +
 			"dry_run resolves the target and stops before posting.",
 		Annotations: writeSafe,

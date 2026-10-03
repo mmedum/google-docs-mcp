@@ -12,8 +12,8 @@ import (
 // ops are deliberately real work — a replace, a cell, a style, an
 // object, a page setup — because a dry run of nothing proves nothing.
 // comment and tab are a thread and a spare tab the sweep made for the
-// dry runs that delete, and suggesting whether a suggestion is pending.
-func dryRunArgs(doc, table, comment, tab string, suggesting bool) map[string]map[string]any {
+// dry runs that delete; a suggestion is always pending.
+func dryRunArgs(doc, table, comment, tab string) map[string]map[string]any {
 	args := map[string]map[string]any{
 		"edit_document": {"document": doc, "mode": "direct", "dry_run": true, "ops": []any{
 			map[string]any{"op": "replace", "target": map[string]any{"text": "Closing line"}, "content": "Closing line, rewritten by a dry run"}}},
@@ -23,6 +23,7 @@ func dryRunArgs(doc, table, comment, tab string, suggesting bool) map[string]map
 			"location": map[string]any{"at": "end", "of": map[string]any{"text": "Closing line"}}},
 		"layout_document": {"document": doc, "mode": "direct", "dry_run": true, "ops": []any{
 			map[string]any{"op": "page", "margin_top_pt": 72}}},
+		"review_suggestion": {"document": doc, "action": "accept", "all": true, "dry_run": true},
 	}
 	args["add_comment"] = map[string]any{"document": doc, "dry_run": true, "content": "written by a dry run",
 		"target": map[string]any{"text": "Closing line"}}
@@ -31,9 +32,6 @@ func dryRunArgs(doc, table, comment, tab string, suggesting bool) map[string]map
 	}
 	if tab != "" {
 		args["delete_tab"] = map[string]any{"document": doc, "tab": tab, "confirm_tab": tab, "dry_run": true}
-	}
-	if suggesting {
-		args["review_suggestion"] = map[string]any{"document": doc, "action": "accept", "all": true, "dry_run": true}
 	}
 	if table != "" {
 		args["edit_table"] = map[string]any{"document": doc, "mode": "direct", "dry_run": true, "ops": []any{
@@ -50,9 +48,9 @@ var plans = map[string]bool{"edit_document": true, "format_document": true, "ins
 
 // dryRunTargets makes what the delete and review dry runs act on, before
 // the sweep reads the revision it holds still: a document-level comment,
-// a spare tab when deletes are registered, and a pending suggestion
-// with Developer Preview. The spare tab is deleted again afterwards.
-func dryRunTargets(d *driver, doc string) (comment, tab string, suggesting bool) {
+// a spare tab when deletes are registered, and a pending suggestion.
+// The spare tab is deleted again afterwards.
+func dryRunTargets(d *driver, doc string) (comment, tab string) {
 	_, sc := d.okStruct("a comment for the dry runs", "add_comment", map[string]any{"document": doc,
 		"content": "Live test: the target of a dry-run delete."})
 	comment = str(sc, "id")
@@ -65,12 +63,9 @@ func dryRunTargets(d *driver, doc string) (comment, tab string, suggesting bool)
 			d.wasAsked("delete the dry-run tab", "delete_tab: delete the tab `Dry run tab`")
 		})
 	}
-	if d.preview {
-		d.ok("a suggestion for the dry runs", "edit_document", map[string]any{"document": doc, "mode": "suggest", "ops": []any{
-			map[string]any{"op": "append", "content": "Suggested by the live test for a dry-run review."}}})
-		suggesting = true
-	}
-	return comment, tab, suggesting
+	d.ok("a suggestion for the dry runs", "edit_document", map[string]any{"document": doc, "mode": "suggest", "ops": []any{
+		map[string]any{"op": "append", "content": "Suggested by the live test for a dry-run review."}}})
+	return comment, tab
 }
 
 // liveDryRuns is the check a fake cannot perform: that a dry run sends
@@ -83,13 +78,13 @@ func dryRunTargets(d *driver, doc string) (comment, tab string, suggesting bool)
 // bug is invisible until someone reads every one of them, which is what
 // this does.
 func liveDryRuns(t *testing.T, d *driver, doc, table string) {
-	comment, tab, suggesting := dryRunTargets(d, doc)
+	comment, tab := dryRunTargets(d, doc)
 	before := first(revisionOf, d.ok("revision before the dry runs", "get_document", map[string]any{"document": doc}))
 	if before == "" {
 		t.Fatal("cannot read the revision from get_document; the wording changed")
 	}
 
-	args := dryRunArgs(doc, table, comment, tab, suggesting)
+	args := dryRunArgs(doc, table, comment, tab)
 	tools, err := d.cs.ListTools(d.ctx, nil)
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
@@ -106,9 +101,6 @@ func liveDryRuns(t *testing.T, d *driver, doc, table string) {
 		}
 		a, ok := args[tool.Name]
 		switch {
-		case !ok && tool.Name == "review_suggestion" && !d.preview:
-			t.Log("review_suggestion needs Developer Preview; not swept")
-			continue
 		case !ok:
 			t.Errorf("%s accepts dry_run and this sweep has no call for it", tool.Name)
 			continue
@@ -142,9 +134,7 @@ func liveDryRuns(t *testing.T, d *driver, doc, table string) {
 
 	// The review the sweep previewed, made: every pending suggestion in
 	// the scratch document, which asks the person first.
-	if suggesting {
-		d.person.answer("accept")
-		d.ok("accept every pending suggestion", "review_suggestion", map[string]any{"document": doc, "action": "accept", "all": true})
-		d.wasAsked("accept every pending suggestion", "review_suggestion: accept all")
-	}
+	d.person.answer("accept")
+	d.ok("accept every pending suggestion", "review_suggestion", map[string]any{"document": doc, "action": "accept", "all": true})
+	d.wasAsked("accept every pending suggestion", "review_suggestion: accept all")
 }

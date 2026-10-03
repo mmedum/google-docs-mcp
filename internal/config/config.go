@@ -61,7 +61,7 @@ const (
 // WriteMode says how a write lands in the document.
 type WriteMode string
 
-// Write modes. Suggest needs Developer Preview; Comment works everywhere.
+// Write modes.
 const (
 	WriteSuggest WriteMode = "suggest"
 	WriteDirect  WriteMode = "direct"
@@ -73,7 +73,6 @@ type Config struct {
 	Profile           string
 	LogLevel          LogLevel
 	LogFormat         LogFormat
-	Preview           bool
 	DefaultWriteMode  WriteMode
 	ReadOnly          bool
 	EnableDestructive bool
@@ -84,14 +83,14 @@ type Config struct {
 	// stand in for the person.
 	RequirePrompt    bool
 	ClientSecretPath string
+	// Warnings name settings that were accepted but no longer do
+	// anything, for the caller to log once at start.
+	Warnings []string
 }
 
-// AvailableWriteModes lists the modes this configuration can honor.
-func (c Config) AvailableWriteModes() []WriteMode {
-	if c.Preview {
-		return []WriteMode{WriteSuggest, WriteDirect, WriteComment}
-	}
-	return []WriteMode{WriteDirect, WriteComment}
+// WriteModes lists the write modes, in order of preference.
+func WriteModes() []WriteMode {
+	return []WriteMode{WriteSuggest, WriteDirect, WriteComment}
 }
 
 // Settings holds the raw string values before validation. Flags and the
@@ -126,7 +125,7 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.Profile, "profile", "PROFILE", "default", "named configuration profile")
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
-	def(&s.Preview, "preview", "PREVIEW", "false", "enable Developer Preview features (suggestion mode, anchored comments)")
+	def(&s.Preview, "preview", "PREVIEW", "", "deprecated and ignored: comments and suggestions are generally available")
 	def(&s.DefaultWriteMode, "default-write-mode", "DEFAULT_WRITE_MODE", "", "default write mode: suggest, direct, comment")
 	def(&s.ReadOnly, "read-only", "READ_ONLY", "false", "register only read tools and request read-only scopes")
 	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register destructive tools (delete comment, delete tab)")
@@ -167,10 +166,13 @@ func (s *Settings) Build() (Config, error) {
 		errs = append(errs, fmt.Errorf("%w: log format %q (want text, json)", ErrInvalid, s.LogFormat))
 	}
 
-	var err error
-	if c.Preview, err = parseBool("preview", s.Preview); err != nil {
-		errs = append(errs, err)
+	// Accepted so an existing configuration still starts; Google made
+	// the features it gated generally available on 2026-09-30.
+	if strings.TrimSpace(s.Preview) != "" {
+		c.Warnings = append(c.Warnings, EnvPrefix+"PREVIEW (--preview) is deprecated and ignored: comments and suggestions are generally available")
 	}
+
+	var err error
 	if c.ReadOnly, err = parseBool("read-only", s.ReadOnly); err != nil {
 		errs = append(errs, err)
 	}
@@ -184,15 +186,9 @@ func (s *Settings) Build() (Config, error) {
 	mode := WriteMode(strings.ToLower(strings.TrimSpace(s.DefaultWriteMode)))
 	switch {
 	case mode == "":
-		if c.Preview {
-			c.DefaultWriteMode = WriteSuggest
-		} else {
-			c.DefaultWriteMode = WriteDirect
-		}
+		c.DefaultWriteMode = WriteSuggest
 	case !writeModes[mode]:
 		errs = append(errs, fmt.Errorf("%w: default write mode %q (want suggest, direct, comment)", ErrInvalid, s.DefaultWriteMode))
-	case mode == WriteSuggest && !c.Preview:
-		errs = append(errs, fmt.Errorf("%w: default write mode suggest needs Developer Preview (set %sPREVIEW=true) or choose direct or comment", ErrInvalid, EnvPrefix))
 	default:
 		c.DefaultWriteMode = mode
 	}

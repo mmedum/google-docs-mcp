@@ -332,8 +332,22 @@ func parseParagraph(tab *Tab, p *gdocs.Paragraph) *Paragraph {
 // that cannot be restyled — which is the shape of #46.
 func (r *Run) suggestions(s gdocs.Suggested, st gdocs.SuggestedStyle) {
 	r.Inserted, r.Deleted = s.SuggestedInsertionIDs, s.SuggestedDeletionIDs
-	r.StyleChanges = textChanges(st)
+	r.StyleChanges = slices.DeleteFunc(textChanges(st), func(c StyleChange) bool {
+		return slices.Contains(r.Inserted, c.ID) && slices.Equal(c.Props, arrivalProps)
+	})
 }
+
+// arrivalProps is the entry Google files on a suggested insertion under
+// the insertion's own id, seen live 2026-10-03: every one of these ten
+// marked, with an empty style. It records the style the new text arrives
+// with, not a change to it, so it is dropped where it is parsed; read as
+// a restyling, every suggested edit was listed as a change to ten
+// properties and drew a restyle warning. The order is suggestedProps',
+// which is the state's field order. A formatting change the same
+// suggestion makes, as inserting **bold** text does, names fewer
+// properties and stays.
+var arrivalProps = []string{"backgroundColor", "baselineOffset", "bold", "fontSize", "foregroundColor",
+	"italic", "smallCaps", "strikethrough", "underline", "weightedFontFamily"}
 
 func parseElement(el *gdocs.ParagraphElement) *Run {
 	if el == nil {

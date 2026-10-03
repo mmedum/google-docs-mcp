@@ -573,3 +573,66 @@ func TestAnEmptyNestedStateInventsNoProperty(t *testing.T) {
 	}
 	t.Error("the suggestion was dropped entirely")
 }
+
+// TestInsertionsOwnStyleIsNotAFormatSuggestion holds the three shapes a
+// suggest-mode insert produced live on 2026-10-03. A plain insertion
+// carries an entry under its own id marking all ten text properties: the
+// style the text arrives with, dropped at parse so neither the reads nor
+// the restyle guard see it. Inserting **bold** files bold under the same
+// id, which is a real change and stays. And the planner's style reset is
+// a suggestion of its own, which stays too: it exists, and can be
+// accepted or rejected.
+func TestInsertionsOwnStyleIsNotAFormatSuggestion(t *testing.T) {
+	all := &gdocs.TextStyleSuggestionState{BoldSuggested: true, ItalicSuggested: true, UnderlineSuggested: true,
+		StrikethroughSuggested: true, SmallCapsSuggested: true, BackgroundColorSuggested: true,
+		ForegroundColorSuggested: true, FontSizeSuggested: true, WeightedFontFamilySuggested: true,
+		BaselineOffsetSuggested: true}
+	inserted := func(content string, changes map[string]gdocs.SuggestedTextStyle) *gdocs.ParagraphElement {
+		return &gdocs.ParagraphElement{TextRun: &gdocs.TextRun{
+			Content: content, TextStyle: &gdocs.TextStyle{},
+			Suggested:      gdocs.Suggested{SuggestedInsertionIDs: []string{"suggest.ins"}},
+			SuggestedStyle: gdocs.SuggestedStyle{SuggestedTextStyleChanges: changes},
+		}}
+	}
+	d, err := doc.Parse(&gdocs.Document{
+		DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+		Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
+			{Paragraph: &gdocs.Paragraph{
+				ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+				Elements: []*gdocs.ParagraphElement{
+					inserted("plain", map[string]gdocs.SuggestedTextStyle{
+						"suggest.ins": {TextStyle: &gdocs.TextStyle{}, TextStyleSuggestionState: all},
+					}),
+					inserted("bold", map[string]gdocs.SuggestedTextStyle{
+						"suggest.ins": {TextStyle: &gdocs.TextStyle{Bold: true}, TextStyleSuggestionState: &gdocs.TextStyleSuggestionState{
+							BoldSuggested: true, WeightedFontFamilySuggested: true}},
+					}),
+					inserted("reset", map[string]gdocs.SuggestedTextStyle{
+						"suggest.reset": {TextStyle: &gdocs.TextStyle{}, TextStyleSuggestionState: all},
+					}),
+					{TextRun: &gdocs.TextRun{Content: "\n", TextStyle: &gdocs.TextStyle{}}},
+				},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := d.Tabs[0].Body.Blocks[0].Paragraph.Runs
+	if got := runs[0].StyleChanges; len(got) != 0 {
+		t.Errorf("the insertion's own arrival entry must be dropped, got %+v", got)
+	}
+	if got := runs[1].StyleChanges; len(got) != 1 || strings.Join(got[0].Props, ",") != "bold,weightedFontFamily" {
+		t.Errorf("bold filed under the insertion's id is a real change, got %+v", got)
+	}
+	if got := runs[2].StyleChanges; len(got) != 1 || got[0].ID != "suggest.reset" || len(got[0].Props) != 10 {
+		t.Errorf("a ten-property entry under another suggestion's id is that suggestion, got %+v", got)
+	}
+	var ids []string
+	for _, fs := range d.FormatSuggestions {
+		ids = append(ids, fs.ID)
+	}
+	if strings.Join(ids, ",") != "suggest.ins,suggest.reset" {
+		t.Errorf("FormatSuggestions: want suggest.ins (bold) and suggest.reset, got %+v", d.FormatSuggestions)
+	}
+}

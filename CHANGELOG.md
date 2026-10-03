@@ -7,6 +7,16 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+
+- A suggested insertion is no longer reported as a formatting change to
+  ten properties. Google files the style inserted text arrives with under
+  the insertion's own suggestion id; `list_suggestions`, reads with
+  `include_suggestions`, edit previews and the direct-edit restyle
+  warning no longer treat it as a restyling. Formatting a suggestion
+  really makes, such as bold on inserted `**bold**` text, is still
+  reported.
+
 ## [2.1.0] - 2026-10-03
 
 ### Changed

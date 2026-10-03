@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-03
+
 ### Fixed
 
 - Text suggested as an insertion is read in the formatting it will have

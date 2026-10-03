@@ -1,7 +1,8 @@
 # Architecture — google-docs-mcp
 
-**Status:** v2.1.0 (2026-10-03). Comments and suggestions are generally
-available and detected per read rather than gated on a flag (§18). Since
+**Status:** v2.1.1 (2026-10-03). Comments and suggestions are generally
+available and detected per read rather than gated on a flag, and text
+suggested as an insertion reads in the style it will have (§18). Since
 v2.0.1 a write that may have landed is reported as `[ambiguous_outcome]`
 instead of being repeated. It asks the person before six writes (§12a).
 Phases 0 to 4 are done (§16): auth, raw

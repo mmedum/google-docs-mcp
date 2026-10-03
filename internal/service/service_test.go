@@ -309,6 +309,10 @@ func TestFetchErrors(t *testing.T) {
 		{&gapi.APIError{Status: 429, Message: "x"}, "rate_limited", "retry"},
 		{&gapi.APIError{Status: 500, Message: "x"}, "server", "retry"},
 		{gapi.ErrNetwork, "network", "reach"},
+		// A write that failed after it may have reached Google must not
+		// be called a server error to retry: it may have been applied.
+		{fmt.Errorf("%w: %w", gapi.ErrAmbiguous, &gapi.APIError{Status: 503, Message: "x"}), "ambiguous_outcome", "may have been applied"},
+		{fmt.Errorf("%w: %w", gapi.ErrAmbiguous, gapi.ErrNetwork), "ambiguous_outcome", "may have been applied"},
 		{errors.New("weird"), "unexpected", "weird"},
 	} {
 		api.getErr = tc.err

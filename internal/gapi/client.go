@@ -269,6 +269,13 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 	start := time.Now()
 	resp, err := c.httpc.Do(req)
 	if err != nil {
+		// net/http wraps a failure in a *url.Error that repeats the whole
+		// URL, and the query can carry a search term. Only the redacted
+		// path is kept, before anything below reads the text.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = fmt.Errorf("%s %s: %w", ue.Op, redactPath(rawURL), ue.Err)
+		}
 		if errors.Is(err, context.Canceled) || (errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil) {
 			return nil, err
 		}
@@ -285,8 +292,8 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 	}
 	apiErr := parseAPIError(resp.StatusCode, method, redactPath(rawURL), data)
 	// A throttling 403 is transient like a 429. On a write it still is not
-	// retried: retryable only repeats a write on 429 or 503, and this keeps
-	// that rule rather than reasoning about what a quota refusal applied.
+	// retried: retryable only repeats a write on 429, and this keeps that
+	// rule rather than reasoning about what a quota refusal applied.
 	if resp.StatusCode == 429 || resp.StatusCode >= 500 || retryableThrottle(apiErr) {
 		return nil, &transientError{err: apiErr, after: parseRetryAfter(resp.Header.Get("Retry-After"))}
 	}
@@ -294,16 +301,18 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 }
 
 // retryable decides whether an attempt may be repeated. Reads retry on
-// any transient failure. Writes retry only when Google answered 429 or
-// 503, which proves nothing was applied; a network failure on a write is
-// reported as ambiguous instead. That covers Drive writes as well as
+// any transient failure. Writes retry only when Google answered 429,
+// which proves nothing was applied. A 503 does not: Google's code.proto
+// says of UNAVAILABLE that it is "not always safe to retry
+// non-idempotent operations". A network failure or any 5xx on a write
+// is reported as ambiguous instead. That covers Drive writes as well as
 // document batches: creating a comment is not idempotent either, and a
-// repeat after a 500 posts it twice.
+// repeat after a 5xx posts it twice.
 func retryable(k reqKind, err error) (bool, time.Duration) {
 	var te *transientError
 	if errors.As(err, &te) {
 		var ae *APIError
-		if k != kindRead && errors.As(te.err, &ae) && ae.Status != 429 && ae.Status != 503 {
+		if k != kindRead && errors.As(te.err, &ae) && ae.Status != 429 {
 			return false, 0
 		}
 		return true, te.after
@@ -377,9 +386,10 @@ func redactPath(raw string) string {
 	})
 }
 
-// wrapAmbiguousWrite marks a write whose outcome is unknown.
+// wrapAmbiguousWrite marks a write whose outcome is unknown: the request
+// may have reached Google and been applied before the failure.
 func wrapAmbiguousWrite(err error) error {
-	if errors.Is(err, ErrNetwork) {
+	if errors.Is(err, ErrNetwork) || errors.Is(err, ErrServer) {
 		return fmt.Errorf("%w: %w", ErrAmbiguous, err)
 	}
 	return err

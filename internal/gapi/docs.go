@@ -75,8 +75,8 @@ type BatchUpdateResponse struct {
 	Raw          json.RawMessage   `json:"-"`
 }
 
-// BatchUpdate applies requests atomically. A network failure after the
-// request was sent is reported as ErrAmbiguous, never retried blindly.
+// BatchUpdate applies requests atomically. A network failure or a 5xx
+// after the request was sent is reported as ErrAmbiguous, never retried.
 func (c *Client) BatchUpdate(ctx context.Context, id string, req *BatchUpdateRequest) (*BatchUpdateResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {

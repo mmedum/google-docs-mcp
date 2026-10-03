@@ -36,6 +36,13 @@ and new required fields are breaking; the schema diff in CI flags them.
 - The `preview-off-suggest` agent eval; the setup it tested no longer
   exists.
 
+## [2.0.1] - 2026-10-01
+
+### Fixed
+
+- A write that fails with a 5xx, 503 included, is no longer repeated; it is `[ambiguous_outcome]` and says to read before trying again. A repeated edit could apply twice, and a repeated create or comment duplicated.
+- A network failure or a canceled call no longer puts the request URL, with its search query and document id, in the error or the debug log.
+
 ## [2.0.0] - 2026-09-30
 
 ### Added

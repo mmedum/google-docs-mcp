@@ -394,6 +394,10 @@ func wrapAPI(err error, what string) error {
 	}
 	msg := ""
 	switch {
+	case errors.Is(err, gapi.ErrAmbiguous):
+		// First: it wraps the server or network error that made the
+		// outcome unknown, and those messages say to retry.
+		msg = "the write may have been applied; read the " + what + " before trying again"
 	case errors.Is(err, gapi.ErrMissingScope):
 		msg = "the stored credentials lack a required OAuth scope; re-run `google-docs-mcp login`"
 	case errors.Is(err, gapi.ErrUnauthorized):

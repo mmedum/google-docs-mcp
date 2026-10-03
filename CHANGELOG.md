@@ -7,6 +7,8 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-03
+
 ### Changed
 
 - Comments and suggestions no longer need Developer Preview: Google made

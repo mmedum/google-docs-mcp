@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
 )
 
@@ -572,4 +573,85 @@ func TestAnEmptyNestedStateInventsNoProperty(t *testing.T) {
 		return
 	}
 	t.Error("the suggestion was dropped entirely")
+}
+
+// TestSuggestedInsertionTakesItsOwnStyle holds the shapes probed live on
+// 2026-10-03 (TestRawSuggestedReset, TestRawDirectOverPendingReset in
+// internal/gapi), each a run inserted as a suggestion after bold text.
+// The response gives the run the style it inherited; the entry under its
+// own insertion id is the style it will have, which
+// PREVIEW_SUGGESTIONS_ACCEPTED confirmed in every case.
+func TestSuggestedInsertionTakesItsOwnStyle(t *testing.T) {
+	reset := doctest.InsertionReset()
+	inherited := &gdocs.TextStyle{Bold: true}
+	run := func(style *gdocs.TextStyle, changes map[string]gdocs.SuggestedTextStyle) *gdocs.ParagraphElement {
+		return &gdocs.ParagraphElement{TextRun: &gdocs.TextRun{
+			Content: "new", TextStyle: style,
+			Suggested:      gdocs.Suggested{SuggestedInsertionIDs: []string{"suggest.ins"}},
+			SuggestedStyle: gdocs.SuggestedStyle{SuggestedTextStyleChanges: changes},
+		}}
+	}
+	own := func(style gdocs.TextStyle) map[string]gdocs.SuggestedTextStyle {
+		return map[string]gdocs.SuggestedTextStyle{"suggest.ins": {TextStyle: &style, TextStyleSuggestionState: reset}}
+	}
+	cases := []struct {
+		name         string
+		el           *gdocs.ParagraphElement
+		bold, italic bool
+		restylings   int
+	}{
+		{"no reset inherits", run(inherited, nil), true, false, 0},
+		{"reset makes it plain", run(inherited, own(gdocs.TextStyle{})), false, false, 0},
+		{"reset then **bold**", run(inherited, own(gdocs.TextStyle{Bold: true})), true, false, 0},
+		{"direct italic over the reset", run(&gdocs.TextStyle{Bold: true, Italic: true}, own(gdocs.TextStyle{Italic: true})), false, true, 0},
+		{"another suggestion restyles it", run(inherited, map[string]gdocs.SuggestedTextStyle{
+			"suggest.ins":   {TextStyle: &gdocs.TextStyle{}, TextStyleSuggestionState: reset},
+			"suggest.other": {TextStyle: &gdocs.TextStyle{Italic: true}, TextStyleSuggestionState: &gdocs.TextStyleSuggestionState{ItalicSuggested: true}},
+		}), false, false, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := doc.Parse(&gdocs.Document{
+				DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+				Body: &gdocs.Body{Content: []*gdocs.StructuralElement{{Paragraph: &gdocs.Paragraph{
+					ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+					Elements:       []*gdocs.ParagraphElement{tc.el, {TextRun: &gdocs.TextRun{Content: "\n"}}},
+				}}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := d.Tabs[0].Body.Blocks[0].Paragraph.Runs[0]
+			if r.Style.Bold != tc.bold || r.Style.Italic != tc.italic {
+				t.Errorf("style: want bold %t italic %t, got %+v", tc.bold, tc.italic, r.Style)
+			}
+			if len(r.StyleChanges) != tc.restylings || len(d.FormatSuggestions) != tc.restylings {
+				t.Errorf("want %d restyling(s), got StyleChanges %+v FormatSuggestions %+v", tc.restylings, r.StyleChanges, d.FormatSuggestions)
+			}
+			for _, c := range r.StyleChanges {
+				if c.ID == "suggest.ins" {
+					t.Errorf("the insertion's own style is not a restyling: %+v", c)
+				}
+			}
+		})
+	}
+}
+
+// TestEverySuggestedTextPropertyHasAStyleField: applying an insertion's
+// own entry matches <name>Suggested in the state to <name> in the style.
+// A state field with no style field would be a property silently left
+// at its inherited value.
+func TestEverySuggestedTextPropertyHasAStyleField(t *testing.T) {
+	style := map[string]bool{}
+	st := reflect.TypeFor[gdocs.TextStyle]()
+	for i := range st.NumField() {
+		style[strings.Split(st.Field(i).Tag.Get("json"), ",")[0]] = true
+	}
+	state := reflect.TypeFor[gdocs.TextStyleSuggestionState]()
+	for i := range state.NumField() {
+		name, ok := strings.CutSuffix(strings.Split(state.Field(i).Tag.Get("json"), ",")[0], "Suggested")
+		if !ok || !style[name] {
+			t.Errorf("state field %s has no TextStyle field %q", state.Field(i).Name, name)
+		}
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -326,13 +327,57 @@ func parseParagraph(tab *Tab, p *gdocs.Paragraph) *Paragraph {
 }
 
 // suggestions records what a suggestion did to an inline element: the
-// ids of the suggestions inserting or deleting it, and the pending
-// restylings of it. One call rather than two lines per case, because a
-// carrier that gets only the first line looks exactly like a carrier
-// that cannot be restyled — which is the shape of #46.
-func (r *Run) suggestions(s gdocs.Suggested, st gdocs.SuggestedStyle) {
+// ids of the suggestions inserting or deleting it, its style, and the
+// pending restylings of it. One call rather than separate lines per
+// case, because a carrier that gets only some of them looks exactly like
+// a carrier that cannot be restyled — which is the shape of #46.
+//
+// A suggested insertion's own textStyle is the style it inherited; the
+// style it will have is the entry filed under its own insertion id (see
+// the evidence log, 2026-10-03). That entry is applied to the style here
+// and is not a restyling: it cannot be reviewed apart from the insertion.
+func (r *Run) suggestions(s gdocs.Suggested, st gdocs.SuggestedStyle, ts *gdocs.TextStyle) {
 	r.Inserted, r.Deleted = s.SuggestedInsertionIDs, s.SuggestedDeletionIDs
-	r.StyleChanges = textChanges(st)
+	for _, c := range textChanges(st) {
+		if slices.Contains(r.Inserted, c.ID) {
+			ts = applySuggested(ts, st.SuggestedTextStyleChanges[c.ID].TextStyle, c.Props)
+		} else {
+			r.StyleChanges = append(r.StyleChanges, c)
+		}
+	}
+	r.Style = parseTextStyle(ts)
+}
+
+// textStyleFields maps each TextStyle field's API name to its index, so
+// a property suggestedProps names can be set without a hand-kept list.
+var textStyleFields = func() map[string]int {
+	t := reflect.TypeFor[gdocs.TextStyle]()
+	m := make(map[string]int, t.NumField())
+	for i := range t.NumField() {
+		m[apiName(t.Field(i))] = i
+	}
+	return m
+}()
+
+// applySuggested is base with props set to their values in to, an unset
+// value meaning inherited.
+func applySuggested(base, to *gdocs.TextStyle, props []string) *gdocs.TextStyle {
+	var out gdocs.TextStyle
+	if base != nil {
+		out = *base
+	}
+	dst := reflect.ValueOf(&out).Elem()
+	for _, p := range props {
+		i, ok := textStyleFields[p]
+		switch {
+		case !ok:
+		case to != nil:
+			dst.Field(i).Set(reflect.ValueOf(to).Elem().Field(i))
+		default:
+			dst.Field(i).SetZero()
+		}
+	}
+	return &out
 }
 
 func parseElement(el *gdocs.ParagraphElement) *Run {
@@ -344,27 +389,24 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 	case el.TextRun != nil:
 		r.Kind = RunText
 		r.Text = el.TextRun.Content
-		r.Style = parseTextStyle(el.TextRun.TextStyle)
-		r.suggestions(el.TextRun.Suggested, el.TextRun.SuggestedStyle)
+		r.suggestions(el.TextRun.Suggested, el.TextRun.SuggestedStyle, el.TextRun.TextStyle)
 	case el.InlineObjectElement != nil:
 		e := el.InlineObjectElement
 		r.Kind, r.ObjectID = RunInlineObject, e.InlineObjectID
-		r.Style = parseTextStyle(e.TextStyle)
-		r.suggestions(e.Suggested, e.SuggestedStyle)
+		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
 	case el.FootnoteReference != nil:
 		e := el.FootnoteReference
 		r.Kind, r.FootnoteID, r.FootnoteNumber = RunFootnoteRef, e.FootnoteID, e.FootnoteNumber
-		r.Style = parseTextStyle(e.TextStyle)
-		r.suggestions(e.Suggested, e.SuggestedStyle)
+		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
 	case el.PageBreak != nil:
 		r.Kind = RunPageBreak
-		r.suggestions(el.PageBreak.Suggested, el.PageBreak.SuggestedStyle)
+		r.suggestions(el.PageBreak.Suggested, el.PageBreak.SuggestedStyle, nil)
 	case el.ColumnBreak != nil:
 		r.Kind = RunColumnBreak
-		r.suggestions(el.ColumnBreak.Suggested, el.ColumnBreak.SuggestedStyle)
+		r.suggestions(el.ColumnBreak.Suggested, el.ColumnBreak.SuggestedStyle, nil)
 	case el.HorizontalRule != nil:
 		r.Kind = RunHorizontalRule
-		r.suggestions(el.HorizontalRule.Suggested, el.HorizontalRule.SuggestedStyle)
+		r.suggestions(el.HorizontalRule.Suggested, el.HorizontalRule.SuggestedStyle, nil)
 	case el.Person != nil:
 		e := el.Person
 		r.Kind = RunPerson
@@ -375,8 +417,7 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 		if r.Text == "" {
 			r.Text = r.PersonEmail
 		}
-		r.Style = parseTextStyle(e.TextStyle)
-		r.suggestions(e.Suggested, e.SuggestedStyle)
+		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
 	case el.RichLink != nil:
 		e := el.RichLink
 		r.Kind = RunRichLink
@@ -387,8 +428,7 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 		if r.Text == "" {
 			r.Text = r.LinkURI
 		}
-		r.Style = parseTextStyle(e.TextStyle)
-		r.suggestions(e.Suggested, e.SuggestedStyle)
+		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
 	case el.DateElement != nil:
 		e := el.DateElement
 		r.Kind = RunDate
@@ -398,15 +438,13 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 				r.Text = e.DateElementProperties.Timestamp
 			}
 		}
-		r.Style = parseTextStyle(e.TextStyle)
-		r.suggestions(e.Suggested, e.SuggestedStyle)
+		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
 	case el.Equation != nil:
 		r.Kind = RunEquation
 		r.Inserted, r.Deleted = el.Equation.SuggestedInsertionIDs, el.Equation.SuggestedDeletionIDs
 	case el.AutoText != nil:
 		r.Kind, r.AutoTextType = RunAutoText, el.AutoText.Type
-		r.Style = parseTextStyle(el.AutoText.TextStyle)
-		r.suggestions(el.AutoText.Suggested, el.AutoText.SuggestedStyle)
+		r.suggestions(el.AutoText.Suggested, el.AutoText.SuggestedStyle, el.AutoText.TextStyle)
 	default:
 		return nil
 	}

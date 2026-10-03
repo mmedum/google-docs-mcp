@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
 	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
@@ -135,5 +137,35 @@ func TestParagraphRestyleIsMarked(t *testing.T) {
 		if !strings.Contains(styled, want) {
 			t.Errorf("with_styles should report the pending paragraph restyle (%q):\n%s", want, styled)
 		}
+	}
+}
+
+// TestSuggestedInsertionReadsInItsOwnStyle is the read a person sees for
+// plain text suggested after a bold word, as Google sends it: the run
+// says bold (inherited), its own entry says plain, and accepted it is
+// plain. The read must show it plain, with no restyle note.
+func TestSuggestedInsertionReadsInItsOwnStyle(t *testing.T) {
+	reset := doctest.InsertionReset()
+	d, err := doc.Parse(&gdocs.Document{
+		DocumentID: "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", RevisionID: "r",
+		Body: &gdocs.Body{Content: []*gdocs.StructuralElement{{Paragraph: &gdocs.Paragraph{
+			ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+			Elements: []*gdocs.ParagraphElement{
+				{TextRun: &gdocs.TextRun{Content: "Alpha", TextStyle: &gdocs.TextStyle{Bold: true}}},
+				{TextRun: &gdocs.TextRun{Content: " new", TextStyle: &gdocs.TextStyle{Bold: true},
+					Suggested: gdocs.Suggested{SuggestedInsertionIDs: []string{"suggest.ins"}},
+					SuggestedStyle: gdocs.SuggestedStyle{SuggestedTextStyleChanges: map[string]gdocs.SuggestedTextStyle{
+						"suggest.ins": {TextStyle: &gdocs.TextStyle{}, TextStyleSuggestionState: reset}}}}},
+				{TextRun: &gdocs.TextRun{Content: " beta.\n"}},
+			},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg := d.Tabs[0].Body
+	got := render.Markdown(seg, 0, len(seg.Blocks), render.Options{Suggestions: true}).Text
+	if !strings.Contains(got, "**Alpha** {++new++}{>>s:suggest.ins<<} beta.") {
+		t.Errorf("want the insertion plain and alone, got:\n%s", got)
 	}
 }

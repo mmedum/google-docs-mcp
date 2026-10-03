@@ -86,7 +86,11 @@ func TestLive(t *testing.T) {
 	}
 
 	d.ok("find", "find_in_document", map[string]any{"document": doc, "query": "point"})
-	d.ok("list suggestions", "list_suggestions", map[string]any{"document": doc})
+	// Nothing above suggests a format. The style of the inserted text is
+	// filed under the insertion's own id, and is not a restyling.
+	if listed := d.ok("list suggestions", "list_suggestions", map[string]any{"document": doc}); strings.Contains(listed, "(text:") {
+		t.Errorf("an insertion's own style is listed as a restyling:\n%s", shown(listed, 500))
+	}
 	if len(suggestions) > 0 {
 		d.ok("reject the last suggestion", "review_suggestion", map[string]any{
 			"document": doc, "action": "reject", "ids": []any{suggestions[len(suggestions)-1]}})

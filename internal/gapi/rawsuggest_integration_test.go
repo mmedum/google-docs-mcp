@@ -212,6 +212,8 @@ func runProbes(t *testing.T, probes []probe) {
 			t.Logf("%s: round %d replies: %s", p.name, i, reply)
 		}
 		t.Logf("--- %s ---\n%s", p.name, rawElements(t, c, ctx, id))
+		// Google's own answer to what the suggestions will do.
+		t.Logf("--- %s accepted ---\n%s", p.name, rawView(t, c, ctx, id, SuggestionsPreviewAccepted))
 	}
 	t.Logf("=== %d scratch documents left behind; Drive search title:\"safe to delete\" finds them ===", len(probes))
 }
@@ -221,9 +223,14 @@ func runProbes(t *testing.T, probes []probe) {
 // whole point of this file.
 func rawElements(t *testing.T, c *Client, ctx context.Context, id string) string {
 	t.Helper()
+	return rawView(t, c, ctx, id, SuggestionsInline)
+}
+
+func rawView(t *testing.T, c *Client, ctx context.Context, id, view string) string {
+	t.Helper()
 	q := url.Values{}
 	q.Set("includeTabsContent", "true")
-	q.Set("suggestionsViewMode", SuggestionsInline)
+	q.Set("suggestionsViewMode", view)
 	body, err := c.do(ctx, kindRead, http.MethodGet, c.docs+"/v1/documents/"+url.PathEscape(id)+"?"+q.Encode(), nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -253,6 +260,10 @@ func elementsOf(whole map[string]any) any {
 		if p, ok := m["paragraph"]; ok {
 			pm, _ := p.(map[string]any)
 			out = append(out, pm["elements"])
+			// A paragraph's own style and suggestions are on the paragraph,
+			// not its runs.
+			ps, _ := pm["paragraphStyle"].(map[string]any)
+			out = append(out, map[string]any{"namedStyleType": ps["namedStyleType"], "suggestedParagraphStyleChanges": pm["suggestedParagraphStyleChanges"]})
 		}
 	}
 	return out
@@ -407,4 +418,108 @@ func TestPrettyPrintFalseIsAccepted(t *testing.T) {
 	if sizes["prettyPrint=false"] >= sizes["default"] {
 		t.Errorf("prettyPrint=false did not shrink the body: %v", sizes)
 	}
+}
+
+// TestRawSuggestedReset asks why inserting formatted content in suggest
+// mode leaves two suggestions. The planner inserts the text and then
+// resets its style, so it does not inherit the bold of the word before
+// it. Seen 2026-10-03: the reset, sent with fields "*", came back under a
+// suggestion id of its own, while a bold update right after it joined the
+// insertion's. Each probe inserts " new" after a directly bolded "Alpha".
+func TestRawSuggestedReset(t *testing.T) {
+	bold := round{reqs: []json.RawMessage{textStyle(t, 1, 6, "bold", true)}}
+	insert := func(fields string) round {
+		reqs := []json.RawMessage{insertAt(t, " new", 6)}
+		if fields != "" {
+			reqs = append(reqs, reset(t, 6, 10, fields))
+		}
+		return round{reqs: reqs, wc: suggestMode}
+	}
+	runProbes(t, []probe{
+		{name: "no reset", seed: "Alpha beta.\n", rounds: []round{bold, insert("")}},
+		{name: "reset *", seed: "Alpha beta.\n", rounds: []round{bold, insert("*")}},
+		{name: "reset named", seed: "Alpha beta.\n", rounds: []round{bold, insert(
+			"bold,italic,underline,strikethrough,smallCaps,backgroundColor,foregroundColor,fontSize,weightedFontFamily,baselineOffset,link")}},
+		// What the planner sends for " new **x**": the reset over the
+		// whole insertion, then bold over part of it; and the reverse.
+		{name: "reset then bold", seed: "Alpha beta.\n", rounds: []round{bold, {wc: suggestMode, reqs: []json.RawMessage{
+			insertAt(t, " new x", 6), reset(t, 6, 12, "*"), textStyle(t, 11, 12, "bold", true)}}}},
+		{name: "bold then reset", seed: "Alpha beta.\n", rounds: []round{bold, {wc: suggestMode, reqs: []json.RawMessage{
+			insertAt(t, " new x", 6), textStyle(t, 11, 12, "bold", true), reset(t, 6, 11, "*")}}}},
+	})
+}
+
+// reset clears the named text properties over a range, "*" for all of
+// them, which is what the planner sends after inserting a fragment.
+func reset(t *testing.T, start, end int, fields string) json.RawMessage {
+	return marshal(t, map[string]any{"updateTextStyle": map[string]any{
+		"range": map[string]any{"startIndex": start, "endIndex": end}, "textStyle": map[string]any{}, "fields": fields}})
+}
+
+// TestRawAcceptedView reads documents the probes above left behind
+// (GDOCS_PROBE_DOCS, comma-separated ids) in the inline view and in the
+// accepted preview, and writes nothing. It asks whether a run's own
+// textStyle in SUGGESTIONS_INLINE is the style before the suggestion,
+// which the documentation does not say.
+func TestRawAcceptedView(t *testing.T) {
+	ids := os.Getenv("GDOCS_PROBE_DOCS")
+	if ids == "" {
+		t.Skip("set GDOCS_PROBE_DOCS to probe document ids")
+	}
+	c := probeClient(t)
+	ctx := context.Background()
+	for _, id := range strings.Split(ids, ",") {
+		for _, view := range []string{SuggestionsInline, SuggestionsPreviewAccepted} {
+			t.Logf("VIEW %s %s\n%s", id[:6], view, rawView(t, c, ctx, id, view))
+		}
+	}
+}
+
+// TestRawDirectOverPendingReset is the restyle guard's question for
+// inserted text: a suggested insertion after bold "Alpha" whose own
+// suggestion resets the text to plain, then a DIRECT bold, italic or
+// bold-off over it. Does the direct change survive into the accepted
+// result, or does the pending reset win?
+func TestRawDirectOverPendingReset(t *testing.T) {
+	bold := round{reqs: []json.RawMessage{textStyle(t, 1, 6, "bold", true)}}
+	suggested := round{wc: suggestMode, reqs: []json.RawMessage{insertAt(t, " new", 6), reset(t, 6, 10, "*")}}
+	direct := func(prop string, v bool) round { return round{reqs: []json.RawMessage{textStyle(t, 6, 10, prop, v)}} }
+	runProbes(t, []probe{
+		{name: "direct bold", seed: "Alpha beta.\n", rounds: []round{bold, suggested, direct("bold", true)}},
+		{name: "direct italic", seed: "Alpha beta.\n", rounds: []round{bold, suggested, direct("italic", true)}},
+		{name: "direct bold off", seed: "Alpha beta.\n", rounds: []round{bold, suggested, direct("bold", false)}},
+	})
+}
+
+// TestRawSuggestedHeading asks whether a paragraph inserted as a
+// suggestion keeps its own paragraph style under its insertion id, the
+// way inserted text keeps its text style: what the planner sends for a
+// markdown "# Heading" in suggest mode.
+func TestRawSuggestedHeading(t *testing.T) {
+	heading := marshal(t, map[string]any{"updateParagraphStyle": map[string]any{
+		"range":          map[string]any{"startIndex": 13, "endIndex": 21},
+		"paragraphStyle": map[string]any{"namedStyleType": "HEADING_1"},
+		"fields":         "namedStyleType",
+	}})
+	runProbes(t, []probe{
+		{"suggested heading", "Alpha beta.\n", []round{{wc: suggestMode, reqs: []json.RawMessage{insertAt(t, "Heading\n", 13), heading}}}},
+	})
+}
+
+// TestRawDirectOverPendingBold is the same-value case of the restyle
+// guard for inserted text: "x" inserted as a suggestion with bold set
+// (as "**x**" is), then a DIRECT bold true or false over it. The first is
+// the shape #46 saw dropped on existing text. Beside it, a suggested bold
+// on existing italic text, to see whether that entry's style holds only
+// the change or every inherited property.
+func TestRawDirectOverPendingBold(t *testing.T) {
+	insertBold := round{wc: suggestMode, reqs: []json.RawMessage{
+		insertAt(t, " x", 6), reset(t, 6, 8, "*"), textStyle(t, 7, 8, "bold", true)}}
+	runProbes(t, []probe{
+		{"direct bold over suggested bold", "Alpha beta.\n", []round{insertBold, {reqs: []json.RawMessage{textStyle(t, 7, 8, "bold", true)}}}},
+		{"direct bold off over suggested bold", "Alpha beta.\n", []round{insertBold, {reqs: []json.RawMessage{textStyle(t, 7, 8, "bold", false)}}}},
+		{"suggested bold on existing italic", "Alpha beta.\n", []round{
+			{reqs: []json.RawMessage{textStyle(t, 1, 6, "italic", true)}},
+			{wc: suggestMode, reqs: []json.RawMessage{textStyle(t, 1, 6, "bold", true)}}}},
+	})
 }

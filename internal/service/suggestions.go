@@ -19,9 +19,9 @@ type Suggestion struct {
 	Inserted string `json:"inserted,omitempty"`
 	Deleted  string `json:"deleted,omitempty"`
 	// Formats is what the suggestion restyles, one entry per thing it
-	// touches: "text: bold", "paragraph: alignment". A suggestion can
-	// carry both text and formatting, which is what one batch in suggest
-	// mode produces when it inserts styled content.
+	// touches: "text: bold", "paragraph: alignment". The formatting of
+	// text a suggestion inserts is not here: it is part of the insertion,
+	// and a read shows the inserted text in it.
 	Formats []string `json:"formats,omitempty"`
 	// Restyled is the text a formatting suggestion covers, quoted the way
 	// Inserted and Deleted are; empty when it covers no text.

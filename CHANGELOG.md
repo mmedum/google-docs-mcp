@@ -7,6 +7,20 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-03
+
+### Fixed
+
+- Text suggested as an insertion is read in the formatting it will have
+  once accepted. Google gives such a run the style it inherited from its
+  neighbor, and files its real style under the insertion's own
+  suggestion id, so plain text suggested after a bold word read as bold.
+- That style is no longer listed as a separate formatting change. Every
+  suggested edit had been reported as a change to ten properties, and a
+  direct restyle over pending inserted text warned about a collision
+  that does not happen: Google folds the direct change into the
+  insertion.
+
 ## [2.1.0] - 2026-10-03
 
 ### Changed

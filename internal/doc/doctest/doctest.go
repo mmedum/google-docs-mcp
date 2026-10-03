@@ -53,3 +53,14 @@ func Fixture(t testing.TB) *doc.Document {
 	}
 	return d
 }
+
+// InsertionReset is the state Google files under a suggested insertion's
+// own id when the inserted text's style is reset: every text property
+// marked except link (seen live 2026-10-03). Paired with an empty style
+// it means the text takes the inherited style.
+func InsertionReset() *gdocs.TextStyleSuggestionState {
+	return &gdocs.TextStyleSuggestionState{BoldSuggested: true, ItalicSuggested: true, UnderlineSuggested: true,
+		StrikethroughSuggested: true, SmallCapsSuggested: true, BackgroundColorSuggested: true,
+		ForegroundColorSuggested: true, FontSizeSuggested: true, WeightedFontFamilySuggested: true,
+		BaselineOffsetSuggested: true}
+}

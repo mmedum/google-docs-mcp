@@ -41,7 +41,7 @@ type SuggestionsResult struct {
 }
 
 // ListSuggestions collects suggestions from the inline view, in document
-// order, merged with thread details when the preview provides them.
+// order, merged with thread details when the comments view provides them.
 func (s *Service) ListSuggestions(ctx context.Context, ref string) (*SuggestionsResult, error) {
 	f, err := s.Fetch(ctx, ref)
 	if err != nil {
@@ -145,7 +145,7 @@ func (s *suggestionSet) collectFormats(d *doc.Document) {
 }
 
 // list classifies each suggestion and merges in the thread details the
-// preview provides.
+// comments view provides.
 func (s *suggestionSet) list(threads map[string]gdocs.SuggestionThread) []Suggestion {
 	out := make([]Suggestion, 0, len(s.order))
 	for _, id := range s.order {
@@ -222,13 +222,10 @@ type ReviewResult struct {
 	Text       string   `json:"-"`
 }
 
-// Review accepts or rejects suggestions (Developer Preview).
+// Review accepts or rejects suggestions.
 func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult, error) {
 	if err := s.requireWritable(); err != nil {
 		return nil, err
-	}
-	if !s.opts.Preview {
-		return nil, Errorf("unavailable", "accepting or rejecting suggestions needs Developer Preview enrollment (GDOCS_PREVIEW=true)")
 	}
 	action := strings.ToLower(strings.TrimSpace(req.Action))
 	switch action {

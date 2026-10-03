@@ -7,6 +7,33 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+
+- Comments and suggestions no longer need Developer Preview: Google made
+  them generally available on 2026-09-30. Every read asks for the comments
+  view, so suggestion mode, comments pinned to a passage, comment threads
+  from the document and `review_suggestion` work without any setting.
+- The default write mode is `suggest` unless `GDOCS_DEFAULT_WRITE_MODE`
+  says otherwise; it was `direct` without preview.
+- If Google refuses the comments view for a document, as it may while the
+  rollout reaches a project, the read is retried without it. Comments then
+  go through Drive, quoting the text, and suggestion mode is refused rather
+  than sent. `get_document` reports `comments_view` and leaves `suggest`
+  out of `write_modes` for that document.
+- `doctor` reports the comments view as a check, not a preview probe.
+
+### Deprecated
+
+- `GDOCS_PREVIEW` and `--preview` are ignored and log a warning. The
+  `preview` field in `get_document` capabilities now mirrors
+  `comments_view`, and `status` reports it as `true`; both go in the
+  next major release.
+
+### Removed
+
+- The `preview-off-suggest` agent eval; the setup it tested no longer
+  exists.
+
 ## [2.0.0] - 2026-09-30
 
 ### Added

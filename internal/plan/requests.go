@@ -479,7 +479,7 @@ func CreateFootnote(at Loc) json.RawMessage {
 	return raw(map[string]any{"createFootnote": map[string]any{"location": at.json()}})
 }
 
-// InsertComment anchors a comment to a range (Developer Preview).
+// InsertComment anchors a comment to a range.
 func InsertComment(content string, r Rng, assignee string) json.RawMessage {
 	req := map[string]any{"content": content, "range": r.json()}
 	if assignee != "" {
@@ -488,19 +488,18 @@ func InsertComment(content string, r Rng, assignee string) json.RawMessage {
 	return raw(map[string]any{"insertComment": req})
 }
 
-// AcceptSuggestion accepts a suggestion by id (Developer Preview).
+// AcceptSuggestion accepts a suggestion by id.
 func AcceptSuggestion(id string) json.RawMessage {
 	return raw(map[string]any{"acceptSuggestion": map[string]any{"suggestionId": id}})
 }
 
-// RejectSuggestion rejects a suggestion by id (Developer Preview).
+// RejectSuggestion rejects a suggestion by id.
 func RejectSuggestion(id string) json.RawMessage {
 	return raw(map[string]any{"rejectSuggestion": map[string]any{"suggestionId": id}})
 }
 
 // DeleteSuggestion removes a suggestion without applying or declining
-// it. Google allows only its author to; an editor rejects instead
-// (Developer Preview).
+// it. Google allows only its author to; an editor rejects instead.
 func DeleteSuggestion(id string) json.RawMessage {
 	return raw(map[string]any{"deleteSuggestion": map[string]any{"suggestionId": id}})
 }

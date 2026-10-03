@@ -71,7 +71,7 @@ func (tr *trace) toolNames() []string {
 func runClaude(t *testing.T, prompt string, extraEnv map[string]string) *trace {
 	t.Helper()
 	dir := t.TempDir()
-	serverEnv := map[string]string{"GDOCS_PREVIEW": previewFlag(), "GDOCS_LOG_LEVEL": "warn"}
+	serverEnv := map[string]string{"GDOCS_LOG_LEVEL": "warn"}
 	for k, v := range extraEnv {
 		serverEnv[k] = v
 	}
@@ -104,7 +104,6 @@ func runClaude(t *testing.T, prompt string, extraEnv map[string]string) *trace {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
-	cmd.Env = append(cmd.Env, "GDOCS_PREVIEW="+previewFlag())
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

@@ -1,6 +1,6 @@
 // Package gapi is a thin raw REST client for the Google Docs and Drive
-// APIs. Requests are built by hand so Developer Preview fields that the
-// generated client lacks can be sent; responses decode into the
+// APIs. Requests are built by hand so fields that the generated client
+// lacks can be sent; responses decode into the
 // generated types where they exist. No MCP imports live here.
 package gapi
 

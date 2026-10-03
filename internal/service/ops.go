@@ -62,9 +62,14 @@ type ObjectInfo struct {
 	HeightPt float64 `json:"height_pt,omitempty"`
 }
 
-// Capabilities tell the model what this server instance can do.
+// Capabilities tell the model what this server can do with the document.
 type Capabilities struct {
+	// CommentsView says Google answered with comments included, so
+	// suggestions and pinned comments work here. Deprecated name kept
+	// for one release: it was the GDOCS_PREVIEW setting before Google
+	// made these features generally available.
 	Preview          bool     `json:"preview"`
+	CommentsView     bool     `json:"comments_view"`
 	WriteModes       []string `json:"write_modes"`
 	DefaultWriteMode string   `json:"default_write_mode"`
 	ReadOnly         bool     `json:"read_only"`
@@ -89,9 +94,12 @@ type Info struct {
 	Text           string       `json:"-"`
 }
 
-func (s *Service) capabilities() Capabilities {
-	c := Capabilities{Preview: s.opts.Preview, DefaultWriteMode: string(s.opts.DefaultWriteMode), ReadOnly: s.opts.ReadOnly, WriteModes: []string{}}
-	for _, m := range (config.Config{Preview: s.opts.Preview}).AvailableWriteModes() {
+func (s *Service) capabilities(f *Fetched) Capabilities {
+	c := Capabilities{Preview: f.CommentsView, CommentsView: f.CommentsView, DefaultWriteMode: string(s.opts.DefaultWriteMode), ReadOnly: s.opts.ReadOnly, WriteModes: []string{}}
+	for _, m := range config.WriteModes() {
+		if m == config.WriteSuggest && !f.canSuggest() {
+			continue
+		}
 		c.WriteModes = append(c.WriteModes, string(m))
 	}
 	return c
@@ -119,7 +127,7 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 		return nil, err
 	}
 	d := f.Doc
-	info := &Info{ID: d.ID, Title: d.Title, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities()}
+	info := &Info{ID: d.ID, Title: d.Title, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities(f)}
 	for _, t := range d.Tabs {
 		ti := TabInfo{Number: t.Number, ID: t.ID, Title: t.Title, Nesting: t.Nesting, Blocks: len(t.Body.Blocks),
 			Headers: len(t.Headers), Footers: len(t.Footers), Footnotes: len(t.Footnotes), Page: t.Page}
@@ -214,7 +222,10 @@ func (i *Info) text() string {
 		t.writeExtras(&b)
 	}
 	c := i.Capabilities
-	fmt.Fprintf(&b, "server: write modes %s (default %s), preview %t, read-only %t\n", strings.Join(c.WriteModes, "/"), c.DefaultWriteMode, c.Preview, c.ReadOnly)
+	fmt.Fprintf(&b, "server: write modes %s (default %s), read-only %t\n", strings.Join(c.WriteModes, "/"), c.DefaultWriteMode, c.ReadOnly)
+	if !c.CommentsView {
+		b.WriteString(CommentsViewRefused + ": suggestion mode is unavailable and comments are posted unanchored\n")
+	}
 	writeWarnings(&b, i.Warnings)
 	return strings.TrimRight(b.String(), "\n")
 }

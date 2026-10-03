@@ -298,6 +298,11 @@ func blocksShifted(before, after *doc.Document) bool {
 
 // planAndApply resolves, plans, and (unless dry-running) applies once.
 func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest, mode plan.Mode) (*EditResult, *resolvedOps, error) {
+	// Checked against the read this batch is planned on, which a conflict
+	// or a later round may have replaced since the mode was chosen.
+	if mode == plan.ModeSuggest && !f.canSuggest() {
+		return nil, nil, Errorf("unavailable", "%s, so suggestion mode is unavailable; use mode comment or direct", CommentsViewRefused)
+	}
 	ro, err := s.resolveOps(ctx, f, req.Ops, mode)
 	if err != nil {
 		return nil, nil, err
@@ -369,13 +374,8 @@ func (s *Service) mode(m string) (plan.Mode, error) {
 		return "", err
 	}
 	switch plan.Mode(m) {
-	case plan.ModeDirect, plan.ModeComment:
+	case plan.ModeDirect, plan.ModeComment, plan.ModeSuggest:
 		return plan.Mode(m), nil
-	case plan.ModeSuggest:
-		if !s.opts.Preview {
-			return "", Errorf("unavailable", "suggestion mode needs Developer Preview enrollment (GDOCS_PREVIEW=true); use mode comment or direct")
-		}
-		return plan.ModeSuggest, nil
 	}
 	return "", Errorf("invalid", "mode %q; use suggest, direct or comment", m)
 }

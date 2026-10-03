@@ -26,7 +26,7 @@ type task struct {
 	check    func(s *server, doc string, tr *trace) []check
 	// env is extra configuration for the server the model talks to, not
 	// for the one that seeds and scores. It is how a task puts the model
-	// in front of a refusal: preview off, or read-only.
+	// in front of a refusal, such as read-only.
 	env map[string]string
 	// noDoc skips seeding, for a task whose point is that the document
 	// is not there.
@@ -335,39 +335,6 @@ var tasks = []task{
 				{"invented no heading", !invented, clip(tr.Final, 300)},
 				{"gave up inside five calls", len(tr.Calls) <= 5, strings.Join(tr.toolNames(), " → ")},
 				{"made no writes", len(tr.writes()) == 0, strings.Join(tr.toolNames(), " → ")},
-			}
-		},
-	},
-	{
-		name:   "preview-off-suggest",
-		env:    map[string]string{"GDOCS_PREVIEW": "false"},
-		prompt: "In the Google Doc %s, change 'a lot' to 'substantially'. Make it a suggestion, not a direct edit.",
-		check: func(s *server, doc string, tr *trace) []check {
-			md := s.read(doc, nil)
-			final := strings.ToLower(tr.Final)
-			// The refusal names the two modes that do work. Either is a
-			// good answer as long as the model said what it did; silently
-			// committing the edit as if it were the suggestion asked for
-			// is not, and neither is claiming a suggestion exists.
-			var direct, comment int
-			for _, c := range tr.writes() {
-				switch m, _ := c.Input["mode"].(string); m {
-				case "direct":
-					direct++
-				case "comment":
-					comment++
-				}
-			}
-			explained := strings.Contains(final, "preview") || strings.Contains(final, "suggestion mode") ||
-				strings.Contains(final, "cannot") || strings.Contains(final, "not available") ||
-				strings.Contains(final, "instead")
-			claimed := strings.Contains(final, "suggested the change") || strings.Contains(final, "as a suggestion")
-			return []check{
-				{"explained that suggestion mode is unavailable", explained, clip(tr.Final, 400)},
-				{"did not claim a suggestion was made", !claimed || comment > 0, clip(tr.Final, 300)},
-				{"did not quietly commit it as a direct edit", direct == 0 || explained, fmt.Sprintf("%d direct, %d comment", direct, comment)},
-				{"document text is intact unless it said otherwise",
-					strings.Contains(md, "a lot") || explained, clip(md, 200)},
 			}
 		},
 	},

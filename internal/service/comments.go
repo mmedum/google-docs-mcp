@@ -30,7 +30,7 @@ type CommentsResult struct {
 
 // ListComments returns every comment thread through the Drive API, which
 // carries replies, resolution and deletion for every deployment, located
-// in the document by the preview's anchors or by quoted text. The
+// in the document by the comments view's anchors or by quoted text. The
 // document fetch and the Drive list are independent and run together.
 func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*CommentsResult, error) {
 	id, err := parseRef(req.Document)
@@ -119,9 +119,9 @@ type AddCommentResult struct {
 	Text       string   `json:"-"`
 }
 
-// AddComment posts a comment on a target. With Developer Preview it is
-// pinned to the target's range; otherwise it goes through the Drive API
-// quoting the text, which the editor shows unanchored.
+// AddComment posts a comment on a target. When the read had the comments
+// view it is pinned to the target's range; otherwise it goes through the
+// Drive API quoting the text, which the editor shows unanchored.
 func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCommentResult, error) {
 	if err := s.requireWritable(); err != nil {
 		return nil, err
@@ -153,10 +153,11 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 			res.Handle = r.Blocks[0].Handle
 		}
 	}
+	anchored := f.CommentsView && r != nil
 	if req.DryRun {
-		res.DryRun, res.Anchored = true, s.opts.Preview && r != nil
+		res.DryRun, res.Anchored = true, anchored
 		if strings.TrimSpace(req.Assignee) != "" && !res.Anchored {
-			res.Warnings = append(res.Warnings, "assignee is only supported with Developer Preview; the comment would be posted without one")
+			res.Warnings = append(res.Warnings, "assignee needs a comment pinned to a passage; the comment would be posted without one")
 		}
 		res.Text = "dry run: would post a comment"
 		if res.Handle != "" {
@@ -167,7 +168,7 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 		}
 		return res, nil
 	}
-	if s.opts.Preview && r != nil {
+	if anchored {
 		err = s.postAnchoredComment(ctx, f, r.Rng(), content, strings.TrimSpace(req.Assignee), res)
 	} else {
 		err = s.postDriveComment(ctx, f, content, req.Assignee, res)
@@ -200,7 +201,7 @@ func commentText(text, what string) (string, error) {
 	return text, nil
 }
 
-// postAnchoredComment pins a comment to a range through the preview API,
+// postAnchoredComment pins a comment to a range through the Docs API,
 // guarded by the revision the range was resolved against.
 func (s *Service) postAnchoredComment(ctx context.Context, f *Fetched, rng plan.Rng, content, assignee string, res *AddCommentResult) error {
 	env, revision, err := s.batchUpdate(ctx, f, []json.RawMessage{plan.InsertComment(content, rng, assignee)}, "")
@@ -218,7 +219,7 @@ func (s *Service) postAnchoredComment(ctx context.Context, f *Fetched, rng plan.
 // when there is one; the editor shows such comments unanchored.
 func (s *Service) postDriveComment(ctx context.Context, f *Fetched, content, assignee string, res *AddCommentResult) error {
 	if assignee != "" {
-		res.Warnings = append(res.Warnings, "assignee is only supported with Developer Preview; the comment was posted without one")
+		res.Warnings = append(res.Warnings, "assignee needs a comment pinned to a passage; the comment was posted without one")
 	}
 	c, err := s.api.CreateComment(ctx, f.Doc.ID, content, res.Quote)
 	if err != nil {
@@ -226,7 +227,7 @@ func (s *Service) postDriveComment(ctx context.Context, f *Fetched, content, ass
 	}
 	res.ID = c.ID
 	if res.Quote != "" {
-		res.Warnings = append(res.Warnings, "the comment quotes the text but is not pinned to it in the editor (Developer Preview anchors comments)")
+		res.Warnings = append(res.Warnings, "the comment quotes the text but is not pinned to it in the editor ("+CommentsViewRefused+")")
 	}
 	return nil
 }

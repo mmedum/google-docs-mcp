@@ -43,8 +43,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 		return res, nil
 	}
 	// The create reply is the whole (empty) document, so the edit plans
-	// against it without another read.
-	f, err := s.adopt(d)
+	// against it without another read. It says nothing about the comments
+	// view, so it is not cached for other calls to read.
+	f, err := s.parse(d, false)
 	if err != nil {
 		return nil, err
 	}

@@ -188,6 +188,9 @@ func runServer(args []string, stdout, stderr io.Writer) int {
 	}
 	logger := config.NewLogger(cfg, stderr)
 	slog.SetDefault(logger)
+	for _, w := range cfg.Warnings {
+		logger.Warn(w)
+	}
 
 	if dumpSchemas {
 		// The whole registrable surface, not this deployment's: the schema
@@ -233,11 +236,11 @@ func runServer(args []string, stdout, stderr io.Writer) int {
 
 	api := gapi.New(ts, gapi.Options{Logger: logger, Timeout: cfg.HTTPTimeout, UserAgent: "google-docs-mcp/" + version.String()})
 	svc := service.New(api, service.Options{
-		Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive,
+		ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive,
 		DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir, Logger: logger,
 	})
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Logger: logger, Version: version.String()})
-	logger.Info("serving MCP over stdio", "version", version.String(), "preview", cfg.Preview, "read_only", cfg.ReadOnly, "default_write_mode", cfg.DefaultWriteMode)
+	logger.Info("serving MCP over stdio", "version", version.String(), "read_only", cfg.ReadOnly, "default_write_mode", cfg.DefaultWriteMode)
 	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && !clientWentAway(err) {
 		return fail(stderr, "server: %v", err)
 	}
@@ -483,18 +486,16 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 			// formatted at all rather than formatted and masked, so
 			// there is no value path for a later edit to widen.
 			check("Docs API (documents.get)", nil, fmt.Sprintf(" %d tab(s), revision present", len(f.Doc.Tabs)))
-			_, perr := api.GetDocument(ctx, f.Doc.ID, gapi.GetOptions{SuggestionsViewMode: gapi.SuggestionsInline, CommentsViewMode: gapi.CommentsIncluded})
-			switch {
-			case perr == nil:
-				check("Developer Preview (commentsViewMode)", nil, " accepted; GDOCS_PREVIEW=true will work")
-			case cfg.Preview:
-				check("Developer Preview (commentsViewMode)", perr, "")
-			default:
-				outf(stdout, "• Developer Preview not available for this project yet (%s); suggestion mode and anchored comments stay off\n", gapi.Class(perr))
+			// Not a failure: the read worked without it, and Google
+			// rolled the comment features out over up to fifteen days.
+			if f.CommentsView {
+				check("Comments view (commentsViewMode)", nil, " accepted; suggestion mode and pinned comments work")
+			} else {
+				outf(stdout, "• %s: suggestion mode is unavailable and comments are posted unanchored\n", service.CommentsViewRefused)
 			}
 		}
 	} else {
-		outf(stdout, "• pass a document id or URL to also test documents.get and the Developer Preview\n")
+		outf(stdout, "• pass a document id or URL to also test documents.get and the comments view\n")
 	}
 	if failed > 0 {
 		outf(stdout, "\n%d check(s) failed\n", failed)

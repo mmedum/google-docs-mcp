@@ -93,11 +93,7 @@ func liveTabs(t *testing.T, d *driver, doc string) {
 	d.ok("raw read cut by the budget", "read_document", map[string]any{"document": doc, "tab": "Tab 1", "format": "raw", "max_chars": 700})
 
 	deleteFooter := map[string]any{"document": doc, "mode": "suggest", "ops": []any{map[string]any{"op": "delete_footer"}}}
-	if d.preview {
-		d.refused("delete footer in suggest mode", "edit_document", deleteFooter, "")
-	} else {
-		d.refused("delete footer in suggest mode without preview", "edit_document", deleteFooter, "Developer Preview")
-	}
+	d.refused("delete footer in suggest mode", "edit_document", deleteFooter, "")
 	d.ok("delete header and footer", "edit_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
 		map[string]any{"op": "delete_header"}, map[string]any{"op": "delete_footer"},
 	}})

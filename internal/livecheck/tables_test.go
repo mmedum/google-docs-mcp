@@ -31,11 +31,7 @@ func liveTables(t *testing.T, d *driver, doc string) {
 
 	suggestCell := map[string]any{"document": doc, "mode": "suggest", "ops": []any{
 		map[string]any{"op": "set_cells", "table": tbl, "cells": []any{map[string]any{"cell": "r3c1", "content": "Suggested cell text"}}}}}
-	if d.preview {
-		d.ok("suggested cell edit", "edit_table", suggestCell)
-	} else {
-		d.refused("suggested cell edit without preview", "edit_table", suggestCell, "Developer Preview")
-	}
+	d.ok("suggested cell edit", "edit_table", suggestCell)
 
 	d.ok("merge cells", "edit_table", map[string]any{"document": doc, "mode": "direct", "ops": []any{
 		map[string]any{"op": "merge_cells", "table": tbl, "from_cell": "r3c1", "to_cell": "r3c3"}}})
@@ -49,9 +45,8 @@ func liveTables(t *testing.T, d *driver, doc string) {
 		map[string]any{"op": "delete_columns", "table": tbl, "column_numbers": []any{2}},
 	}})
 
-	// With preview on, row 3 holds a pending suggestion, so the guard
-	// refuses the delete until it is forced. Without preview there is
-	// nothing to protect and the delete simply works.
+	// Row 3 holds a pending suggestion, so the guard refuses the delete
+	// until it is forced.
 	_, _, refused := d.call("delete row 3", "edit_table", map[string]any{"document": doc, "mode": "direct", "ops": []any{
 		map[string]any{"op": "delete_rows", "table": tbl, "row_numbers": []any{3}}}})
 	if refused {
@@ -59,8 +54,8 @@ func liveTables(t *testing.T, d *driver, doc string) {
 		d.ok("delete row 3, forced", "edit_table", map[string]any{"document": doc, "mode": "direct", "force": true, "ops": []any{
 			map[string]any{"op": "delete_rows", "table": tbl, "row_numbers": []any{3}}}})
 		d.wasAsked("delete row 3, forced", "edit_table: run a forced edit on")
-	} else if d.preview {
-		t.Log("row 3 held no suggestion, so the guard had nothing to refuse")
+	} else {
+		t.Error("row 3 held the suggested cell edit, yet the guard did not refuse its deletion")
 	}
 
 	d.ok("three grid changes on one table: a batch each, renumbered between", "edit_table",

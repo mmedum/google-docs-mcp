@@ -22,7 +22,7 @@ type LargeSpec struct {
 	ListItems   int  // list items per subsection, every third one nested
 	TableEvery  int  // a 4×3 table after every N-th subsection; 0 = none
 	Comments    int  // comment threads, each quoting one paragraph's first sentence
-	Anchored    bool // give the comments Developer Preview anchors
+	Anchored    bool // give the comments anchors, as the comments view does
 	Suggestions int  // paragraphs carrying a suggested insertion and deletion
 	Footnotes   int  // paragraphs carrying a footnote reference
 	Tabs        int  // tabs, each with the same body; 0 or 1 is one tab

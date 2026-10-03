@@ -7,9 +7,8 @@
 //
 //	make build && go test -tags=live ./internal/livecheck -v -timeout 20m
 //
-// Deletion steps run only with GDOCS_ENABLE_DESTRUCTIVE=true. Suggestion
-// mode and anchored comments need Developer Preview (GDOCS_PREVIEW=true,
-// the default here). The scratch document is left behind on purpose and
+// Deletion steps run only with GDOCS_ENABLE_DESTRUCTIVE=true. The
+// scratch document is left behind on purpose and
 // its id is deliberately not printed; delete it when you are done.
 //
 // Coverage rule when a tool or op is added: every tool in --dump-schemas
@@ -37,7 +36,6 @@ type driver struct {
 	cs          *mcp.ClientSession
 	ctx         context.Context
 	destructive bool
-	preview     bool
 	// person answers the questions the server asks: accept, unless a
 	// step says otherwise.
 	person *person
@@ -96,9 +94,6 @@ func start(t *testing.T) *driver {
 		t.Fatalf("build the binary first (make build): %v", err)
 	}
 	env := append(os.Environ(), "GDOCS_LOG_LEVEL=warn")
-	if os.Getenv("GDOCS_PREVIEW") == "" {
-		env = append(env, "GDOCS_PREVIEW=true")
-	}
 	cmd := exec.Command(bin)
 	cmd.Env = env
 	cmd.Stderr = os.Stderr
@@ -112,7 +107,6 @@ func start(t *testing.T) *driver {
 	t.Cleanup(func() { _ = cs.Close() })
 	d := &driver{t: t, cs: cs, ctx: ctx,
 		destructive: truthy(os.Getenv("GDOCS_ENABLE_DESTRUCTIVE")),
-		preview:     os.Getenv("GDOCS_PREVIEW") != "false",
 		person:      p,
 	}
 	return d

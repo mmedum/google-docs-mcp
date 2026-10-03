@@ -50,11 +50,7 @@ func liveLayout(t *testing.T, d *driver, doc string) {
 	d.refused("page setup in comment mode", "layout_document", map[string]any{"document": doc, "mode": "comment", "ops": []any{
 		map[string]any{"op": "page", "landscape": true}}}, "comment")
 	pageSuggest := map[string]any{"document": doc, "mode": "suggest", "ops": []any{map[string]any{"op": "page", "landscape": true}}}
-	if d.preview {
-		d.call("page setup in suggest mode (the API decides whether it can)", "layout_document", pageSuggest)
-	} else {
-		d.refused("page setup in suggest mode without preview", "layout_document", pageSuggest, "Developer Preview")
-	}
+	d.call("page setup in suggest mode (the API decides whether it can)", "layout_document", pageSuggest)
 
 	// A named range is the one anchor that outlives an edit, so the test
 	// edits through it after other writes have moved the text.

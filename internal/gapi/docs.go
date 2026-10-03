@@ -14,7 +14,7 @@ import (
 const (
 	SuggestionsInline          = "SUGGESTIONS_INLINE"
 	SuggestionsPreviewAccepted = "PREVIEW_SUGGESTIONS_ACCEPTED"
-	CommentsIncluded           = "COMMENTS_VIEW_MODE_INCLUDED" // Developer Preview
+	CommentsIncluded           = "COMMENTS_VIEW_MODE_INCLUDED"
 )
 
 // GetOptions select what documents.get returns. Tabs content is always
@@ -25,7 +25,7 @@ type GetOptions struct {
 }
 
 // DocumentResult is a decoded documents.get response. Comment and
-// suggestion threads (Developer Preview) are on the document itself.
+// suggestion threads are on the document itself.
 type DocumentResult struct {
 	Document *gdocs.Document
 }
@@ -52,16 +52,16 @@ func (c *Client) GetDocument(ctx context.Context, id string, o GetOptions) (*Doc
 	return &DocumentResult{Document: &d}, nil
 }
 
-// WriteControl guards a batchUpdate against concurrent edits and, in
-// Developer Preview, selects suggestion mode.
+// WriteControl guards a batchUpdate against concurrent edits and
+// selects suggestion mode.
 type WriteControl struct {
 	RequiredRevisionID string `json:"requiredRevisionId,omitempty"`
 	TargetRevisionID   string `json:"targetRevisionId,omitempty"`
-	WriteMode          string `json:"writeMode,omitempty"` // "SUGGEST" (preview)
+	WriteMode          string `json:"writeMode,omitempty"` // "SUGGEST"
 }
 
 // BatchUpdateRequest is the body of documents.batchUpdate. Requests are
-// pre-marshaled so GA and preview request types share one path.
+// pre-marshaled so every request type shares one path.
 type BatchUpdateRequest struct {
 	Requests     []json.RawMessage `json:"requests"`
 	WriteControl *WriteControl     `json:"writeControl,omitempty"`

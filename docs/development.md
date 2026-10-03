@@ -37,7 +37,7 @@ and are preferred by the Makefile; install them with
   or the Docs reference, and put the link next to the table.
 - Integration tests are tagged and need a login:
   `GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestPreviewSpike -v`
-  creates a scratch document and checks the Developer Preview features.
+  creates a scratch document and checks the comment and suggestion features.
 - The live driver drives every tool and every op kind against a new
   scratch document, through the binary over stdio exactly as a client
   would, plus the `gdocs://` resources:
@@ -47,8 +47,7 @@ and are preferred by the Makefile; install them with
   ```
 
   It needs `GDOCS_ENABLE_DESTRUCTIVE=true` for the deletion steps, and
-  should be run with `GDOCS_PREVIEW` both on and off before a phase is
-  called done. Steps that must be refused assert their refusal, so a
+  should be run before a phase is called done. Steps that must be refused assert their refusal, so a
   green run means the guards fired as well as the writes; the transcript
   is scrubbed of ids so it can be pasted. The scratch document is left
   behind on purpose and its URL is the last line.

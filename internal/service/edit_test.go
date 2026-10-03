@@ -19,10 +19,15 @@ import (
 
 // writable builds a service whose handle memory holds the fixture, as it
 // would after a read; writes check handles against that memory.
-func writable(t *testing.T, preview bool) (*Service, *fakeAPI) {
+// With view false Google refuses the comments view, as it may for a
+// project the comment features have not reached.
+func writable(t *testing.T, view bool) (*Service, *fakeAPI) {
 	t.Helper()
 	api := &fakeAPI{raw: doctest.RawFixture(t)}
-	svc := New(api, Options{Preview: preview, DefaultWriteMode: config.WriteDirect, CacheTTL: time.Nanosecond})
+	if !view {
+		api.viewErr = viewRefused
+	}
+	svc := New(api, Options{DefaultWriteMode: config.WriteDirect, CacheTTL: time.Nanosecond})
 	if _, err := svc.Fetch(context.Background(), fixtureID); err != nil {
 		t.Fatal(err)
 	}
@@ -316,11 +321,11 @@ func TestEditSuggestAndModes(t *testing.T) {
 	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "suggestion") {
 		t.Fatalf("guard warning expected in suggest mode: %v", res.Warnings)
 	}
-	// Default mode comes from options; unknown modes and suggest without preview fail.
+	// Default mode comes from options; unknown modes, and suggest with the comments view refused, fail.
 	plain, _ := writable(t, false)
 	var se *Error
 	if _, err := plain.Edit(ctx, EditRequest{Document: fixtureID, Mode: "suggest", Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p5"}}}}); !errors.As(err, &se) || se.Class != "unavailable" {
-		t.Fatalf("suggest without preview: %v", err)
+		t.Fatalf("suggest with the comments view refused: %v", err)
 	}
 	if _, err := plain.Edit(ctx, EditRequest{Document: fixtureID, Mode: "yolo", Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p5"}}}}); !errors.As(err, &se) || se.Class != "invalid" {
 		t.Fatalf("bad mode: %v", err)
@@ -633,9 +638,11 @@ func TestFindSearchCreateExportSuggestions(t *testing.T) {
 			t.Errorf("%+v: got %v, want %s", tc.req, err, tc.class)
 		}
 	}
-	plain, _ := writable(t, false)
-	if _, err := plain.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", All: true}); !errors.As(err, &se) || se.Class != "unavailable" {
-		t.Fatalf("review without preview: %v", err)
+	// Review is not gated on the comments view: a refusal from Google
+	// destroys nothing, so the request goes and Google answers it.
+	plain, plainAPI := writable(t, false)
+	if _, err := plain.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", All: true}); err != nil || len(plainAPI.batches) != 1 {
+		t.Fatalf("review with the comments view refused: err=%v batches=%d", err, len(plainAPI.batches))
 	}
 }
 
@@ -695,7 +702,7 @@ func TestInsertionEdges(t *testing.T) {
 	}
 	// Appending to a new, empty document fills its only paragraph.
 	created, _ := api.CreateDocument(ctx, "empty")
-	ef, err := svc.adopt(created)
+	ef, err := svc.parse(created, false)
 	if err != nil {
 		t.Fatal(err)
 	}

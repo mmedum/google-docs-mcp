@@ -85,7 +85,7 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "list_suggestions",
 		Description: "List pending suggested edits (tracked changes) in a Google Doc: id, kind (insert, delete, replace, " +
-			"structure, format), the inserted, deleted and restyled text, the block handle, and, with Developer Preview, the author and " +
+			"structure, format), the inserted, deleted and restyled text, the block handle, and, where Google includes them, the author and " +
 			"status. A format suggestion changes only formatting and says what it restyles, as \"text: bold\" or " +
 			"\"paragraph: alignment\". Ids feed review_suggestion.",
 		Annotations: readOnly,

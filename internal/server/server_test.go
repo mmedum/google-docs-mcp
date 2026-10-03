@@ -136,7 +136,7 @@ func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSessi
 // protocol it offers; an empty protocol is the SDK's own choice.
 func connectClient(t *testing.T, api *fakeAPI, cfg config.Config, protocol string, o *mcp.ClientOptions) *mcp.ClientSession {
 	t.Helper()
-	svc := service.New(api, service.Options{Preview: cfg.Preview, ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
+	svc := service.New(api, service.Options{ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
 	// Seed the handle memory as a read would, so tools may target handles.
 	_, _ = svc.Fetch(context.Background(), fixtureID)
 	srv := server.New(server.Deps{Service: svc, Config: cfg, Version: "test"})
@@ -249,7 +249,7 @@ func TestListToolsAndSchemas(t *testing.T) {
 
 func TestWriteToolsEndToEnd(t *testing.T) {
 	api := &fakeAPI{raw: doctest.RawFixture(t)}
-	cs := connectWith(t, api, config.Config{Preview: true, DefaultWriteMode: config.WriteSuggest, ExportDir: t.TempDir()})
+	cs := connectWith(t, api, config.Config{DefaultWriteMode: config.WriteSuggest, ExportDir: t.TempDir()})
 	res := call(t, cs, "edit_document", map[string]any{"document": fixtureID, "ops": []map[string]any{
 		{"op": "replace", "target": map[string]any{"text": "Second point"}, "content": "Second item"},
 		{"op": "append", "content": "- tail"},
@@ -324,7 +324,7 @@ func TestGetDocumentTool(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("error: %s", textOf(res))
 	}
-	if !strings.Contains(textOf(res), "Quarterly Report") || !strings.Contains(textOf(res), "write modes direct/comment") {
+	if !strings.Contains(textOf(res), "Quarterly Report") || !strings.Contains(textOf(res), "write modes suggest/direct/comment") {
 		t.Fatalf("text: %s", textOf(res))
 	}
 	// Read tools carry everything in their text: a client may show the
@@ -472,7 +472,7 @@ func TestCommentAndHistoryTools(t *testing.T) {
 		t.Fatalf("hide_resolved: %q", textOf(res))
 	}
 	res = call(t, cs, "add_comment", map[string]any{"document": fixtureID, "target": map[string]any{"text": "First point"}, "content": "Why?"})
-	if res.IsError || !strings.Contains(textOf(res), "comment dc1 posted on p5") || !strings.Contains(textOf(res), "unanchored") {
+	if res.IsError || !strings.Contains(textOf(res), "comment c1 posted on p5") || strings.Contains(textOf(res), "unanchored") {
 		t.Fatalf("add_comment: %q", textOf(res))
 	}
 	res = call(t, cs, "reply_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "action": "reopen"})
@@ -593,12 +593,7 @@ func TestCommentEditAndSuggestionDiscard(t *testing.T) {
 	if !res.IsError || !strings.Contains(textOf(res), "has no reply nope") {
 		t.Fatalf("edit unknown reply: %s", textOf(res))
 	}
-	// Discarding needs preview, like accepting and rejecting.
-	res = call(t, cs, "review_suggestion", map[string]any{"document": fixtureID, "action": "discard", "all": true})
-	if !res.IsError || !strings.Contains(textOf(res), "Developer Preview") {
-		t.Fatalf("discard without preview: %s", textOf(res))
-	}
-	pv := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{DefaultWriteMode: config.WriteDirect, Preview: true})
+	pv := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{DefaultWriteMode: config.WriteDirect})
 	res = call(t, pv, "review_suggestion", map[string]any{"document": fixtureID, "action": "discard", "all": true})
 	if res.IsError || !strings.Contains(textOf(res), "discarded 1 suggestion(s)") {
 		t.Fatalf("discard: %s", textOf(res))

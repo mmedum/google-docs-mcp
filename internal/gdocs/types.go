@@ -27,12 +27,12 @@ type Document struct {
 	// Pending suggestions to the document-wide styles.
 	SuggestedDocumentStyleChanges map[string]SuggestedDocumentStyle `json:"suggestedDocumentStyleChanges,omitempty"`
 	SuggestedNamedStylesChanges   map[string]SuggestedNamedStyles   `json:"suggestedNamedStylesChanges,omitempty"`
-	// Developer Preview fields, populated when commentsViewMode asks for them.
+	// Populated when commentsViewMode asks for them.
 	Comments    []CommentThread    `json:"comments,omitempty"`
 	Suggestions []SuggestionThread `json:"suggestions,omitempty"`
 }
 
-// Post is a comment or suggestion post (Developer Preview).
+// Post is a comment or suggestion post.
 type Post struct {
 	PostID           string     `json:"postId,omitempty"`
 	Content          string     `json:"content,omitempty"`
@@ -158,8 +158,7 @@ type DocumentTab struct {
 	// NamedStyles are the definitions every paragraph inherits from; a
 	// paragraph's namedStyleType names the one it uses.
 	NamedStyles *NamedStyles `json:"namedStyles,omitempty"`
-	// CommentAnchors map anchor ids to ranges (Developer Preview, with
-	// commentsViewMode).
+	// CommentAnchors map anchor ids to ranges (with commentsViewMode).
 	CommentAnchors map[string]CommentAnchor `json:"commentAnchors,omitempty"`
 	// Pending suggestions to the document-wide styles.
 	SuggestedDocumentStyleChanges map[string]SuggestedDocumentStyle `json:"suggestedDocumentStyleChanges,omitempty"`
@@ -189,7 +188,7 @@ func (s *StructuralElement) RawJSON() json.RawMessage {
 	return s.raw
 }
 
-// CommentAnchor is where a comment thread is pinned (Developer Preview).
+// CommentAnchor is where a comment thread is pinned.
 type CommentAnchor struct {
 	AnchorID string   `json:"anchorId,omitempty"`
 	Ranges   []*Range `json:"ranges,omitempty"`

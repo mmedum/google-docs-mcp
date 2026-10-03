@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mmedum/google-docs-mcp/v2/internal/config"
 	"github.com/mmedum/google-docs-mcp/v2/internal/redact"
 	"github.com/mmedum/google-docs-mcp/v2/internal/version"
 )
@@ -78,6 +79,10 @@ type statusScopes struct {
 // Durations are Go duration strings so a caller compares them rather
 // than parsing prose.
 type statusSettings struct {
+	// Preview is the retired GDOCS_PREVIEW. The features it gated are
+	// generally available, so it reads true; whether they reach a given
+	// document is get_document's comments_view. It stays until the
+	// schema version next changes.
 	Preview          bool     `json:"preview"`
 	WriteModes       []string `json:"write_modes"`
 	DefaultWriteMode string   `json:"default_write_mode"`
@@ -91,7 +96,7 @@ type statusSettings struct {
 func newStatusReport(p *profile) statusReport {
 	cfg := p.cfg
 	modes := make([]string, 0, 3)
-	for _, m := range cfg.AvailableWriteModes() {
+	for _, m := range config.WriteModes() {
 		modes = append(modes, string(m))
 	}
 	r := statusReport{
@@ -106,7 +111,7 @@ func newStatusReport(p *profile) statusReport {
 		},
 		Scopes: statusScopes{Granted: orEmpty(p.user.Scopes)},
 		Settings: statusSettings{
-			Preview:          cfg.Preview,
+			Preview:          true,
 			WriteModes:       modes,
 			DefaultWriteMode: string(cfg.DefaultWriteMode),
 			ReadOnly:         cfg.ReadOnly,

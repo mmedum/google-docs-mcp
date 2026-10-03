@@ -39,12 +39,12 @@ type CommentThread struct {
 }
 
 // comments lists the document's comment threads, located in the
-// document, from the preview payload when present, else the Drive API.
+// document, from the comments view when present, else the Drive API.
 // The lookup runs once per fetch.
 func (s *Service) comments(ctx context.Context, f *Fetched) ([]CommentThread, error) {
 	f.threadsOnce.Do(func() {
-		if s.opts.Preview && f.Wire.Comments != nil {
-			f.threads = locateComments(f, previewThreads(f.Wire))
+		if f.CommentsView && f.Wire.Comments != nil {
+			f.threads = locateComments(f, viewThreads(f.Wire))
 			return
 		}
 		list, err := s.api.ListComments(ctx, f.Doc.ID, false)
@@ -57,7 +57,7 @@ func (s *Service) comments(ctx context.Context, f *Fetched) ([]CommentThread, er
 	return f.threads, f.threadsErr
 }
 
-func previewThreads(w *gdocs.Document) []CommentThread {
+func viewThreads(w *gdocs.Document) []CommentThread {
 	out := make([]CommentThread, 0, len(w.Comments))
 	for _, c := range w.Comments {
 		t := CommentThread{ID: c.CommentID, Author: c.HeadPost.Author.DisplayName, Content: c.HeadPost.Content, Quote: c.PlainTextQuote,
@@ -102,9 +102,9 @@ func driveThreads(list []*gapi.DriveComment) []CommentThread {
 	return out
 }
 
-// previewAnchors maps comment ids to the range the preview payload pins
+// viewAnchors maps comment ids to the range the comments view pins
 // them to, when the document carries comment anchors.
-func previewAnchors(w *gdocs.Document) map[string]*gdocs.Range {
+func viewAnchors(w *gdocs.Document) map[string]*gdocs.Range {
 	if w == nil || len(w.Comments) == 0 {
 		return nil
 	}
@@ -150,11 +150,11 @@ func previewAnchors(w *gdocs.Document) map[string]*gdocs.Range {
 }
 
 // locateComments finds where each thread sits in the document: by the
-// preview's anchor ranges when present, else by its quoted text, which
+// comments view's anchor ranges when present, else by its quoted text, which
 // must match exactly once.
 func locateComments(f *Fetched, threads []CommentThread) []CommentThread {
 	d := f.Doc
-	anchors := previewAnchors(f.Wire)
+	anchors := viewAnchors(f.Wire)
 	for i := range threads {
 		t := &threads[i]
 		if r := anchors[t.ID]; r != nil {

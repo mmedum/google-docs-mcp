@@ -56,7 +56,7 @@ func restyledFixture(t *testing.T, id string, state *gdocs.TextStyleSuggestionSt
 func restyledService(t *testing.T, id string, state *gdocs.TextStyleSuggestionState) *Service {
 	t.Helper()
 	api := &fakeAPI{raw: restyledFixture(t, id, state)}
-	return New(api, Options{Preview: true, DefaultWriteMode: config.WriteDirect})
+	return New(api, Options{DefaultWriteMode: config.WriteDirect})
 }
 
 // TestListSuggestionsSeesAFormattingSuggestion is the reported bug at
@@ -210,7 +210,7 @@ func TestABlankLineEditKeepsItsDirection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(&fakeAPI{raw: raw}, Options{Preview: true, DefaultWriteMode: config.WriteDirect})
+	svc := New(&fakeAPI{raw: raw}, Options{DefaultWriteMode: config.WriteDirect})
 	res, err := svc.ListSuggestions(context.Background(), fixtureID)
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +265,7 @@ func TestARestyleSpanningRunsIsReportedOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(&fakeAPI{raw: raw}, Options{Preview: true, DefaultWriteMode: config.WriteDirect})
+	svc := New(&fakeAPI{raw: raw}, Options{DefaultWriteMode: config.WriteDirect})
 	res, err := svc.ListSuggestions(context.Background(), fixtureID)
 	if err != nil {
 		t.Fatal(err)

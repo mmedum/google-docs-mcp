@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -62,9 +63,12 @@ type asking struct {
 	key []byte
 	lg  *slog.Logger
 
-	// tools are the tools registered to ask, written only while the
-	// server is being built and read-only once it serves.
-	tools map[string]bool
+	// tools are the tools registered to ask, and always those that ask
+	// before every write rather than only when a condition holds. Both
+	// are written only while the server is being built and read-only
+	// once it serves.
+	tools  map[string]bool
+	always map[string]bool
 
 	mu   sync.Mutex
 	used map[string]int64 // nonce → when it expires, in Unix seconds
@@ -73,7 +77,7 @@ type asking struct {
 func newAsking(lg *slog.Logger) *asking {
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
-	return &asking{key: key, lg: lg, used: map[string]int64{}, tools: map[string]bool{}}
+	return &asking{key: key, lg: lg, used: map[string]int64{}, tools: map[string]bool{}, always: map[string]bool{}}
 }
 
 // asks reports whether the tool was registered to ask.
@@ -177,6 +181,13 @@ func (p *person) args() string {
 	return p.argSum
 }
 
+// canAsk reports whether a client can put a question to the person. Form
+// is what an empty elicitation capability declares; only a client that
+// declares URL alone cannot show a form.
+func canAsk(c *mcp.ClientCapabilities) bool {
+	return c != nil && c.Elicitation != nil && (c.Elicitation.Form != nil || c.Elicitation.URL == nil)
+}
+
 // personFor sets up one call. A call that carries answers must also
 // carry the requestState they belong to, which must be one this process
 // issued for this tool and these arguments, unexpired and unspent: a
@@ -187,11 +198,7 @@ func (a *asking) personFor(req *mcp.CallToolRequest, tool string, in any, requir
 	if req == nil {
 		return p, nil
 	}
-	if c := req.ClientCapabilities(); c != nil && c.Elicitation != nil {
-		// Form is what an empty elicitation capability declares; only a
-		// client that declares URL alone cannot show a form.
-		p.canAsk = c.Elicitation.Form != nil || c.Elicitation.URL == nil
-	}
+	p.canAsk = canAsk(req.ClientCapabilities())
 	if req.Session != nil {
 		if ip := req.Session.InitializeParams(); ip != nil {
 			p.travels = ip.ProtocolVersion >= statelessProtocol
@@ -335,10 +342,58 @@ const asksTail = "; when the client cannot ask, ask the person yourself before c
 func addAsking[In, Out any](s *mcp.Server, d Deps, t *mcp.Tool, cond string, h mcp.ToolHandlerFor[In, Out]) {
 	if cond == "" {
 		t.Description += asksFirst
+		d.asking.always[t.Name] = true
 	} else {
 		t.Description += asksWhen(cond)
 	}
 	mcp.AddTool(s, t, asked(d, t.Name, h))
+}
+
+// interactionKey is Claude Code's mark for a tool it must prompt for on
+// every call, in every permission mode, with no allow rule to skip it.
+const interactionKey = "anthropic/requiresUserInteraction"
+
+// interactionHint is receiving middleware for tools/list. A tool that
+// asks the person before every write loses the mark when the client can
+// ask: the server's question is the confirmation then, and it shows what
+// the write destroys, where the client's prompt shows the arguments. The
+// mark stays for a client that cannot ask, whose own prompt is then the
+// only one. destructiveHint stays either way, as the client's soft gate.
+//
+// Both together asked the person twice for every delete, which no
+// source recommends: GitHub and Supabase confirm a destructive tool with
+// the annotation and an elicitation, and Anthropic scopes the mark to a
+// prompt that is "itself the point".
+func interactionHint(a *asking) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			res, err := next(ctx, method, req)
+			list, ok := res.(*mcp.ListToolsResult)
+			if err != nil || !ok {
+				return res, err
+			}
+			lr, ok := req.(*mcp.ListToolsRequest)
+			if !ok || !canAsk(lr.ClientCapabilities()) {
+				return res, err
+			}
+			// The tools are the server's own; copy before changing one.
+			out := *list
+			out.Tools = make([]*mcp.Tool, len(list.Tools))
+			for i, t := range list.Tools {
+				out.Tools[i] = t
+				if _, marked := t.Meta[interactionKey]; marked && a.always[t.Name] {
+					c := *t
+					c.Meta = maps.Clone(t.Meta)
+					delete(c.Meta, interactionKey)
+					if len(c.Meta) == 0 {
+						c.Meta = nil
+					}
+					out.Tools[i] = &c
+				}
+			}
+			return &out, nil
+		}
+	}
 }
 
 // The stages of one tools/call that asked, for askFailures: what a

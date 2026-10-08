@@ -447,7 +447,8 @@ of the body from an export, never implicit.
 
 snake_case verb–noun, no dots. Claude Code prefixes `mcp__<server>__`.
 "Gated" = registered only with `GDOCS_ENABLE_DESTRUCTIVE=1`; gated tools
-also set `_meta["anthropic/requiresUserInteraction"]`. `GDOCS_READ_ONLY=1`
+also set `_meta["anthropic/requiresUserInteraction"]` for a client that
+cannot ask the person (§12a). `GDOCS_READ_ONLY=1`
 registers only readOnly rows and requests readonly scopes.
 
 | Tool | Purpose | Annotations | Phase |
@@ -679,6 +680,15 @@ reaches it, so a write re-planned once after a revision conflict asks
 the same question and goes through, and a different question does not.
 The stage that makes a failed reply `[ambiguous_outcome]` is set only
 when an answer is matched, not when the call arrives with one.
+
+Claude Code's `requiresUserInteraction` mark makes it prompt on every
+call, in every permission mode, past any allow rule. A tool that asks
+before every write carries the mark only for a client that cannot ask:
+`tools/list` drops it when the request's capabilities include form
+elicitation. With both, every delete was put to the person twice, once
+as raw arguments and once as the question that says what it destroys.
+`destructiveHint` stays either way; it is the client's allow-listable
+prompt.
 
 A client that cannot ask gets no question, and the arguments are the
 guard as before; the tool descriptions tell the model to ask the person
@@ -1105,3 +1115,4 @@ checked rather than assumed.
 | A 200 from an `insertComment` batch means the comment exists | Refuted 2026-10-08 against Docs discovery revision 20261006, not observed live: `BatchUpdateDocumentResponse.commentUpdateState` can be `ALL_FAILED_UNKNOWN_REASON`, "All requested comment updates failed". The response was decoded and the field never read, so `add_comment` reported `comment  posted` with an empty id, and comment mode reported its ops applied with no comment ids | `batchUpdate` refuses that state as `[server]`: every batch carrying a comment carries nothing else, so nothing was written and asking again is safe. A reply that names no comment thread is `[ambiguous_outcome]`, pointing at `list_comments` before a second post. |
 | A regex replace should use the API's `searchByRegex` | Declined 2026-10-09. `SubstringMatchCriteria.searchByRegex` is published (Docs discovery 20261006), but nothing says which regex flavor Google runs, whether `replaceText` expands groups, or how a match treats a chip or an image. The overwrite guard has to know every range a replace touches, and it could only guess Google's matches | `replace_all` with `regex` is expanded by the server into one replace per match, found with Go's RE2 over each paragraph's index-aligned text, the matcher `find_in_document` already uses. A match is confined to a paragraph, an empty match and a replacement that would copy an object as text are refused, and the guard, suggest mode and the minimal diff apply to each match as to any replace. |
 | Index-aligned text needs only the runs the parser builds | Refuted 2026-10-09 by a schema Google added. `ParagraphElement.dropdown` arrived between the 2026-09-26 and 2026-10-06 discovery documents; the parser had no case for it, returned nothing, and `alignedSlice` concatenated the runs it had, so every offset after a dropdown in that paragraph moved one place. A regex `find_in_document` reported the wrong offset, and the regex `replace_all` written that day computed its ranges from the same text, so it would have replaced one character early (`TestARegexReplaceAfterAChipHitsItsOwnRange` shows `[10,14)` against Google's `[11,15)`). Exact-text targets were safe: `appendUnits` places each character at its run's own index | A dropdown is a chip run showing its selected option. `alignedSlice` fills any index gap between runs with placeholders, so an element Google adds later costs a missing label, not a shifted range. |
+| A destructive tool should carry both `requiresUserInteraction` and the server's own question | Refuted 2026-10-09, after the owner was asked twice for one delete. No source recommends two hard gates for one call. The MCP spec puts confirmation on the client ("Clients SHOULD prompt for user confirmation on sensitive operations"); GitHub's `delete_repository` (PR #3076) and Supabase's destructive SQL confirm with `destructiveHint` plus a form elicitation, and neither sets the mark; Claude Code's documentation scopes the mark to "tools whose permission prompt is itself the point, such as a consent or access-grant step" | The mark is sent per client: present when the request's capabilities show no form elicitation, absent otherwise, on a tool that asks before every write. Not chosen: a typed confirmation, which would stop Codex in full-access mode accepting an empty form unseen, at the cost of a slower answer in every other client. |

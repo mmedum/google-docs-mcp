@@ -27,6 +27,14 @@ and new required fields are breaking; the schema diff in CI flags them.
   a link read back can be written again. A link to a heading or tab that
   does not exist is refused before anything is sent.
 
+### Changed
+
+- A delete asks once in Claude Code, not twice. `delete_comment` and
+  `delete_tab` drop the `requiresUserInteraction` mark for a client that
+  can ask the person, since the server asks before every delete and
+  shows what it destroys. Allow the tools in Claude Code to see only that
+  question. A client that cannot ask still gets the mark.
+
 ### Fixed
 
 - A dropdown chip reads as the option selected in it. Google added

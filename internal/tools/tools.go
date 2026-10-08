@@ -52,7 +52,7 @@ func Register(s *mcp.Server, d Deps) {
 		d.Logger = slog.New(slog.DiscardHandler)
 	}
 	d.asking = newAsking(d.Logger)
-	s.AddReceivingMiddleware(askFailures(d.asking))
+	s.AddReceivingMiddleware(askFailures(d.asking), interactionHint(d.asking))
 	registerRead(s, d)
 	registerMoreRead(s, d)
 	registerCommentsRead(s, d)
@@ -109,7 +109,7 @@ var (
 	// destructive marks gated tools; the meta asks the client to involve
 	// the person.
 	destructive     = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
-	destructiveMeta = mcp.Meta{"anthropic/requiresUserInteraction": true}
+	destructiveMeta = mcp.Meta{interactionKey: true}
 	// localWrite marks a tool that reads Google and writes only a local
 	// file, in the one directory the person configured.
 	localWrite = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}

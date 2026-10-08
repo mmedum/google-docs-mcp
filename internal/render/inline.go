@@ -334,10 +334,13 @@ func markSpan(s span, o Options) string {
 			core = "~~" + core + "~~"
 		}
 	}
-	if st.LinkURL != "" {
+	switch {
+	case st.LinkURL != "":
 		core = "[" + core + "](" + st.LinkURL + ")"
-	} else if st.LinkHeadingID != "" {
+	case st.LinkHeadingID != "":
 		core = "[" + core + "](#" + st.LinkHeadingID + ")"
+	case st.LinkTabID != "":
+		core = "[" + core + "](#tab=" + st.LinkTabID + ")"
 	}
 	if o.WithStyles {
 		if ann := styleAnnotation(st); ann != "" {

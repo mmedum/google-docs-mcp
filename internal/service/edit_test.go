@@ -820,3 +820,67 @@ func TestARegexReplaceAfterAChipHitsItsOwnRange(t *testing.T) {
 		}
 	}
 }
+
+// A link inside the document is written the way a read renders it:
+// "#<heading id>" for a heading in the linked text's tab, "#tab=<id>"
+// for a tab. Tab t.0 holds the heading h.bg; t.1 holds h.notes.
+func TestLinksToAHeadingOrATab(t *testing.T) {
+	svc, _ := writable(t, false)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		op   EditOp
+		want string
+	}{
+		{"format a heading link",
+			EditOp{Kind: plan.OpTextStyle, Target: &Target{Text: "Step one"}, Params: plan.Params{Text: plan.TextStyleSpec{Link: "#h.bg"}}},
+			`"link":{"heading":{"id":"h.bg","tabId":"t.0"}}`},
+		{"format a tab link",
+			EditOp{Kind: plan.OpTextStyle, Target: &Target{Text: "Step one"}, Params: plan.Params{Text: plan.TextStyleSpec{Link: "#tab=t.1"}}},
+			`"link":{"tabId":"t.1"}`},
+		{"markdown content",
+			EditOp{Kind: plan.OpAppend, Content: "See [the background](#h.bg)."},
+			`"link":{"heading":{"id":"h.bg","tabId":"t.0"}}`},
+	} {
+		res, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", DryRun: true, Ops: []EditOp{tc.op}})
+		if err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		if !strings.Contains(compact(res.Requests), tc.want) {
+			t.Errorf("%s: requests lack %s:\n%s", tc.name, tc.want, res.Requests)
+		}
+	}
+}
+
+func TestALinkToNothingIsRefused(t *testing.T) {
+	svc, api := writable(t, false)
+	ctx := context.Background()
+	for _, tc := range []struct{ name, link string }{
+		{"no such heading", "#h.nowhere"},
+		{"a heading in another tab", "#h.notes"},
+		{"no such tab", "#tab=t.9"},
+	} {
+		_, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+			{Kind: plan.OpTextStyle, Target: &Target{Text: "Step one"}, Params: plan.Params{Text: plan.TextStyleSpec{Link: tc.link}}},
+		}})
+		if classOf(err) != "not_found" {
+			t.Errorf("%s: got %v; want a [not_found] error", tc.name, err)
+		}
+	}
+	if len(api.batches) != 0 {
+		t.Errorf("a refused link sent %d batches", len(api.batches))
+	}
+}
+
+func TestATabLinkReadsBackAsItIsWritten(t *testing.T) {
+	svc, api := newService(t)
+	api.raw = chipDocument(`"textRun":{"content":"x","textStyle":{"link":{"tabId":"t.1"}}}`)
+	res, err := svc.Read(context.Background(), ReadRequest{Document: fixtureID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "[x](#tab=t.1)") {
+		t.Errorf("want [x](#tab=t.1) in:\n%s", res.Text)
+	}
+}

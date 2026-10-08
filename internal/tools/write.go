@@ -90,7 +90,7 @@ type FormatOpInput struct {
 	SizePt              float64     `json:"size_pt,omitempty" jsonschema:"font size in points"`
 	Color               string      `json:"color,omitempty" jsonschema:"text color as #rrggbb, or none"`
 	Background          string      `json:"background,omitempty" jsonschema:"highlight color as #rrggbb, or none"`
-	Link                string      `json:"link,omitempty" jsonschema:"URL to link the text to, or none to remove the link"`
+	Link                string      `json:"link,omitempty" jsonschema:"what to link the text to: a URL, #<heading id> for a heading in the same tab (ids from get_outline), #tab=<tab id> for a tab, or none to remove the link"`
 	Baseline            string      `json:"baseline,omitempty" jsonschema:"SUPERSCRIPT, SUBSCRIPT or NONE"`
 	NamedStyle          string      `json:"named_style,omitempty" jsonschema:"paragraph_style: NORMAL_TEXT, TITLE, SUBTITLE, HEADING_1 … HEADING_6"`
 	Alignment           string      `json:"alignment,omitempty" jsonschema:"paragraph_style: START, CENTER, END, JUSTIFIED"`

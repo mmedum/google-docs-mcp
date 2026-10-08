@@ -458,7 +458,7 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		}
 		out.ops = append(out.ops, p)
 	}
-	return out, nil
+	return out, checkInternalLinks(f.Doc, out.ops)
 }
 
 // resolveDeleteSegment names the header or footer to remove and lists
@@ -599,6 +599,42 @@ func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan
 	rng := r.Rng()
 	p.CommentAnchor = &rng
 	p.TargetText = r.Text
+	return nil
+}
+
+// checkInternalLinks refuses a link inside the document that points at
+// nothing, before anything is sent: "#tab=<id>" must name a tab, and
+// "#<heading id>" a heading in the tab the linked text is in.
+func checkInternalLinks(d *doc.Document, ops []plan.Op) error {
+	for _, op := range ops {
+		links := []string{op.Text.Link}
+		if op.Fragment != nil {
+			for _, b := range op.Fragment.Blocks {
+				for _, in := range b.Inlines {
+					links = append(links, in.Link)
+				}
+			}
+		}
+		for _, link := range links {
+			tabID, headingID, ok := plan.InternalLink(link)
+			if !ok {
+				continue
+			}
+			if tabID != "" {
+				if t, found := d.Tab(tabID); !found || t.ID != tabID {
+					return Errorf("not_found", "op %d: link %s names no tab; tabs: %s", op.Seq, link, tabList(d))
+				}
+				continue
+			}
+			tab, found := d.Tab(op.Seg.TabID)
+			if !found || tab.Body == nil {
+				return Errorf("not_found", "op %d: link %s: the linked text's tab has no headings", op.Seq, link)
+			}
+			if _, found := tab.Body.SectionByHeadingID(headingID); !found {
+				return Errorf("not_found", "op %d: link %s: tab %d has no heading with that id; heading ids come from get_outline", op.Seq, link, tab.Number)
+			}
+		}
+	}
 	return nil
 }
 

@@ -21,6 +21,11 @@ and new required fields are breaking; the schema diff in CI flags them.
   the minimal diff and the overwrite guard all apply. Up to 500 matches.
 - `layout_document` `page` takes `pageless`, and `get_document` says
   when a document is pageless.
+- Links to a heading or a tab of the same document: `#<heading id>`
+  (ids from `get_outline`) or `#tab=<tab id>`, in `format_document`'s
+  `link` and in markdown content. A read renders them the same way, so
+  a link read back can be written again. A link to a heading or tab that
+  does not exist is refused before anything is sent.
 
 ### Fixed
 

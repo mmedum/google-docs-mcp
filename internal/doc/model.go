@@ -514,7 +514,7 @@ func (s TextStyle) Monospace() bool {
 
 // HasLink reports whether the style carries any link.
 func (s TextStyle) HasLink() bool {
-	return s.LinkURL != "" || s.LinkHeadingID != "" || s.LinkBookmark != ""
+	return s.LinkURL != "" || s.LinkHeadingID != "" || s.LinkBookmark != "" || s.LinkTabID != ""
 }
 
 // Table is a grid of cells.

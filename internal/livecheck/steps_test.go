@@ -49,7 +49,7 @@ func TestLive(t *testing.T) {
 
 	d.ok("read without handles", "read_document", map[string]any{"document": doc, "with_handles": false})
 	d.ok("read after create", "read_document", map[string]any{"document": doc, "with_handles": true})
-	d.ok("outline", "get_outline", map[string]any{"document": doc})
+	outline := d.ok("outline", "get_outline", map[string]any{"document": doc})
 	d.ok("search by title", "search_documents", map[string]any{"title": "google-docs-mcp live test", "limit": 3})
 
 	// ---- edits in each mode ---------------------------------------------
@@ -58,6 +58,18 @@ func TestLive(t *testing.T) {
 		map[string]any{"op": "insert", "location": map[string]any{"at": "after", "of": map[string]any{"heading": "Background", "include_heading": true}}, "content": "Inserted after the Background section.\n\n- with a bullet"},
 		map[string]any{"op": "append", "content": "Appended paragraph at the very end."},
 	}})
+
+	// A heading link is written in the form a read renders it, with the
+	// id get_outline shows in braces.
+	if m := headingID.FindStringSubmatch(outline); m == nil {
+		t.Errorf("get_outline shows no heading id:\n%s", shown(outline, 300))
+	} else {
+		d.ok("link to a heading", "format_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
+			map[string]any{"op": "text_style", "target": map[string]any{"text": "Inserted after the Background section."}, "link": "#" + m[1]}}})
+		if read := d.ok("read the heading link back", "read_document", map[string]any{"document": doc}); !strings.Contains(read, "](#"+m[1]+")") {
+			t.Errorf("the heading link does not read back as written:\n%s", shown(read, 500))
+		}
+	}
 
 	suggestArgs := map[string]any{"document": doc, "mode": "suggest", "ops": []any{
 		map[string]any{"op": "replace", "target": map[string]any{"text": "three"}, "content": "four"},
@@ -152,3 +164,6 @@ func TestLive(t *testing.T) {
 }
 
 var listedID = regexp.MustCompile(`(?m)^- (\S+)`)
+
+// headingID is the first heading id get_outline shows, as {h.…}.
+var headingID = regexp.MustCompile(`\{(h\.[A-Za-z0-9_-]+)\}`)

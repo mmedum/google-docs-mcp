@@ -197,7 +197,7 @@ for the defaults.
 | `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
 | `create_document` | New document, optionally with markdown content. |
 | `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all` (text or RE2 regex), `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
-| `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. |
+| `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. A link goes to a URL, to a heading (`#h.…`, from `get_outline`) or to a tab (`#tab=t.…`); markdown content takes the same forms. |
 | `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing, and the replies on each one's thread. |
 | `review_suggestion` | Accept, reject or discard suggestions by id or all. |
 | `list_comments` | Comment threads with every reply, resolved and deleted state, who each is assigned to, quoted text and the block they sit on. |

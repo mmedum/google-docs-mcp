@@ -682,6 +682,7 @@ func parsePageSetup(ds *gdocs.DocumentStyle) *PageSetup {
 		MarginHeaderPt: ptOf(ds.MarginHeader), MarginFooterPt: ptOf(ds.MarginFooter),
 		PageNumberStart: ds.PageNumberStart, Landscape: ds.FlipPageOrientation,
 		FirstPageHF: ds.UseFirstPageHeaderFooter, EvenPageHF: ds.UseEvenPageHeaderFooter,
+		Pageless: ds.DocumentFormat != nil && ds.DocumentFormat.DocumentMode == "PAGELESS",
 	}
 	if ds.PageSize != nil {
 		p.WidthPt, p.HeightPt = ptOf(ds.PageSize.Width), ptOf(ds.PageSize.Height)

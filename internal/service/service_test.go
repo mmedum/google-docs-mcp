@@ -388,6 +388,18 @@ func TestInfo(t *testing.T) {
 	}
 }
 
+func TestInfoSaysATabIsPageless(t *testing.T) {
+	svc, api := newService(t)
+	api.raw = []byte(strings.Replace(string(api.raw), `"documentStyle": {`, `"documentStyle": {"documentFormat": {"documentMode": "PAGELESS"}, `, 1))
+	info, err := svc.Info(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "page US Letter, margins 72/72/72/72 pt (top/bottom/left/right), pageless, background #ffffff"; !strings.Contains(info.Text, want) {
+		t.Errorf("want %q in:\n%s", want, info.Text)
+	}
+}
+
 func TestOutline(t *testing.T) {
 	svc, _ := newService(t)
 	res, err := svc.Outline(context.Background(), fixtureID, "")

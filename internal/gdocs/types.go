@@ -245,6 +245,11 @@ type NamedStyle struct {
 	ParagraphStyle *ParagraphStyle `json:"paragraphStyle,omitempty"`
 }
 
+// DocumentFormat is the document mode: PAGES or PAGELESS.
+type DocumentFormat struct {
+	DocumentMode string `json:"documentMode,omitempty"`
+}
+
 // DocumentStyle is a tab's page setup.
 type DocumentStyle struct {
 	Background                *Background `json:"background,omitempty"`
@@ -260,6 +265,9 @@ type DocumentStyle struct {
 	UseFirstPageHeaderFooter  bool        `json:"useFirstPageHeaderFooter,omitempty"`
 	UseEvenPageHeaderFooter   bool        `json:"useEvenPageHeaderFooter,omitempty"`
 	UseCustomHeaderFooterMgns bool        `json:"useCustomHeaderFooterMargins,omitempty"`
+
+	// DocumentFormat says whether the document has pages.
+	DocumentFormat *DocumentFormat `json:"documentFormat,omitempty"`
 }
 
 // Background is a solid page color.

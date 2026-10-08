@@ -59,7 +59,6 @@ DocumentStyle	firstPageHeaderId	out	as defaultHeaderId; page_setup sets useFirst
 DocumentStyle	firstPageFooterId	out	as defaultFooterId
 DocumentStyle	evenPageHeaderId	out	as defaultHeaderId; page_setup sets useEvenPageHeaderFooter, not the id
 DocumentStyle	evenPageFooterId	out	as defaultFooterId
-DocumentStyle	documentFormat	out	no tool reads or writes the document's format; format: raw carries it for anyone who needs it
 #
 # Image detail. insert_object sets a URI and a size; it does not crop,
 # rotate or recolor, and no read renders these.

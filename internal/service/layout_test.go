@@ -41,6 +41,12 @@ func TestLayoutOpsResolve(t *testing.T) {
 			EditOp{Kind: plan.OpPageSetup, Target: &Target{}, Layout: &LayoutOp{Page: plan.PageSpec{
 				WidthPt: 595, HeightPt: 842, PageMargins: plan.PageMargins{TopPt: floatp(36)}}}},
 			"updateDocumentStyle", []string{`"tabId":"t.0"`, `"magnitude":595`, `"fields":"pageSize,marginTop"`}},
+		{"pageless",
+			EditOp{Kind: plan.OpPageSetup, Target: &Target{}, Layout: &LayoutOp{Page: plan.PageSpec{Pageless: boolp(true)}}},
+			"updateDocumentStyle", []string{`"documentFormat":{"documentMode":"PAGELESS"}`, `"fields":"documentFormat"`}},
+		{"pages again",
+			EditOp{Kind: plan.OpPageSetup, Target: &Target{}, Layout: &LayoutOp{Page: plan.PageSpec{Pageless: boolp(false)}}},
+			"updateDocumentStyle", []string{`"documentFormat":{"documentMode":"PAGES"}`}},
 		{"page setup of another tab",
 			EditOp{Kind: plan.OpPageSetup, Target: &Target{Tab: "Notes"}, Layout: &LayoutOp{Page: plan.PageSpec{Background: "none"}}},
 			"updateDocumentStyle", []string{`"tabId":"t.1"`, `"fields":"background"`}},

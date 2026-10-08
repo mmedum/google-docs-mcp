@@ -19,6 +19,8 @@ and new required fields are breaking; the schema diff in CI flags them.
   one paragraph at a time, and `replace` may name its groups as `$1` or
   `${name}`. Each match is planned as its own replace, so suggest mode,
   the minimal diff and the overwrite guard all apply. Up to 500 matches.
+- `layout_document` `page` takes `pageless`, and `get_document` says
+  when a document is pageless.
 
 ### Fixed
 

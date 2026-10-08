@@ -31,6 +31,7 @@ type LayoutOpInput struct {
 	PageNumberStart       *int     `json:"page_number_start,omitempty" jsonschema:"page and section: the number the first page carries"`
 	FirstPageHeaderFooter *bool    `json:"first_page_header_footer,omitempty" jsonschema:"page and section: give the first page its own header and footer"`
 	EvenPageHeaderFooter  *bool    `json:"even_page_header_footer,omitempty" jsonschema:"page: give even pages their own header and footer"`
+	Pageless              *bool    `json:"pageless,omitempty" jsonschema:"page: true makes the document pageless, one continuous page; false gives it pages again"`
 
 	Columns          int      `json:"columns,omitempty" jsonschema:"section: how many columns the text runs in, 1-3"`
 	ColumnGapPt      *float64 `json:"column_gap_pt,omitempty" jsonschema:"section: space after each column in points"`
@@ -111,7 +112,7 @@ func (o LayoutOpInput) editOp(kind plan.OpKind) service.EditOp {
 		l.Page = plan.PageSpec{WidthPt: o.PageWidthPt, HeightPt: o.PageHeightPt, PageMargins: margins,
 			MarginHeaderPt: o.MarginHeaderPt, MarginFooterPt: o.MarginFooterPt, Background: o.Background,
 			PageNumberStart: o.PageNumberStart, Landscape: o.Landscape,
-			FirstPageHeaderFooter: o.FirstPageHeaderFooter, EvenPageHeaderFooter: o.EvenPageHeaderFooter}
+			FirstPageHeaderFooter: o.FirstPageHeaderFooter, EvenPageHeaderFooter: o.EvenPageHeaderFooter, Pageless: o.Pageless}
 	case plan.OpSectionStyle:
 		l.Section = plan.SectionSpec{PageMargins: margins, Columns: o.Columns,
 			ColumnGapPt: o.ColumnGapPt, ColumnSeparator: separator, ContentDirection: up(o.ContentDirection),
@@ -144,7 +145,7 @@ func registerLayout(s *mcp.Server, d Deps) {
 		Name: "layout_document",
 		Description: "Change how a Google Doc is laid out rather than what it says. Ops: page (page size, margins, " +
 			"background color, landscape, where page numbering starts, whether the first and even pages get their own " +
-			"header and footer), section (the same for one section, plus 1-3 columns with an optional separating line " +
+			"header and footer, pageless), section (the same for one section, plus 1-3 columns with an optional separating line " +
 			"and the gap between them), section_break (start a new section at a location, continuous or on the next " +
 			"page), and named_style (redefine NORMAL_TEXT, TITLE, SUBTITLE or HEADING_1 … HEADING_6 for the whole tab, " +
 			"which restyles every paragraph carrying that style and everything written with it later; get_document " +

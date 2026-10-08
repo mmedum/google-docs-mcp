@@ -145,6 +145,7 @@ type PageSetup struct {
 	FirstPageHF     bool
 	EvenPageHF      bool
 	Background      string
+	Pageless        bool
 }
 
 // Segments returns body, headers, footers and footnotes in that order.

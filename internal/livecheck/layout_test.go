@@ -38,6 +38,17 @@ func liveLayout(t *testing.T, d *driver, doc string) {
 			"border_bottom": "2pt solid #1a73e8", "border_padding_pt": 6, "shading": "#f4f6f8"}}})
 	d.ok("read page-break-before and the border back", "get_document", map[string]any{"document": doc})
 
+	d.ok("pageless", "layout_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
+		map[string]any{"op": "page", "pageless": true}}})
+	if info := d.ok("read the document as pageless", "get_document", map[string]any{"document": doc}); !strings.Contains(info, ", pageless") {
+		t.Errorf("get_document should say the document is pageless:\n%s", shown(info, 600))
+	}
+	d.ok("pages again", "layout_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
+		map[string]any{"op": "page", "pageless": false}}})
+	if info := d.ok("read the document with pages", "get_document", map[string]any{"document": doc}); strings.Contains(info, ", pageless") {
+		t.Errorf("get_document still says pageless after pageless: false:\n%s", shown(info, 600))
+	}
+
 	d.ok("section break", "layout_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
 		map[string]any{"op": "section_break", "section_type": "next_page",
 			"location": map[string]any{"at": "before", "of": map[string]any{"text": "Token BETA marks the replace_all step."}}}}})

@@ -46,6 +46,21 @@ func TestListCommentsLocatesAndRenders(t *testing.T) {
 	}
 }
 
+func TestListCommentsSaysWhoAThreadIsAssignedTo(t *testing.T) {
+	svc, api := writable(t, false)
+	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "Please check", AssigneeEmailAddress: "jane@example.com"}}
+	res, err := svc.ListComments(context.Background(), ListCommentsRequest{Document: fixtureID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Threads[0].Assignee != "jane@example.com" {
+		t.Errorf("assignee: %+v", res.Threads[0])
+	}
+	if want := "- c1 assigned to jane@example.com: Please check"; !strings.Contains(res.Text, want) {
+		t.Errorf("text lacks %q:\n%s", want, res.Text)
+	}
+}
+
 func TestPreviewAnchorsLocateComments(t *testing.T) {
 	svc, api := writable(t, true)
 	// Splice a comment thread and its anchor into the fixture.

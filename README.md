@@ -200,7 +200,7 @@ for the defaults.
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. |
 | `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing, and the replies on each one's thread. |
 | `review_suggestion` | Accept, reject or discard suggestions by id or all. |
-| `list_comments` | Comment threads with every reply, resolved and deleted state, quoted text and the block they sit on. |
+| `list_comments` | Comment threads with every reply, resolved and deleted state, who each is assigned to, quoted text and the block they sit on. |
 | `add_comment` | Comment on a passage (pinned to it) or on the document. |
 | `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. Also replies on a suggested edit's thread. |
 | `list_revisions` | Version history: revision ids, times, authors. |

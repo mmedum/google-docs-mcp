@@ -463,7 +463,7 @@ registers only readOnly rows and requests readonly scopes.
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
 | `list_suggestions` | Pending suggestions with handles, authors and the replies on their threads | readOnly | 1 |
 | `review_suggestion` | accept / reject / discard (discard is author-only); `all` asks the person; dry_run | — | 1, 4, 2.0 |
-| `list_comments` | Full threads: replies, resolved, deleted, quoted text, handles | readOnly | 2 |
+| `list_comments` | Full threads: replies, resolved, deleted, assignee, quoted text, handles | readOnly | 2 |
 | `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | — | 2, 2.0 |
 | `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only); `suggestion_id` replies on a suggestion's thread | — | 2, 4 |
 | `delete_comment` | Gated; a thread or one reply; asks the person; dry_run | destructive | 2, 2.0 |

@@ -244,7 +244,7 @@ func TestEveryPlaceAPersonIsWrittenIsKnown(t *testing.T) {
 	root := moduleRoot(t)
 	const (
 		wantUserLabel = 7  // service: ops.go x2, history.go, search.go x2, comments.go x2 (delete_comment's question)
-		wantPerson    = 37 // every read of a person field in the three packages; the last three were a suggestion thread's reply authors, redacted with the ↳ line
+		wantPerson    = 43 // every read of a person field in the three packages. Of the last nine, three are a suggestion thread's reply authors, redacted with the ↳ line; three are list_comments' assignee, an address the address rule redacts; three are add_comment's assignee input, which goes to Google and is never printed
 	)
 
 	dirs := []string{"internal/service", "internal/render", "internal/plan"}
@@ -370,7 +370,8 @@ func personFields(t *testing.T, root string, dirs []string) map[string]bool {
 		}
 	}
 
-	// The model side: whatever the renderers call the person they carry.
+	// The model side: whatever the renderers call the person they carry,
+	// the one who wrote a post or the one it is assigned to.
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(filepath.Join(root, dir))
 		if err != nil {
@@ -392,7 +393,7 @@ func personFields(t *testing.T, root string, dirs []string) map[string]bool {
 				}
 				for _, f := range st.Fields.List {
 					for _, name := range f.Names {
-						if strings.HasSuffix(name.Name, "Author") {
+						if strings.HasSuffix(name.Name, "Author") || strings.HasSuffix(name.Name, "Assignee") {
 							fields[name.Name] = true
 						}
 					}

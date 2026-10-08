@@ -21,6 +21,7 @@ type Thread struct {
 	Content  string
 	Resolved bool
 	Deleted  bool
+	Assignee string
 	Replies  []Reply
 }
 
@@ -91,6 +92,9 @@ func threadLine(sb *strings.Builder, t Thread, prefix string) {
 		sb.WriteString(" [deleted]")
 	case t.Resolved:
 		sb.WriteString(" [resolved]")
+	}
+	if t.Assignee != "" {
+		sb.WriteString(" assigned to " + t.Assignee)
 	}
 	if t.Quote != "" {
 		fmt.Fprintf(sb, " on “%s”", doc.Clip(t.Quote, 60))

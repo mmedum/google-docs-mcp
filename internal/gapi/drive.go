@@ -163,6 +163,8 @@ type DriveComment struct {
 	Anchor            string        `json:"anchor,omitempty"`
 	QuotedFileContent *QuotedText   `json:"quotedFileContent,omitempty"`
 	Replies           []*DriveReply `json:"replies,omitempty"`
+	// AssigneeEmailAddress is unset when nobody is assigned.
+	AssigneeEmailAddress string `json:"assigneeEmailAddress,omitempty"`
 }
 
 // QuotedText is the text a comment refers to.
@@ -185,7 +187,7 @@ type DriveReply struct {
 const ReplyFields = "id,content,author(displayName,emailAddress),createdTime,action,deleted"
 
 // CommentFields is what the comment calls ask for.
-const CommentFields = "id,content,htmlContent,author(displayName,emailAddress),createdTime,modifiedTime,resolved,deleted,anchor,quotedFileContent,replies(" + ReplyFields + ")"
+const CommentFields = "id,content,htmlContent,author(displayName,emailAddress),createdTime,modifiedTime,resolved,deleted,anchor,quotedFileContent,assigneeEmailAddress,replies(" + ReplyFields + ")"
 
 // commentURL is the Drive URL of a file's comment collection or, with an
 // id, of one thread.

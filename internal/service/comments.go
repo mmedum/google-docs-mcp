@@ -91,7 +91,7 @@ func commentsText(res *CommentsResult, revision string) string {
 // shows every field. The footer of a read fills in fewer (commentMarks).
 func (t CommentThread) thread() render.Thread {
 	rt := render.Thread{ID: t.ID, Handle: t.Handle, Author: t.Author, Created: t.Created, Quote: t.Quote,
-		Content: t.Content, Resolved: t.Resolved, Deleted: t.Deleted}
+		Content: t.Content, Resolved: t.Resolved, Deleted: t.Deleted, Assignee: t.Assignee}
 	for _, r := range t.Replies {
 		rt.Replies = append(rt.Replies, render.Reply{Author: r.Author, Content: r.Content,
 			Created: r.Created, Action: r.Action, Deleted: r.Deleted})

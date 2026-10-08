@@ -48,7 +48,7 @@ func registerCommentsRead(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "list_comments",
 		Description: "List the comment threads of a Google Doc with their full history: author, time, quoted text, the " +
-			"block handle the comment sits on, resolved state, and every reply (including resolve and reopen actions). " +
+			"block handle the comment sits on, resolved state, who it is assigned to, and every reply (including resolve and reopen actions). " +
 			"Resolved threads are included unless hide_resolved is set; deleted ones only with include_deleted. Thread " +
 			"ids feed reply_comment and delete_comment.",
 		Annotations: readOnly,

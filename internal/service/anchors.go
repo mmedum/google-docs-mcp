@@ -30,12 +30,15 @@ type CommentThread struct {
 	Created  string         `json:"created,omitempty"`
 	Modified string         `json:"modified,omitempty"`
 	Replies  []CommentReply `json:"replies"`
-	Handle   string         `json:"handle,omitempty"`
-	Anchored bool           `json:"anchored"`
-	Start    int64          `json:"-"`
-	End      int64          `json:"-"`
-	Tab      string         `json:"-"`
-	Segment  string         `json:"-"`
+	// Assignee is the address the comment is assigned to; Drive's
+	// listing names it, the comments view does not.
+	Assignee string `json:"assignee,omitempty"`
+	Handle   string `json:"handle,omitempty"`
+	Anchored bool   `json:"anchored"`
+	Start    int64  `json:"-"`
+	End      int64  `json:"-"`
+	Tab      string `json:"-"`
+	Segment  string `json:"-"`
 }
 
 // comments lists the document's comment threads, located in the
@@ -83,7 +86,8 @@ func commentAction(a string) string {
 func driveThreads(list []*gapi.DriveComment) []CommentThread {
 	out := make([]CommentThread, 0, len(list))
 	for _, c := range list {
-		t := CommentThread{ID: c.ID, Content: c.Content, Resolved: c.Resolved, Deleted: c.Deleted, Created: c.CreatedTime, Modified: c.ModifiedTime, Replies: []CommentReply{}}
+		t := CommentThread{ID: c.ID, Content: c.Content, Resolved: c.Resolved, Deleted: c.Deleted, Created: c.CreatedTime, Modified: c.ModifiedTime,
+			Assignee: c.AssigneeEmailAddress, Replies: []CommentReply{}}
 		if c.Author != nil {
 			t.Author = c.Author.DisplayName
 		}

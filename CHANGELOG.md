@@ -14,6 +14,7 @@ and new required fields are breaking; the schema diff in CI flags them.
   or rejecting the suggestion is still `review_suggestion`. It needs the
   comments view, since Drive cannot see these threads.
 - `list_suggestions` shows the replies on each suggestion's thread.
+- `list_comments` says who a thread is assigned to.
 
 ### Fixed
 

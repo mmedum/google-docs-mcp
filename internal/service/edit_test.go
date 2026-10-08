@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/config"
+	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
@@ -718,7 +719,7 @@ func TestInsertionEdges(t *testing.T) {
 func TestRegexReplaceAllReplacesEachMatch(t *testing.T) {
 	svc, api := writable(t, false)
 	res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
-		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `step (\w+)`, Replace: "Stage $1"}, Regex: true},
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `(?i)step (\w+)`, Replace: "Stage ${1}"}, Regex: true},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -729,7 +730,7 @@ func TestRegexReplaceAllReplacesEachMatch(t *testing.T) {
 	if got := kindsOf(t, api.batches[0].Requests); got != want {
 		t.Errorf("requests:\n got %s\nwant %s", got, want)
 	}
-	if len(res.Changes) != 1 || res.Changes[0].Description != `2 match(es) of "step (\\w+)" in tab 1` {
+	if len(res.Changes) != 1 || res.Changes[0].Description != `2 match(es) of "(?i)step (\\w+)" in tab 1` {
 		t.Errorf("changes: %+v", res.Changes)
 	}
 }
@@ -901,5 +902,154 @@ func TestARegexFindAfterAChipReportsItsOffset(t *testing.T) {
 		if len(res.Matches) != 1 || res.Matches[0].Offset != 10 {
 			t.Errorf("%s: matches %+v, want one at offset 10", element, res.Matches)
 		}
+	}
+}
+
+// The pattern decides case on a write: [A-Z] stays upper case unless
+// the pattern says (?i). Ignoring case by default turned it into every
+// letter.
+func TestARegexReplaceIsCaseSensitiveUnlessThePatternSaysNot(t *testing.T) {
+	svc, api := writable(t, false)
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `step one`, Replace: "x"}, Regex: true},
+	}})
+	if classOf(err) != "not_found" || len(api.batches) != 0 {
+		t.Errorf("a lower-case pattern matched \"Step one\": %v, %d batches", err, len(api.batches))
+	}
+}
+
+// Go reads $name greedily, so "$1th" names a group "1th" and expands to
+// nothing: every match would be deleted. A name the pattern lacks is
+// refused; ${1} and $$ are how to write the other two.
+func TestAReplacementNamingAMissingGroupIsRefused(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		replace, class string
+	}{
+		{"$1th", "invalid"},
+		{"$2", "invalid"},
+		{"${word}", "invalid"},
+		{"${1}th", ""},
+		{"$$1 for ${1}", ""},
+		{"${0}!", ""},
+	} {
+		svc, api := writable(t, false)
+		_, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", DryRun: true, Ops: []EditOp{
+			{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `Step (\w+)`, Replace: tc.replace}, Regex: true},
+		}})
+		if tc.class == "" && err != nil {
+			t.Errorf("%q: %v", tc.replace, err)
+		}
+		if tc.class != "" && classOf(err) != tc.class {
+			t.Errorf("%q: got %v; want a [%s] error", tc.replace, err, tc.class)
+		}
+		if len(api.batches) != 0 {
+			t.Errorf("%q: a dry run sent %d batches", tc.replace, len(api.batches))
+		}
+	}
+}
+
+// A match may cover text only. Over a chip, the delete would take an
+// element the guard does not know about.
+func TestARegexMatchAcrossAChipIsRefused(t *testing.T) {
+	svc, api := writable(t, false)
+	api.raw = paragraphWith(`"dropdown":{"dropdownProperties":{"displayValue":"Approved"}}`)
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `Status: \S+ done`, Replace: "Status: done"}, Regex: true},
+	}})
+	if classOf(err) != "invalid" || len(api.batches) != 0 {
+		t.Errorf("a match over a chip: %v, %d batches", err, len(api.batches))
+	}
+}
+
+// A table of contents is Google's to maintain; renaming a heading by
+// regex must not edit its entry. "Step one" is at 1 inside the table of
+// contents and at 11 in the body.
+func TestARegexReplaceSkipsATableOfContents(t *testing.T) {
+	svc, api := writable(t, false)
+	api.raw = []byte(`{"documentId":"` + fixtureID + `","title":"Toc","revisionId":"rev-0001","body":{"content":[
+		{"startIndex":0,"endIndex":1,"sectionBreak":{}},
+		{"startIndex":1,"endIndex":11,"tableOfContents":{"content":[
+			{"startIndex":1,"endIndex":10,"paragraph":{"elements":[{"startIndex":1,"endIndex":10,"textRun":{"content":"Step one\n"}}]}},
+			{"startIndex":10,"endIndex":11,"paragraph":{"elements":[{"startIndex":10,"endIndex":11,"textRun":{"content":"\n"}}]}}]}},
+		{"startIndex":11,"endIndex":20,"paragraph":{"elements":[{"startIndex":11,"endIndex":20,"textRun":{"content":"Step one\n"}}]}}]}}`)
+	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `Step`}, Regex: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := kindsOf(t, api.batches[0].Requests); got != "deleteContentRange[11,15)" {
+		t.Errorf("requests %s, want only the body's deleteContentRange[11,15)", got)
+	}
+}
+
+// Only "#<id>" and "#tab=<id>" are links inside the document. A fragment
+// from a pasted URL goes out as a URL, as before.
+func TestAnyOtherFragmentIsAURL(t *testing.T) {
+	svc, _ := writable(t, false)
+	for _, link := range []string{"#heading=h.bg", "#bookmark=id.x1"} {
+		res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", DryRun: true, Ops: []EditOp{
+			{Kind: plan.OpTextStyle, Target: &Target{Text: "Step one"}, Params: plan.Params{Text: plan.TextStyleSpec{Link: link}}},
+		}})
+		if err != nil {
+			t.Errorf("%s: %v", link, err)
+			continue
+		}
+		if want := `"link":{"url":"` + link + `"}`; !strings.Contains(compact(res.Requests), want) {
+			t.Errorf("%s: requests lack %s:\n%s", link, want, res.Requests)
+		}
+	}
+}
+
+// An element right before the paragraph's newline takes its index too,
+// so a range ending at the newline still lines up with the index space.
+func TestAlignedTextFillsAGapBeforeTheNewline(t *testing.T) {
+	svc, api := newService(t)
+	api.raw = []byte(`{"documentId":"` + fixtureID + `","title":"Gap","revisionId":"rev-0001","body":{"content":[
+		{"startIndex":0,"endIndex":1,"sectionBreak":{}},
+		{"startIndex":1,"endIndex":6,"paragraph":{"elements":[
+			{"startIndex":1,"endIndex":4,"textRun":{"content":"abc"}},
+			{"startIndex":4,"endIndex":5,"elementGoogleAddsLater":{}},
+			{"startIndex":5,"endIndex":6,"textRun":{"content":"\n"}}]}}]}}`)
+	f, err := svc.Fetch(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p *doc.Paragraph
+	for _, b := range f.Doc.Tabs[0].Body.AllBlocks() {
+		if b.Paragraph != nil {
+			p = b.Paragraph
+			break
+		}
+	}
+	if got, want := alignedSlice(p, 1, 5), "abc\uFFFC"; got != want {
+		t.Errorf("alignedSlice = %q, want %q", got, want)
+	}
+}
+
+// Only a batch of comments is checked for Google's "all comment updates
+// failed". A review's accept counts as a thread post, and calling it
+// "nothing was posted" after it applied would invite applying it twice.
+func TestAReviewIsNotReportedAsNothingPosted(t *testing.T) {
+	svc, api := writable(t, true)
+	api.replies = []string{`{"replies":[{}],"commentUpdateState":"ALL_FAILED_UNKNOWN_REASON","writeControl":{"requiredRevisionId":"rev-0002"}}`}
+	if _, err := svc.Review(context.Background(), ReviewRequest{Document: fixtureID, Action: "accept", IDs: []string{"s1"}}); err != nil {
+		t.Errorf("an accepted review reported as failed: %v", err)
+	}
+}
+
+// A heading link resolves to any paragraph carrying the id, a TITLE
+// included, not only the headings that start a section.
+func TestALinkToATitleResolves(t *testing.T) {
+	svc, api := writable(t, false)
+	api.raw = []byte(`{"documentId":"` + fixtureID + `","title":"T","revisionId":"rev-0001","body":{"content":[
+		{"startIndex":0,"endIndex":1,"sectionBreak":{}},
+		{"startIndex":1,"endIndex":7,"paragraph":{"paragraphStyle":{"namedStyleType":"TITLE","headingId":"h.title"},
+			"elements":[{"startIndex":1,"endIndex":7,"textRun":{"content":"Title\n"}}]}},
+		{"startIndex":7,"endIndex":12,"paragraph":{"elements":[{"startIndex":7,"endIndex":12,"textRun":{"content":"Back\n"}}]}}]}}`)
+	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", DryRun: true, Ops: []EditOp{
+		{Kind: plan.OpTextStyle, Target: &Target{Text: "Back"}, Params: plan.Params{Text: plan.TextStyleSpec{Link: "#h.title"}}},
+	}}); err != nil {
+		t.Errorf("a link to the title was refused: %v", err)
 	}
 }

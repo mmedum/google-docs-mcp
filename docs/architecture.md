@@ -489,7 +489,10 @@ Design as though every registered tool can be called unattended.
 `replace_all` always carries explicit `tabsCriteria`. With `regex` it
 sends no `replaceAllText` at all: the server finds the matches itself,
 with `find_in_document`'s RE2 matcher over each paragraph, and plans
-each as a replace (a delete when it expands to nothing), up to 500.
+each as a replace (a delete when it expands to nothing), up to 500. The
+pattern decides case, a match covers text only (never a chip, break or
+unknown element), a table of contents is skipped, a group the
+replacement names must exist, and no match at all is `[not_found]`.
 
 **Resources** (Phase 3). Three templates, all `text/markdown`, for
 clients that attach a document as context instead of calling a tool:

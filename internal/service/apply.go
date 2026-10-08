@@ -101,14 +101,21 @@ func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMe
 	if res.WriteControl != nil && res.WriteControl.RequiredRevisionID != "" {
 		revision = res.WriteControl.RequiredRevisionID
 	}
-	env := decodeReplies(res.Raw)
-	// Google answers 200 and still saves no comment, naming no reason.
-	// Every batch carrying a comment or a reply carries nothing else, so
-	// nothing was written and asking again is safe.
-	if env.CommentUpdateState == "ALL_FAILED_UNKNOWN_REASON" {
+	return decodeReplies(res.Raw), revision, nil
+}
+
+// commentBatch sends a batch of comments or replies and nothing else.
+// Google can answer 200 and still save none of them, naming no reason;
+// since the batch held only comments, nothing was written and asking
+// again is safe. Only here: a review's accept or reject also counts as a
+// thread post, and saying "nothing was posted" after one applied would
+// invite applying it twice.
+func (s *Service) commentBatch(ctx context.Context, f *Fetched, reqs []json.RawMessage) (replyEnvelope, string, error) {
+	env, revision, err := s.batchUpdate(ctx, f, reqs, "")
+	if err == nil && env.CommentUpdateState == "ALL_FAILED_UNKNOWN_REASON" {
 		return replyEnvelope{}, "", Errorf("server", "Google saved none of the comments and gave no reason; nothing was posted, so try again shortly")
 	}
-	return env, revision, nil
+	return env, revision, err
 }
 
 // apply sends a plan to Google in the chosen mode, records ids and
@@ -151,7 +158,7 @@ func (s *Service) applyProposals(ctx context.Context, f *Fetched, proposals []pl
 		for _, p := range proposals {
 			reqs = append(reqs, plan.InsertComment(p.Content, p.Range, ""))
 		}
-		env, _, err := s.batchUpdate(ctx, f, reqs, "")
+		env, _, err := s.commentBatch(ctx, f, reqs)
 		if err != nil {
 			return err
 		}

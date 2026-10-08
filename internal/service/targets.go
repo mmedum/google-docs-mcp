@@ -354,6 +354,13 @@ func alignedSlice(p *doc.Paragraph, start, end int64) string {
 			b.WriteRune(objectPlaceholder)
 		}
 	}
+	// And a gap after the last run in range, short of the paragraph's
+	// own end: an element right before the newline.
+	if n := len(p.Runs); n > 0 {
+		for ; pos < min(end, p.Runs[n-1].End); pos++ {
+			b.WriteRune(objectPlaceholder)
+		}
+	}
 	return b.String()
 }
 

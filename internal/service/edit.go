@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/config"
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
@@ -632,7 +636,9 @@ func checkInternalLinks(d *doc.Document, ops []plan.Op) error {
 			if !found || tab.Body == nil {
 				return Errorf("not_found", "op %d: link %s: the linked text's tab is not in the document", op.Seq, link)
 			}
-			if _, found := tab.Body.SectionByHeadingID(headingID); !found {
+			if !slices.ContainsFunc(tab.Body.AllBlocks(), func(b *doc.Block) bool {
+				return b.Paragraph != nil && b.Paragraph.HeadingID == headingID
+			}) {
 				return Errorf("not_found", "op %d: link %s: tab %d has no heading with that id; heading ids come from get_outline", op.Seq, link, tab.Number)
 			}
 		}
@@ -659,13 +665,22 @@ func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op
 // matches are found here, with find_in_document's matcher over each
 // paragraph's index-aligned text, rather than by Google's searchByRegex:
 // Google does not document its regex flavor, and the guard has to see
-// exactly the ranges that change. A match never crosses a paragraph.
+// exactly the ranges that change.
+//
+// A match never crosses a paragraph, never covers anything but text (a
+// chip, a break or an element this server does not model is a
+// placeholder the guard cannot judge), and skips a table of contents,
+// which Google maintains. The pattern decides case: a write that ignored
+// it by default would turn [A-Z] into every letter.
 func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]plan.Op, error) {
 	if op.Find == "" {
 		return nil, Errorf("invalid", "replace_all needs find")
 	}
-	re, err := compileFind(op.Find, op.MatchCase)
+	re, err := compileFind(op.Find, true)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkTemplate(re, op.Replace); err != nil {
 		return nil, err
 	}
 	tab, err := tabOf(f.Doc, targetTab(op.Target))
@@ -675,37 +690,36 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 	var ops []plan.Op
 	for _, seg := range tab.Segments() {
 		bounds := SegmentBounds(tab, seg)
+		toc := tocBlocks(seg)
 		for _, b := range seg.AllBlocks() {
-			if b.Paragraph == nil {
+			if b.Paragraph == nil || toc[b] {
 				continue
 			}
 			aligned := paragraphText(b)
 			for _, m := range re.FindAllStringSubmatchIndex(aligned, -1) {
-				if m[0] == m[1] {
+				switch {
+				case m[0] == m[1]:
 					return nil, Errorf("invalid", "%q matches empty text in %s; a replacement needs text to replace", op.Find, b.Handle)
-				}
-				if len(ops) == matchLimit {
+				case strings.ContainsRune(aligned[m[0]:m[1]], objectPlaceholder):
+					return nil, Errorf("invalid", "%q matches across a chip, image, break or other element in %s; a regex replace changes text only, so narrow the pattern", op.Find, b.Handle)
+				case len(ops) == matchLimit:
 					return nil, Errorf("invalid", "%q matches more than %d times in tab %d; narrow the pattern", op.Find, matchLimit, tab.Number)
-				}
-				repl := string(re.ExpandString(nil, op.Replace, aligned, m))
-				if strings.ContainsRune(repl, objectPlaceholder) {
-					return nil, Errorf("invalid", "the replacement for a match in %s would copy an image, chip or footnote reference as text; leave it out of the groups replace uses", b.Handle)
 				}
 				start := b.Start + doc.UTF16Len(aligned[:m[0]])
 				end := b.Start + doc.UTF16Len(aligned[:m[1]])
-				text := sliceUTF16(b.Paragraph, start, end)
 				rng := plan.Rng{Start: start, End: end, SegmentID: seg.ID, TabID: tab.ID}
-				p := plan.Op{Seq: op.Seq, Kind: plan.OpReplace, Seg: bounds, Target: &rng, TargetText: text, TargetAligned: aligned[m[0]:m[1]], NearBullet: hasBullet(b),
-					Anchors: f.anchorsIn(seg, start, end, out.threads)}
-				if repl == "" {
-					p.Kind = plan.OpDelete
-				} else {
-					p.Fragment = markdown.Plain(repl)
+				p := plan.Op{Seq: op.Seq, Kind: plan.OpDelete, Seg: bounds, Target: &rng, TargetText: aligned[m[0]:m[1]],
+					TargetAligned: aligned[m[0]:m[1]], NearBullet: hasBullet(b), Anchors: f.anchorsIn(seg, start, end, out.threads)}
+				if repl := string(re.ExpandString(nil, op.Replace, aligned, m)); repl != "" {
+					p.Kind, p.Fragment = plan.OpReplace, markdown.Plain(repl)
 				}
 				ops = append(ops, p)
 				out.note(tab.ID, seg.ID, start)
 			}
 		}
+	}
+	if len(ops) == 0 {
+		return nil, Errorf("not_found", "%q matches nothing in tab %d; find_in_document with regex shows what a pattern matches, and a chip's text is not matched", op.Find, tab.Number)
 	}
 	// One caller op, so one line in the summary, as set_cells does.
 	desc := fmt.Sprintf("%d match(es) of %q in tab %d", len(ops), op.Find, tab.Number)
@@ -713,6 +727,62 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 		ops[i].Description = desc
 	}
 	return ops, nil
+}
+
+// checkTemplate refuses a replacement naming a group the pattern does not
+// have. Go reads $name greedily, so "$1pt" names a group "1pt" and expands
+// to nothing, which would turn every replacement into a deletion.
+func checkTemplate(re *regexp.Regexp, tmpl string) error {
+	names := re.SubexpNames()
+	for i := 0; i < len(tmpl); i++ {
+		if tmpl[i] != '$' {
+			continue
+		}
+		rest := tmpl[i+1:]
+		var name string
+		switch {
+		case strings.HasPrefix(rest, "$"):
+			i++
+			continue
+		case strings.HasPrefix(rest, "{"):
+			end := strings.IndexByte(rest, '}')
+			if end < 0 {
+				return Errorf("invalid", "replace has an unclosed ${ at byte %d", i)
+			}
+			name = rest[1:end]
+		default:
+			n := 0
+			for n < len(rest) && (rest[n] == '_' || unicode.IsLetter(rune(rest[n])) || unicode.IsDigit(rune(rest[n]))) {
+				n++
+			}
+			name = rest[:n]
+		}
+		if !groupExists(names, name) {
+			return Errorf("invalid", "replace names $%s, which the pattern has no group for, so it would insert nothing; "+
+				"write ${1} to follow a group with letters or digits, and $$ for a literal $", name)
+		}
+	}
+	return nil
+}
+
+func groupExists(names []string, name string) bool {
+	if n, err := strconv.Atoi(name); err == nil {
+		return n >= 0 && n < len(names)
+	}
+	return name != "" && slices.Contains(names[1:], name)
+}
+
+// tocBlocks lists the paragraphs inside a segment's tables of contents.
+func tocBlocks(seg *doc.Segment) map[*doc.Block]bool {
+	skip := map[*doc.Block]bool{}
+	for _, b := range seg.AllBlocks() {
+		if b.TOC != nil {
+			for _, x := range doc.Flatten(b.TOC.Blocks) {
+				skip[x] = true
+			}
+		}
+	}
+	return skip
 }
 
 func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {

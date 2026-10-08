@@ -211,7 +211,7 @@ func commentText(text, what string) (string, error) {
 // postAnchoredComment pins a comment to a range through the Docs API,
 // guarded by the revision the range was resolved against.
 func (s *Service) postAnchoredComment(ctx context.Context, f *Fetched, rng plan.Rng, content, assignee string, res *AddCommentResult) error {
-	env, revision, err := s.batchUpdate(ctx, f, []json.RawMessage{plan.InsertComment(content, rng, assignee)}, "")
+	env, revision, err := s.commentBatch(ctx, f, []json.RawMessage{plan.InsertComment(content, rng, assignee)})
 	if err != nil {
 		return err
 	}
@@ -347,7 +347,7 @@ func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, cont
 	if !slices.ContainsFunc(f.Wire.Suggestions, func(t gdocs.SuggestionThread) bool { return t.SuggestionID == suggestionID }) {
 		return nil, Errorf("not_found", "suggestion %s has no thread in this document; ids come from list_suggestions", suggestionID)
 	}
-	env, _, err := s.batchUpdate(ctx, f, []json.RawMessage{plan.ReplyToSuggestion(suggestionID, content)}, "")
+	env, _, err := s.commentBatch(ctx, f, []json.RawMessage{plan.ReplyToSuggestion(suggestionID, content)})
 	if err != nil {
 		return nil, err
 	}

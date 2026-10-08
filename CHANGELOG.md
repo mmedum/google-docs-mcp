@@ -16,10 +16,11 @@ diff in CI flags them.
   comments view, since Drive cannot see these threads.
 - `list_suggestions` shows the replies on each suggestion's thread.
 - `list_comments` says who a thread is assigned to.
-- `replace_all` takes `regex`: `find` is an RE2 pattern, matched within
-  one paragraph at a time, and `replace` may name its groups as `$1` or
-  `${name}`. Suggest mode and the overwrite guard apply to each match.
-  Up to 500 matches.
+- `replace_all` takes `regex`: `find` is an RE2 pattern, case-sensitive
+  unless it starts with `(?i)`, matched within one paragraph and over text
+  only. `replace` names groups as `${1}` or `${name}`, and a name the
+  pattern lacks is refused rather than replaced with nothing. Suggest
+  mode and the overwrite guard apply to each match. Up to 500 matches.
 - `layout_document` `page` takes `pageless`, and `get_document` says
   when a document is pageless.
 - Links to a heading in the same tab (`#<heading id>`, ids from

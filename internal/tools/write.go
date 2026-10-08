@@ -60,8 +60,8 @@ type EditOpInput struct {
 	ContentFormat string         `json:"content_format,omitempty" jsonschema:"markdown (default) or text for verbatim text, one paragraph per line"`
 	Find          string         `json:"find,omitempty" jsonschema:"replace_all: the text to find"`
 	Replace       string         `json:"replace,omitempty" jsonschema:"replace_all: the replacement text (may be empty)"`
-	MatchCase     bool           `json:"match_case,omitempty" jsonschema:"replace_all: match case exactly"`
-	Regex         bool           `json:"regex,omitempty" jsonschema:"replace_all: find is an RE2 regular expression, matched within one paragraph at a time, and replace may name its groups as $1 or ${name}; up to 500 matches"`
+	MatchCase     bool           `json:"match_case,omitempty" jsonschema:"replace_all: match case exactly. With regex the pattern decides instead: it is case-sensitive unless it starts with (?i)"`
+	Regex         bool           `json:"regex,omitempty" jsonschema:"replace_all: find is an RE2 regular expression, matched within one paragraph at a time and over text only, never across a chip or image. replace may name groups as ${1} or ${name}; $$ is a literal $. Up to 500 matches"`
 	Name          string         `json:"name,omitempty" jsonschema:"named ranges: the name to give the target, or the name of the range to delete or fill"`
 	RangeID       string         `json:"range_id,omitempty" jsonschema:"named ranges: one range by the id a read reports, instead of a name several ranges may share"`
 	Text          string         `json:"text,omitempty" jsonschema:"replace_named_range: the plain text to write over the range, with no newline"`

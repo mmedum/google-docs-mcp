@@ -163,15 +163,18 @@ func (s TextStyleSpec) bodyIn(tabID string) (map[string]any, []string) {
 }
 
 // InternalLink reports whether a link value points inside the document:
-// "#tab=<tab id>" at a tab, "#<heading id>" at a heading. They are the
-// forms a read renders, so a link read back can be written as it is.
+// "#tab=<tab id>" at a tab, "#<heading id>" at a heading in the same
+// tab. Those are the forms a read renders. Any other fragment, such as
+// "#heading=h.x" from a pasted URL, is sent as a URL, as it always was.
 func InternalLink(link string) (tabID, headingID string, ok bool) {
 	rest, ok := strings.CutPrefix(link, "#")
-	if !ok {
+	switch {
+	case !ok || rest == "":
 		return "", "", false
-	}
-	if id, isTab := strings.CutPrefix(rest, "tab="); isTab {
-		return id, "", true
+	case strings.HasPrefix(rest, "tab="):
+		return strings.TrimPrefix(rest, "tab="), "", true
+	case strings.ContainsAny(rest, "=&/?#"):
+		return "", "", false
 	}
 	return "", rest, true
 }

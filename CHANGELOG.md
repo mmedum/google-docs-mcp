@@ -15,6 +15,10 @@ and new required fields are breaking; the schema diff in CI flags them.
   comments view, since Drive cannot see these threads.
 - `list_suggestions` shows the replies on each suggestion's thread.
 - `list_comments` says who a thread is assigned to.
+- `replace_all` takes `regex`: `find` is an RE2 pattern, matched within
+  one paragraph at a time, and `replace` may name its groups as `$1` or
+  `${name}`. Each match is planned as its own replace, so suggest mode,
+  the minimal diff and the overwrite guard all apply. Up to 500 matches.
 
 ### Fixed
 

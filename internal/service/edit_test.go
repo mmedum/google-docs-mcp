@@ -711,3 +711,67 @@ func TestInsertionEdges(t *testing.T) {
 		t.Fatalf("end of an empty document should fill the paragraph inline: %+v %v", ip, err)
 	}
 }
+
+// A regex replace_all is planned here, one replace per match, so the
+// guard and the minimal diff see exactly the text that changes. The
+// fixture holds "Step one" at 115 and "Step two" at 124.
+func TestRegexReplaceAllReplacesEachMatch(t *testing.T) {
+	svc, api := writable(t, false)
+	res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `step (\w+)`, Replace: "Stage $1", Regex: true}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "Step" becomes "Stage" by inserting "ag" before its "e" and
+	// deleting its "p", the later match first.
+	want := "deleteContentRange[127,128) insertText@126 deleteContentRange[118,119) insertText@117"
+	if got := kindsOf(t, api.batches[0].Requests); got != want {
+		t.Errorf("requests:\n got %s\nwant %s", got, want)
+	}
+	if len(res.Changes) != 1 || res.Changes[0].Description != `2 match(es) of "step (\\w+)" in tab 1` {
+		t.Errorf("changes: %+v", res.Changes)
+	}
+}
+
+func TestRegexReplaceAllWithNothingDeletes(t *testing.T) {
+	svc, api := writable(t, false)
+	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: ` (one|two)`, Regex: true}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := kindsOf(t, api.batches[0].Requests), "deleteContentRange[128,132) deleteContentRange[119,123)"; got != want {
+		t.Errorf("requests:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestRegexReplaceAllIsGuardedAndRefused(t *testing.T) {
+	ctx := context.Background()
+	svc, api := writable(t, false)
+	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x", QuotedFileContent: &gapi.QuotedText{Value: "Second point"}}}
+	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `p.int`, Replace: "item", Regex: true}},
+	}}); classOf(err) != "blocked" || !strings.Contains(messageOf(err), "c1") {
+		t.Errorf("a regex replace over a comment: %v", err)
+	}
+	for _, tc := range []struct {
+		name, find, replace string
+	}{
+		{"bad pattern", `(`, "x"},
+		{"empty match", `x*`, "x"},
+		{"copies an image as text", `See (.)`, "$1"},
+		{"empty find", ``, "x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+				{Kind: plan.OpReplaceAll, Params: plan.Params{Find: tc.find, Replace: tc.replace, Regex: true}},
+			}}); classOf(err) != "invalid" {
+				t.Errorf("got %v; want an [invalid] error", err)
+			}
+		})
+	}
+	if len(api.batches) != 0 {
+		t.Errorf("a refused replace sent %d batches", len(api.batches))
+	}
+}

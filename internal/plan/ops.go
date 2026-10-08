@@ -76,6 +76,10 @@ type Params struct {
 	Text      TextStyleSpec
 	Para      ParagraphStyleSpec
 	Bullets   string // bullet, numbered, checkbox, none
+	// Regex makes Find an RE2 pattern. The service expands such a
+	// replace_all into one replace per match, so the planner never
+	// sees it set.
+	Regex bool
 }
 
 // Op is one resolved operation. The service fills in ranges, text and

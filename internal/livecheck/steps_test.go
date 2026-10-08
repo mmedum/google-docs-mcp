@@ -86,6 +86,14 @@ func TestLive(t *testing.T) {
 	}
 
 	d.ok("find", "find_in_document", map[string]any{"document": doc, "query": "point"})
+	// Planned by this server, one replace per match, so a group reference
+	// is Go's expansion and not whatever Google's regex would do with it.
+	d.ok("regex replace_all", "edit_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
+		map[string]any{"op": "replace_all", "find": `created by (google-docs-\w+)`, "replace": "made by $1", "regex": true},
+	}})
+	if read := d.ok("read after the regex replace", "read_document", map[string]any{"document": doc}); !strings.Contains(read, "made by google-docs-mcp. It is safe") {
+		t.Errorf("the regex replace did not land as planned:\n%s", shown(read, 400))
+	}
 	// Nothing above suggests a format. The style of the inserted text is
 	// filed under the insertion's own id, and is not a restyling.
 	if listed := d.ok("list suggestions", "list_suggestions", map[string]any{"document": doc}); strings.Contains(listed, "(text:") {

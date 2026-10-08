@@ -61,6 +61,7 @@ type EditOpInput struct {
 	Find          string         `json:"find,omitempty" jsonschema:"replace_all: the text to find"`
 	Replace       string         `json:"replace,omitempty" jsonschema:"replace_all: the replacement text (may be empty)"`
 	MatchCase     bool           `json:"match_case,omitempty" jsonschema:"replace_all: match case exactly"`
+	Regex         bool           `json:"regex,omitempty" jsonschema:"replace_all: find is an RE2 regular expression, matched within one paragraph at a time, and replace may name its groups as $1 or ${name}; up to 500 matches"`
 	Name          string         `json:"name,omitempty" jsonschema:"named ranges: the name to give the target, or the name of the range to delete or fill"`
 	RangeID       string         `json:"range_id,omitempty" jsonschema:"named ranges: one range by the id a read reports, instead of a name several ranges may share"`
 	Text          string         `json:"text,omitempty" jsonschema:"replace_named_range: the plain text to write over the range, with no newline"`
@@ -131,7 +132,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 		Description: "Change the text of a Google Doc with one atomic batch of operations. Address content by exact text " +
 			"(quoted from a read), by heading_id or heading (a whole section), by block handle, or by cell; never by " +
 			"position numbers. Ops: insert (at a location), append (end of body), replace (minimal diff, so untouched " +
-			"words keep their formatting and comments), delete, replace_all (find/replace in one tab), insert_break " +
+			"words keep their formatting and comments), delete, replace_all (find/replace in one tab, by text or regex), insert_break " +
 			"(page break), insert_footnote, create_header, create_footer, delete_header, delete_footer (target: tab and " +
 			"segment), and the named-range ops: create_named_range names a target so later calls can find it again " +
 			"after edits move it, where a handle is only valid for the revision it came from; replace_named_range " +
@@ -149,7 +150,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolEdit)))
 			}
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
-				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}}
+				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase, Regex: o.Regex}}
 			eo.Location = o.Location.location()
 			if o.Name != "" || o.RangeID != "" || o.Text != "" {
 				eo.NamedRange = &plan.NamedRangeParams{Name: strings.TrimSpace(o.Name), ID: strings.TrimSpace(o.RangeID), Text: o.Text}

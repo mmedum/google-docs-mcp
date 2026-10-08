@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/config"
@@ -400,8 +401,7 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 	}
 	for _, op := range ops {
 		i := op.Seq
-		if op.Kind == plan.OpSetCells {
-			expanded, err := s.expandSetCells(f, i, op, out)
+		if expanded, ok, err := s.expand(f, op, out); ok {
 			if err != nil {
 				return nil, Errorf(classOf(err), "op %d: %s", i, messageOf(err))
 			}
@@ -600,6 +600,89 @@ func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan
 	p.CommentAnchor = &rng
 	p.TargetText = r.Text
 	return nil
+}
+
+// expand turns one caller op into several planner ops, for the kinds
+// that address many places at once; ok is false for every other kind.
+func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op, ok bool, err error) {
+	switch {
+	case op.Kind == plan.OpSetCells:
+		ops, err = s.expandSetCells(f, op.Seq, op, out)
+	case op.Kind == plan.OpReplaceAll && op.Regex:
+		ops, err = s.expandRegexReplaceAll(f, op.Seq, op, out)
+	default:
+		return nil, false, nil
+	}
+	return ops, true, err
+}
+
+// regexReplaceLimit bounds one regex replace_all, as it bounds what
+// find_in_document lists.
+const regexReplaceLimit = 500
+
+// expandRegexReplaceAll turns a regex replace_all into one replace per
+// match, or a delete where the replacement expands to nothing. The
+// matches are found here, with find_in_document's matcher over each
+// paragraph's index-aligned text, rather than by Google's searchByRegex:
+// Google does not document its regex flavor, and the guard has to see
+// exactly the ranges that change. A match never crosses a paragraph.
+func (s *Service) expandRegexReplaceAll(f *Fetched, seq int, op EditOp, out *resolvedOps) ([]plan.Op, error) {
+	if op.Find == "" {
+		return nil, Errorf("invalid", "replace_all needs find")
+	}
+	pat := op.Find
+	if !op.MatchCase {
+		pat = "(?i)" + pat
+	}
+	re, err := regexp.Compile(pat)
+	if err != nil {
+		return nil, Errorf("invalid", "regex: %v", err)
+	}
+	tab, err := tabOf(f.Doc, targetTab(op.Target))
+	if err != nil {
+		return nil, err
+	}
+	var ops []plan.Op
+	for _, seg := range tab.Segments() {
+		bounds := SegmentBounds(tab, seg)
+		for _, b := range seg.AllBlocks() {
+			if b.Paragraph == nil {
+				continue
+			}
+			aligned := strings.TrimSuffix(alignedSlice(b.Paragraph, b.Start, b.End), "\n")
+			for _, m := range re.FindAllStringSubmatchIndex(aligned, -1) {
+				if m[0] == m[1] {
+					return nil, Errorf("invalid", "%q matches empty text in %s; a replacement needs text to replace", op.Find, b.Handle)
+				}
+				if len(ops) == regexReplaceLimit {
+					return nil, Errorf("invalid", "%q matches more than %d times in tab %d; narrow the pattern", op.Find, regexReplaceLimit, tab.Number)
+				}
+				repl := string(re.ExpandString(nil, op.Replace, aligned, m))
+				if strings.ContainsRune(repl, objectPlaceholder) {
+					return nil, Errorf("invalid", "the replacement for a match in %s would copy an image, chip or footnote reference as text; leave it out of the groups replace uses", b.Handle)
+				}
+				start := b.Start + doc.UTF16Len(aligned[:m[0]])
+				end := b.Start + doc.UTF16Len(aligned[:m[1]])
+				text := sliceUTF16(b.Paragraph, start, end)
+				rng := plan.Rng{Start: start, End: end, SegmentID: seg.ID, TabID: tab.ID}
+				p := plan.Op{Seq: seq, Kind: plan.OpReplace, Seg: bounds, Target: &rng, TargetText: text, TargetAligned: aligned[m[0]:m[1]], NearBullet: hasBullet(b),
+					Anchors: f.anchorsIn(seg, start, end, out.threads)}
+				if repl == "" {
+					p.Kind = plan.OpDelete
+				} else {
+					p.Fragment = markdown.Plain(repl)
+				}
+				ops = append(ops, p)
+				out.note(tab.ID, seg.ID, start)
+			}
+		}
+	}
+	// One caller op, so one line in the summary, as set_cells does.
+	desc := fmt.Sprintf("%d match(es) of %q in tab %d", len(ops), op.Find, tab.Number)
+	for i := range ops {
+		ops[i].Description = desc
+	}
+	return ops, nil
 }
 
 func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {

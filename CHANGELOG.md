@@ -2,53 +2,48 @@
 
 All notable changes to this project are documented here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
-follows [Semantic Versioning](https://semver.org/). Tool removals, renames
-and new required fields are breaking; the schema diff in CI flags them.
+follows [Semantic Versioning](https://semver.org/). Tool removals, renames,
+removed output fields and new required fields are breaking; the schema
+diff in CI flags them.
 
 ## [Unreleased]
 
 ### Added
 
 - `reply_comment` replies on a suggested edit's thread when given
-  `suggestion_id` instead of `comment_id`. Only a plain reply: accepting
-  or rejecting the suggestion is still `review_suggestion`. It needs the
+  `suggestion_id` instead of `comment_id`. It posts a plain reply only;
+  accepting or rejecting is still `review_suggestion`. It needs the
   comments view, since Drive cannot see these threads.
 - `list_suggestions` shows the replies on each suggestion's thread.
 - `list_comments` says who a thread is assigned to.
 - `replace_all` takes `regex`: `find` is an RE2 pattern, matched within
   one paragraph at a time, and `replace` may name its groups as `$1` or
-  `${name}`. Each match is planned as its own replace, so suggest mode,
-  the minimal diff and the overwrite guard all apply. Up to 500 matches.
+  `${name}`. Suggest mode and the overwrite guard apply to each match.
+  Up to 500 matches.
 - `layout_document` `page` takes `pageless`, and `get_document` says
   when a document is pageless.
-- Links to a heading or a tab of the same document: `#<heading id>`
-  (ids from `get_outline`) or `#tab=<tab id>`, in `format_document`'s
-  `link` and in markdown content. A read renders them the same way, so
-  a link read back can be written again. A link to a heading or tab that
-  does not exist is refused before anything is sent.
+- Links to a heading in the same tab (`#<heading id>`, ids from
+  `get_outline`) or to a tab (`#tab=<tab id>`), in `format_document`'s
+  `link` and in markdown content. A read shows them the same way. A link
+  to a heading or tab that does not exist is refused before anything is
+  sent.
 
 ### Changed
 
-- A delete asks once in Claude Code, not twice. `delete_comment` and
-  `delete_tab` drop the `requiresUserInteraction` mark for a client that
-  can ask the person, since the server asks before every delete and
-  shows what it destroys. Allow the tools in Claude Code to see only that
-  question. A client that cannot ask still gets the mark.
+- A delete asks once in Claude Code, not twice. In a client that can ask
+  the person, `delete_comment` and `delete_tab` no longer carry the
+  `requiresUserInteraction` mark; the server's own question, which shows
+  what the delete destroys, is the confirmation. To see only that
+  question, add both tools to Claude Code's allow list.
 
 ### Fixed
 
-- A dropdown chip reads as the option selected in it. Google added
-  dropdowns in 2026-10 and reads dropped them, along with the selected
-  option's text.
-- Text after an element this server does not model keeps its position.
-  A regex `find_in_document` reported each match after a dropdown one
-  character early.
-- A comment Google did not save is no longer reported as posted. Google
-  can accept a batch of comments and save none of them; `add_comment`
-  then said `comment  posted` with no id, and comment mode reported its
-  edits as applied. Both now fail with `[server]`, and nothing was
-  posted. If Google saves a comment but does not name it, `add_comment`
-  fails with `[ambiguous_outcome]` instead of returning an empty id.
+- A dropdown chip reads as the option selected in it, and a regex
+  `find_in_document` reports matches after one at the right offset.
+  Reads dropped dropdowns, which Google added in 2026-10.
+- A comment Google did not save is no longer reported as posted. It is
+  `[server]` when Google saves none of a batch of comments, and
+  `[ambiguous_outcome]` when Google saves a comment without naming it.
 
 ## [2.1.1] - 2026-10-03
 

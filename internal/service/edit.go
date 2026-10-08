@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/config"
@@ -38,6 +37,9 @@ type EditOp struct {
 	// Fragment is content already parsed; set by follow-ups instead of Content.
 	Fragment *markdown.Fragment
 	plan.Params
+	// Regex makes Find an RE2 pattern; such a replace_all is expanded
+	// here into one replace per match and never reaches the planner.
+	Regex  bool
 	Table  *TableOp
 	Object *plan.ObjectParams
 	// Layout carries the page, section and named-style specs, and the
@@ -622,13 +624,13 @@ func checkInternalLinks(d *doc.Document, ops []plan.Op) error {
 			}
 			if tabID != "" {
 				if t, found := d.Tab(tabID); !found || t.ID != tabID {
-					return Errorf("not_found", "op %d: link %s names no tab; tabs: %s", op.Seq, link, tabList(d))
+					return Errorf("not_found", "op %d: link %s names no tab; tab ids: %s", op.Seq, link, tabIDs(d))
 				}
 				continue
 			}
 			tab, found := d.Tab(op.Seg.TabID)
 			if !found || tab.Body == nil {
-				return Errorf("not_found", "op %d: link %s: the linked text's tab has no headings", op.Seq, link)
+				return Errorf("not_found", "op %d: link %s: the linked text's tab is not in the document", op.Seq, link)
 			}
 			if _, found := tab.Body.SectionByHeadingID(headingID); !found {
 				return Errorf("not_found", "op %d: link %s: tab %d has no heading with that id; heading ids come from get_outline", op.Seq, link, tab.Number)
@@ -645,16 +647,12 @@ func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op
 	case op.Kind == plan.OpSetCells:
 		ops, err = s.expandSetCells(f, op.Seq, op, out)
 	case op.Kind == plan.OpReplaceAll && op.Regex:
-		ops, err = s.expandRegexReplaceAll(f, op.Seq, op, out)
+		ops, err = s.expandRegexReplaceAll(f, op, out)
 	default:
 		return nil, false, nil
 	}
 	return ops, true, err
 }
-
-// regexReplaceLimit bounds one regex replace_all, as it bounds what
-// find_in_document lists.
-const regexReplaceLimit = 500
 
 // expandRegexReplaceAll turns a regex replace_all into one replace per
 // match, or a delete where the replacement expands to nothing. The
@@ -662,17 +660,13 @@ const regexReplaceLimit = 500
 // paragraph's index-aligned text, rather than by Google's searchByRegex:
 // Google does not document its regex flavor, and the guard has to see
 // exactly the ranges that change. A match never crosses a paragraph.
-func (s *Service) expandRegexReplaceAll(f *Fetched, seq int, op EditOp, out *resolvedOps) ([]plan.Op, error) {
+func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]plan.Op, error) {
 	if op.Find == "" {
 		return nil, Errorf("invalid", "replace_all needs find")
 	}
-	pat := op.Find
-	if !op.MatchCase {
-		pat = "(?i)" + pat
-	}
-	re, err := regexp.Compile(pat)
+	re, err := compileFind(op.Find, op.MatchCase)
 	if err != nil {
-		return nil, Errorf("invalid", "regex: %v", err)
+		return nil, err
 	}
 	tab, err := tabOf(f.Doc, targetTab(op.Target))
 	if err != nil {
@@ -685,13 +679,13 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, seq int, op EditOp, out *res
 			if b.Paragraph == nil {
 				continue
 			}
-			aligned := strings.TrimSuffix(alignedSlice(b.Paragraph, b.Start, b.End), "\n")
+			aligned := paragraphText(b)
 			for _, m := range re.FindAllStringSubmatchIndex(aligned, -1) {
 				if m[0] == m[1] {
 					return nil, Errorf("invalid", "%q matches empty text in %s; a replacement needs text to replace", op.Find, b.Handle)
 				}
-				if len(ops) == regexReplaceLimit {
-					return nil, Errorf("invalid", "%q matches more than %d times in tab %d; narrow the pattern", op.Find, regexReplaceLimit, tab.Number)
+				if len(ops) == matchLimit {
+					return nil, Errorf("invalid", "%q matches more than %d times in tab %d; narrow the pattern", op.Find, matchLimit, tab.Number)
 				}
 				repl := string(re.ExpandString(nil, op.Replace, aligned, m))
 				if strings.ContainsRune(repl, objectPlaceholder) {
@@ -701,7 +695,7 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, seq int, op EditOp, out *res
 				end := b.Start + doc.UTF16Len(aligned[:m[1]])
 				text := sliceUTF16(b.Paragraph, start, end)
 				rng := plan.Rng{Start: start, End: end, SegmentID: seg.ID, TabID: tab.ID}
-				p := plan.Op{Seq: seq, Kind: plan.OpReplace, Seg: bounds, Target: &rng, TargetText: text, TargetAligned: aligned[m[0]:m[1]], NearBullet: hasBullet(b),
+				p := plan.Op{Seq: op.Seq, Kind: plan.OpReplace, Seg: bounds, Target: &rng, TargetText: text, TargetAligned: aligned[m[0]:m[1]], NearBullet: hasBullet(b),
 					Anchors: f.anchorsIn(seg, start, end, out.threads)}
 				if repl == "" {
 					p.Kind = plan.OpDelete

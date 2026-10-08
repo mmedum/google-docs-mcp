@@ -381,7 +381,8 @@ mode, and a rendered view of the region. Nothing is sent.
 
 ### 7.4 Markdown coverage
 
-Headings 1–6, paragraphs, bold/italic/strikethrough/inline code, links,
+Headings 1–6, paragraphs, bold/italic/strikethrough/inline code, links
+(a URL, `#<heading id>` for a heading in the same tab, `#tab=<tab id>`),
 bullet and numbered lists (nested), hard breaks; task-list checkboxes are
 dropped and their text kept. Fenced code → Courier-styled paragraphs.
 Refused with `[unsupported] <construct> at line N`: images (use
@@ -685,8 +686,8 @@ Claude Code's `requiresUserInteraction` mark makes it prompt on every
 call, in every permission mode, past any allow rule. A tool that asks
 before every write carries the mark only for a client that cannot ask:
 `tools/list` drops it when the request's capabilities include form
-elicitation. With both, every delete was put to the person twice, once
-as raw arguments and once as the question that says what it destroys.
+elicitation, so the person answers once, to the question that says what
+the write destroys, not also to a prompt showing raw arguments.
 `destructiveHint` stays either way; it is the client's allow-listable
 prompt.
 
@@ -717,8 +718,9 @@ accounts. That sets these requirements:
   checks it: Cloud project → APIs → consent screen (Internal vs Testing)
   → Desktop OAuth client → `login` → `doctor`.
 - **Versioning.** Semantic versions; `CHANGELOG.md` in Keep a Changelog
-  form; the schema-dump diff in CI classifies tool removals, renames, and
-  required-field additions as breaking (major after 1.0, minor before).
+  form; the schema-dump diff in CI classifies tool removals, renames,
+  removed output fields and required-field additions as breaking (major
+  after 1.0, minor before).
 - **Documentation set.** README (setup, tool catalog, safety model),
   `docs/architecture.md` (this file), `docs/configuration.md`,
   `docs/security.md` (threat model, scopes, what is stored where),

@@ -150,7 +150,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolEdit)))
 			}
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
-				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase, Regex: o.Regex}}
+				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}, Regex: o.Regex}
 			eo.Location = o.Location.location()
 			if o.Name != "" || o.RangeID != "" || o.Text != "" {
 				eo.NamedRange = &plan.NamedRangeParams{Name: strings.TrimSpace(o.Name), ID: strings.TrimSpace(o.RangeID), Text: o.Text}

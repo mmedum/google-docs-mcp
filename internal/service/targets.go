@@ -332,9 +332,7 @@ const objectPlaceholder = '\uFFFC'
 // index offsets. Chips contribute a placeholder, not their display text.
 //
 // A gap between runs is an element the parser does not model, and gets
-// placeholders too. Without them every offset after it moved: Google
-// added dropdown chips, and until they were parsed, each one shifted the
-// text after it by its length.
+// placeholders too, so the offsets after it still equal indices.
 func alignedSlice(p *doc.Paragraph, start, end int64) string {
 	var b strings.Builder
 	pos := start

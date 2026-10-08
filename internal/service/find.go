@@ -42,6 +42,27 @@ type FindResult struct {
 
 func dropPlaceholders(s string) string { return strings.ReplaceAll(s, string(objectPlaceholder), "") }
 
+// matchLimit bounds how many matches one call lists or replaces.
+const matchLimit = 500
+
+// compileFind compiles a regex query, case-insensitive unless matchCase.
+func compileFind(query string, matchCase bool) (*regexp.Regexp, error) {
+	if !matchCase {
+		query = "(?i)" + query
+	}
+	re, err := regexp.Compile(query)
+	if err != nil {
+		return nil, Errorf("invalid", "regex: %v", err)
+	}
+	return re, nil
+}
+
+// paragraphText is a paragraph's index-aligned text without its newline,
+// the text a regex runs over: string offsets equal index offsets.
+func paragraphText(b *doc.Block) string {
+	return strings.TrimSuffix(alignedSlice(b.Paragraph, b.Start, b.End), "\n")
+}
+
 // Find locates text or a regular expression in one tab's segment and
 // returns handles with context, in document order.
 func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error) {
@@ -52,8 +73,8 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 	if limit <= 0 {
 		limit = 50
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > matchLimit {
+		limit = matchLimit
 	}
 	contextChars := req.Context
 	if contextChars <= 0 {
@@ -70,13 +91,8 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 	var re *regexp.Regexp
 	needle := ""
 	if req.Regex {
-		pat := req.Query
-		if !req.MatchCase {
-			pat = "(?i)" + pat
-		}
-		re, err = regexp.Compile(pat)
-		if err != nil {
-			return nil, Errorf("invalid", "regex: %v", err)
+		if re, err = compileFind(req.Query, req.MatchCase); err != nil {
+			return nil, err
 		}
 	} else {
 		needle = doc.Normalize(req.Query)
@@ -84,7 +100,6 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 	res := &FindResult{Query: req.Query, RevisionID: f.Doc.RevisionID}
 	// Index-aligned text keeps offsets right past chips, images and
 	// footnote references; placeholders are dropped from the output.
-	aligned := func(b *doc.Block) string { return strings.TrimSuffix(alignedSlice(b.Paragraph, b.Start, b.End), "\n") }
 	type located struct {
 		block *doc.Block
 		text  string
@@ -96,7 +111,7 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 			if b.Paragraph == nil {
 				continue
 			}
-			text := aligned(b)
+			text := paragraphText(b)
 			ms := re.FindAllStringIndex(text, -1)
 			if len(ms) == 0 {
 				continue
@@ -110,7 +125,7 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 	} else {
 		for _, h := range f.findText(seg, needle, !req.MatchCase) {
 			if n := len(found); n == 0 || found[n-1].block != h.block {
-				found = append(found, located{block: h.block, text: aligned(h.block)})
+				found = append(found, located{block: h.block, text: paragraphText(h.block)})
 			}
 			l := &found[len(found)-1]
 			l.spans = append(l.spans, [2]int{doc.UTF16ToCodePoint(l.text, h.start-h.block.Start), doc.UTF16ToCodePoint(l.text, h.end-h.block.Start)})

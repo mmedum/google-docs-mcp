@@ -66,11 +66,18 @@ func viewThreads(w *gdocs.Document) []CommentThread {
 		t := CommentThread{ID: c.CommentID, Author: c.HeadPost.Author.DisplayName, Content: c.HeadPost.Content, Quote: c.PlainTextQuote,
 			Resolved: c.Status == "RESOLVED", Created: c.HeadPost.CreateTime, Modified: c.HeadPost.UpdateTime, Replies: []CommentReply{}}
 		for _, p := range c.Replies {
-			t.Replies = append(t.Replies, CommentReply{ID: p.PostID, Author: p.Author.DisplayName, Content: p.Content, Created: p.CreateTime, Action: commentAction(p.CommentAction)})
+			t.Replies = append(t.Replies, postReply(p))
 		}
 		out = append(out, t)
 	}
 	return out
+}
+
+// postReply is one reply post of a Docs thread, a comment's or a
+// suggestion's.
+func postReply(p gdocs.Post) CommentReply {
+	return CommentReply{ID: p.PostID, Author: p.Author.DisplayName, Content: p.Content, Created: p.CreateTime,
+		Action: commentAction(p.CommentAction), Deleted: p.Deleted}
 }
 
 func commentAction(a string) string {

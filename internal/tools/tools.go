@@ -106,8 +106,8 @@ var (
 	// writeSafe marks tools that change the document but never delete
 	// beyond what the person asked and the guard allows.
 	writeSafe = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
-	// destructive marks gated tools; the meta asks the client to involve
-	// the person.
+	// destructive marks gated tools; the meta asks a client that cannot
+	// elicit to involve the person (interactionHint drops it otherwise).
 	destructive     = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
 	destructiveMeta = mcp.Meta{interactionKey: true}
 	// localWrite marks a tool that reads Google and writes only a local

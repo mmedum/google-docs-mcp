@@ -359,11 +359,7 @@ const interactionKey = "anthropic/requiresUserInteraction"
 // the write destroys, where the client's prompt shows the arguments. The
 // mark stays for a client that cannot ask, whose own prompt is then the
 // only one. destructiveHint stays either way, as the client's soft gate.
-//
-// Both together asked the person twice for every delete, which no
-// source recommends: GitHub and Supabase confirm a destructive tool with
-// the annotation and an elicitation, and Anthropic scopes the mark to a
-// prompt that is "itself the point".
+// With both, the person would answer twice for one call.
 func interactionHint(a *asking) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {

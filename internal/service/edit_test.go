@@ -718,7 +718,7 @@ func TestInsertionEdges(t *testing.T) {
 func TestRegexReplaceAllReplacesEachMatch(t *testing.T) {
 	svc, api := writable(t, false)
 	res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
-		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `step (\w+)`, Replace: "Stage $1", Regex: true}},
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `step (\w+)`, Replace: "Stage $1"}, Regex: true},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -737,7 +737,7 @@ func TestRegexReplaceAllReplacesEachMatch(t *testing.T) {
 func TestRegexReplaceAllWithNothingDeletes(t *testing.T) {
 	svc, api := writable(t, false)
 	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
-		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: ` (one|two)`, Regex: true}},
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: ` (one|two)`}, Regex: true},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -751,7 +751,7 @@ func TestRegexReplaceAllIsGuardedAndRefused(t *testing.T) {
 	svc, api := writable(t, false)
 	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x", QuotedFileContent: &gapi.QuotedText{Value: "Second point"}}}
 	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
-		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `p.int`, Replace: "item", Regex: true}},
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `p.int`, Replace: "item"}, Regex: true},
 	}}); classOf(err) != "blocked" || !strings.Contains(messageOf(err), "c1") {
 		t.Errorf("a regex replace over a comment: %v", err)
 	}
@@ -765,7 +765,7 @@ func TestRegexReplaceAllIsGuardedAndRefused(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
-				{Kind: plan.OpReplaceAll, Params: plan.Params{Find: tc.find, Replace: tc.replace, Regex: true}},
+				{Kind: plan.OpReplaceAll, Params: plan.Params{Find: tc.find, Replace: tc.replace}, Regex: true},
 			}}); classOf(err) != "invalid" {
 				t.Errorf("got %v; want an [invalid] error", err)
 			}
@@ -776,10 +776,10 @@ func TestRegexReplaceAllIsGuardedAndRefused(t *testing.T) {
 	}
 }
 
-// chipDocument is one paragraph with an element between two runs of
+// paragraphWith is one paragraph with an element between two runs of
 // text: "Status: " at 1, the element at 9, " done\n" at 10. element is
 // the element's JSON key and body.
-func chipDocument(element string) []byte {
+func paragraphWith(element string) []byte {
 	return []byte(`{"documentId":"` + fixtureID + `","title":"Chips","revisionId":"rev-0001","body":{"content":[
 		{"startIndex":0,"endIndex":1,"sectionBreak":{}},
 		{"startIndex":1,"endIndex":16,"paragraph":{"elements":[
@@ -790,7 +790,7 @@ func chipDocument(element string) []byte {
 
 func TestADropdownReadsAsItsSelectedOption(t *testing.T) {
 	svc, api := newService(t)
-	api.raw = chipDocument(`"dropdown":{"dropdownProperties":{"displayValue":"Approved"}}`)
+	api.raw = paragraphWith(`"dropdown":{"dropdownProperties":{"displayValue":"Approved"}}`)
 	res, err := svc.Read(context.Background(), ReadRequest{Document: fixtureID})
 	if err != nil {
 		t.Fatal(err)
@@ -809,9 +809,9 @@ func TestARegexReplaceAfterAChipHitsItsOwnRange(t *testing.T) {
 		`"elementGoogleAddsLater":{}`,
 	} {
 		svc, api := writable(t, false)
-		api.raw = chipDocument(element)
+		api.raw = paragraphWith(element)
 		if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
-			{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `done`, Regex: true}},
+			{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `done`}, Regex: true},
 		}}); err != nil {
 			t.Fatalf("%s: %v", element, err)
 		}
@@ -875,12 +875,31 @@ func TestALinkToNothingIsRefused(t *testing.T) {
 
 func TestATabLinkReadsBackAsItIsWritten(t *testing.T) {
 	svc, api := newService(t)
-	api.raw = chipDocument(`"textRun":{"content":"x","textStyle":{"link":{"tabId":"t.1"}}}`)
+	api.raw = paragraphWith(`"textRun":{"content":"x","textStyle":{"link":{"tabId":"t.1"}}}`)
 	res, err := svc.Read(context.Background(), ReadRequest{Document: fixtureID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(res.Text, "[x](#tab=t.1)") {
 		t.Errorf("want [x](#tab=t.1) in:\n%s", res.Text)
+	}
+}
+
+// find_in_document reports a match's offset in the paragraph, counting an
+// element between runs as the one place it takes: "done" starts at 10.
+func TestARegexFindAfterAChipReportsItsOffset(t *testing.T) {
+	for _, element := range []string{
+		`"dropdown":{"dropdownProperties":{"displayValue":"Approved"}}`,
+		`"elementGoogleAddsLater":{}`,
+	} {
+		svc, api := newService(t)
+		api.raw = paragraphWith(element)
+		res, err := svc.Find(context.Background(), FindRequest{Document: fixtureID, Query: `done`, Regex: true})
+		if err != nil {
+			t.Fatalf("%s: %v", element, err)
+		}
+		if len(res.Matches) != 1 || res.Matches[0].Offset != 10 {
+			t.Errorf("%s: matches %+v, want one at offset 10", element, res.Matches)
+		}
 	}
 }

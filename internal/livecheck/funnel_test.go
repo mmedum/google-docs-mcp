@@ -244,7 +244,7 @@ func TestEveryPlaceAPersonIsWrittenIsKnown(t *testing.T) {
 	root := moduleRoot(t)
 	const (
 		wantUserLabel = 7  // service: ops.go x2, history.go, search.go x2, comments.go x2 (delete_comment's question)
-		wantPerson    = 43 // every read of a person field in the three packages. Of the last nine, three are a suggestion thread's reply authors, redacted with the ↳ line; three are list_comments' assignee, an address the address rule redacts; three are add_comment's assignee input, which goes to Google and is never printed
+		wantPerson    = 40 // every read of a person field in the three packages
 	)
 
 	dirs := []string{"internal/service", "internal/render", "internal/plan"}

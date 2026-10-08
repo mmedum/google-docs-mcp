@@ -48,7 +48,8 @@ test. Also:
 - Update `README.md`, `docs/`, and `CHANGELOG.md` under `[Unreleased]`
   when behavior or the tool surface changes.
 - Run `./google-docs-mcp --dump-schemas` and check the diff; a removed
-  tool or field, or a new required field, is a breaking change.
+  tool, argument or output field, or a new required argument, is a
+  breaking change.
 
 ## Layout
 

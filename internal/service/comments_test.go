@@ -8,6 +8,7 @@ import (
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
 func TestListCommentsLocatesAndRenders(t *testing.T) {
@@ -115,6 +116,39 @@ func TestAddComment(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "comment pc1 posted on p5") {
 		t.Fatalf("text: %s", res.Text)
+	}
+}
+
+// Google can answer an insertComment batch with 200, no thread, and a
+// state saying every comment failed. Reporting that as posted would hand
+// back a comment with no id.
+func TestAddCommentRefusesACommentGoogleDidNotSave(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply, class string
+	}{
+		{"all failed", `{"replies":[{}],"commentUpdateState":"ALL_FAILED_UNKNOWN_REASON"}`, "server"},
+		{"no thread named", `{"replies":[{}],"commentUpdateState":"ALL_SAVED"}`, "ambiguous_outcome"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, api := writable(t, true)
+			api.replies = []string{tc.reply}
+			res, err := svc.AddComment(context.Background(), AddCommentRequest{Document: fixtureID, Target: &Target{Handle: "p5"}, Content: "Anchored"})
+			if classOf(err) != tc.class {
+				t.Fatalf("got %+v, %v; want a [%s] error", res, err, tc.class)
+			}
+		})
+	}
+}
+
+func TestCommentModeRefusesCommentsGoogleDidNotSave(t *testing.T) {
+	svc, api := writable(t, true)
+	api.replies = []string{`{"replies":[{},{}],"commentUpdateState":"ALL_FAILED_UNKNOWN_REASON"}`}
+	res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "comment", Ops: []EditOp{
+		{Kind: plan.OpReplace, Target: &Target{Text: "Second point"}, Content: "Second item"},
+		{Kind: plan.OpDelete, Target: &Target{Handle: "p5"}},
+	}})
+	if classOf(err) != "server" {
+		t.Fatalf("got %+v, %v; want a [server] error", res, err)
 	}
 }
 

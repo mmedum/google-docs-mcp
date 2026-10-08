@@ -7,6 +7,15 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+
+- A comment Google did not save is no longer reported as posted. Google
+  can accept a batch of comments and save none of them; `add_comment`
+  then said `comment  posted` with no id, and comment mode reported its
+  edits as applied. Both now fail with `[server]`, and nothing was
+  posted. If Google saves a comment but does not name it, `add_comment`
+  fails with `[ambiguous_outcome]` instead of returning an empty id.
+
 ## [2.1.1] - 2026-10-03
 
 ### Fixed

@@ -208,10 +208,11 @@ func (s *Service) postAnchoredComment(ctx context.Context, f *Fetched, rng plan.
 	if err != nil {
 		return err
 	}
-	if ids := env.commentIDs(); len(ids) > 0 {
-		res.ID = ids[0]
+	ids := env.commentIDs()
+	if len(ids) == 0 {
+		return Errorf("ambiguous_outcome", "Google accepted the comment but did not say which one it created; list_comments shows whether it exists before you post it again")
 	}
-	res.RevisionID, res.Anchored = revision, true
+	res.ID, res.RevisionID, res.Anchored = ids[0], revision, true
 	return nil
 }
 

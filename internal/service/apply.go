@@ -85,7 +85,14 @@ func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMe
 	if res.WriteControl != nil && res.WriteControl.RequiredRevisionID != "" {
 		revision = res.WriteControl.RequiredRevisionID
 	}
-	return decodeReplies(res.Raw), revision, nil
+	env := decodeReplies(res.Raw)
+	// Google answers 200 and still saves no comment, naming no reason.
+	// Every batch carrying a comment carries nothing else, so nothing
+	// was written and asking again is safe.
+	if env.CommentUpdateState == "ALL_FAILED_UNKNOWN_REASON" {
+		return replyEnvelope{}, "", Errorf("server", "Google saved none of the comments and gave no reason; nothing was posted, so try again shortly")
+	}
+	return env, revision, nil
 }
 
 // apply sends a plan to Google in the chosen mode, records ids and

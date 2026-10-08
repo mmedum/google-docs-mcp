@@ -46,6 +46,12 @@ diff in CI flags them.
   `[server]` when Google saves none of a batch of comments, and
   `[ambiguous_outcome]` when Google saves a comment without naming it.
 
+### Security
+
+- Built with Go 1.27.2, which fixes nine advisories in `net/http`, its
+  HTTP/2 code, `crypto/tls` and `net/textproto` that `govulncheck` found
+  reachable from this server.
+
 ## [2.1.1] - 2026-10-03
 
 ### Fixed

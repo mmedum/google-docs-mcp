@@ -488,6 +488,15 @@ func InsertComment(content string, r Rng, assignee string) json.RawMessage {
 	return raw(map[string]any{"insertComment": req})
 }
 
+// ReplyToSuggestion adds a reply to a suggestion's thread. Drive cannot
+// reach these threads; only the Docs API can.
+func ReplyToSuggestion(suggestionID, content string) json.RawMessage {
+	return raw(map[string]any{"addCommentReply": map[string]any{
+		"suggestionId": suggestionID,
+		"post":         map[string]any{"content": content},
+	}})
+}
+
 // AcceptSuggestion accepts a suggestion by id.
 func AcceptSuggestion(id string) json.RawMessage {
 	return raw(map[string]any{"acceptSuggestion": map[string]any{"suggestionId": id}})

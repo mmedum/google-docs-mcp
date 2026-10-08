@@ -41,6 +41,8 @@ type Post struct {
 	UpdateTime       string     `json:"updateTime,omitempty"`
 	CommentAction    string     `json:"commentAction,omitempty"`
 	SuggestionAction string     `json:"suggestionAction,omitempty"`
+	// Deleted leaves the post in its thread with no content or author.
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 // PostAuthor identifies who wrote a post.

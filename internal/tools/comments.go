@@ -27,11 +27,12 @@ type AddCommentInput struct {
 
 // ReplyInput continues a thread.
 type ReplyInput struct {
-	Document  string `json:"document" jsonschema:"document id or any docs.google.com URL"`
-	CommentID string `json:"comment_id" jsonschema:"thread id from list_comments or add_comment"`
-	ReplyID   string `json:"reply_id,omitempty" jsonschema:"edit: the reply to rewrite; without it the thread's own comment is rewritten"`
-	Content   string `json:"content,omitempty" jsonschema:"reply text; required for a plain reply and for edit, optional with resolve or reopen"`
-	Action    string `json:"action,omitempty" jsonschema:"reply (default), resolve, reopen, or edit"`
+	Document     string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	CommentID    string `json:"comment_id,omitempty" jsonschema:"thread id from list_comments or add_comment; pass this or suggestion_id"`
+	SuggestionID string `json:"suggestion_id,omitempty" jsonschema:"reply on a suggestion's thread instead; id from list_suggestions. Plain replies only"`
+	ReplyID      string `json:"reply_id,omitempty" jsonschema:"edit: the reply to rewrite; without it the thread's own comment is rewritten"`
+	Content      string `json:"content,omitempty" jsonschema:"reply text; required for a plain reply and for edit, optional with resolve or reopen"`
+	Action       string `json:"action,omitempty" jsonschema:"reply (default), resolve, reopen, or edit"`
 }
 
 // DeleteCommentInput removes a thread or a reply.
@@ -83,10 +84,12 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 		Description: "Reply to a comment thread, resolve it, reopen it, or rewrite what it says. Resolving and reopening " +
 			"are reversible; both may carry a message. action edit replaces the text of the thread's own comment, or of " +
 			"one reply when reply_id names it; Google allows only the author of a comment to rewrite it. Thread and " +
-			"reply ids come from list_comments.",
+			"reply ids come from list_comments. With suggestion_id instead of comment_id it replies on a suggested " +
+			"edit's thread; accepting or rejecting one is review_suggestion.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReplyInput) (*mcp.CallToolResult, *service.ReplyResult, error) {
-		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, ReplyID: in.ReplyID, Content: in.Content, Action: in.Action})
+		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, SuggestionID: in.SuggestionID,
+			ReplyID: in.ReplyID, Content: in.Content, Action: in.Action})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

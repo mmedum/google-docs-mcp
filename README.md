@@ -198,11 +198,11 @@ for the defaults.
 | `create_document` | New document, optionally with markdown content. |
 | `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. |
-| `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing. |
+| `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing, and the replies on each one's thread. |
 | `review_suggestion` | Accept, reject or discard suggestions by id or all. |
 | `list_comments` | Comment threads with every reply, resolved and deleted state, quoted text and the block they sit on. |
 | `add_comment` | Comment on a passage (pinned to it) or on the document. |
-| `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. |
+| `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. Also replies on a suggested edit's thread. |
 | `list_revisions` | Version history: revision ids, times, authors. |
 | `diff_revisions` | Unified diff of Google's markdown or text export between two revisions. `read_document` reads an old `revision` whole. |
 | `edit_table` | `insert_table` (with a data grid), `set_cells` (minimal diff per cell), `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns` (fixed or even widths), `style_rows` (least height, page-break behavior), `pin_header_rows`. Same modes and guard as text edits. |

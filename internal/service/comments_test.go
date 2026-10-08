@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -149,6 +150,84 @@ func TestCommentModeRefusesCommentsGoogleDidNotSave(t *testing.T) {
 	}})
 	if classOf(err) != "server" {
 		t.Fatalf("got %+v, %v; want a [server] error", res, err)
+	}
+}
+
+// withSuggestionThread gives the fixture's suggestion s1 the thread the
+// comments view returns for it, with one reply already on it.
+func withSuggestionThread(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var w map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatal(err)
+	}
+	w["suggestions"] = json.RawMessage(`[{"suggestionId":"s1","status":"OPEN",
+		"headPost":{"postId":"h1","author":{"displayName":"Ann"}},
+		"replies":[{"postId":"p1","content":"Why this word?","author":{"displayName":"Bob"},"createTime":"2026-10-01T09:00:00Z"}]}]`)
+	return mustJSON(w)
+}
+
+func TestReplyToASuggestionsThread(t *testing.T) {
+	svc, api := writable(t, true)
+	api.raw = withSuggestionThread(t, api.raw)
+	api.replies = []string{`{"replies":[{"addCommentReply":{"post":{"postId":"p2"}}}],"commentUpdateState":"ALL_SAVED"}`}
+	res, err := svc.Reply(context.Background(), ReplyRequest{Document: fixtureID, SuggestionID: "s1", Content: " It reads better. "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SuggestionID != "s1" || res.ReplyID != "p2" || res.CommentID != "" || res.Text != "replied to suggestion s1 (reply p2)" {
+		t.Errorf("result: %+v", res)
+	}
+	if len(api.batches) != 1 || len(api.posted) != 0 {
+		t.Fatalf("want one Docs batch and no Drive reply; got %d batches, Drive posts %v", len(api.batches), api.posted)
+	}
+	want := `{"addCommentReply":{"post":{"content":"It reads better."},"suggestionId":"s1"}}`
+	if got := string(api.batches[0].Requests[0]); got != want {
+		t.Errorf("request:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestReplyToASuggestionIsRefused(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name  string
+		view  bool
+		req   ReplyRequest
+		class string
+	}{
+		{"both ids", true, ReplyRequest{Document: fixtureID, CommentID: "c1", SuggestionID: "s1", Content: "x"}, "invalid"},
+		{"resolve", true, ReplyRequest{Document: fixtureID, SuggestionID: "s1", Action: "resolve"}, "invalid"},
+		{"edit", true, ReplyRequest{Document: fixtureID, SuggestionID: "s1", Action: "edit", Content: "x"}, "invalid"},
+		{"no content", true, ReplyRequest{Document: fixtureID, SuggestionID: "s1"}, "invalid"},
+		{"unknown suggestion", true, ReplyRequest{Document: fixtureID, SuggestionID: "s9", Content: "x"}, "not_found"},
+		{"comments view refused", false, ReplyRequest{Document: fixtureID, SuggestionID: "s1", Content: "x"}, "unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, api := writable(t, tc.view)
+			api.raw = withSuggestionThread(t, api.raw)
+			if _, err := svc.Reply(ctx, tc.req); classOf(err) != tc.class {
+				t.Errorf("got %v; want a [%s] error", err, tc.class)
+			}
+			if len(api.batches) != 0 {
+				t.Errorf("a refused reply sent %d batches", len(api.batches))
+			}
+		})
+	}
+}
+
+func TestListSuggestionsShowsTheThreadsReplies(t *testing.T) {
+	svc, api := writable(t, true)
+	api.raw = withSuggestionThread(t, api.raw)
+	res, err := svc.ListSuggestions(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []CommentReply{{ID: "p1", Author: "Bob", Content: "Why this word?", Created: "2026-10-01T09:00:00Z"}}
+	if len(res.Suggestions) != 1 || !reflect.DeepEqual(res.Suggestions[0].Replies, want) {
+		t.Fatalf("suggestions: %+v", res.Suggestions)
+	}
+	if line := "    ↳ Bob (2026-10-01T09:00:00Z): Why this word?"; !strings.Contains(res.Text, line) {
+		t.Errorf("the listing does not show the reply; want %q in:\n%s", line, res.Text)
 	}
 }
 

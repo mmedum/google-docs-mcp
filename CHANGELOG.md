@@ -7,6 +7,14 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+
+- `reply_comment` replies on a suggested edit's thread when given
+  `suggestion_id` instead of `comment_id`. Only a plain reply: accepting
+  or rejecting the suggestion is still `review_suggestion`. It needs the
+  comments view, since Drive cannot see these threads.
+- `list_suggestions` shows the replies on each suggestion's thread.
+
 ### Fixed
 
 - A comment Google did not save is no longer reported as posted. Google

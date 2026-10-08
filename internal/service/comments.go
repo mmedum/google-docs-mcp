@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
 	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
@@ -235,24 +237,27 @@ func (s *Service) postDriveComment(ctx context.Context, f *Fetched, content, ass
 
 // ReplyRequest continues a thread.
 type ReplyRequest struct {
-	Document  string
-	CommentID string
-	ReplyID   string // edit: the reply to rewrite; empty means the comment itself
-	Content   string
-	Action    string // reply (default), resolve, reopen, edit
+	Document     string
+	CommentID    string
+	SuggestionID string // a suggestion's thread instead of a comment's; plain replies only
+	ReplyID      string // edit: the reply to rewrite; empty means the comment itself
+	Content      string
+	Action       string // reply (default), resolve, reopen, edit
 }
 
 // ReplyResult reports the posted reply.
 type ReplyResult struct {
-	CommentID string `json:"comment_id"`
-	ReplyID   string `json:"reply_id"`
-	Action    string `json:"action"`
-	Resolved  bool   `json:"resolved"`
-	Text      string `json:"-"`
+	CommentID    string `json:"comment_id"`
+	SuggestionID string `json:"suggestion_id,omitempty"`
+	ReplyID      string `json:"reply_id"`
+	Action       string `json:"action"`
+	Resolved     bool   `json:"resolved"`
+	Text         string `json:"-"`
 }
 
 // Reply posts a reply, resolves or reopens a thread through the Drive
-// API, which serves every deployment.
+// API, which serves every deployment. A suggestion's thread is the one
+// exception, since Drive cannot see it: see replyToSuggestion.
 func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, error) {
 	if err := s.requireWritable(); err != nil {
 		return nil, err
@@ -279,6 +284,15 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 		}
 	default:
 		return nil, Errorf("invalid", "action %q; use reply, resolve, reopen or edit", req.Action)
+	}
+	if suggestionID := strings.TrimSpace(req.SuggestionID); suggestionID != "" {
+		if strings.TrimSpace(req.CommentID) != "" {
+			return nil, Errorf("invalid", "comment_id and suggestion_id name two threads; pass one")
+		}
+		if action != "reply" {
+			return nil, Errorf("invalid", "a suggestion's thread takes replies only; accept or reject the suggestion with review_suggestion")
+		}
+		return s.replyToSuggestion(ctx, req.Document, suggestionID, content)
 	}
 	id, commentID, thread, err := s.commentRef(ctx, req.Document, req.CommentID)
 	if err != nil {
@@ -311,6 +325,32 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 	default:
 		res.Text = "reopened comment " + commentID
 	}
+	return res, nil
+}
+
+// replyToSuggestion posts a reply on a suggestion's thread. Drive's
+// comments do not include these threads, so the reply goes through the
+// Docs API and needs the comments view.
+func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, content string) (*ReplyResult, error) {
+	f, err := s.FetchFresh(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if !f.CommentsView {
+		return nil, Errorf("unavailable", "%s, so a suggestion's thread cannot be replied to", CommentsViewRefused)
+	}
+	if !slices.ContainsFunc(f.Wire.Suggestions, func(t gdocs.SuggestionThread) bool { return t.SuggestionID == suggestionID }) {
+		return nil, Errorf("not_found", "suggestion %s has no thread in this document; ids come from list_suggestions", suggestionID)
+	}
+	env, _, err := s.batchUpdate(ctx, f, []json.RawMessage{plan.ReplyToSuggestion(suggestionID, content)}, "")
+	if err != nil {
+		return nil, err
+	}
+	res := &ReplyResult{SuggestionID: suggestionID, ReplyID: env.replyPostID(), Action: "reply"}
+	if res.ReplyID == "" {
+		return nil, Errorf("ambiguous_outcome", "Google accepted the reply but did not say which one it created; list_suggestions shows whether it exists before you post it again")
+	}
+	res.Text = fmt.Sprintf("replied to suggestion %s (reply %s)", suggestionID, res.ReplyID)
 	return res, nil
 }
 

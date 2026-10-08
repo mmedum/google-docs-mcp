@@ -91,6 +91,15 @@ func TestLive(t *testing.T) {
 	if listed := d.ok("list suggestions", "list_suggestions", map[string]any{"document": doc}); strings.Contains(listed, "(text:") {
 		t.Errorf("an insertion's own style is listed as a restyling:\n%s", shown(listed, 500))
 	}
+	// A suggestion's thread is out of Drive's reach, so this reply goes
+	// through the Docs API; the listing is the only way to see it landed.
+	if len(suggestions) > 0 {
+		d.ok("reply on a suggestion's thread", "reply_comment", map[string]any{
+			"document": doc, "suggestion_id": suggestions[0], "content": "Live test: a reply on a suggestion."})
+		if listed := d.ok("list suggestions with the reply", "list_suggestions", map[string]any{"document": doc}); !strings.Contains(listed, "Live test: a reply on a suggestion.") {
+			t.Errorf("the reply on the suggestion's thread is not in the listing:\n%s", shown(listed, 500))
+		}
+	}
 	if len(suggestions) > 0 {
 		d.ok("reject the last suggestion", "review_suggestion", map[string]any{
 			"document": doc, "action": "reject", "ids": []any{suggestions[len(suggestions)-1]}})

@@ -244,7 +244,7 @@ func TestEveryPlaceAPersonIsWrittenIsKnown(t *testing.T) {
 	root := moduleRoot(t)
 	const (
 		wantUserLabel = 7  // service: ops.go x2, history.go, search.go x2, comments.go x2 (delete_comment's question)
-		wantPerson    = 34 // every read of a person field in the three packages
+		wantPerson    = 37 // every read of a person field in the three packages; the last three were a suggestion thread's reply authors, redacted with the ↳ line
 	)
 
 	dirs := []string{"internal/service", "internal/render", "internal/plan"}

@@ -400,7 +400,7 @@ bullet presets, clearing formatting.
 |---|---|---|
 | list | `documents.get` with `commentsViewMode` → threads plus the tab's `commentAnchors` map (anchor id → ranges) → handles | `comments.list` (replies, resolved state, `includeDeleted` opt-in) → `quotedFileContent`; server matches the quote to a block, best effort |
 | add | `insertComment` with a Range → anchored in the UI | `comments.create` with `quotedFileContent` → **unanchored** in the UI (stated in the description and in `warnings`) |
-| reply / resolve / reopen | `replies.create` with `action` (one backend for thread operations; `addCommentReply` adds nothing for replies) | `replies.create` with `action` |
+| reply / resolve / reopen | `replies.create` with `action` (one backend for thread operations; `addCommentReply` adds nothing for replies). A suggestion's thread is the exception: Drive cannot see it, so a reply there is `addCommentReply` with `suggestionId` | `replies.create` with `action`; no reply on a suggestion's thread |
 | delete | gated, `comments.delete` / `replies.delete` | gated |
 
 `list_comments` always lists through the Drive API, which carries every
@@ -461,11 +461,11 @@ registers only readOnly rows and requests readonly scopes.
 | `create_document` | Title, optional markdown body | — | 1 |
 | `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2, 4 |
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
-| `list_suggestions` | Pending suggestions with handles and authors | readOnly | 1 |
+| `list_suggestions` | Pending suggestions with handles, authors and the replies on their threads | readOnly | 1 |
 | `review_suggestion` | accept / reject / discard (discard is author-only); `all` asks the person; dry_run | — | 1, 4, 2.0 |
 | `list_comments` | Full threads: replies, resolved, deleted, quoted text, handles | readOnly | 2 |
 | `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | — | 2, 2.0 |
-| `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only) | — | 2, 4 |
+| `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only); `suggestion_id` replies on a suggestion's thread | — | 2, 4 |
 | `delete_comment` | Gated; a thread or one reply; asks the person; dry_run | destructive | 2, 2.0 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
 | `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | — | 2, 4 |

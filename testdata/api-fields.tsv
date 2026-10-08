@@ -42,7 +42,6 @@ SuggestedStyle	*	local	an embeddable, not a schema; its tags are promoted into t
 Document	commentsViewMode	out	the request sets the mode; the response echoing it adds nothing
 Post	assigneeEmail	out	published 2026-09; no tool reports an assignment yet
 Post	contentHtml	out	published 2026-09; the plain content is what a tool shows
-Post	deleted	out	published 2026-09; not yet checked live whether a deleted post is returned
 Post	fromCopiedDocument	out	published 2026-09; no tool reports where a post came from
 Post	fromDocumentComparison	out	published 2026-09; no tool reports where a post came from
 Post	fromImportedDocument	out	published 2026-09; no tool reports where a post came from

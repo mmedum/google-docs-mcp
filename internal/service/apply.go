@@ -55,6 +55,22 @@ func (e replyEnvelope) commentIDs() []string {
 	return out
 }
 
+// replyPostID is the id of the post an addCommentReply request created.
+func (e replyEnvelope) replyPostID() string {
+	id := ""
+	e.each("addCommentReply", func(raw json.RawMessage) {
+		var v struct {
+			Post struct {
+				PostID string `json:"postId"`
+			} `json:"post"`
+		}
+		if json.Unmarshal(raw, &v) == nil && id == "" {
+			id = v.Post.PostID
+		}
+	})
+	return id
+}
+
 // addedTabID is the id of the tab an addDocumentTab request created.
 func (e replyEnvelope) addedTabID() string {
 	id := ""
@@ -87,8 +103,8 @@ func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMe
 	}
 	env := decodeReplies(res.Raw)
 	// Google answers 200 and still saves no comment, naming no reason.
-	// Every batch carrying a comment carries nothing else, so nothing
-	// was written and asking again is safe.
+	// Every batch carrying a comment or a reply carries nothing else, so
+	// nothing was written and asking again is safe.
 	if env.CommentUpdateState == "ALL_FAILED_UNKNOWN_REASON" {
 		return replyEnvelope{}, "", Errorf("server", "Google saved none of the comments and gave no reason; nothing was posted, so try again shortly")
 	}

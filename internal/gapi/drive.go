@@ -186,8 +186,14 @@ type DriveReply struct {
 // ReplyFields is what reply calls ask for.
 const ReplyFields = "id,content,author(displayName,emailAddress),createdTime,action,deleted"
 
-// CommentFields is what the comment calls ask for.
-const CommentFields = "id,content,htmlContent,author(displayName,emailAddress),createdTime,modifiedTime,resolved,deleted,anchor,quotedFileContent,assigneeEmailAddress,replies(" + ReplyFields + ")"
+// CommentFields is what a comment read asks for: get and list.
+const CommentFields = commentWriteFields + ",assigneeEmailAddress"
+
+// commentWriteFields is what creating or editing a comment asks for back.
+// Not the assignee: Drive accepts it on get and list and answers
+// create and update with 400 "Invalid field selection
+// assignee_email_address" (live, 2026-10-09).
+const commentWriteFields = "id,content,htmlContent,author(displayName,emailAddress),createdTime,modifiedTime,resolved,deleted,anchor,quotedFileContent,replies(" + ReplyFields + ")"
 
 // commentURL is the Drive URL of a file's comment collection or, with an
 // id, of one thread.
@@ -210,7 +216,7 @@ func (c *Client) CreateComment(ctx context.Context, fileID, content, quote strin
 	if err != nil {
 		return nil, err
 	}
-	data, err := c.do(ctx, kindDriveWrite, http.MethodPost, c.commentURL(fileID, "")+"?fields="+url.QueryEscape(CommentFields), body)
+	data, err := c.do(ctx, kindDriveWrite, http.MethodPost, c.commentURL(fileID, "")+"?fields="+url.QueryEscape(commentWriteFields), body)
 	if err != nil {
 		return nil, wrapAmbiguousWrite(err)
 	}
@@ -293,7 +299,7 @@ func (c *Client) UpdateComment(ctx context.Context, fileID, commentID, content s
 	if err != nil {
 		return nil, err
 	}
-	data, err := c.do(ctx, kindDriveWrite, http.MethodPatch, c.commentURL(fileID, commentID)+"?fields="+url.QueryEscape(CommentFields), body)
+	data, err := c.do(ctx, kindDriveWrite, http.MethodPatch, c.commentURL(fileID, commentID)+"?fields="+url.QueryEscape(commentWriteFields), body)
 	if err != nil {
 		return nil, wrapAmbiguousWrite(err)
 	}

@@ -34,7 +34,7 @@ func (r *Run) Visible(v View) bool {
 // paragraph's plain text: text and the chips that show their label.
 func (r *Run) ContributesText() bool {
 	switch r.Kind {
-	case RunText, RunPerson, RunRichLink, RunDate:
+	case RunText, RunPerson, RunRichLink, RunDate, RunDropdown:
 		return true
 	}
 	return false

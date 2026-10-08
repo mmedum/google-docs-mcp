@@ -24,6 +24,12 @@ and new required fields are breaking; the schema diff in CI flags them.
 
 ### Fixed
 
+- A dropdown chip reads as the option selected in it. Google added
+  dropdowns in 2026-10 and reads dropped them, along with the selected
+  option's text.
+- Text after an element this server does not model keeps its position.
+  A regex `find_in_document` reported each match after a dropdown one
+  character early.
 - A comment Google did not save is no longer reported as posted. Google
   can accept a batch of comments and save none of them; `add_comment`
   then said `comment  posted` with no id, and comment mode reported its

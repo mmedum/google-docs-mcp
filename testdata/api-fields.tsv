@@ -40,7 +40,7 @@ SuggestedStyle	*	local	an embeddable, not a schema; its tags are promoted into t
 # document in 2026-09, still marked Developer Preview. These fields came
 # with them and no tool reads them yet.
 Document	commentsViewMode	out	the request sets the mode; the response echoing it adds nothing
-Post	assigneeEmail	out	published 2026-09; no tool reports an assignment yet
+Post	assigneeEmail	out	list_comments reads the assignee from Drive's listing, which every deployment gets
 Post	contentHtml	out	published 2026-09; the plain content is what a tool shows
 Post	fromCopiedDocument	out	published 2026-09; no tool reports where a post came from
 Post	fromDocumentComparison	out	published 2026-09; no tool reports where a post came from
@@ -85,3 +85,8 @@ NestingLevel	textStyle	out	the glyph's own styling; no read renders it and no to
 # A link to a bookmark. This server models the deprecated bookmarkId,
 # which is what the API still sends, and nothing here creates bookmarks.
 Link	bookmark	out	no tool creates or follows bookmarks; bookmarkId is modeled for the links Google still sends
+#
+# Dropdown chips entered the discovery document between 2026-09-26 and
+# 2026-10-06. A read shows a dropdown as the option selected in it.
+DocumentTab	dropdownDefinitions	out	the options a dropdown offers; a read shows only the one selected, and no tool sets a dropdown
+Dropdown	suggestedDropdownPropertiesChanges	out	a suggestion that only changes which option is selected is not reported; the selected option is

@@ -775,3 +775,48 @@ func TestRegexReplaceAllIsGuardedAndRefused(t *testing.T) {
 		t.Errorf("a refused replace sent %d batches", len(api.batches))
 	}
 }
+
+// chipDocument is one paragraph with an element between two runs of
+// text: "Status: " at 1, the element at 9, " done\n" at 10. element is
+// the element's JSON key and body.
+func chipDocument(element string) []byte {
+	return []byte(`{"documentId":"` + fixtureID + `","title":"Chips","revisionId":"rev-0001","body":{"content":[
+		{"startIndex":0,"endIndex":1,"sectionBreak":{}},
+		{"startIndex":1,"endIndex":16,"paragraph":{"elements":[
+			{"startIndex":1,"endIndex":9,"textRun":{"content":"Status: "}},
+			{"startIndex":9,"endIndex":10,` + element + `},
+			{"startIndex":10,"endIndex":16,"textRun":{"content":" done\n"}}]}}]}}`)
+}
+
+func TestADropdownReadsAsItsSelectedOption(t *testing.T) {
+	svc, api := newService(t)
+	api.raw = chipDocument(`"dropdown":{"dropdownProperties":{"displayValue":"Approved"}}`)
+	res, err := svc.Read(context.Background(), ReadRequest{Document: fixtureID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "Status: Approved done") {
+		t.Errorf("the dropdown's selected option is not in the read:\n%s", res.Text)
+	}
+}
+
+// An element between two runs takes index space whether this server
+// models it or not. A replace after one must land on Google's indices:
+// "done" is [11,15), not [10,14).
+func TestARegexReplaceAfterAChipHitsItsOwnRange(t *testing.T) {
+	for _, element := range []string{
+		`"dropdown":{"dropdownProperties":{"displayValue":"Approved"}}`,
+		`"elementGoogleAddsLater":{}`,
+	} {
+		svc, api := writable(t, false)
+		api.raw = chipDocument(element)
+		if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+			{Kind: plan.OpReplaceAll, Params: plan.Params{Find: `done`, Regex: true}},
+		}}); err != nil {
+			t.Fatalf("%s: %v", element, err)
+		}
+		if got := kindsOf(t, api.batches[0].Requests); got != "deleteContentRange[11,15)" {
+			t.Errorf("%s: requests %s, want deleteContentRange[11,15)", element, got)
+		}
+	}
+}

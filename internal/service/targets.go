@@ -330,12 +330,22 @@ const objectPlaceholder = '\uFFFC'
 // with every non-text element (chip, image, footnote reference, break)
 // replaced by one placeholder per UTF-16 unit, so string offsets equal
 // index offsets. Chips contribute a placeholder, not their display text.
+//
+// A gap between runs is an element the parser does not model, and gets
+// placeholders too. Without them every offset after it moved: Google
+// added dropdown chips, and until they were parsed, each one shifted the
+// text after it by its length.
 func alignedSlice(p *doc.Paragraph, start, end int64) string {
 	var b strings.Builder
+	pos := start
 	for _, run := range p.Runs {
 		if run.End <= start || run.Start >= end {
 			continue
 		}
+		for ; pos < run.Start; pos++ {
+			b.WriteRune(objectPlaceholder)
+		}
+		pos = min(end, run.End)
 		from := max(start, run.Start) - run.Start
 		to := min(end, run.End) - run.Start
 		if run.Kind == doc.RunText {

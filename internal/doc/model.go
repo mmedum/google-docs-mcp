@@ -448,6 +448,7 @@ const (
 	RunPerson         RunKind = "person"
 	RunRichLink       RunKind = "rich_link"
 	RunDate           RunKind = "date"
+	RunDropdown       RunKind = "dropdown"
 	RunEquation       RunKind = "equation"
 	RunAutoText       RunKind = "auto_text"
 )

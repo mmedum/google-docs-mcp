@@ -432,6 +432,7 @@ type ParagraphElement struct {
 	DateElement         *DateElement         `json:"dateElement,omitempty"`
 	Equation            *Suggested           `json:"equation,omitempty"`
 	AutoText            *AutoText            `json:"autoText,omitempty"`
+	Dropdown            *Dropdown            `json:"dropdown,omitempty"`
 }
 
 // TextRun is styled text.
@@ -559,6 +560,23 @@ type DateElement struct {
 	TextStyle             *TextStyle             `json:"textStyle,omitempty"`
 
 	SuggestedDateElementPropertiesChanges map[string]SuggestedDateElementProperties `json:"suggestedDateElementPropertiesChanges,omitempty"`
+}
+
+// Dropdown is a dropdown chip. It shows the option selected in it; the
+// options themselves live in the tab's dropdown definitions.
+type Dropdown struct {
+	Suggested
+	SuggestedStyle
+	DropdownID         string              `json:"dropdownId,omitempty"`
+	DropdownProperties *DropdownProperties `json:"dropdownProperties,omitempty"`
+	TextStyle          *TextStyle          `json:"textStyle,omitempty"`
+}
+
+// DropdownProperties name the selected option and its display text.
+type DropdownProperties struct {
+	DropdownDefinitionID string `json:"dropdownDefinitionId,omitempty"`
+	SelectedOptionID     string `json:"selectedOptionId,omitempty"`
+	DisplayValue         string `json:"displayValue,omitempty"`
 }
 
 // DateElementProperties describe the date chip.

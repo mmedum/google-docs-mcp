@@ -239,7 +239,7 @@ func textWithMarks(p *doc.Paragraph, view doc.View, marks []Mark) string {
 				text, pos = text[cut:], m.End
 			}
 			b.WriteString(text)
-		case doc.RunPerson, doc.RunRichLink, doc.RunDate:
+		case doc.RunPerson, doc.RunRichLink, doc.RunDate, doc.RunDropdown:
 			b.WriteString(r.Text)
 		}
 	}
@@ -271,7 +271,7 @@ func objectText(r *doc.Run, tab *doc.Tab) string {
 			return "[" + r.Text + "](" + r.LinkURI + ")"
 		}
 		return r.Text
-	case doc.RunDate:
+	case doc.RunDate, doc.RunDropdown:
 		return r.Text
 	case doc.RunEquation:
 		return "{equation}"

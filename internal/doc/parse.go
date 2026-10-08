@@ -439,6 +439,13 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 			}
 		}
 		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
+	case el.Dropdown != nil:
+		e := el.Dropdown
+		r.Kind = RunDropdown
+		if e.DropdownProperties != nil {
+			r.Text = e.DropdownProperties.DisplayValue
+		}
+		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
 	case el.Equation != nil:
 		r.Kind = RunEquation
 		r.Inserted, r.Deleted = el.Equation.SuggestedInsertionIDs, el.Equation.SuggestedDeletionIDs

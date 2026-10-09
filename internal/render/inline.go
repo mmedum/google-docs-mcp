@@ -253,32 +253,103 @@ func textWithMarks(p *doc.Paragraph, view doc.View, marks []Mark) string {
 // entityLike is text a markdown reader takes for a character reference.
 var entityLike = regexp.MustCompile(`^&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
 
-// escapeText keeps a backslash and an ampersand in prose what they are
-// when the markdown is written back, since content resolves backslash
-// escapes and character references as CommonMark does. A backslash is
-// escaped where a reader would take it for an escape or a break: before
-// punctuation, a space, or the end. So is the punctuation after one,
-// which that backslash protected (`\*` stays two characters, not an
-// emphasis mark), and an ampersand that starts a reference. A pipe is
-// left to tableCellText, which escapes every one in a table. Code keeps
-// all of it as it is.
+// escapeText keeps prose what it is when the markdown is written back:
+// it escapes each character content would read as markup, and no other,
+// so a read stays legible.
+//
+//   - A backslash where a reader takes it for an escape or a break: before
+//     punctuation, a space, or the end. And the punctuation after one,
+//     which that backslash protected: `\*` stays two characters.
+//   - An ampersand that starts a character reference.
+//   - A `*` unless spaces stand on both sides of it, and a `_` unless
+//     spaces or letters do: neither can then open or close emphasis.
+//   - Every backtick, tilde and `[`: code, strikethrough, a link.
+//   - A `<` that could open an autolink or inline HTML.
+//
+// The edge of the text counts as neither a space nor a letter, since a
+// style mark may stand there; so does space at either end, which
+// markSpan writes outside the marks. A pipe is left to tableCellText,
+// which escapes every one in a table, and a line start to
+// escapeLineStart. Code keeps all of it as it is.
 func escapeText(s string) string {
+	rs := []rune(s)
+	lo, hi := 0, len(rs)-1
+	for lo <= hi && unicode.IsSpace(rs[lo]) {
+		lo++
+	}
+	for hi >= lo && unicode.IsSpace(rs[hi]) {
+		hi--
+	}
+	at := func(i int) rune {
+		if i < lo || i > hi {
+			return 0
+		}
+		return rs[i]
+	}
 	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '\\' && (i+1 == len(s) || s[i+1] <= ' ' || isPunct(s[i+1])),
-			i > 0 && s[i-1] == '\\' && c != '|' && isPunct(c),
-			c == '&' && entityLike.MatchString(s[i:]):
+	for i, c := range rs {
+		if markup(c, at(i-1), at(i+1), rs[i:]) {
 			b.WriteByte('\\')
 		}
-		b.WriteByte(c)
+		b.WriteRune(c)
 	}
 	return b.String()
 }
 
+// codeSpan fences code in one more backtick than its longest run of
+// them, padded with a space where it starts or ends with one, which a
+// reader then strips (CommonMark, code spans).
+func codeSpan(s string) string {
+	longest, run := 0, 0
+	for _, c := range s {
+		if c != '`' {
+			run = 0
+			continue
+		}
+		run++
+		longest = max(longest, run)
+	}
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		s = " " + s + " "
+	}
+	fence := strings.Repeat("`", longest+1)
+	return fence + s + fence
+}
+
+// markup reports whether content would read c, between prev and next,
+// as markup, by the rules on escapeText; 0 stands for an edge. rest is
+// the text from c on.
+func markup(c, prev, next rune, rest []rune) bool {
+	if prev == '\\' && c != '|' && isPunct(c) {
+		return true
+	}
+	switch c {
+	case '\\':
+		return next <= ' ' || isPunct(next)
+	case '&':
+		return entityLike.MatchString(string(rest))
+	case '*':
+		return !isSpace(prev) || !isSpace(next)
+	case '_':
+		between := isSpace(prev) && isSpace(next)
+		inWord := isWord(prev) && isWord(next)
+		return !between && !inWord
+	case '`', '~', '[':
+		return true
+	case '<':
+		return next == 0 || next == '/' || next == '!' || next == '?' || unicode.IsLetter(next)
+	}
+	return false
+}
+
+func isSpace(r rune) bool { return r != 0 && unicode.IsSpace(r) }
+
+func isWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+
 // isPunct reports whether CommonMark lets a backslash escape c.
-func isPunct(c byte) bool { return strings.IndexByte("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", c) >= 0 }
+func isPunct(c rune) bool {
+	return c < 128 && strings.ContainsRune("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", c)
+}
 
 // tableCellText escapes what would break a markdown table cell.
 func tableCellText(s string) string {
@@ -356,7 +427,7 @@ func markSpan(s span, o Options) string {
 	st := s.style
 	switch {
 	case st.Monospace():
-		core = "`" + core + "`"
+		core = codeSpan(core)
 	default:
 		if st.Bold {
 			core = "**" + core + "**"

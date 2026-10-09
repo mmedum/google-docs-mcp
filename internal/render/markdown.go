@@ -280,17 +280,33 @@ func (r *mdRenderer) footnoteDefs() string {
 }
 
 // escapeLineStart keeps prose that starts like markdown syntax from being
-// read as a heading, list item or rule.
+// read as a heading, list item, quote, rule or code block. A marker alone
+// on the line counts: `-` or `2)` with nothing after it is an empty list
+// item. Four spaces or a tab of indent would make a code block, so the
+// first is written as a character reference, which keeps it.
 func escapeLineStart(s string) string {
-	trim := strings.TrimLeft(s, " ")
+	trim := strings.TrimLeft(s, " \t")
+	if lead := s[:len(s)-len(trim)]; len(lead) >= 4 || strings.Contains(lead, "\t") {
+		return "&#" + strconv.Itoa(int(lead[0])) + ";" + s[1:]
+	}
+	marker := func(m string) bool {
+		return trim == m || strings.HasPrefix(trim, m+" ") || strings.HasPrefix(trim, m+"\t")
+	}
 	switch {
-	case strings.HasPrefix(trim, "#"), strings.HasPrefix(trim, "- "), strings.HasPrefix(trim, "+ "), strings.HasPrefix(trim, "* "), strings.HasPrefix(trim, ">"), trim == "---", trim == "***":
+	case strings.HasPrefix(trim, "#"), strings.HasPrefix(trim, ">"), marker("-"), marker("+"), marker("*"), isRule(trim):
 		return "\\" + s
 	}
-	if i := strings.IndexAny(trim, ".)"); i > 0 && i < 4 {
-		if _, err := strconv.Atoi(trim[:i]); err == nil && len(trim) > i+1 && trim[i+1] == ' ' {
+	if i := strings.IndexAny(trim, ".)"); i > 0 && i <= 9 {
+		if _, err := strconv.Atoi(trim[:i]); err == nil && (len(trim) == i+1 || trim[i+1] == ' ' || trim[i+1] == '\t') {
 			return trim[:i] + "\\" + trim[i:]
 		}
 	}
 	return s
+}
+
+// isRule reports whether a line is a thematic break: three or more of
+// one of -, * or _, spaces between allowed.
+func isRule(line string) bool {
+	marks := strings.Join(strings.Fields(line), "")
+	return len(marks) >= 3 && (strings.Trim(marks, "-") == "" || strings.Trim(marks, "*") == "" || strings.Trim(marks, "_") == "")
 }

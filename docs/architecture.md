@@ -413,10 +413,18 @@ dropped and their text kept. Backslash escapes and entity references
 resolve in text and addresses, as CommonMark says, and not in code
 spans. An autolink keeps its text as typed, as goldmark renders one.
 goldmark keeps them in the source and resolves them only while writing
-HTML, so the parser resolves them through goldmark's own writer. A read
-escapes what that would resolve: a backslash before punctuation, a
-space or the end, the punctuation after one, and an ampersand that
-starts a reference. So prose read and written back is unchanged. Fenced code → Courier-styled paragraphs.
+HTML, so the parser resolves them through goldmark's own writer. A
+`<br>` is a paragraph break, as a read writes between a table cell's
+paragraphs; in a heading or list item, a line break. A read escapes
+each character content would take as markup, and no other: a backslash
+before punctuation, a space or the end, and the punctuation after one;
+an ampersand that starts a reference; a `*` or `_` that could open or
+close emphasis; every backtick, tilde and `[`; a `<` that could start a
+tag; and a line that starts like a list, heading, quote, rule or
+indented code. Code holding a backtick gets a longer fence. So text read
+and written back is unchanged, apart from up to three spaces at a
+paragraph's start and any at its end, which markdown drops. A
+randomized test holds it, plain, bold, code and in table cells. Fenced code → Courier-styled paragraphs.
 Tables and images go in the body between blocks, through an `insert`,
 `append` or `replace` (§7.3). Table cells are plain text. An image sits
 on a line of its own, with an http or https address Google fetches
@@ -1166,3 +1174,4 @@ checked rather than assumed.
 | A suggest-mode delete of an empty paragraph the same call suggested leaves a suggested deletion | Refuted live 2026-10-09: the read after a suggest-mode content call showed no empty paragraph around the suggested table, and rejecting its one suggestion restored the section exactly | The tidy round needs nothing of its own in suggest mode. |
 | An image address Google cannot fetch fails at the request | Confirmed live 2026-10-09: `insertInlineImage` with an address that answers 404 is refused whole, 400 INVALID_ARGUMENT "The provided image was not found." | A round that places one fails alone: a warning names the image's line, and its text and empty paragraph stay. |
 | Every name in a transcript sits in a position a rule knows, because this project's renderers wrote them all | Refuted 2026-10-09 by reading two live transcripts: a person chip printed the account's display name as `@Name` in markdown and bare in a plain-text read, six times a run, with no label before it for a rule to find | The driver reads the account's display name from `get_document` before any step can print a chip, and `redact.Names` replaces it wherever it appears. The eval traces were redacted as encoded JSON, where a newline is `\n` and no line rule fires, so the owner line kept its name; `redact.TranscriptJSON` now redacts each string. |
+| `deleteContentRange` takes an empty range as a no-op | Refuted live 2026-10-09: "Invalid requests[1].deleteContentRange: The range should not be empty", and the batch it was in was refused whole. A replace over an empty table cell with content of more than one paragraph sent one, so every cell of an `insert_table` fill stayed empty | A replace deletes only a range that holds something; the test simulator refuses an empty one as Google does. |

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -236,7 +237,7 @@ func (p *fragParser) blocks(parent ast.Node, nesting int, listID int) error {
 			if err != nil {
 				return err
 			}
-			p.out = append(p.out, &Block{Kind: KindHeading, Level: v.Level, Inlines: in, Line: p.lineOf(v)})
+			p.out = append(p.out, &Block{Kind: KindHeading, Level: v.Level, Inlines: lineBreaks(in), Line: p.lineOf(v)})
 		case *ast.Paragraph, *ast.TextBlock:
 			if imgs, ok := lineImages(v, p.src); ok {
 				line := p.lineOf(v)
@@ -257,9 +258,11 @@ func (p *fragParser) blocks(parent ast.Node, nesting int, listID int) error {
 				return err
 			}
 			if listID > 0 {
-				p.out = append(p.out, &Block{Kind: KindListItem, Nesting: nesting - 1, ListID: listID, Ordered: p.orderedOf(listID), Inlines: in, Line: p.lineOf(v)})
-			} else {
-				p.out = append(p.out, &Block{Kind: KindParagraph, Inlines: in, Line: p.lineOf(v)})
+				p.out = append(p.out, &Block{Kind: KindListItem, Nesting: nesting - 1, ListID: listID, Ordered: p.orderedOf(listID), Inlines: lineBreaks(in), Line: p.lineOf(v)})
+				continue
+			}
+			for _, part := range splitBreaks(in) {
+				p.out = append(p.out, &Block{Kind: KindParagraph, Inlines: part, Line: p.lineOf(v)})
 			}
 		case *ast.List:
 			id := listID
@@ -420,7 +423,14 @@ func (p *fragParser) inlines(parent ast.Node) ([]Inline, error) {
 				return &UnsupportedError{Construct: "image inside text", Line: p.lineOf(c),
 					Hint: "an image in content goes on a line of its own; to put one inside a sentence, use insert_object"}
 			case *ast.RawHTML:
-				return &UnsupportedError{Construct: "inline HTML", Line: p.lineOf(c)}
+				if !isBreak(v, p.src) {
+					return &UnsupportedError{Construct: "inline HTML", Line: p.lineOf(c)}
+				}
+				// A paragraph break, which the caller places: it is how a
+				// read joins a table cell's paragraphs, and how GFM breaks
+				// a line in a cell.
+				out = appendInline(out, s, "\n")
+				continue
 			case *extast.TaskCheckBox:
 				continue
 			}
@@ -453,6 +463,45 @@ func plainText(src []byte) string {
 	gmhtml.DefaultWriter.Write(w, src)
 	_ = w.Flush()
 	return html.UnescapeString(b.String())
+}
+
+// brTag is a <br> tag in any of its spellings.
+var brTag = regexp.MustCompile(`(?i)^<br\s*/?>$`)
+
+// isBreak reports whether inline HTML is a <br> tag.
+func isBreak(v *ast.RawHTML, src []byte) bool {
+	var tag strings.Builder
+	for i := 0; i < v.Segments.Len(); i++ {
+		s := v.Segments.At(i)
+		tag.Write(s.Value(src))
+	}
+	return brTag.MatchString(tag.String())
+}
+
+// splitBreaks cuts a paragraph's inlines into one paragraph per <br>.
+func splitBreaks(in []Inline) [][]Inline {
+	parts := [][]Inline{nil}
+	for _, x := range in {
+		for i, piece := range strings.Split(x.Text, "\n") {
+			if i > 0 {
+				parts = append(parts, nil)
+			}
+			if piece != "" {
+				x.Text = piece
+				parts[len(parts)-1] = append(parts[len(parts)-1], x)
+			}
+		}
+	}
+	return parts
+}
+
+// lineBreaks turns each <br> into a line break, where a new paragraph
+// would make a second heading or list item.
+func lineBreaks(in []Inline) []Inline {
+	for i := range in {
+		in[i].Text = strings.ReplaceAll(in[i].Text, "\n", "\v")
+	}
+	return in
 }
 
 func appendInline(out []Inline, style Inline, txt string) []Inline {

@@ -3,8 +3,10 @@ package render_test
 import (
 	"flag"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -158,6 +160,90 @@ func TestProseParsesBackAsItWas(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("read as %q, parsed back as\n%s\nwant\n%s", md, strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+}
+
+// Any prose a read prints parses back to itself, plain, bold or code, and
+// indented four spaces or a tab: what content would read as markup is
+// escaped, wherever it falls. The pieces are the ones that start markup, put together at
+// random, with a fixed seed so a failure repeats.
+func TestReadProseParsesBackAtRandom(t *testing.T) {
+	pieces := []string{"a", "b", "1", "é", " ", "*", "**", "_", "__", "`", "~", "~~", "[", "]", "(", ")", "](x)", "<", ">",
+		"<a>", "<br>", "</b>", "<!--", "<?", "<http://e.test>", "!", "![", "&", "&amp;", "&#169;", "&x", ";", "\\", "\\*",
+		"#", "# ", "- ", "+ ", "* ", "> ", "1. ", "2) ", "1234. ", "----", "- - -", "|", "{++", "++}", ":", "/", "\"", "'", "^", "=", "."}
+	r := rand.New(rand.NewPCG(1, 2))
+	for range 3000 {
+		var b strings.Builder
+		for range 1 + r.IntN(8) {
+			b.WriteString(pieces[r.IntN(len(pieces))])
+		}
+		text := strings.Join(strings.Fields(b.String()), " ") // markdown drops the space at the ends
+		if text == "" {
+			continue
+		}
+		// A paragraph indented four spaces or a tab keeps its indent.
+		indent := []string{"", "", "    ", "\t"}[r.IntN(4)]
+		for _, style := range []doc.TextStyle{{}, {Bold: true}, {FontFamily: "Courier New"}} {
+			text := text
+			if style.FontFamily == "" {
+				text = indent + text
+			}
+			seg := &doc.Segment{Kind: doc.SegmentBody, Tab: &doc.Tab{Number: 1}}
+			seg.Blocks = []*doc.Block{{Kind: doc.KindParagraph, Handle: "p1", Segment: seg, Paragraph: &doc.Paragraph{Runs: []*doc.Run{
+				{Kind: doc.RunText, Text: text + "\n", Style: style}}}}}
+			md := render.Markdown(seg, 0, 1, render.Options{}).Text
+			f, err := markdown.Parse(md)
+			if err != nil {
+				t.Fatalf("%q read as %q: %v", text, md, err)
+			}
+			if len(f.Blocks) != 1 || f.Blocks[0].Kind != markdown.KindParagraph {
+				t.Fatalf("%q (%+v) read as %q, parsed back as %d block(s): %+v", text, style, md, len(f.Blocks), f.Blocks)
+			}
+			var got strings.Builder
+			ok := true
+			for _, in := range f.Blocks[0].Inlines {
+				got.WriteString(in.Text)
+				// Space at a run's edge is written outside its marks.
+				styled := strings.TrimSpace(in.Text) == "" || in.Bold == style.Bold && in.Code == style.Monospace()
+				ok = ok && styled && !in.Italic && !in.Strike && in.Link == ""
+			}
+			if !ok || got.String() != text {
+				t.Fatalf("%q (%+v) read as %q, parsed back as %+v", text, style, md, f.Blocks[0].Inlines)
+			}
+		}
+		// In a table cell, beside a second paragraph or a second cell.
+		cells := [][]string{{text, "x"}}
+		if r.IntN(2) == 0 {
+			cells[0][0] += "\n" + text
+		}
+		md := render.Markdown(tableOf(cells), 0, 1, render.Options{}).Text
+		f, err := markdown.Parse(md)
+		if err != nil || len(f.Blocks) != 1 || f.Blocks[0].Table == nil {
+			t.Fatalf("%q read as %q, parsed back as %v: %+v", cells, md, err, f)
+		}
+		if got, _, _ := f.Blocks[0].Table.Grid(); !slices.EqualFunc(got, cells, slices.Equal) {
+			t.Fatalf("%q read as %q, parsed back as %q", cells, md, got)
+		}
+	}
+}
+
+// tableOf is a body holding one table, a paragraph per line of each cell.
+func tableOf(cells [][]string) *doc.Segment {
+	seg := &doc.Segment{Kind: doc.SegmentBody, Tab: &doc.Tab{Number: 1}}
+	tbl := &doc.Table{Handle: "tbl1", Rows: len(cells), Cols: len(cells[0])}
+	for ri, row := range cells {
+		var out []*doc.Cell
+		for ci, text := range row {
+			c := &doc.Cell{Table: tbl, Row: ri + 1, Col: ci + 1, Handle: fmt.Sprintf("tbl1:r%dc%d", ri+1, ci+1)}
+			for pi, line := range strings.Split(text, "\n") {
+				c.Blocks = append(c.Blocks, &doc.Block{Kind: doc.KindParagraph, Handle: fmt.Sprintf("%s/p%d", c.Handle, pi+1), Segment: seg,
+					Paragraph: &doc.Paragraph{Runs: []*doc.Run{{Kind: doc.RunText, Text: line + "\n"}}}})
+			}
+			out = append(out, c)
+		}
+		tbl.Cells = append(tbl.Cells, out)
+	}
+	seg.Blocks = []*doc.Block{{Kind: doc.KindTable, Handle: "tbl1", Segment: seg, Table: tbl}}
+	return seg
 }
 
 func TestPlainDetails(t *testing.T) {

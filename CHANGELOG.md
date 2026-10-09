@@ -10,6 +10,9 @@ diff in CI flags them.
 
 ### Added
 
+- Content takes `<br>` as a paragraph break, which is how a read joins
+  a table cell's paragraphs and how GFM breaks a line in a table. In a
+  heading or a list item it is a line break.
 - `reply_comment` replies on a suggested edit's thread when given
   `suggestion_id` instead of `comment_id`. It posts a plain reply only;
   accepting or rejecting is still `review_suggestion`. It needs the
@@ -48,17 +51,23 @@ diff in CI flags them.
 
 ### Fixed
 
-- Prose read as markdown and written back is unchanged. Content now
-  resolves backslash escapes and entity references, in text and link
-  addresses, as CommonMark does: `\#`, which a read writes before prose
-  that starts like a heading, wrote a backslash into the document. A
-  read now escapes the backslashes and ampersands that would resolve,
-  such as the first in `\\server`. A code span keeps both as typed.
+- Text read as markdown and written back is unchanged, apart from up
+  to three spaces at a paragraph's start and any at its end, which
+  markdown drops. A read escapes each character content would take as
+  markup: a backslash, a reference, emphasis and code marks, `[`, a tag,
+  and a line that starts like a list, heading, rule or indented code.
+  Code holding a backtick reads with a longer fence. Content resolves
+  backslash escapes and entity references in text and link addresses,
+  as CommonMark does; `\#` from a read wrote a backslash into the
+  document.
 - A code span that runs over two lines of content is one span with a
   space in it, as CommonMark says. It wrote two paragraphs.
 - An edit warns that handles have shifted after an insert just before
   the last paragraph too. It missed that case, so a handle read before
   the edit could name another block with no warning.
+- `set_cells` writes content of more than one paragraph into an empty
+  cell. It sent a delete of the empty cell first, which Google refuses,
+  so the whole batch failed, an `insert_table` fill included.
 - `edit_table` `insert_table` with `data` and `content_format: text`
   writes the cells verbatim. The fill read them as markdown.
 - In suggest mode, a later batch no longer warns about suggestions its

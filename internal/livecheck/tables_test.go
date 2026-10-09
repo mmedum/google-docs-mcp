@@ -95,8 +95,9 @@ func liveContentEmbeds(t *testing.T, d *driver, doc string) {
 		return map[string]any{"document": doc, "mode": mode, "ops": []any{
 			map[string]any{"op": "insert", "location": afterBackground, "content": content}}}
 	}
-	// A cell reading "# Item" stays as written: cells are plain text.
-	content := "Embeds lead.\n\n| # Item | Owner |\n|---|---|\n| One | Ann |\n\n![docs logo](" + logo + ")\n\nEmbeds tail."
+	// A cell reading "# Item" stays as written: cells are plain text. A
+	// <br> in a cell is a second paragraph there, as a read shows it.
+	content := "Embeds lead.\n\n| # Item | Owner |\n|---|---|\n| One<br>two | Ann |\n\n![docs logo](" + logo + ")\n\nEmbeds tail."
 
 	before := first(revisionOf, d.ok("revision before the dry run", "get_document", map[string]any{"document": doc}))
 	dry := insert("direct", content)
@@ -121,7 +122,7 @@ func liveContentEmbeds(t *testing.T, d *driver, doc string) {
 		t.Fatalf("the content's text is not in the section:\n%s", shown(read, 900))
 	}
 	region := read[lead:tail]
-	for _, want := range []string{"table 2×2", "| # Item | Owner |", "| One | Ann |", "!["} {
+	for _, want := range []string{"table 2×2", "| # Item | Owner |", "| One<br>two | Ann |", "!["} {
 		if !strings.Contains(region, want) {
 			t.Errorf("the region lacks %q:\n%s", want, shown(region, 600))
 		}

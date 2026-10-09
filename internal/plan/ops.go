@@ -787,10 +787,13 @@ func replaceRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 		}
 		return EditRequests(edits, seg), true, nil
 	}
-	// Whole-range replacement: delete, then insert at the same spot.
+	// Whole-range replacement: delete, then insert at the same spot. An
+	// empty cell has nothing to delete, and Google refuses an empty range.
 	var reqs []json.RawMessage
 	del := deleteRange(op)
-	reqs = append(reqs, DeleteRange(del))
+	if del.End > del.Start {
+		reqs = append(reqs, DeleteRange(del))
+	}
 	opts := FragmentOptions{NearBullet: op.NearBullet, Slots: inBody(op) && op.TargetIsBlock}
 	at := Loc{Index: del.Start, SegmentID: seg.ID, TabID: seg.TabID}
 	switch {

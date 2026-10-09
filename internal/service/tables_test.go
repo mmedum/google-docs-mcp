@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -361,5 +362,18 @@ func TestInsertTableDataFormat(t *testing.T) {
 		if err != nil || sim.String() != tc.want {
 			t.Errorf("format %q: %v\n%s\nwant:\n%s", tc.format, err, sim.String(), tc.want)
 		}
+	}
+}
+
+// Content of two paragraphs goes into an empty cell with no delete
+// first: there is nothing to delete, and Google refuses an empty range.
+func TestSetCellsParagraphsIntoAnEmptyCell(t *testing.T) {
+	sim := newSim(t, "Title", "Last.")
+	sim.elems = slices.Insert(sim.elems, 1, &simElem{cells: [][]string{{"", "x"}}})
+	svc, api := simService(t, sim)
+	_, err := svc.Edit(context.Background(), contentEdit("direct", EditOp{Kind: plan.OpSetCells,
+		Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r1c1", Content: "p\n\nq"}, {Cell: "r1c2", Content: "y<br>z"}}}}))
+	if err != nil || sim.String() != "Title\n[p\nq|y\nz]\nLast." {
+		t.Fatalf("%v\n%s\nbatches %d", err, sim.String(), len(api.batches))
 	}
 }

@@ -42,9 +42,11 @@ type simDoc struct {
 func (s *simDoc) edited() { s.revision += "+" }
 
 type simElem struct {
-	para      string     // a paragraph's text, ending in its newline
-	cells     [][]string // a table's cells, each without its newline
-	suggested bool       // inserted by a suggest-mode batch, whole
+	para string // a paragraph's text, ending in its newline
+	// cells are a table's cells, each without its final newline; a
+	// newline inside one separates the cell's paragraphs.
+	cells     [][]string
+	suggested bool // inserted by a suggest-mode batch, whole
 }
 
 // simSuggestion is the one suggestion every suggest-mode write files under.
@@ -166,9 +168,6 @@ func (s *simDoc) insertText(text string, index int64) {
 	e := s.elems[i]
 	if e.cells != nil {
 		r, c, off := s.cellAt(e, st, index)
-		if strings.Contains(text, "\n") {
-			s.t.Fatalf("sim: a newline into a cell is not modeled")
-		}
 		e.cells[r][c] = splice(e.cells[r][c], off, text)
 		return
 	}
@@ -180,6 +179,9 @@ func (s *simDoc) insertText(text string, index int64) {
 }
 
 func (s *simDoc) deleteRange(from, to int64) {
+	if to <= from {
+		s.t.Fatalf("sim: delete [%d,%d) is empty; Google refuses it (seen live 2026-10-09)", from, to)
+	}
 	if to > s.end()-1 {
 		s.t.Fatalf("sim: delete [%d,%d) takes the body's final newline", from, to)
 	}
@@ -341,8 +343,12 @@ func (s *simDoc) json() []byte {
 			for _, c := range row {
 				cell := &gdocs.TableCell{StartIndex: at}
 				at++
-				cell.Content = []*gdocs.StructuralElement{paragraph(c+"\n", at, e.suggested)}
-				at += ulen(c) + 1
+				for _, line := range strings.SplitAfter(c+"\n", "\n") {
+					if line != "" {
+						cell.Content = append(cell.Content, paragraph(line, at, e.suggested))
+						at += ulen(line)
+					}
+				}
 				cell.EndIndex = at
 				tr.TableCells = append(tr.TableCells, cell)
 			}

@@ -200,6 +200,24 @@ func TestEscapesAndReferences(t *testing.T) {
 	}
 }
 
+// A <br> is a paragraph break, which is how a read joins a table cell's
+// paragraphs; in a heading or a list item, where a new paragraph would be
+// a second one, it is a line break. Other inline HTML is still refused.
+func TestBreakTags(t *testing.T) {
+	f := parse(t, "one<br>two<BR/>three\n\n# head<br />line\n\n- item<br>more\n\n| a<br>b | c |\n|---|---|")
+	var got []string
+	for _, b := range f.Blocks {
+		got = append(got, fmt.Sprintf("%s %q", b.Kind, b.Text()))
+	}
+	want := `paragraph "one", paragraph "two", paragraph "three", heading "head\vline", list_item "item\vmore", table "a\nb\tc"`
+	if strings.Join(got, ", ") != want {
+		t.Fatalf("got  %s\nwant %s", strings.Join(got, ", "), want)
+	}
+	if _, err := Parse("one<br>two <b>bold</b>"); err == nil || !strings.Contains(err.Error(), "inline HTML") {
+		t.Fatalf("other inline HTML: %v", err)
+	}
+}
+
 // A table's grid is its cells as plain text; a short row is padded to
 // the header's width.
 func TestTableGrid(t *testing.T) {

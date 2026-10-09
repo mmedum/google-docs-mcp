@@ -42,8 +42,10 @@ type TableParams struct {
 	ColSpan    int
 	Cell       CellStyleSpec
 	HeaderRows int
-	// Data is the grid an insert_table fills after the table exists.
-	Data [][]string
+	// Data is the grid an insert_table fills after the table exists, and
+	// DataFormat how its cells read: markdown, or text for verbatim.
+	Data       [][]string
+	DataFormat string
 	// WidthPt and Even size the columns style_columns names; Even
 	// distributes them and takes no width.
 	WidthPt *float64
@@ -83,10 +85,17 @@ type ObjectParams struct {
 	Crop bool
 }
 
+// The largest table insert_table makes, and the longest image address.
+const (
+	maxTableRows = 200
+	maxTableCols = 20
+	maxImageURL  = 2000
+)
+
 func validateTableOp(op *Op) error {
 	if op.Kind == OpInsertTable {
-		if op.Table.Rows < 1 || op.Table.Cols < 1 || op.Table.Rows > 200 || op.Table.Cols > 20 {
-			return fmt.Errorf("op %d: insert_table needs rows 1-200 and columns 1-20", op.Seq)
+		if op.Table.Rows < 1 || op.Table.Cols < 1 || op.Table.Rows > maxTableRows || op.Table.Cols > maxTableCols {
+			return fmt.Errorf("op %d: insert_table needs rows 1-%d and columns 1-%d", op.Seq, maxTableRows, maxTableCols)
 		}
 		return nil
 	}
@@ -380,7 +389,7 @@ func validateObjectOp(op *Op) error {
 		if !strings.HasPrefix(o.URL, "https://") && !strings.HasPrefix(o.URL, "http://") {
 			return fmt.Errorf("op %d: image url must be a public http(s) URL", op.Seq)
 		}
-		if len(o.URL) > 2000 {
+		if len(o.URL) > maxImageURL {
 			return fmt.Errorf("op %d: image url is longer than 2 kB", op.Seq)
 		}
 		if o.WidthPt < 0 || o.HeightPt < 0 || o.WidthPt > 2000 || o.HeightPt > 2000 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -127,13 +128,12 @@ func (s *Service) runRounds(ctx context.Context, req EditRequest, later [][]Edit
 	for i, ops := range later {
 		if f == nil {
 			var err error
-			if f, err = s.FetchFresh(ctx, req.Document); err != nil {
+			if f, err = s.reread(ctx, req.Document); err != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("the edit was applied but re-reading the document for %s failed: %s", opNumbers(later[i:]), err.Error()))
 				return nil
 			}
-			s.Remember(f)
 		}
-		res, after, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: ops, Force: req.Force, round: true})
+		res, after, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: ops, Force: req.Force, round: true, own: owned(req, result)})
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("the earlier ops were applied but %s failed: %s", opNumbers(later[i:]), messageOf(err)))
 			return nil
@@ -148,11 +148,72 @@ func (s *Service) runRounds(ctx context.Context, req EditRequest, later [][]Edit
 	return f
 }
 
+// reread takes a fresh read for a later batch and makes its handles the
+// ones that batch is checked against.
+func (s *Service) reread(ctx context.Context, document string) (*Fetched, error) {
+	f, err := s.FetchFresh(ctx, document)
+	if err == nil {
+		s.Remember(f)
+	}
+	return f, err
+}
+
+// applyRound runs a later batch that completes an op the first batch
+// reported, and folds what it reports into the call's result without a
+// change of its own.
+func (s *Service) applyRound(ctx context.Context, req EditRequest, result *EditResult, f *Fetched) (*Fetched, error) {
+	res, after, err := s.editFetched(ctx, f, req)
+	if err != nil {
+		return nil, err
+	}
+	fold(result, res)
+	return after, nil
+}
+
+// owned is every suggestion the call has made so far: those of the
+// batches before this one, and this one's. A batch that is itself a
+// round knows its call's only from req.own, and Google files a later
+// suggest-mode write under the first batch's suggestion without naming
+// it again (seen live 2026-10-09).
+func owned(req EditRequest, result *EditResult) []string {
+	return append(slices.Clone(req.own), result.SuggestionIDs...)
+}
+
+// dropOwn takes the suggestions the call made itself out of what the
+// guard sees.
+func dropOwn(ops []plan.Op, own []string) {
+	if len(own) == 0 {
+		return
+	}
+	for i := range ops {
+		var kept []plan.Anchor
+		for _, a := range ops[i].Anchors {
+			if a.Kind != "suggestion" || !slices.Contains(own, a.ID) {
+				kept = append(kept, a)
+			}
+		}
+		ops[i].Anchors = kept
+	}
+}
+
+// annotate adds what a later batch did to the change of the op it
+// completes.
+func annotate(result *EditResult, seq int, note string) {
+	for i := range result.Changes {
+		if result.Changes[i].Seq == seq {
+			result.Changes[i].Description += note
+		}
+	}
+}
+
 // fold merges what a later batch produced into the call's result, apart
 // from the ops it counts and summarizes, which each caller folds its own
 // way.
 func fold(dst, src *EditResult) {
 	dst.RevisionID = src.RevisionID
+	if src.written != "" {
+		dst.written = src.written
+	}
 	dst.SuggestionIDs = append(dst.SuggestionIDs, src.SuggestionIDs...)
 	dst.CommentIDs = append(dst.CommentIDs, src.CommentIDs...)
 	dst.Warnings = append(dst.Warnings, src.Warnings...)
@@ -206,7 +267,8 @@ func followupOps(pre *doc.Document, ro *resolvedOps, result *EditResult) []pendi
 		if fu.Kind == plan.OpInsertTable {
 			handle := newTableHandle(pre, ro.ops, fu)
 			data := fitGrid(fu.Table.Data, fu.Table.Rows, fu.Table.Cols, fu.Seq, result)
-			ops = append(ops, pending{EditOp{Seq: fu.Seq, Kind: plan.OpSetCells, Table: &TableOp{Table: handle, Data: data}}, fu})
+			ops = append(ops, pending{EditOp{Seq: fu.Seq, Kind: plan.OpSetCells, Table: &TableOp{Table: handle, Data: data},
+				ContentFormat: fu.Table.DataFormat}, fu})
 			continue
 		}
 		id := ids[fu.Kind]
@@ -231,11 +293,10 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 	for len(ops) > 0 {
 		if f == nil {
 			var err error
-			if f, err = s.FetchFresh(ctx, req.Document); err != nil {
+			if f, err = s.reread(ctx, req.Document); err != nil {
 				result.Warnings = append(result.Warnings, "the edit was applied but re-reading the document to write the follow-up content failed: "+err.Error())
 				return nil
 			}
-			s.Remember(f)
 		}
 		batch := ops[:min(len(ops), 50)]
 		ops = ops[len(batch):]
@@ -256,26 +317,19 @@ func (s *Service) runFollowups(ctx context.Context, pre *Fetched, req EditReques
 			continue
 		}
 
-		res, after, err := s.editFetched(ctx, f, EditRequest{Document: req.Document, Mode: req.Mode, Ops: edits})
+		after, err := s.applyRound(ctx, EditRequest{Document: req.Document, Mode: req.Mode, Ops: edits, own: owned(req, result)}, result, f)
 		if err != nil {
 			result.Warnings = append(result.Warnings, "the edit was applied but writing the follow-up content failed: "+messageOf(err))
 			f = nil
 			continue
 		}
-		// A follow-up completes an op the first batch already reported,
-		// so it annotates that summary instead of adding one of its own.
-		fold(result, res)
 		f = after
 		for _, p := range ready {
 			note := ", content written"
 			if p.fu.Kind == plan.OpInsertTable {
 				note = ", filled as " + p.op.Table.Table
 			}
-			for j := range result.Changes {
-				if result.Changes[j].Seq == p.fu.Seq {
-					result.Changes[j].Description += note
-				}
-			}
+			annotate(result, p.fu.Seq, note)
 		}
 	}
 	return f

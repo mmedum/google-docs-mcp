@@ -155,6 +155,7 @@ func TestLive(t *testing.T) {
 	liveDryRuns(t, d, doc, first(tableHandle, handleRead))
 
 	liveObjects(t, d, doc)
+	liveContentEmbeds(t, d, doc)
 	liveTabs(t, d, doc)
 	liveLayout(t, d, doc)
 	liveResources(t, d, doc)

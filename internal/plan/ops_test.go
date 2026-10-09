@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
 )
 
 func seg() Segment { return Segment{ID: "", TabID: "t.0", Start: 1, End: 100} }
@@ -128,6 +130,83 @@ func TestPlanReplaceWholeBlocks(t *testing.T) {
 			if strings.HasPrefix(ins, "\n") || strings.HasSuffix(ins, "\n") {
 				t.Errorf("%s text %q should have no boundary newlines", tc.name, ins)
 			}
+		}
+	}
+}
+
+// Content with a table or image leaves slots only in the body, and in a
+// replace only of whole blocks; the plan hands the op on for the rounds.
+func TestPlanEmbeddedContent(t *testing.T) {
+	withTable := frag(t, "Lead\n\n| a |\n|---|\n| 1 |")
+	header := Segment{ID: "kix.h1", TabID: "t.0", Start: 0, End: 20}
+	cases := []struct {
+		name string
+		op   Op
+		slot int64 // 0: refused
+	}{
+		// "Lead" at 29..33, then the slot's newline.
+		{"insert between blocks", Op{Kind: OpInsert, Seg: seg(), Insert: &Loc{Index: 29}, Fragment: withTable}, 34},
+		// A newline first, then "Lead" at 100..104.
+		{"append at the end", Op{Kind: OpAppend, Seg: seg(), Insert: &Loc{Index: 99}, AtEnd: true, Fragment: withTable}, 105},
+		{"replace a middle block", Op{Kind: OpReplace, Seg: seg(), Target: &Rng{Start: 29, End: 69}, TargetIsBlock: true, TargetText: "x", Fragment: withTable}, 34},
+		// The newline before the last block goes, and comes back in front.
+		{"replace the last block", Op{Kind: OpReplace, Seg: seg(), Target: &Rng{Start: 90, End: 100}, TargetIsBlock: true, TargetText: "x", Fragment: withTable}, 95},
+		{"replace inside a paragraph", Op{Kind: OpReplace, Seg: seg(), Target: &Rng{Start: 30, End: 40}, TargetText: "x", Fragment: withTable}, 0},
+		{"insert in a header", Op{Kind: OpInsert, Seg: header, Insert: &Loc{Index: 5, SegmentID: "kix.h1"}, Fragment: withTable}, 0},
+	}
+	for _, tc := range cases {
+		res, err := Plan([]Op{tc.op}, Options{})
+		if tc.slot == 0 {
+			var ue *markdown.UnsupportedError
+			if !errors.As(err, &ue) || ue.Construct != "table" {
+				t.Errorf("%s: got %v, want the table refused", tc.name, err)
+			}
+			continue
+		}
+		if err != nil || len(res.Embedded) != 1 || len(res.Embedded[0].Slots) != 1 || res.Embedded[0].Slots[0].Index != tc.slot {
+			t.Errorf("%s: %v, embedded %+v, want one slot at %d", tc.name, err, res.Embedded, tc.slot)
+		}
+	}
+	// A comment proposes the content and leaves nothing to place.
+	op := Op{Kind: OpInsert, Seg: seg(), Insert: &Loc{Index: 29}, CommentAnchor: &Rng{Start: 29, End: 35}, Fragment: withTable, Description: "after p2"}
+	res, err := Plan([]Op{op}, Options{Mode: ModeComment})
+	if err != nil || len(res.Embedded) != 0 || res.Proposals[0].Content != "Proposed insertion at after p2:\n\nLead\na\n1" {
+		t.Fatalf("comment mode: %v %+v", err, res)
+	}
+}
+
+// A suggested deletion stays in place. Where deleted text sits before the
+// newline the last slot would end with, the slot gets a newline of its
+// own, or it would hold that text and never be empty.
+func TestPlanSuggestIsolatesLastSlot(t *testing.T) {
+	withTable := frag(t, "Lead\n\n| a |\n|---|\n| 1 |")
+	// "Lead" goes in at 1 and at 90, and the slot follows it.
+	only := Op{Kind: OpReplace, Seg: seg(), Target: &Rng{Start: 1, End: 100}, TargetIsBlock: true, TargetText: "x", Fragment: withTable}
+	cleared := Op{Kind: OpAppend, Seg: seg(), Insert: &Loc{Index: 90}, Inline: true, Fill: true, ClearTo: 93, Fragment: withTable}
+	for _, tc := range []struct {
+		name string
+		op   Op
+		mode Mode
+		text string
+		slot int64
+	}{
+		{"the whole body replaced, direct", only, ModeDirect, "Lead\n", 6},
+		{"the whole body replaced, suggested", only, ModeSuggest, "Lead\n\n", 6},
+		{"whitespace cleared, direct", cleared, ModeDirect, "Lead\n", 95},
+		{"whitespace cleared, suggested", cleared, ModeSuggest, "Lead\n\n", 95},
+	} {
+		res, err := Plan([]Op{tc.op}, Options{Mode: tc.mode})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		var text string
+		for _, r := range res.Requests {
+			if v := view(t, r); v.kind == "insertText" {
+				text = v.body["text"].(string)
+			}
+		}
+		if text != tc.text || len(res.Embedded) != 1 || res.Embedded[0].Slots[0].Index != tc.slot {
+			t.Errorf("%s: inserted %q, embedded %+v; want %q with the slot at %d", tc.name, text, res.Embedded, tc.text, tc.slot)
 		}
 	}
 }

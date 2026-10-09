@@ -16,6 +16,13 @@ diff in CI flags them.
   comments view, since Drive cannot see these threads.
 - `list_suggestions` shows the replies on each suggestion's thread.
 - `list_comments` says who a thread is assigned to.
+- Markdown content in `edit_document` and `create_document` takes
+  tables and images. Table cells are plain text; an image sits on a line
+  of its own. The text lands first, then later batches place up to 10
+  tables and images. Such content must be the only op in its call. A
+  table or image that cannot be placed is a warning, and the text stays
+  written. An image inside a sentence is still refused; `insert_object`
+  places one there.
 - `replace_all` takes `regex`: `find` is an RE2 pattern, case-sensitive
   unless it starts with `(?i)`, matched within one paragraph and over text
   only. `replace` names groups as `${1}` or `${name}`, and a name the
@@ -41,6 +48,10 @@ diff in CI flags them.
 
 ### Fixed
 
+- `edit_table` `insert_table` with `data` and `content_format: text`
+  writes the cells verbatim. The fill read them as markdown.
+- In suggest mode, a later batch no longer warns about suggestions its
+  own call made. `insert_table` with `data` warned once per cell.
 - A dropdown chip reads as the option selected in it, and a regex
   `find_in_document` reports matches after one at the right offset.
   Reads dropped dropdowns, which Google added in 2026-10.

@@ -56,7 +56,7 @@ type EditOpInput struct {
 	Op            string         `json:"op" jsonschema:"insert, append, replace, delete, replace_all, insert_break (page break), insert_footnote, create_header, create_footer, delete_header, delete_footer, create_named_range, delete_named_range, replace_named_range"`
 	Target        *TargetInput   `json:"target,omitempty" jsonschema:"what replace, delete or replace_all (tab only) act on"`
 	Location      *LocationInput `json:"location,omitempty" jsonschema:"where insert, insert_break and insert_footnote go; append defaults to the end of the body"`
-	Content       string         `json:"content,omitempty" jsonschema:"new content as markdown: paragraphs, # headings, **bold**, *italic*, ~~strike~~, code, [links](url), bullet and numbered lists (nested by indentation). Tables and images are not accepted here."`
+	Content       string         `json:"content,omitempty" jsonschema:"new content as markdown: paragraphs, # headings, **bold**, *italic*, ~~strike~~, code, [links](url), bullet and numbered lists (nested by indentation), tables (cells are plain text) and images (![alt](https://…) on a line of its own). Content with a table or image must be the only op in its call: its text lands first, then later batches place up to 10 tables and images."`
 	ContentFormat string         `json:"content_format,omitempty" jsonschema:"markdown (default) or text for verbatim text, one paragraph per line"`
 	Find          string         `json:"find,omitempty" jsonschema:"replace_all: the text to find"`
 	Replace       string         `json:"replace,omitempty" jsonschema:"replace_all: the replacement text (may be empty)"`
@@ -70,7 +70,7 @@ type EditOpInput struct {
 // EditInput is the edit_document call.
 type EditInput struct {
 	Document       string        `json:"document" jsonschema:"document id or any docs.google.com URL"`
-	Ops            []EditOpInput `json:"ops" jsonschema:"operations applied together as one atomic batch; targets are resolved against the document as it is now"`
+	Ops            []EditOpInput `json:"ops" jsonschema:"operations sent together in one batch; the content of a new header, footer or footnote and the tables and images of content follow in later batches. Targets are resolved against the document as it is now"`
 	Mode           string        `json:"mode,omitempty" jsonschema:"suggest (tracked changes a person accepts), direct (edit the text), or comment (post each change as a comment on the passage, changing nothing); default from get_document capabilities"`
 	DryRun         bool          `json:"dry_run,omitempty" jsonschema:"resolve and plan everything, show the exact requests and the current text of the region, but send nothing"`
 	ExpectRevision string        `json:"expect_revision,omitempty" jsonschema:"fail if the document is no longer at this revision id"`
@@ -129,14 +129,15 @@ type FormatInput struct {
 func registerWrite(s *mcp.Server, d Deps) {
 	addAsking(s, d, &mcp.Tool{
 		Name: "edit_document",
-		Description: "Change the text of a Google Doc with one atomic batch of operations. Address content by exact text " +
+		Description: "Change the text of a Google Doc with one batch of operations. Address content by exact text " +
 			"(quoted from a read), by heading_id or heading (a whole section), by block handle, or by cell; never by " +
 			"position numbers. Ops: insert (at a location), append (end of body), replace (minimal diff, so untouched " +
 			"words keep their formatting and comments), delete, replace_all (find/replace in one tab, by text or regex), insert_break " +
 			"(page break), insert_footnote, create_header, create_footer, delete_header, delete_footer (target: tab and " +
 			"segment), and the named-range ops: create_named_range names a target so later calls can find it again " +
 			"after edits move it, where a handle is only valid for the revision it came from; replace_named_range " +
-			"writes plain text over it; delete_named_range forgets the name and leaves the text. Content is markdown. mode chooses how the " +
+			"writes plain text over it; delete_named_range forgets the name and leaves the text. Content is markdown. A table or image " +
+			"in it is placed by later batches once the text has landed, so a failure there leaves the text written and says so. mode chooses how the " +
 			"change lands: suggest = tracked change for a person to accept, direct = edit the text, comment = post " +
 			"each proposed change as a comment and change nothing. Direct edits refuse to delete ranges holding " +
 			"comments, suggestions, images or footnotes unless force is set. Use dry_run to preview the plan. " +
@@ -214,7 +215,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "create_document",
 		Description: "Create a new Google Doc in the signed-in account's Drive, optionally with initial content written " +
-			"as markdown (headings, formatting, lists). Returns the id and URL. Initial content is written directly " +
+			"as markdown (headings, formatting, lists, tables, images). Returns the id and URL. Initial content is written directly " +
 			"because a new document has nothing to suggest against.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, *service.CreateResult, error) {
@@ -250,7 +251,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 // CreateInput is the create_document call.
 type CreateInput struct {
 	Title         string `json:"title" jsonschema:"document title"`
-	Content       string `json:"content,omitempty" jsonschema:"initial content as markdown"`
+	Content       string `json:"content,omitempty" jsonschema:"initial content as markdown, tables and images included"`
 	ContentFormat string `json:"content_format,omitempty" jsonschema:"markdown (default) or text"`
 }
 

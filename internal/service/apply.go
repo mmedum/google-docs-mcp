@@ -132,10 +132,11 @@ func (s *Service) apply(ctx context.Context, f *Fetched, planned *plan.Result, m
 	if mode == plan.ModeSuggest {
 		writeMode = "SUGGEST"
 	}
-	env, _, err := s.batchUpdate(ctx, f, planned.Requests, writeMode)
+	env, revision, err := s.batchUpdate(ctx, f, planned.Requests, writeMode)
 	if err != nil {
 		return replyEnvelope{}, err
 	}
+	result.written = revision
 	result.SuggestionIDs = append(result.SuggestionIDs, env.suggestionIDs()...)
 	return env, nil
 }

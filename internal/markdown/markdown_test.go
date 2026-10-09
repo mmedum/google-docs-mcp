@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -113,14 +114,70 @@ func TestPlainTextAndSingleParagraph(t *testing.T) {
 	}
 }
 
+// An image alone on its line is a block of its own, with its address
+// and alt text; a paragraph of images one to a line is one block each.
+func TestBlockImages(t *testing.T) {
+	f := parse(t, "Intro.\n\n![a logo](https://e.test/logo.png)\n\n![](http://e.test/b.png)\n![second](https://e.test/c.png)\n\nEnd.")
+	var got []string
+	for _, b := range f.Blocks {
+		if b.Kind == KindImage {
+			got = append(got, fmt.Sprintf("%d %s %q", b.Line, b.Image.URL, b.Image.Alt))
+		} else {
+			got = append(got, fmt.Sprintf("%d %s %s", b.Line, b.Kind, b.Text()))
+		}
+	}
+	want := []string{
+		"1 paragraph Intro.",
+		`3 https://e.test/logo.png "a logo"`,
+		`5 http://e.test/b.png ""`,
+		`6 https://e.test/c.png "second"`,
+		"8 paragraph End.",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// An image's text, which a comment proposal shows, names its alt text
+// when it has one.
+func TestBlockImageText(t *testing.T) {
+	f := parse(t, "![a logo](https://e.test/logo.png)\n\n![](https://e.test/b.png)")
+	if got := f.Blocks[0].Text() + " " + f.Blocks[1].Text(); got != "[image: a logo (https://e.test/logo.png)] [image: https://e.test/b.png]" {
+		t.Fatalf("image text = %q", got)
+	}
+}
+
+// Embeds counts the tables and images content places in later batches.
+func TestEmbeds(t *testing.T) {
+	f := parse(t, "Text.\n\n| a |\n|---|\n| 1 |\n\n![i](https://e.test/i.png)\n![j](https://e.test/j.png)\n\n- item")
+	if n := f.Embeds(); n != 3 {
+		t.Fatalf("embeds = %d", n)
+	}
+}
+
+// A table's grid is its cells as plain text; a short row is padded to
+// the header's width.
+func TestTableGrid(t *testing.T) {
+	f := parse(t, "| A | **B** | C |\n|---|---|---|\n| [one](https://e.test) | `two` |\n| x | y | z |")
+	cells, rows, cols := f.Blocks[0].Table.Grid()
+	if rows != 3 || cols != 3 || fmt.Sprint(cells) != "[[A B C] [one two ] [x y z]]" {
+		t.Fatalf("grid %d×%d %q", rows, cols, cells)
+	}
+}
+
 func TestUnsupported(t *testing.T) {
 	cases := map[string]string{
-		"a\n\n---\n\nb":                       "horizontal rule",
-		"> quoted":                            "block quote",
-		"<div>x</div>\n":                      "HTML block",
-		"text with ![alt](https://i/x)":       "image",
-		"text <b>raw</b> html":                "inline HTML",
-		"| only header |\n|---|\n| ![i](u) |": "image",
+		"a\n\n---\n\nb":                                        "horizontal rule",
+		"> quoted":                                             "block quote",
+		"<div>x</div>\n":                                       "HTML block",
+		"text with ![alt](https://i/x)":                        "image inside text",
+		"text <b>raw</b> html":                                 "inline HTML",
+		"| only header |\n|---|\n| ![i](u) |":                  "image inside text",
+		"- ![i](https://e.test/i.png)":                         "image in a list item",
+		"![a](https://e.test/a.png)![b](https://e.test/b.png)": "image inside text",
+		"![relative](logo.png)":                                "image without a web address",
+		"![ftp](ftp://e.test/i.png)":                           "image without a web address",
+		"![no host](https:///i.png)":                           "image without a web address",
 	}
 	for src, construct := range cases {
 		_, err := Parse(src)

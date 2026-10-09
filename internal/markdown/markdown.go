@@ -6,6 +6,7 @@ package markdown
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -25,6 +26,10 @@ const (
 	KindListItem  BlockKind = "list_item"
 	KindCode      BlockKind = "code"
 	KindTable     BlockKind = "table"
+	// KindImage is an image that is a paragraph by itself. An image
+	// inside a sentence is refused: content places it in a paragraph of
+	// its own, and insert_object puts one inline.
+	KindImage BlockKind = "image"
 )
 
 // Inline is a run of text with one formatting.
@@ -50,7 +55,14 @@ type Block struct {
 	Inlines []Inline
 	Lines   []string // code block lines
 	Table   *Table
+	Image   *Image
 	Line    int // 1-based source line, for errors
+}
+
+// Image is a block image: its address and its alt text.
+type Image struct {
+	URL string
+	Alt string
 }
 
 // Text returns the block's plain text.
@@ -68,6 +80,11 @@ func (b *Block) Text() string {
 			rows = append(rows, strings.Join(cells, "\t"))
 		}
 		return strings.Join(rows, "\n")
+	case KindImage:
+		if b.Image.Alt != "" {
+			return "[image: " + b.Image.Alt + " (" + b.Image.URL + ")]"
+		}
+		return "[image: " + b.Image.URL + "]"
 	}
 	return inlineText(b.Inlines)
 }
@@ -75,6 +92,18 @@ func (b *Block) Text() string {
 // Table is a GFM table; the first row is the header.
 type Table struct {
 	Rows [][][]Inline
+}
+
+// Grid is the table's cells as plain text, with its size. GFM gives
+// every row the header's width.
+func (t *Table) Grid() (cells [][]string, rows, cols int) {
+	cells = make([][]string, len(t.Rows))
+	for i, row := range t.Rows {
+		for _, c := range row {
+			cells[i] = append(cells[i], inlineText(c))
+		}
+	}
+	return cells, len(t.Rows), len(t.Rows[0])
 }
 
 // Fragment is parsed markdown.
@@ -89,6 +118,18 @@ func (f *Fragment) PlainText() string {
 		parts = append(parts, b.Text())
 	}
 	return strings.Join(parts, "\n")
+}
+
+// Embeds counts the tables and images, which content places in rounds
+// after its text.
+func (f *Fragment) Embeds() int {
+	n := 0
+	for _, b := range f.Blocks {
+		if b.Kind == KindTable || b.Kind == KindImage {
+			n++
+		}
+	}
+	return n
 }
 
 // SingleParagraph reports whether the fragment is one plain paragraph
@@ -193,6 +234,20 @@ func (p *fragParser) blocks(parent ast.Node, nesting int, listID int) error {
 			}
 			p.out = append(p.out, &Block{Kind: KindHeading, Level: v.Level, Inlines: in, Line: p.lineOf(v)})
 		case *ast.Paragraph, *ast.TextBlock:
+			if imgs, ok := lineImages(v, p.src); ok {
+				line := p.lineOf(v)
+				if listID != 0 {
+					return &UnsupportedError{Construct: "image in a list item", Line: line, Hint: "an image in content goes on a line of its own, outside a list"}
+				}
+				for i, img := range imgs {
+					b, err := p.image(img, line+i)
+					if err != nil {
+						return err
+					}
+					p.out = append(p.out, b)
+				}
+				continue
+			}
 			in, err := p.inlines(v)
 			if err != nil {
 				return err
@@ -254,6 +309,49 @@ func (p *fragParser) codeLines(n ast.Node) []string {
 	return lines
 }
 
+// lineImages returns the images of a paragraph that holds nothing but
+// images, one to a line: each becomes a block of its own.
+func lineImages(n ast.Node, src []byte) ([]*ast.Image, bool) {
+	var imgs []*ast.Image
+	open := true // the next image starts a line
+	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+		switch v := c.(type) {
+		case *ast.Image:
+			if !open {
+				return nil, false
+			}
+			imgs, open = append(imgs, v), false
+		case *ast.Text:
+			// Between two images on their own lines goldmark puts an
+			// empty text that carries the line break.
+			if open || strings.TrimSpace(string(v.Segment.Value(src))) != "" || !v.SoftLineBreak() && !v.HardLineBreak() {
+				return nil, false
+			}
+			open = true
+		default:
+			return nil, false
+		}
+	}
+	return imgs, len(imgs) > 0 && !open
+}
+
+// image turns a block image on the given line into a Block. Google
+// fetches the image itself, so only a web address can work.
+func (p *fragParser) image(v *ast.Image, line int) (*Block, error) {
+	u, err := url.Parse(string(v.Destination))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return nil, &UnsupportedError{Construct: "image without a web address", Line: line,
+			Hint: "an image needs an http or https address Google can fetch"}
+	}
+	var alt strings.Builder
+	for c := v.FirstChild(); c != nil; c = c.NextSibling() {
+		if t, ok := c.(*ast.Text); ok {
+			alt.Write(t.Segment.Value(p.src))
+		}
+	}
+	return &Block{Kind: KindImage, Image: &Image{URL: u.String(), Alt: alt.String()}, Line: line}, nil
+}
+
 func (p *fragParser) table(t *extast.Table) (*Table, error) {
 	out := &Table{}
 	for row := t.FirstChild(); row != nil; row = row.NextSibling() {
@@ -313,7 +411,8 @@ func (p *fragParser) inlines(parent ast.Node) ([]Inline, error) {
 				out = appendInline(out, s, string(v.Label(p.src)))
 				continue
 			case *ast.Image:
-				return &UnsupportedError{Construct: "image", Line: p.lineOf(c), Hint: "images are inserted with insert_object, not through markdown"}
+				return &UnsupportedError{Construct: "image inside text", Line: p.lineOf(c),
+					Hint: "an image in content goes on a line of its own; to put one inside a sentence, use insert_object"}
 			case *ast.RawHTML:
 				return &UnsupportedError{Construct: "inline HTML", Line: p.lineOf(c)}
 			case *extast.TaskCheckBox:

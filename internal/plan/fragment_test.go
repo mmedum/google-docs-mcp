@@ -2,6 +2,7 @@ package plan
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -129,6 +130,82 @@ func TestCompileFragmentPrefixAndBullets(t *testing.T) {
 	}
 	if _, err := CompileFragment(frag(t, "| a |\n|---|\n| b |"), Loc{}, FragmentOptions{}); err == nil || !strings.Contains(err.Error(), "edit_table") {
 		t.Fatalf("table should be refused: %v", err)
+	}
+}
+
+// With slots, a table or image is an empty paragraph of normal text
+// where a later round puts it, at the index it has once the batch lands.
+func TestCompileFragmentSlots(t *testing.T) {
+	f := frag(t, "Intro\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n![x](https://e.test/x.png)\n\nEnd")
+	c, err := CompileFragment(f, Loc{Index: 10}, FragmentOptions{Suffix: true, NearBullet: true, Slots: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Text != "Intro\n\n\nEnd\n" {
+		t.Fatalf("text = %q", c.Text)
+	}
+	var slots []string
+	for _, sl := range c.Slots {
+		slots = append(slots, fmt.Sprintf("%d %s", sl.Index, sl.Block.Kind))
+	}
+	if strings.Join(slots, ", ") != "16 table, 17 image" {
+		t.Fatalf("slots = %v", slots)
+	}
+	var styled []string
+	for _, r := range c.Requests {
+		if v := view(t, r); v.kind == "updateParagraphStyle" || v.kind == "deleteParagraphBullets" {
+			styled = append(styled, fmt.Sprintf("%s %d-%d", v.kind, v.rng[0], v.rng[1]))
+		}
+	}
+	want := "updateParagraphStyle 10-15, deleteParagraphBullets 10-15, updateParagraphStyle 16-17, deleteParagraphBullets 16-17, " +
+		"updateParagraphStyle 17-18, deleteParagraphBullets 17-18, updateParagraphStyle 18-21, deleteParagraphBullets 18-21"
+	if got := strings.Join(styled, ", "); got != want {
+		t.Fatalf("paragraphs:\n got %s\nwant %s", got, want)
+	}
+
+	// Filling a blank paragraph, a slot can come first: its newline is
+	// the first one inserted.
+	c, err = CompileFragment(frag(t, "| a |\n|---|\n| 1 |\n\nAfter"), Loc{Index: 5}, FragmentOptions{Inline: true, Fill: true, Slots: true})
+	if err != nil || c.Text != "\nAfter" || len(c.Slots) != 1 || c.Slots[0].Index != 5 {
+		t.Fatalf("fill: %v %+v", err, c)
+	}
+	// A lone slot filling a blank paragraph is that paragraph: nothing is
+	// inserted, and the paragraph gets normal text.
+	c, err = CompileFragment(frag(t, "![x](https://e.test/x.png)"), Loc{Index: 5}, FragmentOptions{Inline: true, Fill: true, Slots: true})
+	if err != nil || len(c.Slots) != 1 || c.Slots[0].Index != 5 || len(c.Requests) != 1 || view(t, c.Requests[0]).kind != "updateParagraphStyle" {
+		t.Fatalf("lone slot: %v %+v", err, c)
+	}
+	// Inside a paragraph the first and last pieces merge into its text.
+	if _, err := CompileFragment(frag(t, "![x](https://e.test/x.png)"), Loc{Index: 5}, FragmentOptions{Inline: true, Slots: true}); err == nil ||
+		!strings.Contains(err.Error(), "between blocks") {
+		t.Fatalf("inline slot should be refused: %v", err)
+	}
+}
+
+// A table or image the later round could not place is refused before the
+// text is written, at the limits insert_table and insert_object keep.
+func TestCompileFragmentSlotLimits(t *testing.T) {
+	table := func(rows, cols int) string {
+		row := "|" + strings.Repeat(" x |", cols) + "\n"
+		return row + "|" + strings.Repeat("---|", cols) + "\n" + strings.Repeat(row, rows-1)
+	}
+	image := func(n int) string {
+		u := "https://e.test/"
+		return "![i](" + u + strings.Repeat("a", n-len(u)) + ")"
+	}
+	for _, tc := range []struct {
+		src, refused string
+	}{
+		{table(200, 20), ""},
+		{table(201, 1), "201×1 table at line 1; a table holds at most 200 rows and 20 columns"},
+		{table(1, 21), "1×21 table at line 1"},
+		{image(2000), ""},
+		{image(2001), "image address over 2 kB at line 1"},
+	} {
+		_, err := CompileFragment(frag(t, tc.src), Loc{Index: 1}, FragmentOptions{Slots: true})
+		if tc.refused == "" && err != nil || tc.refused != "" && (err == nil || !strings.Contains(err.Error(), tc.refused)) {
+			t.Errorf("%.40q: got %v, want %q", tc.src, err, tc.refused)
+		}
 	}
 }
 

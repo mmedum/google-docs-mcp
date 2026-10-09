@@ -70,8 +70,12 @@ type EditRequest struct {
 	Force          bool
 	ExpectRevision string
 	// round marks a later batch of a call, run after an earlier one has
-	// been written: too late to ask the person anything.
+	// been written: too late to ask the person anything, and the call's
+	// first batch, not this one, warns when handles shift.
 	round bool
+	// own are the suggestions the call's earlier batches made. A later
+	// batch works over them, and the guard does not report them.
+	own []string
 }
 
 // EditResult reports what happened.
@@ -97,6 +101,10 @@ type EditResult struct {
 	Followups []string `json:"followups,omitempty"`
 	// Text is the result as the model reads it.
 	Text string `json:"-"`
+	// written is the revision the last batch's reply gave. A later batch
+	// runs only on a read at that revision: any other means somebody
+	// else wrote in between.
+	written string
 }
 
 func (r *EditResult) text() string {
@@ -244,6 +252,7 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	}
 	if req.DryRun {
 		result.Followups = append(result.Followups, describeRounds(later)...)
+		result.Followups = append(result.Followups, describeEmbeds(ro.planned.Embedded)...)
 		return result, nil, nil
 	}
 	result.Applied = len(batch.Ops)
@@ -254,6 +263,9 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	if len(later) > 0 {
 		after = s.runRounds(ctx, req, later, result, after)
 	}
+	if len(ro.planned.Embedded) > 0 {
+		after = s.placeEmbeds(ctx, req, ro.planned.Embedded, result, after)
+	}
 	if after == nil {
 		if after, err = s.FetchFresh(ctx, req.Document); err != nil {
 			result.Warnings = append(result.Warnings, "applied, but re-reading the document failed: "+err.Error())
@@ -263,7 +275,9 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	// The caller sees the post-edit handles in the preview, so they are
 	// what later writes must be checked against.
 	s.Remember(after)
-	if blocksShifted(f.Doc, after.Doc) {
+	// A round is part of a call whose first batch compares the read it
+	// started from with the last one, so it does not warn on its own.
+	if !req.round && blocksShifted(f.Doc, after.Doc) {
 		result.Warnings = append(result.Warnings, "the number of blocks changed, so handles after the edited region now name different blocks; use the handles in the preview or re-read before targeting by handle")
 	}
 	result.RevisionID = after.Doc.RevisionID
@@ -312,6 +326,10 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 	}
 	ro, err := s.resolveOps(ctx, f, req.Ops, mode)
 	if err != nil {
+		return nil, nil, err
+	}
+	dropOwn(ro.ops, req.own)
+	if err := checkEmbeds(req.Ops, ro.ops); err != nil {
 		return nil, nil, err
 	}
 	planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})

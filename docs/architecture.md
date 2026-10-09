@@ -76,7 +76,7 @@ folder management, moving files, sharing, trashing, copying.
 | Constraint (verified against official docs) | Consequence |
 |---|---|
 | Indices are **UTF-16 code units**, per segment (body / header / footer / footnote each start at 0), shift after every mutation, and are only valid for the revision you read. | The model never sees or computes indices. Server owns index math; Go strings are UTF-8 so every offset goes through `utf16` conversion. |
-| `batchUpdate` is **atomic** and requests apply in order. | One batch per tool call; requests sorted by descending index. |
+| `batchUpdate` is **atomic** and requests apply in order. | One batch per tool call where the call allows it; requests sorted by descending index. What can only follow a write goes in later batches, each reported and none rolled back (§7.3). |
 | `writeControl.requiredRevisionId` → 400 if the doc changed; the response returns the new revision id. | Every write is guarded by the revision it was planned against. |
 | Inserted text "will match the text immediately before the insertion index"; a newline copies the paragraph style "including lists and bullets" from the current paragraph. | Minimal-diff edits inherit surrounding formatting for free; the compiler sets explicit styles only where the content asks for them. |
 | Tabs: `includeTabsContent=true` returns `document.tabs[]`. Requests without `tabId` hit the first tab, except `replaceAllText` and named-range requests, which default to **all tabs**. | Always read with tabs; always set `tabId` or explicit `tabsCriteria`. |
@@ -370,9 +370,34 @@ guard below only reports.
 7. Re-fetch; return `{ revision_id, mode, ops_applied, changes: [{op,
    handles, preview}], suggestion_ids, warnings }`.
 
-Multi-batch ops (only `insert_table` with data): insert the empty table,
-re-fetch, fill cells. If the fill fails the empty table remains and the
-response says so.
+Multi-batch ops: `insert_table` with data inserts the empty table,
+re-fetches and fills the cells. If the fill fails the empty table remains
+and the response says so.
+
+Content with tables or images runs in rounds, and the rounds are not
+atomic. The first batch writes the text with an empty paragraph, a slot,
+where each table or image goes. Later batches fill the slots one at a
+time, highest first, each against a fresh read. That read must be at the
+revision the previous batch's reply gave, or somebody else wrote in
+between and the slots, found by index, may have moved; the rest are then
+reported, not placed. It must also still show the slot where the text
+left it. An image goes into its slot. A table goes in
+at the newline of the paragraph before the slot, gets its cells as plain
+text through the `insert_table` fill, and a last batch deletes the empty
+paragraphs it leaves; the slot stays where the body ends or a table
+follows, since Docs needs a paragraph there (spike E, §18). Such content
+is the only op of its call, so nothing else in the first batch moves the
+slots, and it holds at most 10 tables and images. In suggest mode deleted
+text stays in place, so where it would share the last slot's paragraph
+(a replace of the whole body, a blank paragraph cleared of whitespace)
+the slot gets a newline of its own. A later batch of any call is not
+guarded against the suggestions its own earlier batches made. A table over 200 rows
+or 20 columns, or an image address over 2 kB, is refused before anything
+is written. A slot that cannot be filled is a warning naming the line of
+the content, and the text stays written. When the round failed, the
+warning says the empty paragraph is still there; when somebody else
+changed the document in between, it does not, since the slot's state is
+then unknown. A dry run lists the rounds without planning them.
 
 Dry run returns the resolved targets, the guard report, the kinds of
 request that would be sent (not the requests themselves: they carry
@@ -385,9 +410,14 @@ Headings 1–6, paragraphs, bold/italic/strikethrough/inline code, links
 (a URL, `#<heading id>` for a heading in the same tab, `#tab=<tab id>`),
 bullet and numbered lists (nested), hard breaks; task-list checkboxes are
 dropped and their text kept. Fenced code → Courier-styled paragraphs.
-Refused with `[unsupported] <construct> at line N`: images (use
-`insert_object`), tables in content (use `edit_table`), HTML, block
-quotes, horizontal rules.
+Tables and images go in the body between blocks, through an `insert`,
+`append` or `replace` (§7.3). Table cells are plain text. An image sits
+on a line of its own, with an http or https address Google fetches
+itself. Its alt text reaches only a comment-mode proposal, since
+`insertInlineImage` takes none. Refused with
+`[unsupported] <construct> at line N`: an image inside text or a list
+item (use `insert_object`), a table or image in a header, footer,
+footnote or table cell, HTML, block quotes, horizontal rules.
 
 What markdown cannot say goes through `format_document`: fonts, sizes,
 colors, alignment, spacing, indents, named styles on existing text,
@@ -1123,4 +1153,8 @@ checked rather than assumed.
 | A destructive tool should carry both `requiresUserInteraction` and the server's own question | Refuted 2026-10-09, after the owner was asked twice for one delete. No source recommends two hard gates for one call. The MCP spec puts confirmation on the client ("Clients SHOULD prompt for user confirmation on sensitive operations"); GitHub's `delete_repository` (PR #3076) and Supabase's destructive SQL confirm with `destructiveHint` plus a form elicitation, and neither sets the mark; Claude Code's documentation scopes the mark to "tools whose permission prompt is itself the point, such as a consent or access-grant step" | The mark is sent per client: present when the request's capabilities show no form elicitation, absent otherwise, on a tool that asks before every write. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to refuse the call before it reached the server. Not chosen: a typed confirmation, which would stop Codex in full-access mode accepting an empty form unseen, at the cost of a slower answer in every other client. |
 | Sending the mark per client leaves every client either the mark or a question | Refuted 2026-10-09 by a review of the same change in google-mail-mcp. On protocol 2026-07-28 capabilities travel per request, so a client can declare form elicitation to `tools/list` and none to `tools/call`, and get neither the mark nor a question. The same review found no test that the mark is dropped from a copy of the tool, not from the server's own | Recorded as a known limit. It gives a misbehaving client nothing it lacked, since such a client answers the server's question itself and can accept without a person. `GDOCS_REQUIRE_PROMPT=true` still refuses that call. `TestTheMarkIsForAClientThatCannotAsk` now lists on one server, for a client that can ask and then for two that cannot, on every protocol. |
 | `assigneeEmailAddress` is a field of Drive's `Comment`, so any call that returns a comment can ask for it | **Refuted live 2026-10-09**, on the first live run after `list_comments` started reading it. `comments.get` and `comments.list` serve it; `comments.create` and `comments.update` answer 400 "Invalid field selection assignee_email_address" when the `fields` mask names it, so `add_comment` without the comments view and `reply_comment` `edit` failed outright. The discovery document gives no hint of the split | Reads ask for `CommentFields`; create and update ask for `commentWriteFields`, the same set without the assignee. `TestOnlyACommentReadAsksForTheAssignee` holds the split with a fake that answers as Drive did. |
-
+| Tables and images in content should be placed by index arithmetic in one batch | Declined 2026-10-09 after spike E, live (`internal/gapi/rawtable_integration_test.go`). The arithmetic exists: an empty table is 2 + rows×(1+2×cols) long and cell (r,c) starts at table + 3 + r×(1+2×cols) + 2c, checked at 2×2, 1×2 and 1×1 only. Placement: `insertTable` at a paragraph's newline starts the table one past it and leaves the old newline as an empty paragraph after the table; at a paragraph's start it leaves an empty paragraph before the table; at `endOfSegmentLocation` one after. `deleteContentRange` over the empty paragraph after a table is accepted when text follows. An inline image at the start of an empty paragraph sits alone in it. In `SUGGEST` mode `insertTable`, text into a cell and `insertInlineImage` are accepted as suggestions | Rounds instead (§7.3), each against a fresh read, so nothing rests on a formula checked at three sizes. Partial results are reported, not rolled back. |
+| A `batchUpdate` reply's revision is the revision the next read reports | Confirmed live 2026-10-09: across the content rounds of one live run, every read after a write carried the revision that write's reply gave, and no round saw another | A round runs only on a read at the revision the previous batch's reply gave; any other means somebody else wrote in between (§7.3). |
+| Each suggest-mode batch names the suggestions it creates | Refuted live 2026-10-09: the five batches of one suggest-mode content call (text, image, table, fill, tidy) were all filed under the first batch's suggestion, and only the first reply named it. The fill then warned once per cell that its range held a suggestion: the call's own | Later batches carry the suggestions their call made so far, and the guard leaves those out. |
+| A suggest-mode delete of an empty paragraph the same call suggested leaves a suggested deletion | Refuted live 2026-10-09: the read after a suggest-mode content call showed no empty paragraph around the suggested table, and rejecting its one suggestion restored the section exactly | The tidy round needs nothing of its own in suggest mode. |
+| An image address Google cannot fetch fails at the request | Confirmed live 2026-10-09: `insertInlineImage` with an address that answers 404 is refused whole, 400 INVALID_ARGUMENT "The provided image was not found." | A round that places one fails alone: a warning names the image's line, and its text and empty paragraph stay. |

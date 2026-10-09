@@ -155,6 +155,51 @@ func TestEmbeds(t *testing.T) {
 	}
 }
 
+// Text and addresses resolve backslash escapes and entity and numeric
+// references, as CommonMark does; a code span and an autolink keep them.
+func TestEscapesAndReferences(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{`\*not italic\* and 1\. not a list`, `"*not italic* and 1. not a list"`},
+		// A read escapes prose that starts like markdown; written back,
+		// it is the prose again.
+		{`\# not a heading`, `"# not a heading"`},
+		{`AT&amp;T &copy; &#169; &#x41; &notanentity a\\b \a`, `"AT&T © © A &notanentity a\\b \\a"`},
+		{`\&amp; stays an entity's text`, `"&amp; stays an entity's text"`},
+		{"`a\\*b &amp;` and \\*c\\*", `"a\\*b &amp;" code, " and *c*"`},
+		{`[x\_y](https://e.test/a\_b?q=1&amp;r=2&s=3)`, `"x_y" -> https://e.test/a_b?q=1&r=2&s=3`},
+		{`<https://e.test/a\_b>`, `"https://e.test/a\\_b" -> https://e.test/a\_b`},
+		{"| \\*r\\* |\n|---|\n| s |", `table "*r*\ns"`},
+		// An escaped backslash and an escaped pipe, unescaped once each.
+		{"| c " + `\\\|` + " d |\n|---|", `table "c \\| d"`},
+		// A line break inside a code span is a space, not a new paragraph.
+		{"x `a\nb` c", `"x ", "a b" code, " c"`},
+		{`![a\*b &amp; c](https://e.test/i\_j.png)`, `image https://e.test/i_j.png "a*b & c"`},
+	} {
+		b := parse(t, tc.src).Blocks[0]
+		var got []string
+		switch b.Kind {
+		case KindTable:
+			got = append(got, fmt.Sprintf("table %q", b.Text()))
+		case KindImage:
+			got = append(got, fmt.Sprintf("image %s %q", b.Image.URL, b.Image.Alt))
+		default:
+			for _, in := range b.Inlines {
+				g := fmt.Sprintf("%q", in.Text)
+				switch {
+				case in.Code:
+					g += " code"
+				case in.Link != "":
+					g += " -> " + in.Link
+				}
+				got = append(got, g)
+			}
+		}
+		if strings.Join(got, ", ") != tc.want {
+			t.Errorf("Parse(%q):\n got %s\nwant %s", tc.src, strings.Join(got, ", "), tc.want)
+		}
+	}
+}
+
 // A table's grid is its cells as plain text; a short row is padded to
 // the header's width.
 func TestTableGrid(t *testing.T) {

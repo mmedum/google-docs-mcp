@@ -286,8 +286,11 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 }
 
 // blocksShifted reports whether a segment gained or lost top-level blocks
-// somewhere before its last block, which renumbers the handles after
-// that point. A pure append at the end shifts nothing.
+// with unchanged blocks after them, which renumbers those blocks'
+// handles. An edit that reaches the segment's end, such as an append or a
+// blank last paragraph filled, shifts nothing. Nor do blank paragraphs
+// alone: Docs keeps one after a table that ends a body, and nothing
+// targets one for what it says.
 func blocksShifted(before, after *doc.Document) bool {
 	segs := map[string]*doc.Segment{}
 	for _, t := range after.Tabs {
@@ -298,23 +301,34 @@ func blocksShifted(before, after *doc.Document) bool {
 	for _, t := range before.Tabs {
 		for _, old := range t.Segments() {
 			cur := segs[t.ID+"/"+old.ID]
-			if cur == nil || len(cur.Blocks) == len(old.Blocks) {
-				continue
-			}
-			n := min(len(old.Blocks), len(cur.Blocks))
-			first := n
-			for i := range n {
-				if doc.Normalize(old.Blocks[i].Text(doc.ViewInline)) != doc.Normalize(cur.Blocks[i].Text(doc.ViewInline)) {
-					first = i
-					break
-				}
-			}
-			if first < len(old.Blocks)-1 {
+			if cur != nil && len(cur.Blocks) != len(old.Blocks) && slices.ContainsFunc(unchangedTail(old.Blocks, cur.Blocks), hasText) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// hasText reports whether a block reads as anything.
+func hasText(b *doc.Block) bool { return doc.Normalize(b.Text(doc.ViewInline)) != "" }
+
+// unchangedTail is the blocks that read the same at the end of a segment
+// before and after an edit, stopping short of those that read the same
+// at its start.
+func unchangedTail(old, cur []*doc.Block) []*doc.Block {
+	same := func(a, b *doc.Block) bool {
+		return doc.Normalize(a.Text(doc.ViewInline)) == doc.Normalize(b.Text(doc.ViewInline))
+	}
+	n := min(len(old), len(cur))
+	head := 0
+	for head < n && same(old[head], cur[head]) {
+		head++
+	}
+	tail := 0
+	for tail < n-head && same(old[len(old)-1-tail], cur[len(cur)-1-tail]) {
+		tail++
+	}
+	return cur[len(cur)-tail:]
 }
 
 // planAndApply resolves, plans, and (unless dry-running) applies once.

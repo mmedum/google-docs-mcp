@@ -409,7 +409,14 @@ mode, and a rendered view of the region. Nothing is sent.
 Headings 1–6, paragraphs, bold/italic/strikethrough/inline code, links
 (a URL, `#<heading id>` for a heading in the same tab, `#tab=<tab id>`),
 bullet and numbered lists (nested), hard breaks; task-list checkboxes are
-dropped and their text kept. Fenced code → Courier-styled paragraphs.
+dropped and their text kept. Backslash escapes and entity references
+resolve in text and addresses, as CommonMark says, and not in code
+spans. An autolink keeps its text as typed, as goldmark renders one.
+goldmark keeps them in the source and resolves them only while writing
+HTML, so the parser resolves them through goldmark's own writer. A read
+escapes what that would resolve: a backslash before punctuation, a
+space or the end, the punctuation after one, and an ampersand that
+starts a reference. So prose read and written back is unchanged. Fenced code → Courier-styled paragraphs.
 Tables and images go in the body between blocks, through an `insert`,
 `append` or `replace` (§7.3). Table cells are plain text. An image sits
 on a line of its own, with an http or https address Google fetches
@@ -1158,3 +1165,4 @@ checked rather than assumed.
 | Each suggest-mode batch names the suggestions it creates | Refuted live 2026-10-09: the five batches of one suggest-mode content call (text, image, table, fill, tidy) were all filed under the first batch's suggestion, and only the first reply named it. The fill then warned once per cell that its range held a suggestion: the call's own | Later batches carry the suggestions their call made so far, and the guard leaves those out. |
 | A suggest-mode delete of an empty paragraph the same call suggested leaves a suggested deletion | Refuted live 2026-10-09: the read after a suggest-mode content call showed no empty paragraph around the suggested table, and rejecting its one suggestion restored the section exactly | The tidy round needs nothing of its own in suggest mode. |
 | An image address Google cannot fetch fails at the request | Confirmed live 2026-10-09: `insertInlineImage` with an address that answers 404 is refused whole, 400 INVALID_ARGUMENT "The provided image was not found." | A round that places one fails alone: a warning names the image's line, and its text and empty paragraph stay. |
+| Every name in a transcript sits in a position a rule knows, because this project's renderers wrote them all | Refuted 2026-10-09 by reading two live transcripts: a person chip printed the account's display name as `@Name` in markdown and bare in a plain-text read, six times a run, with no label before it for a rule to find | The driver reads the account's display name from `get_document` before any step can print a chip, and `redact.Names` replaces it wherever it appears. The eval traces were redacted as encoded JSON, where a newline is `\n` and no line rule fires, so the owner line kept its name; `redact.TranscriptJSON` now redacts each string. |

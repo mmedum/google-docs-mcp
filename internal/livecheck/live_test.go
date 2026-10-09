@@ -203,5 +203,24 @@ func first(re *regexp.Regexp, s string) string {
 	return ""
 }
 
+// known are the names steps have read, for shown to replace: a person
+// chip prints one where no rule in redact can find it.
+var known struct {
+	sync.Mutex
+	names []string
+}
+
+// knowName adds a name for shown to replace, before anything prints it.
+func knowName(name string) {
+	known.Lock()
+	defer known.Unlock()
+	known.names = append(known.names, name)
+}
+
 // shown is the funnel every transcript line goes through.
-func shown(s string, n int) string { return redact.Clip(s, n) }
+func shown(s string, n int) string {
+	known.Lock()
+	names := slices.Clone(known.names)
+	known.Unlock()
+	return redact.Clip(s, n, names...)
+}

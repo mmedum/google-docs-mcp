@@ -6,6 +6,7 @@ package render
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -155,6 +156,9 @@ func inline(p *doc.Paragraph, seg *doc.Segment, o Options, marks []Mark, inTable
 		spans = nil
 	}
 	addText := func(text string, r *doc.Run) {
+		if !r.Style.Monospace() {
+			text = escapeText(text)
+		}
 		s := span{text: text, style: r.Style, inserted: suggestionKey(r.Inserted), deleted: suggestionKey(r.Deleted), restyled: r.StyleChanges}
 		if inTable {
 			s.text = tableCellText(s.text)
@@ -245,6 +249,36 @@ func textWithMarks(p *doc.Paragraph, view doc.View, marks []Mark) string {
 	}
 	return b.String()
 }
+
+// entityLike is text a markdown reader takes for a character reference.
+var entityLike = regexp.MustCompile(`^&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
+
+// escapeText keeps a backslash and an ampersand in prose what they are
+// when the markdown is written back, since content resolves backslash
+// escapes and character references as CommonMark does. A backslash is
+// escaped where a reader would take it for an escape or a break: before
+// punctuation, a space, or the end. So is the punctuation after one,
+// which that backslash protected (`\*` stays two characters, not an
+// emphasis mark), and an ampersand that starts a reference. A pipe is
+// left to tableCellText, which escapes every one in a table. Code keeps
+// all of it as it is.
+func escapeText(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\\' && (i+1 == len(s) || s[i+1] <= ' ' || isPunct(s[i+1])),
+			i > 0 && s[i-1] == '\\' && c != '|' && isPunct(c),
+			c == '&' && entityLike.MatchString(s[i:]):
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// isPunct reports whether CommonMark lets a backslash escape c.
+func isPunct(c byte) bool { return strings.IndexByte("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", c) >= 0 }
 
 // tableCellText escapes what would break a markdown table cell.
 func tableCellText(s string) string {

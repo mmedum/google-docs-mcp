@@ -5,7 +5,10 @@
 package markdown
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"html"
 	"net/url"
 	"strings"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	extast "github.com/yuin/goldmark/extension/ast"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 )
 
@@ -338,7 +342,7 @@ func lineImages(n ast.Node, src []byte) ([]*ast.Image, bool) {
 // image turns a block image on the given line into a Block. Google
 // fetches the image itself, so only a web address can work.
 func (p *fragParser) image(v *ast.Image, line int) (*Block, error) {
-	u, err := url.Parse(string(v.Destination))
+	u, err := url.Parse(plainText(v.Destination))
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 		return nil, &UnsupportedError{Construct: "image without a web address", Line: line,
 			Hint: "an image needs an http or https address Google can fetch"}
@@ -346,7 +350,7 @@ func (p *fragParser) image(v *ast.Image, line int) (*Block, error) {
 	var alt strings.Builder
 	for c := v.FirstChild(); c != nil; c = c.NextSibling() {
 		if t, ok := c.(*ast.Text); ok {
-			alt.Write(t.Segment.Value(p.src))
+			alt.WriteString(plainText(t.Segment.Value(p.src)))
 		}
 	}
 	return &Block{Kind: KindImage, Image: &Image{URL: u.String(), Alt: alt.String()}, Line: line}, nil
@@ -360,9 +364,6 @@ func (p *fragParser) table(t *extast.Table) (*Table, error) {
 			in, err := p.inlines(cell)
 			if err != nil {
 				return nil, err
-			}
-			for i := range in {
-				in[i].Text = strings.ReplaceAll(in[i].Text, `\|`, "|")
 			}
 			cells = append(cells, in)
 		}
@@ -382,7 +383,12 @@ func (p *fragParser) inlines(parent ast.Node) ([]Inline, error) {
 			s := style
 			switch v := c.(type) {
 			case *ast.Text:
-				txt := string(v.Segment.Value(p.src))
+				// A code span keeps its backslashes and ampersands, and a
+				// line break inside one is a space.
+				txt := strings.ReplaceAll(string(v.Segment.Value(p.src)), "\n", " ")
+				if !s.Code {
+					txt = plainText(v.Segment.Value(p.src))
+				}
 				if v.SoftLineBreak() {
 					txt += " "
 				} else if v.HardLineBreak() {
@@ -404,7 +410,7 @@ func (p *fragParser) inlines(parent ast.Node) ([]Inline, error) {
 			case *ast.CodeSpan:
 				s.Code = true
 			case *ast.Link:
-				s.Link = string(v.Destination)
+				s.Link = plainText(v.Destination)
 			case *ast.AutoLink:
 				u := string(v.URL(p.src))
 				s.Link = u
@@ -435,6 +441,18 @@ func (p *fragParser) inlines(parent ast.Node) ([]Inline, error) {
 		}
 	}
 	return out, nil
+}
+
+// plainText resolves what CommonMark resolves in text and addresses:
+// backslash escapes, and entity and numeric references. goldmark keeps
+// them in the source and resolves them as it writes HTML, so the text is
+// written as goldmark writes it, and that HTML's escaping undone.
+func plainText(src []byte) string {
+	var b bytes.Buffer
+	w := bufio.NewWriter(&b)
+	gmhtml.DefaultWriter.Write(w, src)
+	_ = w.Flush()
+	return html.UnescapeString(b.String())
 }
 
 func appendInline(out []Inline, style Inline, txt string) []Inline {

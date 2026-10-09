@@ -58,10 +58,12 @@
   URLs are caught by shape; a revision is caught by shape where it is
   written as `revision <id>` and by position in a revision listing,
   which writes the id bare. A person's name has no shape,
-  so names are caught by position — the set is closed and short because
-  this project's own renderers wrote every one of them — and an address
-  is caught both ways, since `userLabel` renders a person as
-  `Name <address>`. `internal/redact` carries no build tag,
+  so names are caught by position where this project's renderers put
+  one after a label, and an address is caught both ways, since
+  `userLabel` renders a person as `Name <address>`. A person chip prints
+  a name with no label before it, so the driver reads the account's
+  display name before any step can print a chip, and replaces that name
+  wherever it appears. `internal/redact` carries no build tag,
   so the tests for it run in every `make check` rather than only when
   someone runs the driver with credentials.
 - Scopes: `documents` and `drive` (or their read-only variants with

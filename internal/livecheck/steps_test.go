@@ -47,6 +47,15 @@ func TestLive(t *testing.T) {
 		t.Logf("=== scratch document left behind ===\ndelete it when you are done; Drive search title:\"safe to delete\" finds every run's")
 	})
 
+	// The account's name reaches the transcript bare through a person
+	// chip, so it is known before any step can print one. This line's
+	// own copy is caught by its position.
+	if name := first(ownerName, d.ok("get_document for the account's name", "get_document", map[string]any{"document": doc})); name != "" {
+		knowName(name)
+	} else {
+		t.Log("get_document names the owner by address only; a person chip shows the address, which redact catches")
+	}
+
 	d.ok("read without handles", "read_document", map[string]any{"document": doc, "with_handles": false})
 	d.ok("read after create", "read_document", map[string]any{"document": doc, "with_handles": true})
 	outline := d.ok("outline", "get_outline", map[string]any{"document": doc})
@@ -165,6 +174,9 @@ func TestLive(t *testing.T) {
 }
 
 var listedID = regexp.MustCompile(`(?m)^- (\S+)`)
+
+// ownerName is the display name in get_document's owner line.
+var ownerName = regexp.MustCompile(`(?m)^owner (.+?) <[^>]+@[^>]+>`)
 
 // headingID is the first heading id get_outline shows, as {h.…}.
 var headingID = regexp.MustCompile(`\{(h\.[A-Za-z0-9_-]+)\}`)

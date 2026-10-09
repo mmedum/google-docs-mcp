@@ -92,12 +92,14 @@ func TestEvals(t *testing.T) {
 			// document id, every tool argument and the full text of every
 			// tool result — an owner's name and address, comment authors,
 			// document content — and nothing touched it, while the live
-			// driver beside it redacted every line. It is JSON, but it is
-			// text, and the rules are the same ones.
-			raw, err := json.MarshalIndent(res, "", "  ")
+			// driver beside it redacted every line. The rules are the same
+			// ones, applied to each string, where a line starts as it did.
+			raw, err := json.Marshal(res)
 			if err == nil {
-				_ = os.WriteFile(filepath.Join(outDir(t), tk.name+".json"),
-					[]byte(redact.Transcript(string(raw))), 0o644)
+				raw, err = redact.TranscriptJSON(raw)
+			}
+			if err == nil {
+				_ = os.WriteFile(filepath.Join(outDir(t), tk.name+".json"), raw, 0o644)
 			}
 			t.Logf("%d/%d checks, %d calls, %d turns, $%.2f, %.0fs: %s",
 				res.Passed, res.Total, len(tr.Calls), tr.Turns, tr.Cost, tr.Seconds, strings.Join(tr.toolNames(), " → "))

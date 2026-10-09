@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
 	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 )
 
@@ -1051,5 +1053,89 @@ func TestALinkToATitleResolves(t *testing.T) {
 		{Kind: plan.OpTextStyle, Target: &Target{Text: "Back"}, Params: plan.Params{Text: plan.TextStyleSpec{Link: "#h.title"}}},
 	}}); err != nil {
 		t.Errorf("a link to the title was refused: %v", err)
+	}
+}
+
+// Handles after an edit shift when blocks the edit left alone move: an
+// insert before them, including before the last paragraph. An edit that
+// reaches the end of the body moves nothing after it.
+func TestShiftedHandlesWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		paras []string
+		op    EditOp
+		warns bool
+	}{
+		{"insert before the last paragraph", []string{"A", "B", "C"}, EditOp{Kind: plan.OpInsert, Location: &Location{At: "before", Of: &Target{Handle: "p3"}}, Content: "X"}, true},
+		{"insert in the middle", []string{"A", "B", "C"}, EditOp{Kind: plan.OpInsert, Location: after("p1"), Content: "X"}, true},
+		{"delete in the middle", []string{"A", "B", "C"}, EditOp{Kind: plan.OpDelete, Target: &Target{Handle: "p2"}}, true},
+		{"append", []string{"A", "B", "C"}, EditOp{Kind: plan.OpAppend, Content: "X\n\nY"}, false},
+		{"append into a blank last paragraph", []string{"A", ""}, EditOp{Kind: plan.OpAppend, Content: "X\n\nY"}, false},
+		{"append a paragraph like the last", []string{"A", "B"}, EditOp{Kind: plan.OpAppend, Content: "B"}, false},
+		// Docs keeps a blank paragraph after a table that ends a body.
+		{"append a table into a blank last paragraph", []string{"Title", ""}, EditOp{Kind: plan.OpAppend, Content: "| a |\n|---|\n| 1 |"}, false},
+		{"insert before text, a blank last paragraph after it", []string{"A", "B", ""}, EditOp{Kind: plan.OpInsert, Location: &Location{At: "before", Of: &Target{Handle: "p2"}}, Content: "X"}, true},
+		{"replace the last paragraph with two", []string{"A", "B", "C"}, EditOp{Kind: plan.OpReplace, Target: &Target{Handle: "p3"}, Content: "X\n\nY"}, false},
+		{"replace a paragraph with one", []string{"A", "B", "C"}, EditOp{Kind: plan.OpReplace, Target: &Target{Handle: "p2"}, Content: "X"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := simService(t, newSim(t, tc.paras...))
+			res, err := svc.Edit(context.Background(), contentEdit("direct", tc.op))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if warned := strings.Contains(strings.Join(res.Warnings, "\n"), "number of blocks changed"); warned != tc.warns {
+				t.Fatalf("warned %t, want %t: %q", warned, tc.warns, res.Warnings)
+			}
+		})
+	}
+}
+
+// A paragraph read as markdown and written back unchanged is unchanged:
+// a read escapes what content would resolve, so nothing is lost, and the
+// write finds nothing to do.
+func TestReadTextWritesBackUnchanged(t *testing.T) {
+	for _, text := range []string{
+		`See \\server\share, C:\Users\x\ and AT&amp;T &copy; &#169; \&amp;`,
+		`a regex \d+\.\s* and \*literal\* stars and a\_b`,
+		"# not a heading",
+		"1. not a list",
+	} {
+		sim := newSim(t, text, "Last.")
+		svc, api := simService(t, sim)
+		ctx := context.Background()
+		read, err := svc.Read(ctx, ReadRequest{Document: fixtureID, Scope: ReadScope{FromHandle: "p1", ToHandle: "p1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, md, _ := strings.Cut(read.Text, "-->")
+		md = strings.TrimSpace(md)
+		if _, err := svc.Edit(ctx, contentEdit("direct", EditOp{Kind: plan.OpReplace, Target: &Target{Handle: "p1"}, Content: md})); err != nil {
+			t.Fatal(err)
+		}
+		if got := sim.String(); got != text+"\nLast." || len(api.batches) != 0 {
+			t.Errorf("%q read as %q, written back as %q in %d batch(es)", text, md, got, len(api.batches))
+		}
+	}
+}
+
+// A table's cells read as markdown parse back to what they hold, a pipe
+// and a backslash before one included.
+func TestReadTableCellsParseBack(t *testing.T) {
+	cells := [][]string{{`a\|b`, "x|y"}, {`\*z\*`, `C:\dir\`}}
+	sim := newSim(t, "Intro", "Last.")
+	sim.elems = slices.Insert(sim.elems, 1, &simElem{cells: cells})
+	svc, _ := simService(t, sim)
+	read, err := svc.Read(context.Background(), ReadRequest{Document: fixtureID, Scope: ReadScope{FromHandle: "tbl1", ToHandle: "tbl1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, md, _ := strings.Cut(read.Text, "-->")
+	f, err := markdown.Parse(md)
+	if err != nil || len(f.Blocks) != 1 || f.Blocks[0].Table == nil {
+		t.Fatalf("%v: %q", err, md)
+	}
+	if got, _, _ := f.Blocks[0].Table.Grid(); !slices.EqualFunc(got, cells, slices.Equal) {
+		t.Fatalf("cells %q read as %q, parsed back as %q", cells, md, got)
 	}
 }

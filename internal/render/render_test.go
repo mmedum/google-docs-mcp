@@ -2,6 +2,7 @@ package render_test
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
 	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
@@ -128,6 +130,33 @@ func TestBudgetAndContinue(t *testing.T) {
 	}
 	if out := render.Markdown(seg, -5, 999, render.Options{}); out.Blocks != len(seg.Blocks)-1 {
 		t.Fatalf("clamped range rendered %d blocks", out.Blocks)
+	}
+}
+
+// Prose with backslashes and ampersands parses back from a read as it
+// was, in a styled run too, where a backslash at the end would escape the
+// closing mark. Code keeps both as typed.
+func TestProseParsesBackAsItWas(t *testing.T) {
+	seg := &doc.Segment{Kind: doc.SegmentBody, Tab: &doc.Tab{Number: 1}}
+	seg.Blocks = []*doc.Block{{Kind: doc.KindParagraph, Handle: "p1", Segment: seg, Paragraph: &doc.Paragraph{Runs: []*doc.Run{
+		{Kind: doc.RunText, Text: `dir\`, Style: doc.TextStyle{Bold: true}},
+		{Kind: doc.RunText, Text: ` and \*x\* AT&amp;T `},
+		{Kind: doc.RunText, Text: `a\*b &amp;`, Style: doc.TextStyle{FontFamily: "Courier New"}},
+		{Kind: doc.RunText, Text: " end\\\n"},
+	}}}}
+	md := render.Markdown(seg, 0, 1, render.Options{}).Text
+	f, err := markdown.Parse(md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, in := range f.Blocks[0].Inlines {
+		got = append(got, fmt.Sprintf("%q bold=%t code=%t", in.Text, in.Bold, in.Code))
+	}
+	want := []string{`"dir\\" bold=true code=false`, `" and \\*x\\* AT&amp;T " bold=false code=false`,
+		`"a\\*b &amp;" bold=false code=true`, `" end\\" bold=false code=false`}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("read as %q, parsed back as\n%s\nwant\n%s", md, strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 

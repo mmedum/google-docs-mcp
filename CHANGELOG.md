@@ -48,6 +48,17 @@ diff in CI flags them.
 
 ### Fixed
 
+- Prose read as markdown and written back is unchanged. Content now
+  resolves backslash escapes and entity references, in text and link
+  addresses, as CommonMark does: `\#`, which a read writes before prose
+  that starts like a heading, wrote a backslash into the document. A
+  read now escapes the backslashes and ampersands that would resolve,
+  such as the first in `\\server`. A code span keeps both as typed.
+- A code span that runs over two lines of content is one span with a
+  space in it, as CommonMark says. It wrote two paragraphs.
+- An edit warns that handles have shifted after an insert just before
+  the last paragraph too. It missed that case, so a handle read before
+  the edit could name another block with no warning.
 - `edit_table` `insert_table` with `data` and `content_format: text`
   writes the cells verbatim. The fill read them as markdown.
 - In suggest mode, a later batch no longer warns about suggestions its

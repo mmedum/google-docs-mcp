@@ -381,34 +381,46 @@ func TestAForcedOpInALaterBatchIsRefused(t *testing.T) {
 
 // A tool that asks the person before every write carries Claude Code's
 // requiresUserInteraction mark only for a client that cannot ask. With
-// both, Claude Code put two prompts in front of every delete.
+// both, Claude Code put two prompts in front of every delete. Each
+// protocol lists on one server, the client that can ask first, so a mark
+// dropped from the server's own tool rather than from a copy shows up
+// for the clients after it.
 func TestTheMarkIsForAClientThatCannotAsk(t *testing.T) {
-	marked := func(cs *mcp.ClientSession) map[string]bool {
-		t.Helper()
-		res, err := cs.ListTools(context.Background(), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out := map[string]bool{}
-		for _, tool := range res.Tools {
-			if tool.Name != "delete_comment" && tool.Name != "delete_tab" {
-				continue
-			}
-			if a := tool.Annotations; a == nil || a.DestructiveHint == nil || !*a.DestructiveHint {
-				t.Errorf("%s lost destructiveHint: %+v", tool.Name, a)
-			}
-			out[tool.Name] = tool.Meta["anthropic/requiresUserInteraction"] == true
-		}
-		return out
-	}
+	asks := (&answerer{action: "accept"}).handle
+	urlAlone := &mcp.ClientCapabilities{Elicitation: &mcp.ElicitationCapabilities{URL: &mcp.URLElicitationCapabilities{}}}
 	for _, protocol := range protocols {
-		cs, _ := connectAsking(t, everything(), protocol, &answerer{action: "accept"})
-		if got := marked(cs); len(got) != 2 || got["delete_comment"] || got["delete_tab"] {
-			t.Errorf("%s, a client that can ask: marked %v, want both present and unmarked", protocol, got)
-		}
-		cs, _ = connectAsking(t, everything(), protocol, nil)
-		if got := marked(cs); len(got) != 2 || !got["delete_comment"] || !got["delete_tab"] {
-			t.Errorf("%s, a client that cannot ask: marked %v, want both marked", protocol, got)
+		srv := newServer(askFixture(t), everything())
+		for _, tc := range []struct {
+			name   string
+			o      *mcp.ClientOptions
+			marked bool
+		}{
+			{"form", &mcp.ClientOptions{ElicitationHandler: asks}, false},
+			{"url alone", &mcp.ClientOptions{ElicitationHandler: asks, Capabilities: urlAlone}, true},
+			{"no elicitation", &mcp.ClientOptions{}, true},
+		} {
+			t.Run(protocol+"/"+tc.name, func(t *testing.T) {
+				res, err := connectTo(t, srv, protocol, tc.o).ListTools(context.Background(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				seen := 0
+				for _, tool := range res.Tools {
+					if tool.Name != "delete_comment" && tool.Name != "delete_tab" {
+						continue
+					}
+					seen++
+					if a := tool.Annotations; a == nil || a.DestructiveHint == nil || !*a.DestructiveHint {
+						t.Errorf("%s lost destructiveHint: %+v", tool.Name, a)
+					}
+					if marked := tool.Meta["anthropic/requiresUserInteraction"] == true; marked != tc.marked {
+						t.Errorf("%s marked %t, want %t", tool.Name, marked, tc.marked)
+					}
+				}
+				if seen != 2 {
+					t.Errorf("listed %d of delete_comment and delete_tab, want 2", seen)
+				}
+			})
 		}
 	}
 }

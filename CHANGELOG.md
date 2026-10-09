@@ -35,7 +35,9 @@ diff in CI flags them.
   the person, `delete_comment` and `delete_tab` no longer carry the
   `requiresUserInteraction` mark; the server's own question, which shows
   what the delete destroys, is the confirmation. To see only that
-  question, add both tools to Claude Code's allow list.
+  question, add both tools to Claude Code's allow list. A Claude Code
+  `Elicitation` hook that accepts now confirms a delete alone, where the
+  mark used to stop the call before it reached the server.
 
 ### Fixed
 

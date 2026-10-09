@@ -349,8 +349,8 @@ func addAsking[In, Out any](s *mcp.Server, d Deps, t *mcp.Tool, cond string, h m
 	mcp.AddTool(s, t, asked(d, t.Name, h))
 }
 
-// interactionKey is Claude Code's mark for a tool it must prompt for on
-// every call, in every permission mode, with no allow rule to skip it.
+// interactionKey is Claude Code's mark for a tool it prompts for on
+// every call, even under an allow rule.
 const interactionKey = "anthropic/requiresUserInteraction"
 
 // interactionHint is receiving middleware for tools/list. A tool that

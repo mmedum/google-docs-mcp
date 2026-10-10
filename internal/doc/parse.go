@@ -439,6 +439,13 @@ func parseElement(el *gdocs.ParagraphElement) *Run {
 			}
 		}
 		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
+	case el.Dropdown != nil:
+		e := el.Dropdown
+		r.Kind = RunDropdown
+		if e.DropdownProperties != nil {
+			r.Text = e.DropdownProperties.DisplayValue
+		}
+		r.suggestions(e.Suggested, e.SuggestedStyle, e.TextStyle)
 	case el.Equation != nil:
 		r.Kind = RunEquation
 		r.Inserted, r.Deleted = el.Equation.SuggestedInsertionIDs, el.Equation.SuggestedDeletionIDs
@@ -682,6 +689,7 @@ func parsePageSetup(ds *gdocs.DocumentStyle) *PageSetup {
 		MarginHeaderPt: ptOf(ds.MarginHeader), MarginFooterPt: ptOf(ds.MarginFooter),
 		PageNumberStart: ds.PageNumberStart, Landscape: ds.FlipPageOrientation,
 		FirstPageHF: ds.UseFirstPageHeaderFooter, EvenPageHF: ds.UseEvenPageHeaderFooter,
+		Pageless: ds.DocumentFormat != nil && ds.DocumentFormat.DocumentMode == "PAGELESS",
 	}
 	if ds.PageSize != nil {
 		p.WidthPt, p.HeightPt = ptOf(ds.PageSize.Width), ptOf(ds.PageSize.Height)

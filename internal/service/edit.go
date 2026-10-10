@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/config"
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
@@ -37,6 +41,9 @@ type EditOp struct {
 	// Fragment is content already parsed; set by follow-ups instead of Content.
 	Fragment *markdown.Fragment
 	plan.Params
+	// Regex makes Find an RE2 pattern; such a replace_all is expanded
+	// here into one replace per match and never reaches the planner.
+	Regex  bool
 	Table  *TableOp
 	Object *plan.ObjectParams
 	// Layout carries the page, section and named-style specs, and the
@@ -63,8 +70,12 @@ type EditRequest struct {
 	Force          bool
 	ExpectRevision string
 	// round marks a later batch of a call, run after an earlier one has
-	// been written: too late to ask the person anything.
+	// been written: too late to ask the person anything, and the call's
+	// first batch, not this one, warns when handles shift.
 	round bool
+	// own are the suggestions the call's earlier batches made. A later
+	// batch works over them, and the guard does not report them.
+	own []string
 }
 
 // EditResult reports what happened.
@@ -90,6 +101,10 @@ type EditResult struct {
 	Followups []string `json:"followups,omitempty"`
 	// Text is the result as the model reads it.
 	Text string `json:"-"`
+	// written is the revision the last batch's reply gave. A later batch
+	// runs only on a read at that revision: any other means somebody
+	// else wrote in between.
+	written string
 }
 
 func (r *EditResult) text() string {
@@ -237,6 +252,7 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	}
 	if req.DryRun {
 		result.Followups = append(result.Followups, describeRounds(later)...)
+		result.Followups = append(result.Followups, describeEmbeds(ro.planned.Embedded)...)
 		return result, nil, nil
 	}
 	result.Applied = len(batch.Ops)
@@ -247,6 +263,9 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	if len(later) > 0 {
 		after = s.runRounds(ctx, req, later, result, after)
 	}
+	if len(ro.planned.Embedded) > 0 {
+		after = s.placeEmbeds(ctx, req, ro.planned.Embedded, result, after)
+	}
 	if after == nil {
 		if after, err = s.FetchFresh(ctx, req.Document); err != nil {
 			result.Warnings = append(result.Warnings, "applied, but re-reading the document failed: "+err.Error())
@@ -256,7 +275,9 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 	// The caller sees the post-edit handles in the preview, so they are
 	// what later writes must be checked against.
 	s.Remember(after)
-	if blocksShifted(f.Doc, after.Doc) {
+	// A round is part of a call whose first batch compares the read it
+	// started from with the last one, so it does not warn on its own.
+	if !req.round && blocksShifted(f.Doc, after.Doc) {
 		result.Warnings = append(result.Warnings, "the number of blocks changed, so handles after the edited region now name different blocks; use the handles in the preview or re-read before targeting by handle")
 	}
 	result.RevisionID = after.Doc.RevisionID
@@ -265,8 +286,11 @@ func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) 
 }
 
 // blocksShifted reports whether a segment gained or lost top-level blocks
-// somewhere before its last block, which renumbers the handles after
-// that point. A pure append at the end shifts nothing.
+// with unchanged blocks after them, which renumbers those blocks'
+// handles. An edit that reaches the segment's end, such as an append or a
+// blank last paragraph filled, shifts nothing. Nor do blank paragraphs
+// alone: Docs keeps one after a table that ends a body, and nothing
+// targets one for what it says.
 func blocksShifted(before, after *doc.Document) bool {
 	segs := map[string]*doc.Segment{}
 	for _, t := range after.Tabs {
@@ -277,23 +301,34 @@ func blocksShifted(before, after *doc.Document) bool {
 	for _, t := range before.Tabs {
 		for _, old := range t.Segments() {
 			cur := segs[t.ID+"/"+old.ID]
-			if cur == nil || len(cur.Blocks) == len(old.Blocks) {
-				continue
-			}
-			n := min(len(old.Blocks), len(cur.Blocks))
-			first := n
-			for i := range n {
-				if doc.Normalize(old.Blocks[i].Text(doc.ViewInline)) != doc.Normalize(cur.Blocks[i].Text(doc.ViewInline)) {
-					first = i
-					break
-				}
-			}
-			if first < len(old.Blocks)-1 {
+			if cur != nil && len(cur.Blocks) != len(old.Blocks) && slices.ContainsFunc(unchangedTail(old.Blocks, cur.Blocks), hasText) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// hasText reports whether a block reads as anything.
+func hasText(b *doc.Block) bool { return doc.Normalize(b.Text(doc.ViewInline)) != "" }
+
+// unchangedTail is the blocks that read the same at the end of a segment
+// before and after an edit, stopping short of those that read the same
+// at its start.
+func unchangedTail(old, cur []*doc.Block) []*doc.Block {
+	same := func(a, b *doc.Block) bool {
+		return doc.Normalize(a.Text(doc.ViewInline)) == doc.Normalize(b.Text(doc.ViewInline))
+	}
+	n := min(len(old), len(cur))
+	head := 0
+	for head < n && same(old[head], cur[head]) {
+		head++
+	}
+	tail := 0
+	for tail < n-head && same(old[len(old)-1-tail], cur[len(cur)-1-tail]) {
+		tail++
+	}
+	return cur[len(cur)-tail:]
 }
 
 // planAndApply resolves, plans, and (unless dry-running) applies once.
@@ -305,6 +340,10 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 	}
 	ro, err := s.resolveOps(ctx, f, req.Ops, mode)
 	if err != nil {
+		return nil, nil, err
+	}
+	dropOwn(ro.ops, req.own)
+	if err := checkEmbeds(req.Ops, ro.ops); err != nil {
 		return nil, nil, err
 	}
 	planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})
@@ -400,8 +439,7 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 	}
 	for _, op := range ops {
 		i := op.Seq
-		if op.Kind == plan.OpSetCells {
-			expanded, err := s.expandSetCells(f, i, op, out)
+		if expanded, ok, err := s.expand(f, op, out); ok {
 			if err != nil {
 				return nil, Errorf(classOf(err), "op %d: %s", i, messageOf(err))
 			}
@@ -458,7 +496,7 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		}
 		out.ops = append(out.ops, p)
 	}
-	return out, nil
+	return out, checkInternalLinks(f.Doc, out.ops)
 }
 
 // resolveDeleteSegment names the header or footer to remove and lists
@@ -600,6 +638,183 @@ func (s *Service) resolveReplaceAll(f *Fetched, op EditOp, p *plan.Op, mode plan
 	p.CommentAnchor = &rng
 	p.TargetText = r.Text
 	return nil
+}
+
+// checkInternalLinks refuses a link inside the document that points at
+// nothing, before anything is sent: "#tab=<id>" must name a tab, and
+// "#<heading id>" a heading in the tab the linked text is in.
+func checkInternalLinks(d *doc.Document, ops []plan.Op) error {
+	for _, op := range ops {
+		links := []string{op.Text.Link}
+		if op.Fragment != nil {
+			for _, b := range op.Fragment.Blocks {
+				for _, in := range b.Inlines {
+					links = append(links, in.Link)
+				}
+			}
+		}
+		for _, link := range links {
+			tabID, headingID, ok := plan.InternalLink(link)
+			if !ok {
+				continue
+			}
+			if tabID != "" {
+				if t, found := d.Tab(tabID); !found || t.ID != tabID {
+					return Errorf("not_found", "op %d: link %s names no tab; tab ids: %s", op.Seq, link, tabIDs(d))
+				}
+				continue
+			}
+			tab, found := d.Tab(op.Seg.TabID)
+			if !found || tab.Body == nil {
+				return Errorf("not_found", "op %d: link %s: the linked text's tab is not in the document", op.Seq, link)
+			}
+			if !slices.ContainsFunc(tab.Body.AllBlocks(), func(b *doc.Block) bool {
+				return b.Paragraph != nil && b.Paragraph.HeadingID == headingID
+			}) {
+				return Errorf("not_found", "op %d: link %s: tab %d has no heading with that id; heading ids come from get_outline", op.Seq, link, tab.Number)
+			}
+		}
+	}
+	return nil
+}
+
+// expand turns one caller op into several planner ops, for the kinds
+// that address many places at once; ok is false for every other kind.
+func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op, ok bool, err error) {
+	switch {
+	case op.Kind == plan.OpSetCells:
+		ops, err = s.expandSetCells(f, op.Seq, op, out)
+	case op.Kind == plan.OpReplaceAll && op.Regex:
+		ops, err = s.expandRegexReplaceAll(f, op, out)
+	default:
+		return nil, false, nil
+	}
+	return ops, true, err
+}
+
+// expandRegexReplaceAll turns a regex replace_all into one replace per
+// match, or a delete where the replacement expands to nothing. The
+// matches are found here, with find_in_document's matcher over each
+// paragraph's index-aligned text, rather than by Google's searchByRegex:
+// Google does not document its regex flavor, and the guard has to see
+// exactly the ranges that change.
+//
+// A match never crosses a paragraph, never covers anything but text (a
+// chip, a break or an element this server does not model is a
+// placeholder the guard cannot judge), and skips a table of contents,
+// which Google maintains. The pattern decides case: a write that ignored
+// it by default would turn [A-Z] into every letter.
+func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]plan.Op, error) {
+	if op.Find == "" {
+		return nil, Errorf("invalid", "replace_all needs find")
+	}
+	re, err := compileFind(op.Find, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkTemplate(re, op.Replace); err != nil {
+		return nil, err
+	}
+	tab, err := tabOf(f.Doc, targetTab(op.Target))
+	if err != nil {
+		return nil, err
+	}
+	var ops []plan.Op
+	for _, seg := range tab.Segments() {
+		bounds := SegmentBounds(tab, seg)
+		toc := tocBlocks(seg)
+		for _, b := range seg.AllBlocks() {
+			if b.Paragraph == nil || toc[b] {
+				continue
+			}
+			aligned := paragraphText(b)
+			for _, m := range re.FindAllStringSubmatchIndex(aligned, -1) {
+				switch {
+				case m[0] == m[1]:
+					return nil, Errorf("invalid", "%q matches empty text in %s; a replacement needs text to replace", op.Find, b.Handle)
+				case strings.ContainsRune(aligned[m[0]:m[1]], objectPlaceholder):
+					return nil, Errorf("invalid", "%q matches across a chip, image, break or other element in %s; a regex replace changes text only, so narrow the pattern", op.Find, b.Handle)
+				case len(ops) == matchLimit:
+					return nil, Errorf("invalid", "%q matches more than %d times in tab %d; narrow the pattern", op.Find, matchLimit, tab.Number)
+				}
+				start := b.Start + doc.UTF16Len(aligned[:m[0]])
+				end := b.Start + doc.UTF16Len(aligned[:m[1]])
+				rng := plan.Rng{Start: start, End: end, SegmentID: seg.ID, TabID: tab.ID}
+				p := plan.Op{Seq: op.Seq, Kind: plan.OpDelete, Seg: bounds, Target: &rng, TargetText: aligned[m[0]:m[1]],
+					TargetAligned: aligned[m[0]:m[1]], NearBullet: hasBullet(b), Anchors: f.anchorsIn(seg, start, end, out.threads)}
+				if repl := string(re.ExpandString(nil, op.Replace, aligned, m)); repl != "" {
+					p.Kind, p.Fragment = plan.OpReplace, markdown.Plain(repl)
+				}
+				ops = append(ops, p)
+				out.note(tab.ID, seg.ID, start)
+			}
+		}
+	}
+	if len(ops) == 0 {
+		return nil, Errorf("not_found", "%q matches nothing in tab %d; find_in_document with regex shows what a pattern matches, and a chip's text is not matched", op.Find, tab.Number)
+	}
+	// One caller op, so one line in the summary, as set_cells does.
+	desc := fmt.Sprintf("%d match(es) of %q in tab %d", len(ops), op.Find, tab.Number)
+	for i := range ops {
+		ops[i].Description = desc
+	}
+	return ops, nil
+}
+
+// checkTemplate refuses a replacement naming a group the pattern does not
+// have. Go reads $name greedily, so "$1pt" names a group "1pt" and expands
+// to nothing, which would turn every replacement into a deletion.
+func checkTemplate(re *regexp.Regexp, tmpl string) error {
+	names := re.SubexpNames()
+	for i := 0; i < len(tmpl); i++ {
+		if tmpl[i] != '$' {
+			continue
+		}
+		rest := tmpl[i+1:]
+		var name string
+		switch {
+		case strings.HasPrefix(rest, "$"):
+			i++
+			continue
+		case strings.HasPrefix(rest, "{"):
+			end := strings.IndexByte(rest, '}')
+			if end < 0 {
+				return Errorf("invalid", "replace has an unclosed ${ at byte %d", i)
+			}
+			name = rest[1:end]
+		default:
+			n := 0
+			for n < len(rest) && (rest[n] == '_' || unicode.IsLetter(rune(rest[n])) || unicode.IsDigit(rune(rest[n]))) {
+				n++
+			}
+			name = rest[:n]
+		}
+		if !groupExists(names, name) {
+			return Errorf("invalid", "replace names $%s, which the pattern has no group for, so it would insert nothing; "+
+				"write ${1} to follow a group with letters or digits, and $$ for a literal $", name)
+		}
+	}
+	return nil
+}
+
+func groupExists(names []string, name string) bool {
+	if n, err := strconv.Atoi(name); err == nil {
+		return n >= 0 && n < len(names)
+	}
+	return name != "" && slices.Contains(names[1:], name)
+}
+
+// tocBlocks lists the paragraphs inside a segment's tables of contents.
+func tocBlocks(seg *doc.Segment) map[*doc.Block]bool {
+	skip := map[*doc.Block]bool{}
+	for _, b := range seg.AllBlocks() {
+		if b.TOC != nil {
+			for _, x := range doc.Flatten(b.TOC.Blocks) {
+				skip[x] = true
+			}
+		}
+	}
+	return skip
 }
 
 func resolveCreateSegment(f *Fetched, op EditOp, p *plan.Op) error {

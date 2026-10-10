@@ -7,7 +7,8 @@ with the race detector and an 80% statement-coverage floor per core
 package, govulncheck, the stdio smoke test, and the staleness check
 (README tool table, configuration docs, changelog and architecture status
 against the code). `make schema-diff` compares tool schemas with the last
-tag and flags removed tools or fields and new required fields.
+tag and flags removed tools, arguments or output fields and new required
+arguments.
 
 Before a phase is called done, also run `/simplify` and `/code-review
 high` on the changed code and resolve or explicitly defer the findings

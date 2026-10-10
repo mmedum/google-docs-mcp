@@ -136,10 +136,20 @@ func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSessi
 // protocol it offers; an empty protocol is the SDK's own choice.
 func connectClient(t *testing.T, api *fakeAPI, cfg config.Config, protocol string, o *mcp.ClientOptions) *mcp.ClientSession {
 	t.Helper()
+	return connectTo(t, newServer(api, cfg), protocol, o)
+}
+
+// newServer is a server over api, with its handle memory seeded as a
+// read would, so tools may target handles.
+func newServer(api *fakeAPI, cfg config.Config) *mcp.Server {
 	svc := service.New(api, service.Options{ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
-	// Seed the handle memory as a read would, so tools may target handles.
 	_, _ = svc.Fetch(context.Background(), fixtureID)
-	srv := server.New(server.Deps{Service: svc, Config: cfg, Version: "test"})
+	return server.New(server.Deps{Service: svc, Config: cfg, Version: "test"})
+}
+
+// connectTo connects one more client to srv, as connectClient does.
+func connectTo(t *testing.T, srv *mcp.Server, protocol string, o *mcp.ClientOptions) *mcp.ClientSession {
+	t.Helper()
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()
 	ss, err := srv.Connect(ctx, st, nil)

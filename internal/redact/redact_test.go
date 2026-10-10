@@ -188,3 +188,46 @@ func TestAnAlreadyMaskedAddressIsStillRedacted(t *testing.T) {
 		t.Error("the organization domain survived into the transcript")
 	}
 }
+
+// A known name goes wherever it appears, a person chip included, and the
+// longer of two names that share a start goes whole.
+func TestNames(t *testing.T) {
+	in := "- Review the numbers@Ann Petersen\n* Review the numbersAnn Petersen-Lund and Ann\n"
+	got := Names(in, []string{"Ann", "", "Ann Petersen", "Ann Petersen-Lund"})
+	want := "- Review the numbers@<person>\n* Review the numbers<person> and <person>\n"
+	if got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
+
+// Clip applies names after the shape rules: a name that is also an
+// address's local part cannot break the address before its rule sees it.
+func TestClipNamesAfterRules(t *testing.T) {
+	got := Clip("owner qa <qa@acme-corp.example>\nmail qa@acme-corp.example, and qa again\n", 200, "qa")
+	want := "owner <person>\nmail <address>, and <person> again\n"
+	if got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
+
+// A JSON trace is redacted string by string: the owner line inside a
+// tool result is found at its line's start, and the document stays JSON.
+func TestTranscriptJSON(t *testing.T) {
+	in := `{"calls":[{"result":"Title\nowner Ann Petersen <ann@acme-corp.example>\nlast modified 2026-09-01 by Ann Petersen\n"}],"cost":0.12,"turns":3}`
+	got, err := TranscriptJSON([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{
+  "calls": [
+    {
+      "result": "Title\nowner \u003cperson\u003e\nlast modified 2026-09-01 by \u003cperson\u003e\n"
+    }
+  ],
+  "cost": 0.12,
+  "turns": 3
+}`
+	if string(got) != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+}

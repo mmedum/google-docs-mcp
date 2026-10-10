@@ -58,10 +58,12 @@
   URLs are caught by shape; a revision is caught by shape where it is
   written as `revision <id>` and by position in a revision listing,
   which writes the id bare. A person's name has no shape,
-  so names are caught by position — the set is closed and short because
-  this project's own renderers wrote every one of them — and an address
-  is caught both ways, since `userLabel` renders a person as
-  `Name <address>`. `internal/redact` carries no build tag,
+  so names are caught by position where this project's renderers put
+  one after a label, and an address is caught both ways, since
+  `userLabel` renders a person as `Name <address>`. A person chip prints
+  a name with no label before it, so the driver reads the account's
+  display name before any step can print a chip, and replaces that name
+  wherever it appears. `internal/redact` carries no build tag,
   so the tests for it run in every `make check` rather than only when
   someone runs the driver with credentials.
 - Scopes: `documents` and `drive` (or their read-only variants with
@@ -76,7 +78,7 @@
 | The model edits the wrong passage | Targets are exact text, stable heading ids, or handles checked against the revision they came from. Every write is guarded by `requiredRevisionId`; a concurrent edit is re-planned once, then refused. |
 | Content anchored to comments, suggestions, images or footnotes is destroyed | Direct edits refuse to delete such ranges unless `force` is passed; `suggest` and `comment` modes delete nothing. |
 | Writes that cannot be undone here | Six writes are put to the person through the client first, when it can ask: `delete_tab`, `delete_comment`, a forced edit that destroys comments, suggestions, images or footnotes, and `review_suggestion` with `all: true` (`docs/architecture.md` §12a). The question names what would go, read fresh, and the answer is bound to it by a signed, single-use state. A client that cannot ask gets no question; `GDOCS_REQUIRE_PROMPT=true` refuses those writes instead. |
-| Destructive actions | Delete tools are **unregistered** unless `GDOCS_ENABLE_DESTRUCTIVE=true`, and once registered each call must repeat its target — `confirm_tab`, `confirm_comment_id` — or the server refuses it. Registration is a deployer's decision made once; the repetition is a decision made every time, and it is checked in the server rather than declared in the schema, so a client in an auto-approve mode cannot skip it. They also carry `destructiveHint` and `requiresUserInteraction`, but both are advisory — the spec says clients treat tool annotations as untrusted, and a host in an auto-approve mode runs a registered tool without asking. What this server controls is what it registers and what it refuses; the hints are a courtesy to clients that honor them. |
+| Destructive actions | Delete tools are **unregistered** unless `GDOCS_ENABLE_DESTRUCTIVE=true`, and once registered each call must repeat its target — `confirm_tab`, `confirm_comment_id` — or the server refuses it. Registration is a deployer's decision made once; the repetition is a decision made every time, and it is checked in the server rather than declared in the schema, so a client in an auto-approve mode cannot skip it. They also carry `destructiveHint`, and `requiresUserInteraction` for a client that cannot ask the person itself, but both are advisory — the spec says clients treat tool annotations as untrusted, and a host in an auto-approve mode runs a registered tool without asking. What this server controls is what it registers and what it refuses; the hints are a courtesy to clients that honor them. |
 | Runaway output | Reads are budgeted (`max_chars`, default 20 000) and cut at block boundaries. |
 | Regex denial of service | Go's RE2 engine, linear time. |
 | Secrets in the repository | gitleaks in pre-commit and CI with rules for Google client ids, secrets and refresh tokens; fixtures are synthetic. |

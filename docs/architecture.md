@@ -1,10 +1,13 @@
 # Architecture — google-docs-mcp
 
-**Status:** v2.1.1 (2026-10-03). Comments and suggestions are generally
-available and detected per read rather than gated on a flag, and text
-suggested as an insertion reads in the style it will have (§18). Since
-v2.0.1 a write that may have landed is reported as `[ambiguous_outcome]`
-instead of being repeated. It asks the person before six writes (§12a).
+**Status:** v2.2.0 (released 2026-10-10, live run green). Markdown
+content takes tables and images, and text read as markdown writes back
+unchanged. `replace_all` takes a regular expression, a document can be
+pageless, and a link can point at a heading or a tab. Comments and
+suggestions are generally available and detected per read rather than
+gated on a flag (§18). Since v2.0.1 a write that may have landed is
+reported as `[ambiguous_outcome]` instead of being repeated. It asks the
+person before six writes (§12a).
 Phases 0 to 4 are done (§16): auth, raw
 client, model, renderer, reads, search, create, export, editing with
 minimal diffs in all three modes, formatting, suggestion review, comment
@@ -76,7 +79,7 @@ folder management, moving files, sharing, trashing, copying.
 | Constraint (verified against official docs) | Consequence |
 |---|---|
 | Indices are **UTF-16 code units**, per segment (body / header / footer / footnote each start at 0), shift after every mutation, and are only valid for the revision you read. | The model never sees or computes indices. Server owns index math; Go strings are UTF-8 so every offset goes through `utf16` conversion. |
-| `batchUpdate` is **atomic** and requests apply in order. | One batch per tool call; requests sorted by descending index. |
+| `batchUpdate` is **atomic** and requests apply in order. | One batch per tool call where the call allows it; requests sorted by descending index. What can only follow a write goes in later batches, each reported and none rolled back (§7.3). |
 | `writeControl.requiredRevisionId` → 400 if the doc changed; the response returns the new revision id. | Every write is guarded by the revision it was planned against. |
 | Inserted text "will match the text immediately before the insertion index"; a newline copies the paragraph style "including lists and bullets" from the current paragraph. | Minimal-diff edits inherit surrounding formatting for free; the compiler sets explicit styles only where the content asks for them. |
 | Tabs: `includeTabsContent=true` returns `document.tabs[]`. Requests without `tabId` hit the first tab, except `replaceAllText` and named-range requests, which default to **all tabs**. | Always read with tabs; always set `tabId` or explicit `tabsCriteria`. |
@@ -370,9 +373,34 @@ guard below only reports.
 7. Re-fetch; return `{ revision_id, mode, ops_applied, changes: [{op,
    handles, preview}], suggestion_ids, warnings }`.
 
-Multi-batch ops (only `insert_table` with data): insert the empty table,
-re-fetch, fill cells. If the fill fails the empty table remains and the
-response says so.
+Multi-batch ops: `insert_table` with data inserts the empty table,
+re-fetches and fills the cells. If the fill fails the empty table remains
+and the response says so.
+
+Content with tables or images runs in rounds, and the rounds are not
+atomic. The first batch writes the text with an empty paragraph, a slot,
+where each table or image goes. Later batches fill the slots one at a
+time, highest first, each against a fresh read. That read must be at the
+revision the previous batch's reply gave, or somebody else wrote in
+between and the slots, found by index, may have moved; the rest are then
+reported, not placed. It must also still show the slot where the text
+left it. An image goes into its slot. A table goes in
+at the newline of the paragraph before the slot, gets its cells as plain
+text through the `insert_table` fill, and a last batch deletes the empty
+paragraphs it leaves; the slot stays where the body ends or a table
+follows, since Docs needs a paragraph there (spike E, §18). Such content
+is the only op of its call, so nothing else in the first batch moves the
+slots, and it holds at most 10 tables and images. In suggest mode deleted
+text stays in place, so where it would share the last slot's paragraph
+(a replace of the whole body, a blank paragraph cleared of whitespace)
+the slot gets a newline of its own. A later batch of any call is not
+guarded against the suggestions its own earlier batches made. A table over 200 rows
+or 20 columns, or an image address over 2 kB, is refused before anything
+is written. A slot that cannot be filled is a warning naming the line of
+the content, and the text stays written. When the round failed, the
+warning says the empty paragraph is still there; when somebody else
+changed the document in between, it does not, since the slot's state is
+then unknown. A dry run lists the rounds without planning them.
 
 Dry run returns the resolved targets, the guard report, the kinds of
 request that would be sent (not the requests themselves: they carry
@@ -381,12 +409,33 @@ mode, and a rendered view of the region. Nothing is sent.
 
 ### 7.4 Markdown coverage
 
-Headings 1–6, paragraphs, bold/italic/strikethrough/inline code, links,
+Headings 1–6, paragraphs, bold/italic/strikethrough/inline code, links
+(a URL, `#<heading id>` for a heading in the same tab, `#tab=<tab id>`),
 bullet and numbered lists (nested), hard breaks; task-list checkboxes are
-dropped and their text kept. Fenced code → Courier-styled paragraphs.
-Refused with `[unsupported] <construct> at line N`: images (use
-`insert_object`), tables in content (use `edit_table`), HTML, block
-quotes, horizontal rules.
+dropped and their text kept. Backslash escapes and entity references
+resolve in text and addresses, as CommonMark says, and not in code
+spans. An autolink keeps its text as typed, as goldmark renders one.
+goldmark keeps them in the source and resolves them only while writing
+HTML, so the parser resolves them through goldmark's own writer. A
+`<br>` is a paragraph break, as a read writes between a table cell's
+paragraphs; in a heading or list item, a line break. A read escapes
+each character content would take as markup, and no other: a backslash
+before punctuation, a space or the end, and the punctuation after one;
+an ampersand that starts a reference; a `*` or `_` that could open or
+close emphasis; every backtick, tilde and `[`; a `<` that could start a
+tag; and a line that starts like a list, heading, quote, rule or
+indented code. Code holding a backtick gets a longer fence. So text read
+and written back is unchanged, apart from up to three spaces at a
+paragraph's start and any at its end, which markdown drops. A
+randomized test holds it, plain, bold, code and in table cells. Fenced code → Courier-styled paragraphs.
+Tables and images go in the body between blocks, through an `insert`,
+`append` or `replace` (§7.3). Table cells are plain text. An image sits
+on a line of its own, with an http or https address Google fetches
+itself. Its alt text reaches only a comment-mode proposal, since
+`insertInlineImage` takes none. Refused with
+`[unsupported] <construct> at line N`: an image inside text or a list
+item (use `insert_object`), a table or image in a header, footer,
+footnote or table cell, HTML, block quotes, horizontal rules.
 
 What markdown cannot say goes through `format_document`: fonts, sizes,
 colors, alignment, spacing, indents, named styles on existing text,
@@ -400,7 +449,7 @@ bullet presets, clearing formatting.
 |---|---|---|
 | list | `documents.get` with `commentsViewMode` → threads plus the tab's `commentAnchors` map (anchor id → ranges) → handles | `comments.list` (replies, resolved state, `includeDeleted` opt-in) → `quotedFileContent`; server matches the quote to a block, best effort |
 | add | `insertComment` with a Range → anchored in the UI | `comments.create` with `quotedFileContent` → **unanchored** in the UI (stated in the description and in `warnings`) |
-| reply / resolve / reopen | `replies.create` with `action` (one backend for thread operations; `addCommentReply` adds nothing for replies) | `replies.create` with `action` |
+| reply / resolve / reopen | `replies.create` with `action` (one backend for thread operations; `addCommentReply` adds nothing for replies). A suggestion's thread is the exception: Drive cannot see it, so a reply there is `addCommentReply` with `suggestionId` | `replies.create` with `action`; no reply on a suggestion's thread |
 | delete | gated, `comments.delete` / `replies.delete` | gated |
 
 `list_comments` always lists through the Drive API, which carries every
@@ -447,7 +496,8 @@ of the body from an export, never implicit.
 
 snake_case verb–noun, no dots. Claude Code prefixes `mcp__<server>__`.
 "Gated" = registered only with `GDOCS_ENABLE_DESTRUCTIVE=1`; gated tools
-also set `_meta["anthropic/requiresUserInteraction"]`. `GDOCS_READ_ONLY=1`
+also set `_meta["anthropic/requiresUserInteraction"]` for a client that
+cannot ask the person (§12a). `GDOCS_READ_ONLY=1`
 registers only readOnly rows and requests readonly scopes.
 
 | Tool | Purpose | Annotations | Phase |
@@ -461,11 +511,11 @@ registers only readOnly rows and requests readonly scopes.
 | `create_document` | Title, optional markdown body | — | 1 |
 | `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2, 4 |
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
-| `list_suggestions` | Pending suggestions with handles and authors | readOnly | 1 |
+| `list_suggestions` | Pending suggestions with handles, authors and the replies on their threads | readOnly | 1 |
 | `review_suggestion` | accept / reject / discard (discard is author-only); `all` asks the person; dry_run | — | 1, 4, 2.0 |
-| `list_comments` | Full threads: replies, resolved, deleted, quoted text, handles | readOnly | 2 |
+| `list_comments` | Full threads: replies, resolved, deleted, assignee, quoted text, handles | readOnly | 2 |
 | `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | — | 2, 2.0 |
-| `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only) | — | 2, 4 |
+| `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only); `suggestion_id` replies on a suggestion's thread | — | 2, 4 |
 | `delete_comment` | Gated; a thread or one reply; asks the person; dry_run | destructive | 2, 2.0 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
 | `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | — | 2, 4 |
@@ -484,7 +534,13 @@ without asking. `_meta["anthropic/requiresUserInteraction"]` is a signal
 a client may act on, not a control — the spec says clients treat tool
 annotations as untrusted, and a server cannot make its own hint binding.
 Design as though every registered tool can be called unattended.
-`replace_all` always carries explicit `tabsCriteria`.
+`replace_all` always carries explicit `tabsCriteria`. With `regex` it
+sends no `replaceAllText` at all: the server finds the matches itself,
+with `find_in_document`'s RE2 matcher over each paragraph, and plans
+each as a replace (a delete when it expands to nothing), up to 500. The
+pattern decides case, a match covers text only (never a chip, break or
+unknown element), a table of contents is skipped, a group the
+replacement names must exist, and no match at all is `[not_found]`.
 
 **Resources** (Phase 3). Three templates, all `text/markdown`, for
 clients that attach a document as context instead of calling a tool:
@@ -677,6 +733,15 @@ the same question and goes through, and a different question does not.
 The stage that makes a failed reply `[ambiguous_outcome]` is set only
 when an answer is matched, not when the call arrives with one.
 
+Claude Code's `requiresUserInteraction` mark makes it prompt on every
+call, even under an allow rule. A tool that asks
+before every write carries the mark only for a client that cannot ask:
+`tools/list` drops it when the request's capabilities include form
+elicitation, so the person answers once, to the question that says what
+the write destroys, not also to a prompt showing raw arguments.
+`destructiveHint` stays either way; it is the client's allow-listable
+prompt.
+
 A client that cannot ask gets no question, and the arguments are the
 guard as before; the tool descriptions tell the model to ask the person
 itself in that case. `GDOCS_REQUIRE_PROMPT=true` refuses those writes
@@ -704,8 +769,9 @@ accounts. That sets these requirements:
   checks it: Cloud project → APIs → consent screen (Internal vs Testing)
   → Desktop OAuth client → `login` → `doctor`.
 - **Versioning.** Semantic versions; `CHANGELOG.md` in Keep a Changelog
-  form; the schema-dump diff in CI classifies tool removals, renames, and
-  required-field additions as breaking (major after 1.0, minor before).
+  form; the schema-dump diff in CI classifies tool removals, renames,
+  removed output fields and required-field additions as breaking (major
+  after 1.0, minor before).
 - **Documentation set.** README (setup, tool catalog, safety model),
   `docs/architecture.md` (this file), `docs/configuration.md`,
   `docs/security.md` (threat model, scopes, what is stored where),
@@ -1099,3 +1165,16 @@ checked rather than assumed.
 | `changelog.disable` is how you stop goreleaser inventing a commit list when you pass your own `--release-notes`, and a `release.footer` will still wrap it | Half refuted, 2026-09-13, and the half that was wrong was wrong in a way a summary of the documentation would never have caught — it took reading goreleaser v2.18.1. **`changelog.disable` is fatal here**: it is evaluated in the changelog pipe's `Skip`, which runs before `Run`, so `ctx.ReleaseNotes` is never assigned and the file named by `--release-notes` is never opened. The body collapses to header plus footer. `google-chat-mcp` carries `disable: true` **and** passes `--release-notes` in the same workflow, and its release page is a footer with nothing above it — the bug shipped and nobody read the page. **The footer half was the opposite of what was first written here**: `internal/pipe/release/body.go` renders `{{ Header }}{{ ReleaseNotes }}{{ Footer }}` from `Config.Release.Header` and `Config.Release.Footer`, on every path, `--release-notes` included. The early return in the changelog pipe skips only `ctx.ReleaseFooterFile`/`ReleaseFooterTmpl`, which are the `--release-footer` *flags* — a different pair with confusingly similar names, and the reason the first reading of this went the wrong way | `gates release-notes` prints the `CHANGELOG.md` section for the tag and nothing else — the sibling servers' command, adopted rather than reinvented, after a separate `scripts/relnotes` binary had been built here and thrown away for being a fifth answer to a solved question. The footer stays in `.goreleaser.yaml` where it works, one shared wording per server. The `changelog:` block is deleted rather than disabled. A tag whose section is missing or empty fails the release rather than publishing silence, asserted in `scripts/gates`, along with the link-footer stop. The lesson worth keeping is not about goreleaser: a documentation summary said header and footer were "reasonable to infer" as composable and the source said one of them is not, so the config was briefly built on the inference — verify at the source, and prefer the sibling's *observed behavior* over any reading, because chat's empty release page was the evidence that settled it |
 | The sibling with the tidiest README is the one to copy | Half refuted, 2026-09-13. `google-chat-mcp` has the best *skeleton* — the shortest intro and the only correct tail, `Security → Code of conduct → License`, each a line linking its own file, License last as the standard-readme spec requires — and it is the one repository of six holding every file GitHub's community profile names. But measured against GitHub's own "About READMEs", it answers three of the five questions it lists and misses two that a sibling already answered: *why the project is useful* (docs' `Why another Google Docs MCP`) and *where users can get help* (docs' `Reporting a problem`). standard-readme also requires a `Contributing` section, which chat buries inside `Development`, and asks for a description under 120 characters, which all six exceeded — 152 to 273 | One skeleton across all six repositories, taken from chat's shape and completed from the sources rather than from any one sibling: short description under 120 characters, then `Why`, `Install`, `Set up`, `Connect a client`, `Tools`, `Safety`, `How it works`, `Getting help`, `Versioning`, `Development`, `Documentation`, `Contributing`, `Security`, `Code of conduct`, `License`. No table of contents: standard-readme asks for one over 100 lines, and GitHub now renders an outline menu from the headings, so a hand-maintained copy of the heading list is a fact that can go stale for no gain. `Licence` becomes `License`, which names the `LICENSE` file and the `Apache-2.0` identifier. Prose was British until 2026-09-25, when every repository moved to American English |
 | The bundle manifest's `$schema` is pinned because it names a versioned file | **Half refuted, 2026-09-17, against the published schemas.** The filename pins the FORMAT; the REF pins the bytes, and this one named `main` — a branch upstream can amend under a document that claims to conform to it. Fetched `mcpb-manifest-v0.2`, `v0.3` and `v0.4`, which are served, and `v0.5`, which is not; the copy at tag `v2.1.2` is byte-identical to `main` today, which is the argument for the tag rather than against it. 0.4 is not adopted: its only difference from 0.3 is a `uv` value in the `server.type` enum, and this bundle's type is `binary` | `$schema` names the tag, and the gate holds the whole URL — upstream's path at a full release tag or a commit SHA. An allow-list, because refusing the branch NAMES passes a partial tag like `v2.1`, which upstream re-points as it releases. Plus a floor under `manifest_version`, which is the claim the others cannot make: 0.2 beside a 0.2 schema is stale and self-consistent |
+| A 200 from an `insertComment` batch means the comment exists | Refuted 2026-10-08 against Docs discovery revision 20261006, not observed live: `BatchUpdateDocumentResponse.commentUpdateState` can be `ALL_FAILED_UNKNOWN_REASON`, "All requested comment updates failed". The response was decoded and the field never read, so `add_comment` reported `comment  posted` with an empty id, and comment mode reported its ops applied with no comment ids | `batchUpdate` refuses that state as `[server]`: every batch carrying a comment carries nothing else, so nothing was written and asking again is safe. A reply that names no comment thread is `[ambiguous_outcome]`, pointing at `list_comments` before a second post. |
+| A regex replace should use the API's `searchByRegex` | Declined 2026-10-09. `SubstringMatchCriteria.searchByRegex` is published (Docs discovery 20261006), but nothing says which regex flavor Google runs, whether `replaceText` expands groups, or how a match treats a chip or an image. The overwrite guard has to know every range a replace touches, and it could only guess Google's matches | `replace_all` with `regex` is expanded by the server into one replace per match, found with Go's RE2 over each paragraph's index-aligned text, the matcher `find_in_document` already uses. A match is confined to a paragraph, an empty match and a replacement that would copy an object as text are refused, and the guard, suggest mode and the minimal diff apply to each match as to any replace. |
+| Index-aligned text needs only the runs the parser builds | Refuted 2026-10-09 by a schema Google added. `ParagraphElement.dropdown` arrived between the 2026-09-26 and 2026-10-06 discovery documents; the parser had no case for it, returned nothing, and `alignedSlice` concatenated the runs it had, so every offset after a dropdown in that paragraph moved one place. A regex `find_in_document` reported the wrong offset, and the regex `replace_all` written that day computed its ranges from the same text, so it would have replaced one character early (`TestARegexReplaceAfterAChipHitsItsOwnRange` shows `[10,14)` against Google's `[11,15)`). Exact-text targets were safe: `appendUnits` places each character at its run's own index | A dropdown is a chip run showing its selected option. `alignedSlice` fills any index gap between runs with placeholders, so an element Google adds later costs a missing label, not a shifted range. |
+| A destructive tool should carry both `requiresUserInteraction` and the server's own question | Refuted 2026-10-09, after the owner was asked twice for one delete. No source recommends two hard gates for one call. The MCP spec puts confirmation on the client ("Clients SHOULD prompt for user confirmation on sensitive operations"); GitHub's `delete_repository` (PR #3076) and Supabase's destructive SQL confirm with `destructiveHint` plus a form elicitation, and neither sets the mark; Claude Code's documentation scopes the mark to "tools whose permission prompt is itself the point, such as a consent or access-grant step" | The mark is sent per client: present when the request's capabilities show no form elicitation, absent otherwise, on a tool that asks before every write. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to refuse the call before it reached the server. Not chosen: a typed confirmation, which would stop Codex in full-access mode accepting an empty form unseen, at the cost of a slower answer in every other client. |
+| Sending the mark per client leaves every client either the mark or a question | Refuted 2026-10-09 by a review of the same change in google-mail-mcp. On protocol 2026-07-28 capabilities travel per request, so a client can declare form elicitation to `tools/list` and none to `tools/call`, and get neither the mark nor a question. The same review found no test that the mark is dropped from a copy of the tool, not from the server's own | Recorded as a known limit. It gives a misbehaving client nothing it lacked, since such a client answers the server's question itself and can accept without a person. `GDOCS_REQUIRE_PROMPT=true` still refuses that call. `TestTheMarkIsForAClientThatCannotAsk` now lists on one server, for a client that can ask and then for two that cannot, on every protocol. |
+| `assigneeEmailAddress` is a field of Drive's `Comment`, so any call that returns a comment can ask for it | **Refuted live 2026-10-09**, on the first live run after `list_comments` started reading it. `comments.get` and `comments.list` serve it; `comments.create` and `comments.update` answer 400 "Invalid field selection assignee_email_address" when the `fields` mask names it, so `add_comment` without the comments view and `reply_comment` `edit` failed outright. The discovery document gives no hint of the split | Reads ask for `CommentFields`; create and update ask for `commentWriteFields`, the same set without the assignee. `TestOnlyACommentReadAsksForTheAssignee` holds the split with a fake that answers as Drive did. |
+| Tables and images in content should be placed by index arithmetic in one batch | Declined 2026-10-09 after spike E, live (`internal/gapi/rawtable_integration_test.go`). The arithmetic exists: an empty table is 2 + rows×(1+2×cols) long and cell (r,c) starts at table + 3 + r×(1+2×cols) + 2c, checked at 2×2, 1×2 and 1×1 only. Placement: `insertTable` at a paragraph's newline starts the table one past it and leaves the old newline as an empty paragraph after the table; at a paragraph's start it leaves an empty paragraph before the table; at `endOfSegmentLocation` one after. `deleteContentRange` over the empty paragraph after a table is accepted when text follows. An inline image at the start of an empty paragraph sits alone in it. In `SUGGEST` mode `insertTable`, text into a cell and `insertInlineImage` are accepted as suggestions | Rounds instead (§7.3), each against a fresh read, so nothing rests on a formula checked at three sizes. Partial results are reported, not rolled back. |
+| A `batchUpdate` reply's revision is the revision the next read reports | Confirmed live 2026-10-09: across the content rounds of one live run, every read after a write carried the revision that write's reply gave, and no round saw another | A round runs only on a read at the revision the previous batch's reply gave; any other means somebody else wrote in between (§7.3). |
+| Each suggest-mode batch names the suggestions it creates | Refuted live 2026-10-09: the five batches of one suggest-mode content call (text, image, table, fill, tidy) were all filed under the first batch's suggestion, and only the first reply named it. The fill then warned once per cell that its range held a suggestion: the call's own | Later batches carry the suggestions their call made so far, and the guard leaves those out. |
+| A suggest-mode delete of an empty paragraph the same call suggested leaves a suggested deletion | Refuted live 2026-10-09: the read after a suggest-mode content call showed no empty paragraph around the suggested table, and rejecting its one suggestion restored the section exactly | The tidy round needs nothing of its own in suggest mode. |
+| An image address Google cannot fetch fails at the request | Confirmed live 2026-10-09: `insertInlineImage` with an address that answers 404 is refused whole, 400 INVALID_ARGUMENT "The provided image was not found." | A round that places one fails alone: a warning names the image's line, and its text and empty paragraph stay. |
+| Every name in a transcript sits in a position a rule knows, because this project's renderers wrote them all | Refuted 2026-10-09 by reading two live transcripts: a person chip printed the account's display name as `@Name` in markdown and bare in a plain-text read, six times a run, with no label before it for a rule to find | The driver reads the account's display name from `get_document` before any step can print a chip, and `redact.Names` replaces it wherever it appears. The eval traces were redacted as encoded JSON, where a newline is `\n` and no line rule fires, so the owner line kept its name; `redact.TranscriptJSON` now redacts each string. |
+| `deleteContentRange` takes an empty range as a no-op | Refuted live 2026-10-09: "Invalid requests[1].deleteContentRange: The range should not be empty", and the batch it was in was refused whole. A replace over an empty table cell with content of more than one paragraph sent one, so every cell of an `insert_table` fill stayed empty | A replace deletes only a range that holds something; the test simulator refuses an empty one as Google does. |

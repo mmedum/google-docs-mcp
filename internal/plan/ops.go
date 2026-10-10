@@ -118,6 +118,9 @@ type Op struct {
 	NearBullet bool
 
 	Fragment *markdown.Fragment
+	// Slots are where the fragment's tables and images wait, set when
+	// the op is compiled.
+	Slots []Slot
 
 	// CommentAnchor is where a comment-mode proposal attaches. Defaults to Target.
 	CommentAnchor *Rng
@@ -176,8 +179,11 @@ type Result struct {
 	// (the reply names the segment) or a table inserted with a data grid
 	// (found again by the handle its position predicts).
 	Followups []*Op
-	Warnings  []string
-	Summary   []OpSummary
+	// Embedded are the ops whose content holds tables or images, each
+	// waiting in a slot for a later round (Op.Slots).
+	Embedded []*Op
+	Warnings []string
+	Summary  []OpSummary
 	// Forced are the ops force lets destroy anchored content: what the
 	// person is asked about before the plan is applied.
 	Forced []Forced
@@ -244,7 +250,7 @@ func Plan(ops []Op, o Options) (*Result, error) {
 	if err := checkOverlaps(ops); err != nil {
 		return nil, err
 	}
-	if err := compile(ops, res, add); err != nil {
+	if err := compile(ops, o.Mode, res, add); err != nil {
 		return nil, err
 	}
 	if o.Mode == ModeSuggest {
@@ -259,7 +265,7 @@ func Plan(ops []Op, o Options) (*Result, error) {
 // (it shifts nothing), content ops highest index first so earlier
 // indices stay valid, lists after the content they would shift, and
 // global replacements last.
-func compile(ops []Op, res *Result, add func(*Op, []json.RawMessage, bool)) error {
+func compile(ops []Op, mode Mode, res *Result, add func(*Op, []json.RawMessage, bool)) error {
 	var formats, bullets, content, global []*Op
 	for i := range ops {
 		op := &ops[i]
@@ -294,13 +300,16 @@ func compile(ops []Op, res *Result, add func(*Op, []json.RawMessage, bool)) erro
 		add(op, formatRequests(op), false)
 	}
 	for _, op := range content {
-		reqs, minimal, err := contentRequests(op)
+		reqs, minimal, err := contentRequests(op, mode)
 		if err != nil {
 			return err
 		}
 		add(op, reqs, minimal)
 		if op.NeedsFollowup() {
 			res.Followups = append(res.Followups, op)
+		}
+		if len(op.Slots) > 0 {
+			res.Embedded = append(res.Embedded, op)
 		}
 	}
 	for _, op := range bullets {
@@ -688,13 +697,16 @@ func formatRequests(op *Op) []json.RawMessage {
 	return nil
 }
 
-func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
+func contentRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
-		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline, Inline: op.Inline, Fill: op.Fill, NearBullet: op.NearBullet})
+		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline,
+			Inline: op.Inline, Fill: op.Fill, NearBullet: op.NearBullet, Slots: inBody(op),
+			Isolate: mode == ModeSuggest && op.ClearTo > op.Insert.Index})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 		}
+		op.Slots = c.Slots
 		if op.ClearTo > op.Insert.Index {
 			// The paragraph being filled holds whitespace; clear it first
 			// so the later requests see the indices they were built for.
@@ -706,7 +718,7 @@ func contentRequests(op *Op) ([]json.RawMessage, bool, error) {
 	case OpDelete:
 		return []json.RawMessage{DeleteRange(deleteRange(op))}, false, nil
 	case OpReplace:
-		return replaceRequests(op)
+		return replaceRequests(op, mode)
 	case OpFootnote:
 		return []json.RawMessage{CreateFootnote(*op.Insert)}, false, nil
 	case OpCreateHeader:
@@ -756,7 +768,7 @@ func deleteRange(op *Op) Rng {
 	return r
 }
 
-func replaceRequests(op *Op) ([]json.RawMessage, bool, error) {
+func replaceRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	seg := op.Seg
 	// Minimal diff when both sides are one paragraph of plain text and the
 	// old text is known to line up with the index space.
@@ -775,11 +787,14 @@ func replaceRequests(op *Op) ([]json.RawMessage, bool, error) {
 		}
 		return EditRequests(edits, seg), true, nil
 	}
-	// Whole-range replacement: delete, then insert at the same spot.
+	// Whole-range replacement: delete, then insert at the same spot. An
+	// empty cell has nothing to delete, and Google refuses an empty range.
 	var reqs []json.RawMessage
 	del := deleteRange(op)
-	reqs = append(reqs, DeleteRange(del))
-	opts := FragmentOptions{NearBullet: op.NearBullet}
+	if del.End > del.Start {
+		reqs = append(reqs, DeleteRange(del))
+	}
+	opts := FragmentOptions{NearBullet: op.NearBullet, Slots: inBody(op) && op.TargetIsBlock}
 	at := Loc{Index: del.Start, SegmentID: seg.ID, TabID: seg.TabID}
 	switch {
 	case !op.TargetIsBlock:
@@ -789,6 +804,7 @@ func replaceRequests(op *Op) ([]json.RawMessage, bool, error) {
 		opts.Prefix = true
 	case op.Target.End >= seg.End:
 		// Only block in the segment: text sits before the final newline.
+		opts.Isolate = mode == ModeSuggest
 	default:
 		opts.Suffix = true
 	}
@@ -796,8 +812,13 @@ func replaceRequests(op *Op) ([]json.RawMessage, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 	}
+	op.Slots = c.Slots
 	return append(reqs, c.Requests...), false, nil
 }
+
+// inBody says an op writes into a tab's body, the one segment a table or
+// an image in content may go: headers, footers and footnotes hold text.
+func inBody(op *Op) bool { return op.Seg.ID == "" }
 
 func proposal(op *Op) (Proposal, error) {
 	anchor := op.CommentAnchor

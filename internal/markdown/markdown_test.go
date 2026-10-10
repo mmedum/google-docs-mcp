@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -113,14 +114,133 @@ func TestPlainTextAndSingleParagraph(t *testing.T) {
 	}
 }
 
+// An image alone on its line is a block of its own, with its address
+// and alt text; a paragraph of images one to a line is one block each.
+func TestBlockImages(t *testing.T) {
+	f := parse(t, "Intro.\n\n![a logo](https://e.test/logo.png)\n\n![](http://e.test/b.png)\n![second](https://e.test/c.png)\n\nEnd.")
+	var got []string
+	for _, b := range f.Blocks {
+		if b.Kind == KindImage {
+			got = append(got, fmt.Sprintf("%d %s %q", b.Line, b.Image.URL, b.Image.Alt))
+		} else {
+			got = append(got, fmt.Sprintf("%d %s %s", b.Line, b.Kind, b.Text()))
+		}
+	}
+	want := []string{
+		"1 paragraph Intro.",
+		`3 https://e.test/logo.png "a logo"`,
+		`5 http://e.test/b.png ""`,
+		`6 https://e.test/c.png "second"`,
+		"8 paragraph End.",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// An image's text, which a comment proposal shows, names its alt text
+// when it has one.
+func TestBlockImageText(t *testing.T) {
+	f := parse(t, "![a logo](https://e.test/logo.png)\n\n![](https://e.test/b.png)")
+	if got := f.Blocks[0].Text() + " " + f.Blocks[1].Text(); got != "[image: a logo (https://e.test/logo.png)] [image: https://e.test/b.png]" {
+		t.Fatalf("image text = %q", got)
+	}
+}
+
+// Embeds counts the tables and images content places in later batches.
+func TestEmbeds(t *testing.T) {
+	f := parse(t, "Text.\n\n| a |\n|---|\n| 1 |\n\n![i](https://e.test/i.png)\n![j](https://e.test/j.png)\n\n- item")
+	if n := f.Embeds(); n != 3 {
+		t.Fatalf("embeds = %d", n)
+	}
+}
+
+// Text and addresses resolve backslash escapes and entity and numeric
+// references, as CommonMark does; a code span and an autolink keep them.
+func TestEscapesAndReferences(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{`\*not italic\* and 1\. not a list`, `"*not italic* and 1. not a list"`},
+		// A read escapes prose that starts like markdown; written back,
+		// it is the prose again.
+		{`\# not a heading`, `"# not a heading"`},
+		{`AT&amp;T &copy; &#169; &#x41; &notanentity a\\b \a`, `"AT&T © © A &notanentity a\\b \\a"`},
+		{`\&amp; stays an entity's text`, `"&amp; stays an entity's text"`},
+		{"`a\\*b &amp;` and \\*c\\*", `"a\\*b &amp;" code, " and *c*"`},
+		{`[x\_y](https://e.test/a\_b?q=1&amp;r=2&s=3)`, `"x_y" -> https://e.test/a_b?q=1&r=2&s=3`},
+		{`<https://e.test/a\_b>`, `"https://e.test/a\\_b" -> https://e.test/a\_b`},
+		{"| \\*r\\* |\n|---|\n| s |", `table "*r*\ns"`},
+		// An escaped backslash and an escaped pipe, unescaped once each.
+		{"| c " + `\\\|` + " d |\n|---|", `table "c \\| d"`},
+		// A line break inside a code span is a space, not a new paragraph.
+		{"x `a\nb` c", `"x ", "a b" code, " c"`},
+		{`![a\*b &amp; c](https://e.test/i\_j.png)`, `image https://e.test/i_j.png "a*b & c"`},
+	} {
+		b := parse(t, tc.src).Blocks[0]
+		var got []string
+		switch b.Kind {
+		case KindTable:
+			got = append(got, fmt.Sprintf("table %q", b.Text()))
+		case KindImage:
+			got = append(got, fmt.Sprintf("image %s %q", b.Image.URL, b.Image.Alt))
+		default:
+			for _, in := range b.Inlines {
+				g := fmt.Sprintf("%q", in.Text)
+				switch {
+				case in.Code:
+					g += " code"
+				case in.Link != "":
+					g += " -> " + in.Link
+				}
+				got = append(got, g)
+			}
+		}
+		if strings.Join(got, ", ") != tc.want {
+			t.Errorf("Parse(%q):\n got %s\nwant %s", tc.src, strings.Join(got, ", "), tc.want)
+		}
+	}
+}
+
+// A <br> is a paragraph break, which is how a read joins a table cell's
+// paragraphs; in a heading or a list item, where a new paragraph would be
+// a second one, it is a line break. Other inline HTML is still refused.
+func TestBreakTags(t *testing.T) {
+	f := parse(t, "one<br>two<BR/>three\n\n# head<br />line\n\n- item<br>more\n\n| a<br>b | c |\n|---|---|")
+	var got []string
+	for _, b := range f.Blocks {
+		got = append(got, fmt.Sprintf("%s %q", b.Kind, b.Text()))
+	}
+	want := `paragraph "one", paragraph "two", paragraph "three", heading "head\vline", list_item "item\vmore", table "a\nb\tc"`
+	if strings.Join(got, ", ") != want {
+		t.Fatalf("got  %s\nwant %s", strings.Join(got, ", "), want)
+	}
+	if _, err := Parse("one<br>two <b>bold</b>"); err == nil || !strings.Contains(err.Error(), "inline HTML") {
+		t.Fatalf("other inline HTML: %v", err)
+	}
+}
+
+// A table's grid is its cells as plain text; a short row is padded to
+// the header's width.
+func TestTableGrid(t *testing.T) {
+	f := parse(t, "| A | **B** | C |\n|---|---|---|\n| [one](https://e.test) | `two` |\n| x | y | z |")
+	cells, rows, cols := f.Blocks[0].Table.Grid()
+	if rows != 3 || cols != 3 || fmt.Sprint(cells) != "[[A B C] [one two ] [x y z]]" {
+		t.Fatalf("grid %d×%d %q", rows, cols, cells)
+	}
+}
+
 func TestUnsupported(t *testing.T) {
 	cases := map[string]string{
-		"a\n\n---\n\nb":                       "horizontal rule",
-		"> quoted":                            "block quote",
-		"<div>x</div>\n":                      "HTML block",
-		"text with ![alt](https://i/x)":       "image",
-		"text <b>raw</b> html":                "inline HTML",
-		"| only header |\n|---|\n| ![i](u) |": "image",
+		"a\n\n---\n\nb":                                        "horizontal rule",
+		"> quoted":                                             "block quote",
+		"<div>x</div>\n":                                       "HTML block",
+		"text with ![alt](https://i/x)":                        "image inside text",
+		"text <b>raw</b> html":                                 "inline HTML",
+		"| only header |\n|---|\n| ![i](u) |":                  "image inside text",
+		"- ![i](https://e.test/i.png)":                         "image in a list item",
+		"![a](https://e.test/a.png)![b](https://e.test/b.png)": "image inside text",
+		"![relative](logo.png)":                                "image without a web address",
+		"![ftp](ftp://e.test/i.png)":                           "image without a web address",
+		"![no host](https:///i.png)":                           "image without a web address",
 	}
 	for src, construct := range cases {
 		_, err := Parse(src)

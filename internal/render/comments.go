@@ -21,6 +21,7 @@ type Thread struct {
 	Content  string
 	Resolved bool
 	Deleted  bool
+	Assignee string
 	Replies  []Reply
 }
 
@@ -40,29 +41,35 @@ func CommentThreads(threads []Thread) string {
 	for _, t := range threads {
 		threadLine(&sb, t, "")
 		sb.WriteString("\n")
-		for _, r := range t.Replies {
-			sb.WriteString("    ↳ ")
-			if r.Author != "" {
-				sb.WriteString(r.Author)
-			} else {
-				sb.WriteString("someone")
-			}
-			if r.Action != "" {
-				sb.WriteString(" " + r.Action + "d")
-			}
-			if r.Created != "" {
-				fmt.Fprintf(&sb, " (%s)", r.Created)
-			}
-			if r.Deleted {
-				sb.WriteString(" [deleted]")
-			}
-			if r.Content != "" {
-				sb.WriteString(": " + doc.OneLine(r.Content))
-			}
-			sb.WriteString("\n")
-		}
+		ReplyLines(&sb, t.Replies)
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// ReplyLines writes a thread's replies, one indented line each, under
+// the line that names the thread.
+func ReplyLines(sb *strings.Builder, replies []Reply) {
+	for _, r := range replies {
+		sb.WriteString("    ↳ ")
+		if r.Author != "" {
+			sb.WriteString(r.Author)
+		} else {
+			sb.WriteString("someone")
+		}
+		if r.Action != "" {
+			sb.WriteString(" " + r.Action + "d")
+		}
+		if r.Created != "" {
+			fmt.Fprintf(sb, " (%s)", r.Created)
+		}
+		if r.Deleted {
+			sb.WriteString(" [deleted]")
+		}
+		if r.Content != "" {
+			sb.WriteString(": " + doc.OneLine(r.Content))
+		}
+		sb.WriteString("\n")
+	}
 }
 
 // threadLine writes a thread as one bullet: the thread, its handle, its
@@ -85,6 +92,9 @@ func threadLine(sb *strings.Builder, t Thread, prefix string) {
 		sb.WriteString(" [deleted]")
 	case t.Resolved:
 		sb.WriteString(" [resolved]")
+	}
+	if t.Assignee != "" {
+		sb.WriteString(" assigned to " + t.Assignee)
 	}
 	if t.Quote != "" {
 		fmt.Fprintf(sb, " on “%s”", doc.Clip(t.Quote, 60))

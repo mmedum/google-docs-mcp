@@ -41,6 +41,8 @@ type Post struct {
 	UpdateTime       string     `json:"updateTime,omitempty"`
 	CommentAction    string     `json:"commentAction,omitempty"`
 	SuggestionAction string     `json:"suggestionAction,omitempty"`
+	// Deleted leaves the post in its thread with no content or author.
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 // PostAuthor identifies who wrote a post.
@@ -243,6 +245,11 @@ type NamedStyle struct {
 	ParagraphStyle *ParagraphStyle `json:"paragraphStyle,omitempty"`
 }
 
+// DocumentFormat is the document mode: PAGES or PAGELESS.
+type DocumentFormat struct {
+	DocumentMode string `json:"documentMode,omitempty"`
+}
+
 // DocumentStyle is a tab's page setup.
 type DocumentStyle struct {
 	Background                *Background `json:"background,omitempty"`
@@ -258,6 +265,9 @@ type DocumentStyle struct {
 	UseFirstPageHeaderFooter  bool        `json:"useFirstPageHeaderFooter,omitempty"`
 	UseEvenPageHeaderFooter   bool        `json:"useEvenPageHeaderFooter,omitempty"`
 	UseCustomHeaderFooterMgns bool        `json:"useCustomHeaderFooterMargins,omitempty"`
+
+	// DocumentFormat says whether the document has pages.
+	DocumentFormat *DocumentFormat `json:"documentFormat,omitempty"`
 }
 
 // Background is a solid page color.
@@ -422,6 +432,7 @@ type ParagraphElement struct {
 	DateElement         *DateElement         `json:"dateElement,omitempty"`
 	Equation            *Suggested           `json:"equation,omitempty"`
 	AutoText            *AutoText            `json:"autoText,omitempty"`
+	Dropdown            *Dropdown            `json:"dropdown,omitempty"`
 }
 
 // TextRun is styled text.
@@ -549,6 +560,23 @@ type DateElement struct {
 	TextStyle             *TextStyle             `json:"textStyle,omitempty"`
 
 	SuggestedDateElementPropertiesChanges map[string]SuggestedDateElementProperties `json:"suggestedDateElementPropertiesChanges,omitempty"`
+}
+
+// Dropdown is a dropdown chip. It shows the option selected in it; the
+// options themselves live in the tab's dropdown definitions.
+type Dropdown struct {
+	Suggested
+	SuggestedStyle
+	DropdownID         string              `json:"dropdownId,omitempty"`
+	DropdownProperties *DropdownProperties `json:"dropdownProperties,omitempty"`
+	TextStyle          *TextStyle          `json:"textStyle,omitempty"`
+}
+
+// DropdownProperties name the selected option and its display text.
+type DropdownProperties struct {
+	DropdownDefinitionID string `json:"dropdownDefinitionId,omitempty"`
+	SelectedOptionID     string `json:"selectedOptionId,omitempty"`
+	DisplayValue         string `json:"displayValue,omitempty"`
 }
 
 // DateElementProperties describe the date chip.

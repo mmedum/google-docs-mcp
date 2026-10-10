@@ -200,28 +200,27 @@ func binOr(args []string) string {
 
 // schemaDump is the shape of `google-docs-mcp --dump-schemas`.
 type schemaDump struct {
-	Tools []struct {
-		Name        string `json:"name"`
-		InputSchema struct {
-			Required   []string                   `json:"required"`
-			Properties map[string]json.RawMessage `json:"properties"`
-		} `json:"inputSchema"`
-	} `json:"tools"`
+	Tools []dumpedTool `json:"tools"`
+}
+
+type dumpedTool struct {
+	Name        string `json:"name"`
+	InputSchema struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	} `json:"inputSchema"`
+	// Only the write tools declare one; a read answers in text.
+	OutputSchema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	} `json:"outputSchema"`
 }
 
 // diff reports what changed between two schema dumps and whether any of
-// it breaks a caller: a tool or field that disappeared, or a field that
-// became required.
+// it breaks a caller: a tool, argument or output field that disappeared,
+// or an argument that became required.
 func diff(w io.Writer, old, new *schemaDump) bool {
-	type tool = struct {
-		Name        string `json:"name"`
-		InputSchema struct {
-			Required   []string                   `json:"required"`
-			Properties map[string]json.RawMessage `json:"properties"`
-		} `json:"inputSchema"`
-	}
-	index := func(d *schemaDump) map[string]tool {
-		m := make(map[string]tool, len(d.Tools))
+	index := func(d *schemaDump) map[string]dumpedTool {
+		m := make(map[string]dumpedTool, len(d.Tools))
 		for _, t := range d.Tools {
 			m[t.Name] = t
 		}
@@ -244,6 +243,11 @@ func diff(w io.Writer, old, new *schemaDump) bool {
 		for _, f := range slices.Sorted(mapKeys(o[name].InputSchema.Properties)) {
 			if _, ok := nt.InputSchema.Properties[f]; !ok {
 				breaking = append(breaking, fmt.Sprintf("%s: field removed %s", name, f))
+			}
+		}
+		for _, f := range slices.Sorted(mapKeys(o[name].OutputSchema.Properties)) {
+			if _, ok := nt.OutputSchema.Properties[f]; !ok {
+				breaking = append(breaking, fmt.Sprintf("%s: output field removed %s", name, f))
 			}
 		}
 	}

@@ -352,7 +352,7 @@ func (s *Service) resolveInsertTable(f *Fetched, op EditOp, p *plan.Op, out *res
 	}
 	p.Seg = ip.bounds()
 	p.Insert = &plan.Loc{Index: index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
-	p.Table = plan.TableParams{Rows: op.Table.Rows, Cols: op.Table.Cols, Data: op.Table.Data}
+	p.Table = plan.TableParams{Rows: op.Table.Rows, Cols: op.Table.Cols, Data: op.Table.Data, DataFormat: op.ContentFormat}
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
 	out.note(ip.tab.ID, ip.segment.ID, index)

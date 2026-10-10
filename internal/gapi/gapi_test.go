@@ -811,3 +811,48 @@ func TestReadRetriesOnInternalError(t *testing.T) {
 		t.Fatalf("attempts %d, err %v, want 2 and success", n, err)
 	}
 }
+
+// Drive answers a comment create or update that asks for the assignee
+// with 400 "Invalid field selection assignee_email_address", and serves
+// it on get and list (live, 2026-10-09). The fake does the same.
+func TestOnlyACommentReadAsksForTheAssignee(t *testing.T) {
+	var readFields []string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fields := r.URL.Query().Get("fields")
+		if r.Method != http.MethodGet {
+			if strings.Contains(fields, "assigneeEmailAddress") {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"code":400,"message":"Invalid field selection assignee_email_address"}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"id":"c1","content":"x"}`))
+			return
+		}
+		readFields = append(readFields, fields)
+		if strings.HasSuffix(r.URL.Path, "/comments") {
+			_, _ = w.Write([]byte(`{"comments":[{"id":"c1","assigneeEmailAddress":"jane@example.com"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"c1","assigneeEmailAddress":"jane@example.com"}`))
+	}))
+	ctx := context.Background()
+	if _, err := c.CreateComment(ctx, "abc", "hello", ""); err != nil {
+		t.Errorf("create: %v", err)
+	}
+	if _, err := c.UpdateComment(ctx, "abc", "c1", "edited"); err != nil {
+		t.Errorf("update: %v", err)
+	}
+	list, err := c.ListComments(ctx, "abc", false)
+	if err != nil || len(list) != 1 || list[0].AssigneeEmailAddress != "jane@example.com" {
+		t.Errorf("list: %+v %v", list, err)
+	}
+	got, err := c.GetComment(ctx, "abc", "c1")
+	if err != nil || got.AssigneeEmailAddress != "jane@example.com" {
+		t.Errorf("get: %+v %v", got, err)
+	}
+	for _, f := range readFields {
+		if !strings.Contains(f, "assigneeEmailAddress") {
+			t.Errorf("a read did not ask for the assignee: fields=%s", f)
+		}
+	}
+}

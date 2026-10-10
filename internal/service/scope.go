@@ -241,6 +241,16 @@ func tabList(d *doc.Document) string {
 	return strings.Join(parts, ", ")
 }
 
+// tabIDs lists each tab's id with its title, for a message asking for an
+// id rather than a title or a number.
+func tabIDs(d *doc.Document) string {
+	parts := make([]string, 0, len(d.Tabs))
+	for _, t := range d.Tabs {
+		parts = append(parts, fmt.Sprintf("%s (%q)", t.ID, t.Title))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func closestHeadings(seg *doc.Segment, want string) string {
 	needle := strings.ToLower(doc.Normalize(want))
 	var hits []string

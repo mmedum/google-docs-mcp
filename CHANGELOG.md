@@ -2,10 +2,90 @@
 
 All notable changes to this project are documented here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
-follows [Semantic Versioning](https://semver.org/). Tool removals, renames
-and new required fields are breaking; the schema diff in CI flags them.
+follows [Semantic Versioning](https://semver.org/). Tool removals, renames,
+removed output fields and new required fields are breaking; the schema
+diff in CI flags them.
 
 ## [Unreleased]
+
+## [2.2.0] - 2026-10-10
+
+### Added
+
+- Content takes `<br>` as a paragraph break, which is how a read joins
+  a table cell's paragraphs and how GFM breaks a line in a table. In a
+  heading or a list item it is a line break.
+- `reply_comment` replies on a suggested edit's thread when given
+  `suggestion_id` instead of `comment_id`. It posts a plain reply only;
+  accepting or rejecting is still `review_suggestion`. It needs the
+  comments view, since Drive cannot see these threads.
+- `list_suggestions` shows the replies on each suggestion's thread.
+- `list_comments` says who a thread is assigned to.
+- Markdown content in `edit_document` and `create_document` takes
+  tables and images. Table cells are plain text; an image sits on a line
+  of its own. The text lands first, then later batches place up to 10
+  tables and images. Such content must be the only op in its call. A
+  table or image that cannot be placed is a warning, and the text stays
+  written. An image inside a sentence is still refused; `insert_object`
+  places one there.
+- `replace_all` takes `regex`: `find` is an RE2 pattern, case-sensitive
+  unless it starts with `(?i)`, matched within one paragraph and over text
+  only. `replace` names groups as `${1}` or `${name}`, and a name the
+  pattern lacks is refused rather than replaced with nothing. Suggest
+  mode and the overwrite guard apply to each match. Up to 500 matches.
+- `layout_document` `page` takes `pageless`, and `get_document` says
+  when a document is pageless.
+- Links to a heading in the same tab (`#<heading id>`, ids from
+  `get_outline`) or to a tab (`#tab=<tab id>`), in `format_document`'s
+  `link` and in markdown content. A read shows them the same way. A link
+  to a heading or tab that does not exist is refused before anything is
+  sent.
+
+### Changed
+
+- A delete asks once in Claude Code, not twice. In a client that can ask
+  the person, `delete_comment` and `delete_tab` no longer carry the
+  `requiresUserInteraction` mark; the server's own question, which shows
+  what the delete destroys, is the confirmation. To see only that
+  question, add both tools to Claude Code's allow list. A Claude Code
+  `Elicitation` hook that accepts now confirms a delete alone, where the
+  mark used to stop the call before it reached the server.
+
+### Fixed
+
+- Text read as markdown and written back is unchanged, apart from up
+  to three spaces at a paragraph's start and any at its end, which
+  markdown drops. A read escapes each character content would take as
+  markup: a backslash, a reference, emphasis and code marks, `[`, a tag,
+  and a line that starts like a list, heading, rule or indented code.
+  Code holding a backtick reads with a longer fence. Content resolves
+  backslash escapes and entity references in text and link addresses,
+  as CommonMark does; `\#` from a read wrote a backslash into the
+  document.
+- A code span that runs over two lines of content is one span with a
+  space in it, as CommonMark says. It wrote two paragraphs.
+- An edit warns that handles have shifted after an insert just before
+  the last paragraph too. It missed that case, so a handle read before
+  the edit could name another block with no warning.
+- `set_cells` writes content of more than one paragraph into an empty
+  cell. It sent a delete of the empty cell first, which Google refuses,
+  so the whole batch failed, an `insert_table` fill included.
+- `edit_table` `insert_table` with `data` and `content_format: text`
+  writes the cells verbatim. The fill read them as markdown.
+- In suggest mode, a later batch no longer warns about suggestions its
+  own call made. `insert_table` with `data` warned once per cell.
+- A dropdown chip reads as the option selected in it, and a regex
+  `find_in_document` reports matches after one at the right offset.
+  Reads dropped dropdowns, which Google added in 2026-10.
+- A comment Google did not save is no longer reported as posted. It is
+  `[server]` when Google saves none of a batch of comments, and
+  `[ambiguous_outcome]` when Google saves a comment without naming it.
+
+### Security
+
+- Built with Go 1.27.2, which fixes nine advisories in `net/http`, its
+  HTTP/2 code, `crypto/tls` and `net/textproto` that `govulncheck` found
+  reachable from this server.
 
 ## [2.1.1] - 2026-10-03
 

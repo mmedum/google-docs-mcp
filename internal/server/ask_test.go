@@ -378,3 +378,49 @@ func TestAForcedOpInALaterBatchIsRefused(t *testing.T) {
 		t.Errorf("asked %d, %d batches: %s", len(p.asked()), len(api.batches), out)
 	}
 }
+
+// A tool that asks the person before every write carries Claude Code's
+// requiresUserInteraction mark only for a client that cannot ask. With
+// both, Claude Code put two prompts in front of every delete. Each
+// protocol lists on one server, the client that can ask first, so a mark
+// dropped from the server's own tool rather than from a copy shows up
+// for the clients after it.
+func TestTheMarkIsForAClientThatCannotAsk(t *testing.T) {
+	asks := (&answerer{action: "accept"}).handle
+	urlAlone := &mcp.ClientCapabilities{Elicitation: &mcp.ElicitationCapabilities{URL: &mcp.URLElicitationCapabilities{}}}
+	for _, protocol := range protocols {
+		srv := newServer(askFixture(t), everything())
+		for _, tc := range []struct {
+			name   string
+			o      *mcp.ClientOptions
+			marked bool
+		}{
+			{"form", &mcp.ClientOptions{ElicitationHandler: asks}, false},
+			{"url alone", &mcp.ClientOptions{ElicitationHandler: asks, Capabilities: urlAlone}, true},
+			{"no elicitation", &mcp.ClientOptions{}, true},
+		} {
+			t.Run(protocol+"/"+tc.name, func(t *testing.T) {
+				res, err := connectTo(t, srv, protocol, tc.o).ListTools(context.Background(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				seen := 0
+				for _, tool := range res.Tools {
+					if tool.Name != "delete_comment" && tool.Name != "delete_tab" {
+						continue
+					}
+					seen++
+					if a := tool.Annotations; a == nil || a.DestructiveHint == nil || !*a.DestructiveHint {
+						t.Errorf("%s lost destructiveHint: %+v", tool.Name, a)
+					}
+					if marked := tool.Meta["anthropic/requiresUserInteraction"] == true; marked != tc.marked {
+						t.Errorf("%s marked %t, want %t", tool.Name, marked, tc.marked)
+					}
+				}
+				if seen != 2 {
+					t.Errorf("listed %d of delete_comment and delete_tab, want 2", seen)
+				}
+			})
+		}
+	}
+}

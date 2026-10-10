@@ -30,6 +30,21 @@ type FragmentOptions struct {
 	// Fill says the paragraph at an inline insertion point is empty, so
 	// the first fragment paragraph takes its own style instead.
 	Fill bool
+	// Slots lets the fragment hold tables and images: each becomes an
+	// empty paragraph, its slot, which a later round fills (spike E).
+	// Without it they are refused.
+	Slots bool
+	// Isolate gives a slot that ends the fragment a newline of its own.
+	// Set where the newline it would end with follows text the batch
+	// deletes: as a suggestion that text stays, inside the slot.
+	Isolate bool
+}
+
+// Slot is the empty paragraph a table or image of the content waits in.
+// Index is where it starts once the batch has been applied.
+type Slot struct {
+	Index int64
+	Block *markdown.Block
 }
 
 // Compiled is a fragment laid out at an insertion point.
@@ -41,6 +56,8 @@ type Compiled struct {
 	// newline, including the suffix newline).
 	Start int64
 	End   int64
+	// Slots are where the tables and images go, in order.
+	Slots []Slot
 }
 
 type piece struct {
@@ -49,30 +66,21 @@ type piece struct {
 	start    int64
 	end      int64
 	listItem bool
+	slot     bool
 }
 
 // CompileFragment lays a fragment out at `at` and returns the requests:
-// one insertText, a style reset over the whole insertion, paragraph
+// one insertText (none for a lone slot filling a blank paragraph), a
+// style reset over the whole insertion, paragraph
 // styles, inline styles, and finally list creation in descending order
 // (createParagraphBullets consumes the nesting tabs, so it goes last).
 func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled, error) {
 	if f == nil || len(f.Blocks) == 0 {
 		return nil, fmt.Errorf("nothing to insert: the content is empty")
 	}
-	var pieces []*piece
-	for _, b := range f.Blocks {
-		switch b.Kind {
-		case markdown.KindTable:
-			return nil, &markdown.UnsupportedError{Construct: "table", Line: b.Line, Hint: "tables are inserted with edit_table, not through markdown content"}
-		case markdown.KindCode:
-			for _, line := range b.Lines {
-				pieces = append(pieces, &piece{block: b, text: line})
-			}
-		case markdown.KindListItem:
-			pieces = append(pieces, &piece{block: b, text: strings.Repeat("\t", b.Nesting) + b.Text(), listItem: true})
-		default:
-			pieces = append(pieces, &piece{block: b, text: b.Text()})
-		}
+	pieces, err := fragmentPieces(f, o)
+	if err != nil {
+		return nil, err
 	}
 	var sb strings.Builder
 	cursor := at.Index
@@ -91,6 +99,10 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 		cursor += doc.UTF16Len(p.text)
 		p.end = cursor
 	}
+	if o.Isolate && pieces[len(pieces)-1].slot {
+		sb.WriteString("\n")
+		cursor++
+	}
 	if o.Suffix {
 		sb.WriteString("\n")
 		cursor++
@@ -106,7 +118,16 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 	}
 
 	c := &Compiled{Text: text, Length: doc.UTF16Len(text), Start: contentStart, End: cursor}
-	c.Requests = append(c.Requests, InsertText(text, at))
+	for _, p := range pieces {
+		if p.slot {
+			c.Slots = append(c.Slots, Slot{Index: p.start, Block: p.block})
+		}
+	}
+	// A lone slot filling a blank paragraph is that paragraph, and an
+	// insertText needs text.
+	if text != "" {
+		c.Requests = append(c.Requests, InsertText(text, at))
+	}
 	// Inserted text inherits the style of its neighbors; reset it.
 	if cursor > contentStart {
 		c.Requests = append(c.Requests, ClearTextStyle(rng(contentStart, cursor)))
@@ -116,6 +137,54 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 	}
 	c.Requests = append(c.Requests, listRequests(pieces, rng)...)
 	return c, nil
+}
+
+// fragmentPieces lays a fragment's blocks out as paragraphs: one per
+// block, one per code line, and an empty slot per table or image.
+func fragmentPieces(f *markdown.Fragment, o FragmentOptions) ([]*piece, error) {
+	var pieces []*piece
+	for _, b := range f.Blocks {
+		switch b.Kind {
+		case markdown.KindTable, markdown.KindImage:
+			// An insertion inside a paragraph merges the first and last
+			// pieces into its text, so neither could be an empty slot.
+			if !o.Slots || o.Inline && !o.Fill {
+				return nil, &markdown.UnsupportedError{Construct: string(b.Kind), Line: b.Line, Hint: "a table or image in content " +
+					"goes in an insert, append or replace in the body, between blocks; edit_table and insert_object reach the rest"}
+			}
+			if err := checkSlot(b); err != nil {
+				return nil, err
+			}
+			pieces = append(pieces, &piece{block: b, slot: true})
+		case markdown.KindCode:
+			for _, line := range b.Lines {
+				pieces = append(pieces, &piece{block: b, text: line})
+			}
+		case markdown.KindListItem:
+			pieces = append(pieces, &piece{block: b, text: strings.Repeat("\t", b.Nesting) + b.Text(), listItem: true})
+		default:
+			pieces = append(pieces, &piece{block: b, text: b.Text()})
+		}
+	}
+	return pieces, nil
+}
+
+// checkSlot refuses a table or image the later round could not place,
+// before the text is written: the limits insert_table and insert_object
+// hold an op to.
+func checkSlot(b *markdown.Block) error {
+	switch b.Kind {
+	case markdown.KindTable:
+		if rows, cols := len(b.Table.Rows), len(b.Table.Rows[0]); rows > maxTableRows || cols > maxTableCols {
+			return &markdown.UnsupportedError{Construct: fmt.Sprintf("%d×%d table", rows, cols), Line: b.Line,
+				Hint: fmt.Sprintf("a table holds at most %d rows and %d columns", maxTableRows, maxTableCols)}
+		}
+	case markdown.KindImage:
+		if len(b.Image.URL) > maxImageURL {
+			return &markdown.UnsupportedError{Construct: "image address over 2 kB", Line: b.Line}
+		}
+	}
+	return nil
 }
 
 // pieceRequests styles one laid-out paragraph: named style, bullet

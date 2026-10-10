@@ -55,6 +55,22 @@ func (e replyEnvelope) commentIDs() []string {
 	return out
 }
 
+// replyPostID is the id of the post an addCommentReply request created.
+func (e replyEnvelope) replyPostID() string {
+	id := ""
+	e.each("addCommentReply", func(raw json.RawMessage) {
+		var v struct {
+			Post struct {
+				PostID string `json:"postId"`
+			} `json:"post"`
+		}
+		if json.Unmarshal(raw, &v) == nil && id == "" {
+			id = v.Post.PostID
+		}
+	})
+	return id
+}
+
 // addedTabID is the id of the tab an addDocumentTab request created.
 func (e replyEnvelope) addedTabID() string {
 	id := ""
@@ -88,6 +104,20 @@ func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMe
 	return decodeReplies(res.Raw), revision, nil
 }
 
+// commentBatch sends a batch of comments or replies and nothing else.
+// Google can answer 200 and still save none of them, naming no reason;
+// since the batch held only comments, nothing was written and asking
+// again is safe. Only here: a review's accept or reject also counts as a
+// thread post, and saying "nothing was posted" after one applied would
+// invite applying it twice.
+func (s *Service) commentBatch(ctx context.Context, f *Fetched, reqs []json.RawMessage) (replyEnvelope, string, error) {
+	env, revision, err := s.batchUpdate(ctx, f, reqs, "")
+	if err == nil && env.CommentUpdateState == "ALL_FAILED_UNKNOWN_REASON" {
+		return replyEnvelope{}, "", Errorf("server", "Google saved none of the comments and gave no reason; nothing was posted, so try again shortly")
+	}
+	return env, revision, err
+}
+
 // apply sends a plan to Google in the chosen mode, records ids and
 // returns the replies so the follow-ups can find what was created.
 func (s *Service) apply(ctx context.Context, f *Fetched, planned *plan.Result, mode plan.Mode, result *EditResult) (replyEnvelope, error) {
@@ -102,10 +132,11 @@ func (s *Service) apply(ctx context.Context, f *Fetched, planned *plan.Result, m
 	if mode == plan.ModeSuggest {
 		writeMode = "SUGGEST"
 	}
-	env, _, err := s.batchUpdate(ctx, f, planned.Requests, writeMode)
+	env, revision, err := s.batchUpdate(ctx, f, planned.Requests, writeMode)
 	if err != nil {
 		return replyEnvelope{}, err
 	}
+	result.written = revision
 	result.SuggestionIDs = append(result.SuggestionIDs, env.suggestionIDs()...)
 	return env, nil
 }
@@ -128,7 +159,7 @@ func (s *Service) applyProposals(ctx context.Context, f *Fetched, proposals []pl
 		for _, p := range proposals {
 			reqs = append(reqs, plan.InsertComment(p.Content, p.Range, ""))
 		}
-		env, _, err := s.batchUpdate(ctx, f, reqs, "")
+		env, _, err := s.commentBatch(ctx, f, reqs)
 		if err != nil {
 			return err
 		}

@@ -31,6 +31,8 @@ type Suggestion struct {
 	Status   string `json:"status,omitempty"`
 	Summary  string `json:"summary,omitempty"`
 	Created  string `json:"created,omitempty"`
+	// Replies is the suggestion's thread, from the comments view.
+	Replies []CommentReply `json:"replies,omitempty"`
 }
 
 // SuggestionsResult lists pending suggestions.
@@ -171,6 +173,9 @@ func (s *suggestionSet) list(threads map[string]gdocs.SuggestionThread) []Sugges
 		}
 		if t, ok := threads[id]; ok {
 			sg.Author, sg.Status, sg.Summary, sg.Created = t.HeadPost.Author.DisplayName, t.Status, t.SummaryText, t.HeadPost.CreateTime
+			for _, p := range t.Replies {
+				sg.Replies = append(sg.Replies, postReply(p))
+			}
 		}
 		out = append(out, *sg)
 	}
@@ -198,6 +203,7 @@ func renderSuggestions(res *SuggestionsResult) string {
 			fmt.Fprintf(&sb, " {==%s==}", doc.Clip(sg.Restyled, 80))
 		}
 		sb.WriteString("\n")
+		render.ReplyLines(&sb, renderReplies(sg.Replies))
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

@@ -51,6 +51,9 @@ type fakeAPI struct {
 	revisions       []*gapi.Revision
 	revisionExports map[string]string
 	revisionErr     error
+	// sim, when set, applies each batch to a simulated body and serves
+	// it back on every read.
+	sim *simDoc
 }
 
 func (f *fakeAPI) GetComment(_ context.Context, fileID, commentID string) (*gapi.DriveComment, error) {
@@ -109,6 +112,9 @@ func (f *fakeAPI) BatchUpdate(_ context.Context, id string, req *gapi.BatchUpdat
 	f.batches = append(f.batches, req)
 	if n := len(f.batches) - 1; n < len(f.batchErrs) && f.batchErrs[n] != nil {
 		return nil, f.batchErrs[n]
+	}
+	if f.sim != nil {
+		return f.sim.apply(req)
 	}
 	raw := `{"replies":[],"writeControl":{"requiredRevisionId":"rev-0002"}}`
 	if n := len(f.batches) - 1; n < len(f.replies) && f.replies[n] != "" {
@@ -174,7 +180,10 @@ func (f *fakeAPI) GetDocument(_ context.Context, id string, o gapi.GetOptions) (
 		return nil, &gapi.APIError{Status: 404, Message: "not found"}
 	}
 	raw := f.raw
-	if f.afterBatch != nil && len(f.batches) > 0 {
+	switch {
+	case f.sim != nil:
+		raw = f.sim.json()
+	case f.afterBatch != nil && len(f.batches) > 0:
 		raw = f.afterBatch
 	}
 	var d gdocs.Document
@@ -385,6 +394,18 @@ func TestInfo(t *testing.T) {
 	info, _ = svc.Info(context.Background(), fixtureID)
 	if len(info.Warnings) != 1 || !strings.Contains(info.Warnings[0], "trash") {
 		t.Fatalf("trashed warning missing: %+v", info.Warnings)
+	}
+}
+
+func TestInfoSaysATabIsPageless(t *testing.T) {
+	svc, api := newService(t)
+	api.raw = []byte(strings.Replace(string(api.raw), `"documentStyle": {`, `"documentStyle": {"documentFormat": {"documentMode": "PAGELESS"}, `, 1))
+	info, err := svc.Info(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "page US Letter, margins 72/72/72/72 pt (top/bottom/left/right), pageless, background #ffffff"; !strings.Contains(info.Text, want) {
+		t.Errorf("want %q in:\n%s", want, info.Text)
 	}
 }
 

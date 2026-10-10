@@ -47,9 +47,18 @@ func TestLive(t *testing.T) {
 		t.Logf("=== scratch document left behind ===\ndelete it when you are done; Drive search title:\"safe to delete\" finds every run's")
 	})
 
+	// The account's name reaches the transcript bare through a person
+	// chip, so it is known before any step can print one. This line's
+	// own copy is caught by its position.
+	if name := first(ownerName, d.ok("get_document for the account's name", "get_document", map[string]any{"document": doc})); name != "" {
+		knowName(name)
+	} else {
+		t.Log("get_document names the owner by address only; a person chip shows the address, which redact catches")
+	}
+
 	d.ok("read without handles", "read_document", map[string]any{"document": doc, "with_handles": false})
 	d.ok("read after create", "read_document", map[string]any{"document": doc, "with_handles": true})
-	d.ok("outline", "get_outline", map[string]any{"document": doc})
+	outline := d.ok("outline", "get_outline", map[string]any{"document": doc})
 	d.ok("search by title", "search_documents", map[string]any{"title": "google-docs-mcp live test", "limit": 3})
 
 	// ---- edits in each mode ---------------------------------------------
@@ -58,6 +67,18 @@ func TestLive(t *testing.T) {
 		map[string]any{"op": "insert", "location": map[string]any{"at": "after", "of": map[string]any{"heading": "Background", "include_heading": true}}, "content": "Inserted after the Background section.\n\n- with a bullet"},
 		map[string]any{"op": "append", "content": "Appended paragraph at the very end."},
 	}})
+
+	// A heading link is written in the form a read renders it, with the
+	// id get_outline shows in braces.
+	if m := headingID.FindStringSubmatch(outline); m == nil {
+		t.Errorf("get_outline shows no heading id:\n%s", shown(outline, 300))
+	} else {
+		d.ok("link to a heading", "format_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
+			map[string]any{"op": "text_style", "target": map[string]any{"text": "Inserted after the Background section."}, "link": "#" + m[1]}}})
+		if read := d.ok("read the heading link back", "read_document", map[string]any{"document": doc}); !strings.Contains(read, "](#"+m[1]+")") {
+			t.Errorf("the heading link does not read back as written:\n%s", shown(read, 500))
+		}
+	}
 
 	suggestArgs := map[string]any{"document": doc, "mode": "suggest", "ops": []any{
 		map[string]any{"op": "replace", "target": map[string]any{"text": "three"}, "content": "four"},
@@ -86,10 +107,27 @@ func TestLive(t *testing.T) {
 	}
 
 	d.ok("find", "find_in_document", map[string]any{"document": doc, "query": "point"})
+	// Planned by this server, one replace per match, so a group reference
+	// is Go's expansion and not whatever Google's regex would do with it.
+	d.ok("regex replace_all", "edit_document", map[string]any{"document": doc, "mode": "direct", "ops": []any{
+		map[string]any{"op": "replace_all", "find": `created by (google-docs-\w+)`, "replace": "made by $1", "regex": true},
+	}})
+	if read := d.ok("read after the regex replace", "read_document", map[string]any{"document": doc}); !strings.Contains(read, "made by google-docs-mcp. It is safe") {
+		t.Errorf("the regex replace did not land as planned:\n%s", shown(read, 400))
+	}
 	// Nothing above suggests a format. The style of the inserted text is
 	// filed under the insertion's own id, and is not a restyling.
 	if listed := d.ok("list suggestions", "list_suggestions", map[string]any{"document": doc}); strings.Contains(listed, "(text:") {
 		t.Errorf("an insertion's own style is listed as a restyling:\n%s", shown(listed, 500))
+	}
+	// A suggestion's thread is out of Drive's reach, so this reply goes
+	// through the Docs API; the listing is the only way to see it landed.
+	if len(suggestions) > 0 {
+		d.ok("reply on a suggestion's thread", "reply_comment", map[string]any{
+			"document": doc, "suggestion_id": suggestions[0], "content": "Live test: a reply on a suggestion."})
+		if listed := d.ok("list suggestions with the reply", "list_suggestions", map[string]any{"document": doc}); !strings.Contains(listed, "Live test: a reply on a suggestion.") {
+			t.Errorf("the reply on the suggestion's thread is not in the listing:\n%s", shown(listed, 500))
+		}
 	}
 	if len(suggestions) > 0 {
 		d.ok("reject the last suggestion", "review_suggestion", map[string]any{
@@ -126,6 +164,7 @@ func TestLive(t *testing.T) {
 	liveDryRuns(t, d, doc, first(tableHandle, handleRead))
 
 	liveObjects(t, d, doc)
+	liveContentEmbeds(t, d, doc)
 	liveTabs(t, d, doc)
 	liveLayout(t, d, doc)
 	liveResources(t, d, doc)
@@ -135,3 +174,9 @@ func TestLive(t *testing.T) {
 }
 
 var listedID = regexp.MustCompile(`(?m)^- (\S+)`)
+
+// ownerName is the display name in get_document's owner line.
+var ownerName = regexp.MustCompile(`(?m)^owner (.+?) <[^>]+@[^>]+>`)
+
+// headingID is the first heading id get_outline shows, as {h.…}.
+var headingID = regexp.MustCompile(`\{(h\.[A-Za-z0-9_-]+)\}`)

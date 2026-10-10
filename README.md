@@ -196,18 +196,18 @@ for the defaults.
 | `search_documents` | Locate documents by title or content, owner, or modification date. |
 | `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
 | `create_document` | New document, optionally with markdown content. |
-| `edit_document` | Atomic batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
-| `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. |
-| `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing. |
+| `edit_document` | One batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all` (text or RE2 regex), `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. Markdown content may hold tables and images; later batches place them once the text has landed. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
+| `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. A link goes to a URL, to a heading in the same tab (`#h.…`, from `get_outline`) or to a tab (`#tab=t.…`); markdown content takes the same forms. |
+| `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing, and the replies on each one's thread. |
 | `review_suggestion` | Accept, reject or discard suggestions by id or all. |
-| `list_comments` | Comment threads with every reply, resolved and deleted state, quoted text and the block they sit on. |
+| `list_comments` | Comment threads with every reply, resolved and deleted state, who each is assigned to, quoted text and the block they sit on. |
 | `add_comment` | Comment on a passage (pinned to it) or on the document. |
-| `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. |
+| `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. Also replies on a suggested edit's thread. |
 | `list_revisions` | Version history: revision ids, times, authors. |
 | `diff_revisions` | Unified diff of Google's markdown or text export between two revisions. `read_document` reads an old `revision` whole. |
 | `edit_table` | `insert_table` (with a data grid), `set_cells` (minimal diff per cell), `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns` (fixed or even widths), `style_rows` (least height, page-break behavior), `pin_header_rows`. Same modes and guard as text edits. |
 | `insert_object` | Insert an inline image from a public URL, a person chip, a rich-link chip or a date chip at a location; replace an image's source in place; or delete an object, including a floating image no text range covers. |
-| `layout_document` | `page` (size, margins, background, landscape, page numbering, first/even-page headers), `section` (the same for one section, plus 1–3 columns), `section_break`, and `named_style` to redefine `NORMAL_TEXT`, `TITLE`, `SUBTITLE` or `HEADING_1` … `HEADING_6` for a whole tab. |
+| `layout_document` | `page` (size, margins, background, landscape, page numbering, first/even-page headers, pageless), `section` (the same for one section, plus 1–3 columns), `section_break`, and `named_style` to redefine `NORMAL_TEXT`, `TITLE`, `SUBTITLE` or `HEADING_1` … `HEADING_6` for a whole tab. |
 | `manage_tabs` | Add (with content), rename, move or nest tabs. Always direct: the API cannot suggest tab changes. |
 
 Two more tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:

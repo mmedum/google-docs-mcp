@@ -103,7 +103,11 @@ func (s TextStyleSpec) Validate() error {
 	return nil
 }
 
-func (s TextStyleSpec) body() (map[string]any, []string) {
+func (s TextStyleSpec) body() (map[string]any, []string) { return s.bodyIn("") }
+
+// bodyIn is body for text in one tab, which a link to a heading needs:
+// "#<heading id>" names a heading in the tab the linked text is in.
+func (s TextStyleSpec) bodyIn(tabID string) (map[string]any, []string) {
 	style := map[string]any{}
 	var fields []string
 	set := func(name string, v any) {
@@ -150,12 +154,46 @@ func (s TextStyleSpec) body() (map[string]any, []string) {
 	case "none":
 		fields = append(fields, "link")
 	default:
-		set("link", map[string]any{"url": s.Link})
+		set("link", linkJSON(s.Link, tabID))
 	}
 	if s.Baseline != "" {
 		set("baselineOffset", s.Baseline)
 	}
 	return style, fields
+}
+
+// InternalLink reports whether a link value points inside the document:
+// "#tab=<tab id>" at a tab, "#<heading id>" at a heading in the same
+// tab. Those are the forms a read renders. Any other fragment, such as
+// "#heading=h.x" from a pasted URL, is sent as a URL, as it always was.
+func InternalLink(link string) (tabID, headingID string, ok bool) {
+	rest, ok := strings.CutPrefix(link, "#")
+	switch {
+	case !ok || rest == "":
+		return "", "", false
+	case strings.HasPrefix(rest, "tab="):
+		return strings.TrimPrefix(rest, "tab="), "", true
+	case strings.ContainsAny(rest, "=&/?#"):
+		return "", "", false
+	}
+	return "", rest, true
+}
+
+// linkJSON is the API's Link for a link value; tabID is the tab of the
+// linked text, where a heading link looks for its heading.
+func linkJSON(link, tabID string) map[string]any {
+	tab, heading, ok := InternalLink(link)
+	switch {
+	case !ok:
+		return map[string]any{"url": link}
+	case heading == "":
+		return map[string]any{"tabId": tab}
+	}
+	h := map[string]any{"id": heading}
+	if tabID != "" {
+		h["tabId"] = tabID
+	}
+	return map[string]any{"heading": h}
 }
 
 // colorJSON turns #rrggbb into the API color object.
@@ -192,7 +230,7 @@ func ValidColor(s string) bool {
 
 // UpdateTextStyle applies a spec to a range.
 func UpdateTextStyle(r Rng, s TextStyleSpec) json.RawMessage {
-	style, fields := s.body()
+	style, fields := s.bodyIn(r.TabID)
 	return raw(map[string]any{"updateTextStyle": map[string]any{"range": r.json(), "textStyle": style, "fields": strings.Join(fields, ",")}})
 }
 
@@ -486,6 +524,15 @@ func InsertComment(content string, r Rng, assignee string) json.RawMessage {
 		req["assigneeEmailAddress"] = assignee
 	}
 	return raw(map[string]any{"insertComment": req})
+}
+
+// ReplyToSuggestion adds a reply to a suggestion's thread. Drive cannot
+// reach these threads; only the Docs API can.
+func ReplyToSuggestion(suggestionID, content string) json.RawMessage {
+	return raw(map[string]any{"addCommentReply": map[string]any{
+		"suggestionId": suggestionID,
+		"post":         map[string]any{"content": content},
+	}})
 }
 
 // AcceptSuggestion accepts a suggestion by id.

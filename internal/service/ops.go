@@ -234,11 +234,14 @@ func (i *Info) text() string {
 // show: its page setup, the objects that float above the text, and the
 // ranges the document remembers by name.
 func (t TabInfo) writeExtras(b *strings.Builder) {
-	if p := t.Page; p != nil && (p.WidthPt > 0 || p.MarginLeftPt > 0) {
+	if p := t.Page; p != nil && (p.WidthPt > 0 || p.MarginLeftPt > 0 || p.Pageless) {
 		fmt.Fprintf(b, "  page %s, margins %g/%g/%g/%g pt (top/bottom/left/right)",
 			pageName(p), p.MarginTopPt, p.MarginBottomPt, p.MarginLeftPt, p.MarginRightPt)
 		if p.Landscape {
 			b.WriteString(", landscape")
+		}
+		if p.Pageless {
+			b.WriteString(", pageless")
 		}
 		if p.Background != "" {
 			fmt.Fprintf(b, ", background %s", p.Background)

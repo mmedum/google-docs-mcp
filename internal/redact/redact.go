@@ -6,7 +6,11 @@
 package redact
 
 import (
+	"bytes"
+	"cmp"
+	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -16,10 +20,12 @@ import (
 // Two kinds of thing, caught two ways. An id, a URL and an address have
 // a shape, so a pattern finds them wherever they appear. **A person's
 // name does not.** There is no shape for "Ann Petersen", so names are
-// caught by position, and position works only because the renderers in
-// internal/service and internal/render wrote every one of them: `owner
-// X`, a reply line, and ` by X` from Info.text, list_revisions,
-// search_documents, list_comments and list_suggestions.
+// caught by position where the renderers in internal/service and
+// internal/render put one after a label: `owner X`, a reply line, and
+// ` by X` from Info.text, list_revisions, search_documents,
+// list_comments and list_suggestions. A person chip prints a name with
+// no label before it, so a driver passes the names it knows to Clip,
+// which replaces them wherever they appear (see Names).
 //
 // A person is redacted to the end of the line, and everything after the
 // name goes with it — a comment's quote and body, a suggestion's diff, a
@@ -64,15 +70,64 @@ func Transcript(s string) string {
 	return byPerson.ReplaceAllString(s, " by <person>")
 }
 
-// Clip redacts and then truncates, in that order. Truncating first
-// lets a value straddling the cut stop matching its shape rule and
-// survive, which a test in this package holds.
-func Clip(s string, n int) string {
-	s = Transcript(s)
+// Names replaces each name given wherever it appears. A person chip
+// prints a display name with no position before it, `@Ann Petersen` in
+// markdown and bare in plain text, so the rules above cannot catch it;
+// a driver passes the names it has read, the signed-in account's first.
+// Longest first, so a name that holds another goes whole.
+func Names(s string, names []string) string {
+	names = slices.SortedFunc(slices.Values(names), func(a, b string) int { return cmp.Compare(len(b), len(a)) })
+	for _, n := range names {
+		if strings.TrimSpace(n) != "" {
+			s = strings.ReplaceAll(s, n, "<person>")
+		}
+	}
+	return s
+}
+
+// Clip redacts, replaces the names given, and then truncates, in that
+// order. Truncating first lets a value straddling the cut stop matching
+// its shape rule and survive, which a test in this package holds. Names
+// go after the rules, so a name that is also an address's local part
+// cannot break the address before its rule sees it.
+func Clip(s string, n int, names ...string) string {
+	s = Names(Transcript(s), names)
 	if len(s) <= n {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// TranscriptJSON applies Transcript to every string in a JSON document
+// and returns it indented. Applied to the encoded text instead, the rules
+// anchored to a line's start never fire, since encoding writes a newline
+// as \n, and the rule that redacts to the end of a line takes a string's
+// closing quote with it.
+func TranscriptJSON(raw []byte) ([]byte, error) {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	var v any
+	if err := d.Decode(&v); err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(transcribe(v), "", "  ")
+}
+
+// transcribe redacts every string inside a decoded JSON value.
+func transcribe(v any) any {
+	switch x := v.(type) {
+	case string:
+		return Transcript(x)
+	case []any:
+		for i := range x {
+			x[i] = transcribe(x[i])
+		}
+	case map[string]any:
+		for k := range x {
+			x[k] = transcribe(x[k])
+		}
+	}
+	return v
 }
 
 // Account is an address with the local part removed and the domain kept.

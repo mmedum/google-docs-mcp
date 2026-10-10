@@ -145,6 +145,7 @@ type PageSetup struct {
 	FirstPageHF     bool
 	EvenPageHF      bool
 	Background      string
+	Pageless        bool
 }
 
 // Segments returns body, headers, footers and footnotes in that order.
@@ -447,6 +448,7 @@ const (
 	RunPerson         RunKind = "person"
 	RunRichLink       RunKind = "rich_link"
 	RunDate           RunKind = "date"
+	RunDropdown       RunKind = "dropdown"
 	RunEquation       RunKind = "equation"
 	RunAutoText       RunKind = "auto_text"
 )
@@ -512,7 +514,7 @@ func (s TextStyle) Monospace() bool {
 
 // HasLink reports whether the style carries any link.
 func (s TextStyle) HasLink() bool {
-	return s.LinkURL != "" || s.LinkHeadingID != "" || s.LinkBookmark != ""
+	return s.LinkURL != "" || s.LinkHeadingID != "" || s.LinkBookmark != "" || s.LinkTabID != ""
 }
 
 // Table is a grid of cells.

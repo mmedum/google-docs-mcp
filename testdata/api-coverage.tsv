@@ -24,8 +24,8 @@ drive	approvals.reassign	out	Workspace administration surface, not a document op
 drive	approvals.start	out	Workspace administration surface, not a document operation
 drive	apps.get	out	installed Drive apps; nothing here dispatches to another application
 drive	apps.list	out	installed Drive apps; nothing here dispatches to another application
-drive	changes.getStartPageToken	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
-drive	changes.list	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
+drive	changes.getStartPageToken	out	a feed of changes across the person's whole Drive; one document's history comes from revisions.list
+drive	changes.list	out	a feed of changes across the person's whole Drive; one document's history comes from revisions.list
 drive	changes.watch	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
 drive	channels.stop	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
 drive	comments.create	used	CreateComment
@@ -54,7 +54,7 @@ drive	files.listLabels	out	Drive labels, which google-drive-mcp registers behind
 drive	files.modifyLabels	out	Drive labels, which google-drive-mcp registers behind GDRIVE_LABELS
 drive	files.update	out	renaming, moving and trashing are file metadata; the tool surface changes content, not the file
 drive	files.watch	out	push notification: delivery needs a hosted endpoint, and this server is a stdio subprocess with no address to deliver to
-drive	operations.get	out	long-running operation polling; no call this server makes returns one
+drive	operations.get	used	ExportRevision
 drive	permissions.create	out	sharing is Drive's, and a Docs server that could grant access would widen what a leaked token reaches
 drive	permissions.delete	out	sharing is Drive's, and a Docs server that could revoke access would widen what a leaked token reaches
 drive	permissions.get	out	file-level Drive concern, covered by the sibling google-drive-mcp; this server edits what is inside a document

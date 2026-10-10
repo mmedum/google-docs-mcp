@@ -1,5 +1,5 @@
 {
-  "fetched": "2026-09-26",
+  "fetched": "2026-10-10",
   "apis": [
     {
       "api": "docs",
@@ -140,6 +140,19 @@
           ]
         },
         {
+          "name": "CreateDropdownDefinitionRequest",
+          "properties": [
+            "dropdownDefinition",
+            "tabId"
+          ]
+        },
+        {
+          "name": "CreateDropdownDefinitionResponse",
+          "properties": [
+            "dropdownDefinition"
+          ]
+        },
+        {
           "name": "CreateFooterRequest",
           "properties": [
             "sectionBreakLocation",
@@ -269,6 +282,13 @@
           "name": "DeleteContentRangeRequest",
           "properties": [
             "range"
+          ]
+        },
+        {
+          "name": "DeleteDropdownDefinitionRequest",
+          "properties": [
+            "dropdownDefinitionId",
+            "tabId"
           ]
         },
         {
@@ -423,6 +443,7 @@
             "body",
             "commentAnchors",
             "documentStyle",
+            "dropdownDefinitions",
             "footers",
             "footnotes",
             "headers",
@@ -433,6 +454,64 @@
             "positionedObjects",
             "suggestedDocumentStyleChanges",
             "suggestedNamedStylesChanges"
+          ]
+        },
+        {
+          "name": "Dropdown",
+          "properties": [
+            "dropdownId",
+            "dropdownProperties",
+            "suggestedDeletionIds",
+            "suggestedDropdownPropertiesChanges",
+            "suggestedInsertionIds",
+            "suggestedTextStyleChanges",
+            "textStyle"
+          ]
+        },
+        {
+          "name": "DropdownDefinition",
+          "properties": [
+            "dropdownDefinitionId",
+            "dropdownDefinitionProperties",
+            "suggestedDeletionId",
+            "suggestedDropdownDefinitionPropertiesChanges",
+            "suggestedInsertionId"
+          ]
+        },
+        {
+          "name": "DropdownDefinitionProperties",
+          "properties": [
+            "options",
+            "title"
+          ]
+        },
+        {
+          "name": "DropdownDefinitionPropertiesSuggestionState",
+          "properties": [
+            "optionsSuggested",
+            "titleSuggested"
+          ]
+        },
+        {
+          "name": "DropdownOption",
+          "properties": [
+            "displayValue",
+            "optionId",
+            "textStyle"
+          ]
+        },
+        {
+          "name": "DropdownProperties",
+          "properties": [
+            "displayValue",
+            "dropdownDefinitionId",
+            "selectedOptionId"
+          ]
+        },
+        {
+          "name": "DropdownPropertiesSuggestionState",
+          "properties": [
+            "selectedOptionIdSuggested"
           ]
         },
         {
@@ -631,6 +710,21 @@
             "dateElementProperties",
             "endOfSegmentLocation",
             "location"
+          ]
+        },
+        {
+          "name": "InsertDropdownRequest",
+          "properties": [
+            "dropdownDefinitionId",
+            "endOfSegmentLocation",
+            "location",
+            "selectedOptionId"
+          ]
+        },
+        {
+          "name": "InsertDropdownResponse",
+          "properties": [
+            "dropdown"
           ]
         },
         {
@@ -891,6 +985,7 @@
             "autoText",
             "columnBreak",
             "dateElement",
+            "dropdown",
             "endIndex",
             "equation",
             "footnoteReference",
@@ -1101,6 +1196,7 @@
             "acceptSuggestion",
             "addCommentReply",
             "addDocumentTab",
+            "createDropdownDefinition",
             "createFooter",
             "createFootnote",
             "createHeader",
@@ -1109,6 +1205,7 @@
             "deleteComment",
             "deleteCommentReply",
             "deleteContentRange",
+            "deleteDropdownDefinition",
             "deleteFooter",
             "deleteHeader",
             "deleteNamedRange",
@@ -1120,6 +1217,7 @@
             "deleteTableRow",
             "insertComment",
             "insertDate",
+            "insertDropdown",
             "insertInlineImage",
             "insertPageBreak",
             "insertPerson",
@@ -1139,6 +1237,8 @@
             "updateCommentPost",
             "updateDocumentStyle",
             "updateDocumentTabProperties",
+            "updateDropdownDefinitionProperties",
+            "updateDropdownProperties",
             "updateNamedStyle",
             "updateParagraphStyle",
             "updateSectionStyle",
@@ -1153,11 +1253,13 @@
           "properties": [
             "addCommentReply",
             "addDocumentTab",
+            "createDropdownDefinition",
             "createFooter",
             "createFootnote",
             "createHeader",
             "createNamedRange",
             "insertComment",
+            "insertDropdown",
             "insertInlineImage",
             "insertInlineSheetsChart",
             "replaceAllText"
@@ -1307,6 +1409,20 @@
           "properties": [
             "documentStyle",
             "documentStyleSuggestionState"
+          ]
+        },
+        {
+          "name": "SuggestedDropdownDefinitionProperties",
+          "properties": [
+            "dropdownDefinitionProperties",
+            "dropdownDefinitionPropertiesSuggestionState"
+          ]
+        },
+        {
+          "name": "SuggestedDropdownProperties",
+          "properties": [
+            "dropdownProperties",
+            "dropdownPropertiesSuggestionState"
           ]
         },
         {
@@ -1616,6 +1732,25 @@
           "properties": [
             "fields",
             "tabProperties"
+          ]
+        },
+        {
+          "name": "UpdateDropdownDefinitionPropertiesRequest",
+          "properties": [
+            "dropdownDefinitionId",
+            "dropdownDefinitionProperties",
+            "fields",
+            "selectedOptionIdReplacements",
+            "tabId"
+          ]
+        },
+        {
+          "name": "UpdateDropdownPropertiesRequest",
+          "properties": [
+            "dropdownId",
+            "dropdownProperties",
+            "fields",
+            "tabId"
           ]
         },
         {

@@ -76,6 +76,7 @@ type PageSpec struct {
 	Landscape             *bool
 	FirstPageHeaderFooter *bool
 	EvenPageHeaderFooter  *bool
+	Pageless              *bool
 }
 
 // IsZero reports whether the spec changes nothing.
@@ -83,7 +84,7 @@ func (s PageSpec) IsZero() bool {
 	return s.WidthPt == 0 && s.HeightPt == 0 && s.noneSet() &&
 		s.MarginHeaderPt == nil && s.MarginFooterPt == nil && s.Background == "" &&
 		s.PageNumberStart == nil && s.Landscape == nil &&
-		s.FirstPageHeaderFooter == nil && s.EvenPageHeaderFooter == nil
+		s.FirstPageHeaderFooter == nil && s.EvenPageHeaderFooter == nil && s.Pageless == nil
 }
 
 // Validate checks the spec on its own, before any document is read.
@@ -141,6 +142,13 @@ func (s PageSpec) body() (map[string]any, []string) {
 	}
 	if s.EvenPageHeaderFooter != nil {
 		set("useEvenPageHeaderFooter", *s.EvenPageHeaderFooter)
+	}
+	if s.Pageless != nil {
+		mode := "PAGES"
+		if *s.Pageless {
+			mode = "PAGELESS"
+		}
+		set("documentFormat", map[string]any{"documentMode": mode})
 	}
 	return style, fields
 }

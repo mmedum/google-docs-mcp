@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-10
+
 ### Added
 
 - Content takes `<br>` as a paragraph break, which is how a read joins

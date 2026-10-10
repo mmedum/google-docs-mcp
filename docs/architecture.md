@@ -1,10 +1,13 @@
 # Architecture — google-docs-mcp
 
-**Status:** v2.1.1 (2026-10-03). Comments and suggestions are generally
-available and detected per read rather than gated on a flag, and text
-suggested as an insertion reads in the style it will have (§18). Since
-v2.0.1 a write that may have landed is reported as `[ambiguous_outcome]`
-instead of being repeated. It asks the person before six writes (§12a).
+**Status:** v2.2.0 (released 2026-10-10, live run green). Markdown
+content takes tables and images, and text read as markdown writes back
+unchanged. `replace_all` takes a regular expression, a document can be
+pageless, and a link can point at a heading or a tab. Comments and
+suggestions are generally available and detected per read rather than
+gated on a flag (§18). Since v2.0.1 a write that may have landed is
+reported as `[ambiguous_outcome]` instead of being repeated. It asks the
+person before six writes (§12a).
 Phases 0 to 4 are done (§16): auth, raw
 client, model, renderer, reads, search, create, export, editing with
 minimal diffs in all three modes, formatting, suggestion review, comment

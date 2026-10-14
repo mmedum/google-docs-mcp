@@ -76,6 +76,27 @@ func TestMarkdownFileInfo(t *testing.T) {
 	}
 }
 
+func TestMarkdownFileUnderTheOlderType(t *testing.T) {
+	// Drive keeps a .md uploaded as text/x-markdown under that type, and
+	// the Docs API reads it as Markdown and refuses its writes the same
+	// way (§18). It is a Markdown file here, and an edit keeps its type.
+	svc, api := mdService(t, config.WriteSuggest)
+	api.file = &gapi.File{MimeType: "text/x-markdown"}
+	ctx := context.Background()
+	info, err := svc.Info(ctx, fixtureID)
+	if err != nil || info.Kind != KindMarkdownFile {
+		t.Fatalf("Info = %+v, %v; want a markdown_file", info, err)
+	}
+	if _, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplace, Target: &Target{Text: "**bold**"}, Content: "**strong**"},
+	}}); err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	if len(api.uploads) != 1 || !strings.Contains(api.uploads[0], "**strong**") {
+		t.Errorf("uploads = %q, want one carrying the edit", api.uploads)
+	}
+}
+
 func TestMarkdownFileReadIsItsText(t *testing.T) {
 	svc, _ := mdService(t, config.WriteDirect)
 	ctx := context.Background()
@@ -406,8 +427,8 @@ func TestSearchKinds(t *testing.T) {
 		kind, query string
 	}{
 		{"", "mimeType = 'application/vnd.google-apps.document' and trashed = false"},
-		{"markdown_file", "mimeType = 'text/markdown' and trashed = false"},
-		{"any", "(mimeType = 'application/vnd.google-apps.document' or mimeType = 'text/markdown') and trashed = false"},
+		{"markdown_file", "(mimeType = 'text/markdown' or mimeType = 'text/x-markdown') and trashed = false"},
+		{"any", "(mimeType = 'application/vnd.google-apps.document' or mimeType = 'text/markdown' or mimeType = 'text/x-markdown') and trashed = false"},
 	}
 	for _, tc := range tests {
 		if _, err := svc.Search(ctx, SearchRequest{Kind: tc.kind}); err != nil || api.searchQ != tc.query {

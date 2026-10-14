@@ -128,8 +128,14 @@ func (f *fakeAPI) UploadFile(_ context.Context, id string, data []byte, mimeType
 	if f.uploadErr != nil {
 		return nil, f.uploadErr
 	}
-	if mimeType != "text/markdown" {
-		return nil, fmt.Errorf("uploaded as %s", mimeType)
+	// An upload keeps the file's type: Drive makes the uploaded type the
+	// file's, so sending another would retype it.
+	want := "text/markdown"
+	if f.file != nil && f.file.MimeType != "" {
+		want = f.file.MimeType
+	}
+	if mimeType != want {
+		return nil, fmt.Errorf("uploaded as %s to a %s file", mimeType, want)
 	}
 	if f.beforeUpload != nil {
 		f.beforeUpload()

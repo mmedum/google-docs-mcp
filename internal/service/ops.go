@@ -207,7 +207,7 @@ func (i *Info) fromFile(file *gapi.File) {
 	if file.Trashed {
 		i.Warnings = append(i.Warnings, "this document is in the trash")
 	}
-	if src := file.AppProperties[copySourceKey]; src != "" && file.MimeType != gapi.MarkdownMimeType {
+	if src := file.AppProperties[copySourceKey]; src != "" && !gapi.IsMarkdownMimeType(file.MimeType) {
 		i.WorkingCopyOf = src
 	}
 }

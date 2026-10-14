@@ -41,6 +41,10 @@ type SearchResult struct {
 	Text          string      `json:"-"`
 }
 
+// markdownClause matches a Markdown file under either of its types.
+var markdownClause = "mimeType = " + gapi.QuoteDriveValue(gapi.MarkdownMimeType) +
+	" or mimeType = " + gapi.QuoteDriveValue(gapi.LegacyMarkdownMimeType)
+
 // Search finds Google Docs, and Markdown files when asked, by title or
 // content, newest first. Markdown files are not in the default: a person
 // who syncs a code folder into Drive has hundreds of them.
@@ -50,9 +54,9 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	case "", KindDocument:
 		kind = "mimeType = " + gapi.QuoteDriveValue(gapi.DocumentMimeType)
 	case KindMarkdownFile:
-		kind = "mimeType = " + gapi.QuoteDriveValue(gapi.MarkdownMimeType)
+		kind = "(" + markdownClause + ")"
 	case "any":
-		kind = "(mimeType = " + gapi.QuoteDriveValue(gapi.DocumentMimeType) + " or mimeType = " + gapi.QuoteDriveValue(gapi.MarkdownMimeType) + ")"
+		kind = "(mimeType = " + gapi.QuoteDriveValue(gapi.DocumentMimeType) + " or " + markdownClause + ")"
 	default:
 		return nil, Errorf("invalid", "kind %q; use document, markdown_file or any", req.Kind)
 	}
@@ -82,9 +86,9 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	for _, f := range list.Files {
 		h := SearchHit{ID: f.ID, Title: f.Name, Kind: KindDocument, URL: f.WebViewLink, Modified: f.ModifiedTime, ModifiedBy: userLabel(f.LastModifyingUser)}
 		if f.MimeType != "" {
-			s.rememberKind(f.ID, f.MimeType == gapi.MarkdownMimeType)
+			s.rememberKind(f.ID, gapi.IsMarkdownMimeType(f.MimeType))
 		}
-		if f.MimeType == gapi.MarkdownMimeType {
+		if gapi.IsMarkdownMimeType(f.MimeType) {
 			h.Kind = KindMarkdownFile
 		}
 		if len(f.Owners) > 0 {

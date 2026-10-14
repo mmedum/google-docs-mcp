@@ -70,6 +70,16 @@ func (m *mdFile) url() string {
 	return doc.FileURL(m.meta.ID)
 }
 
+// mime is the type an upload to the file is sent as: its own, so that a
+// text/x-markdown file is not retyped, since Drive makes the uploaded
+// type the file's.
+func (m *mdFile) mime() string {
+	if gapi.IsMarkdownMimeType(m.meta.MimeType) {
+		return m.meta.MimeType
+	}
+	return gapi.MarkdownMimeType
+}
+
 // revision is what a Markdown file's revision_id is: Drive's head
 // revision, which every upload moves.
 func (m *mdFile) revision() string { return m.meta.HeadRevisionID }
@@ -93,7 +103,7 @@ func (s *Service) kind(ctx context.Context, ref string) (bool, *gapi.File) {
 	file, err := s.api.GetFile(ctx, id)
 	switch {
 	case err == nil && file != nil:
-		md := file.MimeType == gapi.MarkdownMimeType
+		md := gapi.IsMarkdownMimeType(file.MimeType)
 		s.rememberKind(id, md)
 		return md, file
 	case errors.Is(err, gapi.ErrNotFound) || errors.Is(err, gapi.ErrForbidden):
@@ -151,7 +161,7 @@ func (s *Service) fetchMarkdown(ctx context.Context, ref string, meta *gapi.File
 				return nil, wrapAPI(err, "file")
 			}
 		}
-		if meta.MimeType != gapi.MarkdownMimeType {
+		if !gapi.IsMarkdownMimeType(meta.MimeType) {
 			// Retyped since this session asked, by an upload sent as
 			// another type: the Docs API refuses a text/plain .md.
 			s.rememberKind(id, false)

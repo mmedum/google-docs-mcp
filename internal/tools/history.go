@@ -10,13 +10,13 @@ import (
 
 // RevisionsInput lists version history.
 type RevisionsInput struct {
-	Document string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Limit    int    `json:"limit,omitempty" jsonschema:"how many of the newest revisions to return; default 20, max 200"`
 }
 
 // DiffInput compares two revisions.
 type DiffInput struct {
-	Document string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	From     string `json:"from" jsonschema:"the older revision id from list_revisions"`
 	To       string `json:"to,omitempty" jsonschema:"the newer revision id from list_revisions; default the current content"`
 	Format   string `json:"format,omitempty" jsonschema:"md (default) or txt: which export to compare"`

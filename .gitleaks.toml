@@ -43,4 +43,10 @@ regexes = [
   # and here rather than inline because this job scans the pull request's
   # commits and a comment can only clear the commit that carries it.
   '''internal/gdocs''',
+
+  # The synthetic comment token in the Markdown-file fixtures. The Docs
+  # editor writes an opaque `token:` into a .md file's gdoc_comments
+  # block, and generic-api-key scores the made-up value as a secret.
+  # Allowed as the literal for the same two reasons as the path above.
+  '''AbC123opaque''',
 ]

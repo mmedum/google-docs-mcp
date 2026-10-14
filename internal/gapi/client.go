@@ -157,6 +157,12 @@ func (c *Client) do(ctx context.Context, k reqKind, method, rawURL string, body 
 
 // doAccept is do with an explicit Accept header (exports return bytes).
 func (c *Client) doAccept(ctx context.Context, k reqKind, method, rawURL string, body []byte, accept string) ([]byte, error) {
+	return c.send(ctx, k, method, rawURL, body, accept, acceptJSON)
+}
+
+// send is the one request path: rate limiting, retries, and the body
+// sent as contentType, which is JSON everywhere except a media upload.
+func (c *Client) send(ctx context.Context, k reqKind, method, rawURL string, body []byte, accept, contentType string) ([]byte, error) {
 	lim := c.readLim
 	switch k {
 	case kindWrite:
@@ -170,7 +176,7 @@ func (c *Client) doAccept(ctx context.Context, k reqKind, method, rawURL string,
 	path := redactPath(rawURL)
 	var lastErr error
 	for attempt := 1; attempt <= c.retry.MaxAttempts; attempt++ {
-		res, err := c.once(ctx, method, rawURL, body, accept)
+		res, err := c.once(ctx, method, rawURL, body, accept, contentType)
 		if err == nil {
 			c.log.DebugContext(ctx, "google api", "method", method, "path", path, "status", res.status, "ms", res.elapsed.Milliseconds(), "attempt", attempt)
 			return res.body, nil
@@ -246,7 +252,7 @@ func askCompactJSON(req *http.Request, accept string) {
 	req.URL.RawQuery += "prettyPrint=false"
 }
 
-func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, accept string) (*attemptResult, error) {
+func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, accept, contentType string) (*attemptResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	var rdr io.Reader
@@ -264,7 +270,7 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 	askCompactJSON(req, accept)
 	req.Header.Set("User-Agent", c.ua)
 	if body != nil {
-		req.Header.Set("Content-Type", acceptJSON)
+		req.Header.Set("Content-Type", contentType)
 	}
 	start := time.Now()
 	resp, err := c.httpc.Do(req)

@@ -145,13 +145,19 @@ func coverageProblems(published map[string]apiMethod, verdicts []verdict, calls 
 		seen[key] = v.line
 		switch v.Verdict {
 		case "used":
-			if !slices.Contains(calls, v.Reason) {
-				problems = append(problems, fmt.Sprintf(
-					"%s:%d: %s %s says it is used by %q, which is not a call in internal/gapi",
-					apiCoverageFile, v.line, v.API, v.Method, v.Reason))
-				continue
+			// One method may back several calls: files.get is both a
+			// file's metadata and, with alt=media, its bytes. Each is
+			// named, comma-separated, and each must be a call.
+			for _, name := range strings.Split(v.Reason, ",") {
+				name = strings.TrimSpace(name)
+				if !slices.Contains(calls, name) {
+					problems = append(problems, fmt.Sprintf(
+						"%s:%d: %s %s says it is used by %q, which is not a call in internal/gapi",
+						apiCoverageFile, v.line, v.API, v.Method, name))
+					continue
+				}
+				used[name] = v.API + " " + v.Method
 			}
-			used[v.Reason] = v.API + " " + v.Method
 		case "out":
 			if strings.TrimSpace(v.Reason) == "" {
 				problems = append(problems, fmt.Sprintf("%s:%d: %s %s is out with no reason given",

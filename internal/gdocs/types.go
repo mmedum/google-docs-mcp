@@ -43,6 +43,10 @@ type Post struct {
 	SuggestionAction string     `json:"suggestionAction,omitempty"`
 	// Deleted leaves the post in its thread with no content or author.
 	Deleted bool `json:"deleted,omitempty"`
+	// FromImportedDocument marks a post read out of an imported file
+	// rather than made in Docs, its author whatever the file says: on a
+	// Markdown file, a comment whose entry carries no token (spike D).
+	FromImportedDocument bool `json:"fromImportedDocument,omitempty"`
 }
 
 // PostAuthor identifies who wrote a post.

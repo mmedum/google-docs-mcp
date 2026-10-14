@@ -23,6 +23,9 @@ type WholeResult struct {
 // comment saying where read_document can continue. No handles, styles,
 // suggestions or comments: those are what the read tools are for.
 func (s *Service) ReadWhole(ctx context.Context, ref string, maxChars int) (*WholeResult, error) {
+	if s.isMarkdown(ctx, ref) {
+		return s.mdWhole(ctx, ref, maxChars)
+	}
 	f, err := s.Fetch(ctx, ref)
 	if err != nil {
 		return nil, err

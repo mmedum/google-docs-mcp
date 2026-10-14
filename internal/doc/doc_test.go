@@ -247,6 +247,8 @@ func TestParseID(t *testing.T) {
 		"https://docs.google.com/document/d/" + id + "/edit",
 		"https://docs.google.com/document/d/" + id + "/edit?tab=t.0#heading=h.bg",
 		"https://docs.google.com/open?id=" + id,
+		// A Markdown file's link is Drive's viewer.
+		"https://drive.google.com/file/d/" + id + "/view",
 		"  " + id + "\n",
 	} {
 		got, err := doc.ParseID(in)

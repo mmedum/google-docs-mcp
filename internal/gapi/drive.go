@@ -25,6 +25,16 @@ type FileCapabilities struct {
 	CanEdit    bool `json:"canEdit,omitempty"`
 	CanComment bool `json:"canComment,omitempty"`
 	CanShare   bool `json:"canShare,omitempty"`
+	// CanModifyContent is whether the caller may upload new content,
+	// which is how a Markdown file is written.
+	CanModifyContent bool `json:"canModifyContent,omitempty"`
+}
+
+// ContentRestriction is a lock on a file's content. A read-only one
+// means "a new revision of the file may not be added" (Drive reference).
+type ContentRestriction struct {
+	ReadOnly bool   `json:"readOnly,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // File is the files.get response subset we read.
@@ -40,6 +50,17 @@ type File struct {
 	Version           string            `json:"version,omitempty"`
 	Trashed           bool              `json:"trashed,omitempty"`
 	Capabilities      *FileCapabilities `json:"capabilities,omitempty"`
+	// HeadRevisionID, MD5Checksum and Size are Drive's for a file with
+	// binary content, such as a Markdown file, and absent on a Google
+	// Doc. Size is a decimal string.
+	HeadRevisionID      string                `json:"headRevisionId,omitempty"`
+	MD5Checksum         string                `json:"md5Checksum,omitempty"`
+	Size                string                `json:"size,omitempty"`
+	ContentRestrictions []*ContentRestriction `json:"contentRestrictions,omitempty"`
+	// AppProperties are this OAuth client's own key/value pairs on the
+	// file, which no other app sees: a working copy names the Markdown
+	// file it came from there.
+	AppProperties map[string]string `json:"appProperties,omitempty"`
 }
 
 // About returns the signed-in user, the cheapest authenticated call.
@@ -59,7 +80,8 @@ func (c *Client) About(ctx context.Context) (*User, error) {
 }
 
 // FileFields is what GetFile asks Drive for.
-const FileFields = "id,name,mimeType,createdTime,modifiedTime,owners(displayName,emailAddress),lastModifyingUser(displayName,emailAddress),webViewLink,version,trashed,capabilities(canEdit,canComment,canShare)"
+const FileFields = "id,name,mimeType,createdTime,modifiedTime,owners(displayName,emailAddress),lastModifyingUser(displayName,emailAddress),webViewLink,version,trashed," +
+	"capabilities(canEdit,canComment,canShare,canModifyContent),headRevisionId,md5Checksum,size,contentRestrictions(readOnly,reason),appProperties"
 
 // GetFile returns Drive metadata for a document.
 func (c *Client) GetFile(ctx context.Context, id string) (*File, error) {
@@ -80,6 +102,10 @@ func (c *Client) GetFile(ctx context.Context, id string) (*File, error) {
 
 // DocumentMimeType is the Drive MIME type of a Google Doc.
 const DocumentMimeType = "application/vnd.google-apps.document"
+
+// MarkdownMimeType is the Drive MIME type of a Markdown file, which Docs
+// opens in place and leaves a file of this type (architecture §7.5).
+const MarkdownMimeType = "text/markdown"
 
 // ExportMimeTypes maps short format names to Drive export MIME types.
 var ExportMimeTypes = map[string]string{

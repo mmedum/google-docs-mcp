@@ -41,7 +41,10 @@ var (
 	// because `doctor` needs the same rule with a different replacement:
 	// it masks to "…@domain" rather than removing the whole thing, and a
 	// second copy of the pattern is a second thing to widen.
-	docURL = regexp.MustCompile(`/document/d/[A-Za-z0-9_-]+`)
+	// A document's link, and a Markdown file's, which is Drive's viewer
+	// (drive.google.com/file/d/<id>): one rule for both, as revAny is one
+	// rule for every prefix of a revision id.
+	docURL = regexp.MustCompile(`(/(?:document|file)/d/)[A-Za-z0-9_-]+`)
 	gdocs  = regexp.MustCompile(`gdocs://[A-Za-z0-9_-]{20,}`)
 	// Every prefix that precedes a revision id, in one rule. There were
 	// three, and the third existed only because the second had been
@@ -62,7 +65,7 @@ var (
 // rules for why names are caught by position and everything else by
 // shape.
 func Transcript(s string) string {
-	s = docURL.ReplaceAllString(s, "/document/d/<scratch>")
+	s = docURL.ReplaceAllString(s, "${1}<scratch>")
 	s = gdocs.ReplaceAllString(s, "gdocs://<scratch>")
 	s = revAny.ReplaceAllString(s, "${1}<rev>")
 	s = Address.ReplaceAllString(s, "<address>")

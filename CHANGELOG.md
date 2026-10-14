@@ -8,6 +8,54 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+
+- Markdown files. Docs now opens a `.md` file stored in Drive and edits
+  it in place, and the Docs API reads such a file but refuses every
+  write to it. Every tool now tells one from a Google Doc and treats it
+  as the text it is: reads return the file's own markdown, `get_outline`
+  lists its headings with slug ids, and `edit_document` changes it with
+  minimal edits uploaded through Drive once per call, in `direct` mode
+  only. The comments Docs keeps inside the file are left out of reads,
+  never touched by an edit, and listed by `list_comments`. Tools that
+  need the Docs API refuse a Markdown file up front with
+  `[unsupported]`. See "Markdown files" in the README.
+- Working copies. Nothing writes through an open editor's session to a
+  Markdown file, so to work in one together live, `create_document` with
+  `from_file` makes a Google Doc from it, where every write mode works
+  as in any Google Doc. The new `write_markdown_file` writes the copy
+  back, carrying only what changed in it, block by block: the rest of
+  the file keeps its own Markdown, its front matter and its comments. A
+  block also changed in the file since the copy was made is a conflict,
+  refused unless `force` keeps the file's version.
+- Comments on Markdown files: `add_comment`, `mode: comment` and
+  `reply_comment` write the comment into the file under the signed-in
+  account's name, the way the Docs editor writes its own, and the editor
+  shows it. Resolving is done in the editor.
+- Every write to a Markdown file waits for, then refuses, comments,
+  replies and resolves made in the Docs editor and not saved yet, checks
+  again just before uploading, and afterwards keeps a save that landed
+  in between, making the change again on top of it.
+- `get_document` reports `kind` (`document` or `markdown_file`), a
+  Markdown file's size in `bytes`, and for a working copy the file it
+  came from in `working_copy_of`.
+- `search_documents` takes `kind`: `document` (the default),
+  `markdown_file` or `any`. Each hit reports its `kind`.
+- A document may be named by a `drive.google.com/file/d/…` URL.
+
+### Changed
+
+- A comment whose author Google read out of an imported file, rather
+  than an account, names them "(as the file names them)": on a
+  Markdown file anyone who can edit the file can write such a name.
+
+### Fixed
+
+- On a Markdown file, `get_document` offered suggestion and comment
+  modes that Google then refused, every write failed only after it had
+  been planned, and `list_comments` missed the comments made in the Docs
+  editor, which Drive cannot see.
+
 ## [2.2.0] - 2026-10-10
 
 ### Added

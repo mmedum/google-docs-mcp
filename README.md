@@ -155,6 +155,64 @@ are posted through Drive quoting the text instead of pinned to it, and
 suggestion mode is refused rather than sent; `get_document` says which.
 `GDOCS_PREVIEW` is deprecated and ignored.
 
+### Markdown files
+
+Docs opens a Markdown file stored in Drive (`.md`, typed `text/markdown`)
+and edits it in place, leaving it a Markdown file. The Docs API reads such
+a file but refuses every write to it, and nothing writes through an open
+editor's session: the only write is an upload of the whole file, and an
+upload makes an open editor reload. So there are two ways to work on one.
+
+**Together, live: a working copy.** `create_document` with `from_file`
+makes a Google Doc from the file. You and Claude work in it as in any
+Google Doc: edits merge with your typing, suggestion mode shows tracked
+changes, comments sit on their passage. `write_markdown_file` then writes
+what changed in the copy back into the file, block by block. The rest of
+the file keeps its own Markdown, its front matter and the comments Docs
+keeps in it. A change to a block that was also changed in the file since
+the copy was made is a conflict, refused unless `force` keeps the file's
+version of those.
+
+**Directly, on the file.** `get_document` says `kind: markdown_file`,
+reads return the file's own Markdown, and edits are minimal changes to
+that text, uploaded once per call:
+
+- Targets are exact text, `heading_id` (a slug such as `next-steps`, from
+  `get_outline`) or `heading`. Lines (`L12`) stand where a Google Doc has
+  handles, and a long read continues from one.
+- `edit_document` takes `insert`, `append`, `replace`, `delete` and
+  `replace_all`, with content written as given. Formatting, tables,
+  objects, layout and tabs are refused: write them as Markdown.
+- `mode: direct` changes the text. `mode: comment` and `add_comment`
+  write a comment into the file under your account's name, the way the
+  editor writes its own; the editor shows it, marked "From imported
+  document", and keeps it when you save. Its id changes each time the
+  file is written, until someone saves the file in the editor.
+  `reply_comment` replies the same way. Resolving cannot be done
+  through the file (written into it, a resolve makes Google fail to read
+  the file), so you resolve in the editor. A Markdown file takes no
+  suggestions.
+- The comments Docs keeps in the file are left out of reads, never
+  touched by an edit, and listed by `list_comments` along with comments
+  made through Drive's API. Content that holds comment markup is refused.
+- The guard refuses a direct edit that changes commented text, an image
+  or a footnote reference unless forced, as in a Google Doc.
+- **Writing while someone has the file open.** Drive has no way to make
+  an upload conditional, and an open editor holds work the file does not
+  show yet. Before writing, the server compares the editor's live
+  session with the file: if a comment, reply or resolve has not reached
+  the file, it waits a moment, then refuses. Just before the upload it
+  checks again. After it, it checks the file's history: if someone's
+  save landed in between, the save is kept and the change made again on
+  top of it.
+- When a person saves the file in the Docs editor, Docs rewrites all of
+  it in its own Markdown style and turns front matter into a heading. A
+  read warns about front matter; `list_revisions` and `read_document`
+  with `revision` reach the earlier text.
+- `search_documents` finds Markdown files with `kind: markdown_file` or
+  `any`; its default is Google Docs only. `create_document` with `kind:
+  markdown_file` makes a new one.
+
 ## Connect a client
 
 Claude Code:
@@ -193,15 +251,15 @@ for the defaults.
 | `get_outline` | Heading tree per tab with stable `heading_id`s, block handles, and section sizes. |
 | `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Block handles come with the text unless `with_handles` is false; options add styles, pending suggestions as `{++inserted++}` / `{--deleted--}` / `{==restyled==}`, and comment markers `{>>c:id<<}`. |
 | `find_in_document` | Text or regex search returning handles, offsets and context. |
-| `search_documents` | Locate documents by title or content, owner, or modification date. |
+| `search_documents` | Locate documents by title or content, owner, or modification date; `kind` adds Markdown files. |
 | `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
-| `create_document` | New document, optionally with markdown content. |
+| `create_document` | New document, optionally with markdown content; `kind: markdown_file` makes a `.md` file, `from_file` a working copy of one. |
 | `edit_document` | One batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all` (text or RE2 regex), `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. Markdown content may hold tables and images; later batches place them once the text has landed. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. A link goes to a URL, to a heading in the same tab (`#h.…`, from `get_outline`) or to a tab (`#tab=t.…`); markdown content takes the same forms. |
 | `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing, and the replies on each one's thread. |
 | `review_suggestion` | Accept, reject or discard suggestions by id or all. |
 | `list_comments` | Comment threads with every reply, resolved and deleted state, who each is assigned to, quoted text and the block they sit on. |
-| `add_comment` | Comment on a passage (pinned to it) or on the document. |
+| `add_comment` | Comment on a passage (pinned to it) or on the document; on a Markdown file, written into the file. |
 | `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. Also replies on a suggested edit's thread. |
 | `list_revisions` | Version history: revision ids, times, authors. |
 | `diff_revisions` | Unified diff of Google's markdown or text export between two revisions. `read_document` reads an old `revision` whole. |
@@ -209,6 +267,7 @@ for the defaults.
 | `insert_object` | Insert an inline image from a public URL, a person chip, a rich-link chip or a date chip at a location; replace an image's source in place; or delete an object, including a floating image no text range covers. |
 | `layout_document` | `page` (size, margins, background, landscape, page numbering, first/even-page headers, pageless), `section` (the same for one section, plus 1–3 columns), `section_break`, and `named_style` to redefine `NORMAL_TEXT`, `TITLE`, `SUBTITLE` or `HEADING_1` … `HEADING_6` for a whole tab. |
 | `manage_tabs` | Add (with content), rename, move or nest tabs. Always direct: the API cannot suggest tab changes. |
+| `write_markdown_file` | Write a working copy back into its Markdown file, carrying only what changed in the copy; conflicts with changes made in the file since are refused unless forced; `dry_run`. |
 
 Two more tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:
 `delete_comment` (a thread or one reply) and `delete_tab` (a tab with its
@@ -221,7 +280,8 @@ can, and names what would go. A call they did not confirm comes back
 `[blocked]`. `GDOCS_REQUIRE_PROMPT=true` refuses those writes when the
 client cannot ask.
 
-Documents are identified by id or any `docs.google.com` URL.
+Documents are identified by id, any `docs.google.com` URL, or a Markdown
+file's `drive.google.com/file/d/…` URL.
 
 ### Resources
 

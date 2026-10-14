@@ -75,6 +75,25 @@ func TestCoverageProblems(t *testing.T) {
 			want:  "is not a call in internal/gapi",
 		},
 		{
+			name: "one method backing two calls",
+			verdicts: []verdict{
+				{API: "docs", Method: "documents.get", Verdict: "used", Reason: "GetDocument, DownloadDocument", line: 1},
+				{API: "drive", Method: "files.list", Verdict: "used", Reason: "SearchFiles", line: 2},
+				{API: "drive", Method: "permissions.create", Verdict: "out", Reason: "sharing is Drive's", line: 3},
+			},
+			calls: append(slices.Clone(calls), "DownloadDocument"),
+		},
+		{
+			name: "one method backing two calls, one of them not a call",
+			verdicts: []verdict{
+				{API: "docs", Method: "documents.get", Verdict: "used", Reason: "GetDocument, FetchDocument", line: 1},
+				{API: "drive", Method: "files.list", Verdict: "used", Reason: "SearchFiles", line: 2},
+				{API: "drive", Method: "permissions.create", Verdict: "out", Reason: "sharing is Drive's", line: 3},
+			},
+			calls: calls,
+			want:  `says it is used by "FetchDocument", which is not a call in internal/gapi`,
+		},
+		{
 			name: "out with no reason at all",
 			verdicts: []verdict{
 				{API: "docs", Method: "documents.get", Verdict: "used", Reason: "GetDocument", line: 1},

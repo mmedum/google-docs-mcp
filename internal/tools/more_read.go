@@ -10,7 +10,7 @@ import (
 
 // FindInput is the find_in_document call.
 type FindInput struct {
-	Document  string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document  string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Query     string `json:"query" jsonschema:"text to find (normalized exact match) or a regular expression when regex is true"`
 	Regex     bool   `json:"regex,omitempty" jsonschema:"treat query as an RE2 regular expression"`
 	MatchCase bool   `json:"match_case,omitempty" jsonschema:"match case exactly; default case-insensitive"`
@@ -26,13 +26,14 @@ type SearchInput struct {
 	Title         string `json:"title,omitempty" jsonschema:"words that must appear in the title"`
 	ModifiedAfter string `json:"modified_after,omitempty" jsonschema:"only documents modified after this date (YYYY-MM-DD or RFC 3339)"`
 	Owner         string `json:"owner,omitempty" jsonschema:"owner email address"`
+	Kind          string `json:"kind,omitempty" jsonschema:"document (the default: Google Docs), markdown_file (.md files Docs opens in place), or any"`
 	Limit         int    `json:"limit,omitempty" jsonschema:"page size, default 20, max 100"`
 	PageToken     string `json:"page_token,omitempty" jsonschema:"next_page_token from a previous result"`
 }
 
 // ExportInput is the export_document call.
 type ExportInput struct {
-	Document string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Format   string `json:"format" jsonschema:"md, txt or html (returned inline); pdf, docx, odt, rtf or epub (written under GDOCS_EXPORT_DIR)"`
 	MaxChars int    `json:"max_chars,omitempty" jsonschema:"inline formats: character budget, default 20000"`
 }
@@ -57,10 +58,10 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 		Name: "search_documents",
 		Description: "Locate Google Docs the signed-in account can open, by words in the title or the text, optionally " +
 			"limited by owner or modification date, newest first. Returns ids and URLs to pass to the other tools. " +
-			"With no filters it lists recently modified documents.",
+			"With no filters it lists recently modified documents. Markdown files (.md) are found with kind markdown_file or any.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, any, error) {
-		res, err := d.Service.Search(ctx, service.SearchRequest{Query: in.Query, Title: in.Title, ModifiedAfter: in.ModifiedAfter, Owner: in.Owner, Limit: in.Limit, PageToken: in.PageToken})
+		res, err := d.Service.Search(ctx, service.SearchRequest{Query: in.Query, Title: in.Title, ModifiedAfter: in.ModifiedAfter, Owner: in.Owner, Kind: in.Kind, Limit: in.Limit, PageToken: in.PageToken})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

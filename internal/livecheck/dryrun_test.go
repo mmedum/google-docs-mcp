@@ -13,7 +13,7 @@ import (
 // object, a page setup — because a dry run of nothing proves nothing.
 // comment and tab are a thread and a spare tab the sweep made for the
 // dry runs that delete; a suggestion is always pending.
-func dryRunArgs(doc, table, comment, tab string) map[string]map[string]any {
+func dryRunArgs(doc, table, comment, tab, workingCopy string) map[string]map[string]any {
 	args := map[string]map[string]any{
 		"edit_document": {"document": doc, "mode": "direct", "dry_run": true, "ops": []any{
 			map[string]any{"op": "replace", "target": map[string]any{"text": "Closing line"}, "content": "Closing line, rewritten by a dry run"}}},
@@ -27,6 +27,9 @@ func dryRunArgs(doc, table, comment, tab string) map[string]map[string]any {
 	}
 	args["add_comment"] = map[string]any{"document": doc, "dry_run": true, "content": "written by a dry run",
 		"target": map[string]any{"text": "Closing line"}}
+	if workingCopy != "" {
+		args["write_markdown_file"] = map[string]any{"document": workingCopy, "dry_run": true}
+	}
 	if comment != "" {
 		args["delete_comment"] = map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment, "dry_run": true}
 	}
@@ -48,9 +51,10 @@ var plans = map[string]bool{"edit_document": true, "format_document": true, "ins
 
 // dryRunTargets makes what the delete and review dry runs act on, before
 // the sweep reads the revision it holds still: a document-level comment,
-// a spare tab when deletes are registered, and a pending suggestion.
-// The spare tab is deleted again afterwards.
-func dryRunTargets(d *driver, doc string) (comment, tab string) {
+// a spare tab when deletes are registered, a pending suggestion, and a
+// working copy of a scratch Markdown file. The spare tab is deleted
+// again afterwards; the two files stay, named "safe to delete".
+func dryRunTargets(d *driver, doc string) (comment, tab, workingCopy string) {
 	_, sc := d.okStruct("a comment for the dry runs", "add_comment", map[string]any{"document": doc,
 		"content": "Live test: the target of a dry-run delete."})
 	comment = str(sc, "id")
@@ -65,7 +69,14 @@ func dryRunTargets(d *driver, doc string) (comment, tab string) {
 	}
 	d.ok("a suggestion for the dry runs", "edit_document", map[string]any{"document": doc, "mode": "suggest", "ops": []any{
 		map[string]any{"op": "append", "content": "Suggested by the live test for a dry-run review."}}})
-	return comment, tab
+	_, sc = d.okStruct("a Markdown file for the dry runs", "create_document", map[string]any{"kind": "markdown_file",
+		"title": "google-docs-mcp live dry-run file (safe to delete)", "content": "# Dry run\n\nA line.\n"})
+	if md := str(sc, "id"); md != "" {
+		_, sc = d.okStruct("a working copy for the dry runs", "create_document", map[string]any{"from_file": md,
+			"title": "google-docs-mcp live dry-run copy (safe to delete)"})
+		workingCopy = str(sc, "id")
+	}
+	return comment, tab, workingCopy
 }
 
 // liveDryRuns is the check a fake cannot perform: that a dry run sends
@@ -78,13 +89,13 @@ func dryRunTargets(d *driver, doc string) (comment, tab string) {
 // bug is invisible until someone reads every one of them, which is what
 // this does.
 func liveDryRuns(t *testing.T, d *driver, doc, table string) {
-	comment, tab := dryRunTargets(d, doc)
+	comment, tab, workingCopy := dryRunTargets(d, doc)
 	before := first(revisionOf, d.ok("revision before the dry runs", "get_document", map[string]any{"document": doc}))
 	if before == "" {
 		t.Fatal("cannot read the revision from get_document; the wording changed")
 	}
 
-	args := dryRunArgs(doc, table, comment, tab)
+	args := dryRunArgs(doc, table, comment, tab, workingCopy)
 	tools, err := d.cs.ListTools(d.ctx, nil)
 	if err != nil {
 		t.Fatalf("list tools: %v", err)

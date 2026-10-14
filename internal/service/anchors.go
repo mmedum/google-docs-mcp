@@ -63,7 +63,7 @@ func (s *Service) comments(ctx context.Context, f *Fetched) ([]CommentThread, er
 func viewThreads(w *gdocs.Document) []CommentThread {
 	out := make([]CommentThread, 0, len(w.Comments))
 	for _, c := range w.Comments {
-		t := CommentThread{ID: c.CommentID, Author: c.HeadPost.Author.DisplayName, Content: c.HeadPost.Content, Quote: c.PlainTextQuote,
+		t := CommentThread{ID: c.CommentID, Author: postAuthor(c.HeadPost), Content: c.HeadPost.Content, Quote: c.PlainTextQuote,
 			Resolved: c.Status == "RESOLVED", Created: c.HeadPost.CreateTime, Modified: c.HeadPost.UpdateTime, Replies: []CommentReply{}}
 		for _, p := range c.Replies {
 			t.Replies = append(t.Replies, postReply(p))
@@ -76,8 +76,27 @@ func viewThreads(w *gdocs.Document) []CommentThread {
 // postReply is one reply post of a Docs thread, a comment's or a
 // suggestion's.
 func postReply(p gdocs.Post) CommentReply {
-	return CommentReply{ID: p.PostID, Author: p.Author.DisplayName, Content: p.Content, Created: p.CreateTime,
+	return CommentReply{ID: p.PostID, Author: postAuthor(p), Content: p.Content, Created: p.CreateTime,
 		Action: commentAction(p.CommentAction), Deleted: p.Deleted}
+}
+
+// postAuthor is who wrote a post, labeled when the name came out of an
+// imported file rather than an account: on a Markdown file, a comment
+// whose entry carries no token, which anyone who can edit the file could
+// have written (spike D).
+func postAuthor(p gdocs.Post) string {
+	if p.FromImportedDocument {
+		return authorFromFile(p.Author.DisplayName)
+	}
+	return p.Author.DisplayName
+}
+
+// authorFromFile labels a name a file gives a comment.
+func authorFromFile(name string) string {
+	if name == "" {
+		name = "unnamed"
+	}
+	return name + " (as the file names them)"
 }
 
 func commentAction(a string) string {

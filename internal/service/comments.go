@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -39,6 +40,9 @@ func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*C
 	if err != nil {
 		return nil, err
 	}
+	if s.isMarkdown(ctx, id) {
+		return s.mdListComments(ctx, req)
+	}
 	type listed struct {
 		list []*gapi.DriveComment
 		err  error
@@ -57,21 +61,26 @@ func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*C
 	if l.err != nil {
 		return nil, wrapAPI(l.err, "comments")
 	}
-	threads := locateComments(f, driveThreads(l.list))
-	res := &CommentsResult{RevisionID: f.Doc.RevisionID, Threads: []CommentThread{}}
+	return tallyThreads(locateComments(f, driveThreads(l.list)), f.Doc.RevisionID, req.HideResolved), nil
+}
+
+// tallyThreads is a listing's result: the threads counted, the resolved
+// ones dropped when hidden, and the text.
+func tallyThreads(threads []CommentThread, revision string, hide bool) *CommentsResult {
+	res := &CommentsResult{RevisionID: revision, Threads: []CommentThread{}}
 	for _, t := range threads {
 		if t.Resolved {
 			res.Resolved++
 		} else if !t.Deleted {
 			res.Open++
 		}
-		if req.HideResolved && t.Resolved {
+		if hide && t.Resolved {
 			continue
 		}
 		res.Threads = append(res.Threads, t)
 	}
-	res.Text = commentsText(res, f.Doc.RevisionID)
-	return res, nil
+	res.Text = commentsText(res, revision)
+	return res
 }
 
 func commentsText(res *CommentsResult, revision string) string {
@@ -136,6 +145,9 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	content, err := commentText(req.Content, "content")
 	if err != nil {
 		return nil, err
+	}
+	if s.isMarkdown(ctx, req.Document) {
+		return s.mdAddComment(ctx, req, content)
 	}
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
@@ -267,28 +279,9 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 	if err := s.requireWritable(); err != nil {
 		return nil, err
 	}
-	action := strings.ToLower(strings.TrimSpace(req.Action))
-	if action == "" {
-		action = "reply"
-	}
-	content := strings.TrimSpace(req.Content)
-	switch action {
-	case "reply":
-		var err error
-		if content, err = commentText(content, "content"); err != nil {
-			return nil, err
-		}
-	case "resolve", "reopen":
-		if len(content) > 2048 {
-			return nil, Errorf("invalid", "content is %d bytes; replies are limited to 2048", len(content))
-		}
-	case "edit":
-		var err error
-		if content, err = commentText(content, "content"); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, Errorf("invalid", "action %q; use reply, resolve, reopen or edit", req.Action)
+	action, content, err := replyAction(req)
+	if err != nil {
+		return nil, err
 	}
 	if suggestionID := strings.TrimSpace(req.SuggestionID); suggestionID != "" {
 		if strings.TrimSpace(req.CommentID) != "" {
@@ -298,6 +291,14 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 			return nil, Errorf("invalid", "a suggestion's thread takes replies only; accept or reject the suggestion with review_suggestion")
 		}
 		return s.replyToSuggestion(ctx, req.Document, suggestionID, content)
+	}
+	if s.isMarkdown(ctx, req.Document) {
+		// A comment made through Drive's API is Drive's to answer; one
+		// the Docs editor keeps in the file is not in Drive at all.
+		id, _ := parseRef(req.Document)
+		if _, err := s.api.GetComment(ctx, id, strings.TrimSpace(req.CommentID)); errors.Is(err, gapi.ErrNotFound) {
+			return s.mdReply(ctx, req, action, content)
+		}
 	}
 	id, commentID, thread, err := s.commentRef(ctx, req.Document, req.CommentID)
 	if err != nil {
@@ -331,6 +332,28 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 		res.Text = "reopened comment " + commentID
 	}
 	return res, nil
+}
+
+// replyAction is a reply's action, reply by default, and its content
+// checked for that action.
+func replyAction(req ReplyRequest) (string, string, error) {
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		action = "reply"
+	}
+	content := strings.TrimSpace(req.Content)
+	switch action {
+	case "reply", "edit":
+		var err error
+		content, err = commentText(content, "content")
+		return action, content, err
+	case "resolve", "reopen":
+		if len(content) > 2048 {
+			return "", "", Errorf("invalid", "content is %d bytes; replies are limited to 2048", len(content))
+		}
+		return action, content, nil
+	}
+	return "", "", Errorf("invalid", "action %q; use reply, resolve, reopen or edit", req.Action)
 }
 
 // replyToSuggestion posts a reply on a suggestion's thread. Drive's
@@ -398,6 +421,12 @@ func (s *Service) commentRef(ctx context.Context, docRef, commentID string) (str
 		return "", "", nil, Errorf("invalid", "comment_id is empty; ids come from list_comments")
 	}
 	thread, err := s.api.GetComment(ctx, id, commentID)
+	if errors.Is(err, gapi.ErrNotFound) {
+		if s.isMarkdown(ctx, id) {
+			return "", "", nil, mdUnsupported("Drive has no comment "+commentID+"; a comment the Docs editor keeps in the file is not Drive's to delete",
+				"the person can delete it in the Docs editor")
+		}
+	}
 	if err != nil {
 		return "", "", nil, wrapAPI(err, "comment")
 	}

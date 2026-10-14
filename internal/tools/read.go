@@ -14,12 +14,12 @@ const MaxMaxChars = 400000
 
 // DocumentInput identifies a document.
 type DocumentInput struct {
-	Document string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 }
 
 // OutlineInput selects a document and optionally one tab.
 type OutlineInput struct {
-	Document string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Tab      string `json:"tab,omitempty" jsonschema:"tab id, title or number to limit the outline to; default all tabs"`
 }
 
@@ -32,7 +32,7 @@ type OutlineInput struct {
 
 // ReadInput scopes a read.
 type ReadInput struct {
-	Document           string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document           string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Tab                string `json:"tab,omitempty" jsonschema:"tab id, title or number; default the first tab"`
 	Segment            string `json:"segment,omitempty" jsonschema:"body (default), header, footer or footnote, optionally numbered (header2, footnote3)"`
 	HeadingID          string `json:"heading_id,omitempty" jsonschema:"read one section by its stable heading id from get_outline; overrides tab and segment"`
@@ -60,7 +60,8 @@ func registerRead(s *mcp.Server, d Deps) {
 			"read of the text shows: page setup, floating images, named ranges, and the named style definitions the " +
 			"tab's paragraphs carry (the font, size, color and spacing every heading or body paragraph inherits, with " +
 			"how many paragraphs of that tab carry each, headers and footnotes included; layout_document's named_style " +
-			"op redefines those definitions). " +
+			"op redefines those definitions). kind says whether it is a Google Doc or a Markdown file (.md) that Docs " +
+			"opens in place, which is read and written as its own text. " +
 			"Cheap; call it first when handed a " +
 			"document id or URL. Then use get_outline for the heading tree and read_document for content.",
 		Annotations: readOnly,
@@ -98,7 +99,9 @@ func registerRead(s *mcp.Server, d Deps) {
 			"include_suggestions shows pending suggested edits inline as {++inserted++} / {--deleted--}, with a " +
 			"formatting-only suggestion as {==highlighted==} because it adds and removes nothing, and " +
 			"include_comments marks commented passages with {>>c:id<<} and lists those threads below. " +
-			"Empty paragraphs are kept so structure is faithful. Handles are valid for the revision_id returned.",
+			"Empty paragraphs are kept so structure is faithful. Handles are valid for the revision_id returned. " +
+			"A Markdown file (.md) reads as its own text, without handles: scope it by heading_id or heading, and a " +
+			"truncated read continues from a line (continue_from L120).",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
 		if in.MaxChars < 0 {

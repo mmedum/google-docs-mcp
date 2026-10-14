@@ -10,14 +10,14 @@ import (
 
 // ListCommentsInput selects comment threads.
 type ListCommentsInput struct {
-	Document       string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	HideResolved   bool   `json:"hide_resolved,omitempty" jsonschema:"leave out resolved threads; default shows them"`
 	IncludeDeleted bool   `json:"include_deleted,omitempty" jsonschema:"also list deleted threads (their text is gone)"`
 }
 
 // AddCommentInput posts a thread.
 type AddCommentInput struct {
-	Document       string       `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string       `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Target         *TargetInput `json:"target,omitempty" jsonschema:"the text, section, block or cell to comment on; omit for a comment on the document as a whole"`
 	Content        string       `json:"content" jsonschema:"the comment text (plain text, up to 2048 bytes)"`
 	Assignee       string       `json:"assignee,omitempty" jsonschema:"email address to assign the comment to (pinned comments only)"`
@@ -27,7 +27,7 @@ type AddCommentInput struct {
 
 // ReplyInput continues a thread.
 type ReplyInput struct {
-	Document     string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document     string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	CommentID    string `json:"comment_id,omitempty" jsonschema:"thread id from list_comments or add_comment; pass this or suggestion_id"`
 	SuggestionID string `json:"suggestion_id,omitempty" jsonschema:"reply on a suggestion's thread instead; id from list_suggestions. Plain replies only"`
 	ReplyID      string `json:"reply_id,omitempty" jsonschema:"edit: the reply to rewrite; without it the thread's own comment is rewritten"`
@@ -37,7 +37,7 @@ type ReplyInput struct {
 
 // DeleteCommentInput removes a thread or a reply.
 type DeleteCommentInput struct {
-	Document  string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document  string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	CommentID string `json:"comment_id" jsonschema:"thread id from list_comments"`
 	ReplyID   string `json:"reply_id,omitempty" jsonschema:"delete only this reply of the thread"`
 	Confirm   string `json:"confirm_comment_id,omitempty" jsonschema:"repeat comment_id exactly; the deletion is refused without it"`
@@ -50,7 +50,9 @@ func registerCommentsRead(s *mcp.Server, d Deps) {
 		Description: "List the comment threads of a Google Doc with their full history: author, time, quoted text, the " +
 			"block handle the comment sits on, resolved state, who it is assigned to, and every reply (including resolve and reopen actions). " +
 			"Resolved threads are included unless hide_resolved is set; deleted ones only with include_deleted. Thread " +
-			"ids feed reply_comment and delete_comment.",
+			"ids feed reply_comment and delete_comment. On a Markdown file (.md) the comments made in the Docs editor " +
+			"live in the file, the line they sit on is shown as [L12], and the id of one written by this server changes " +
+			"each time the file is written until a person saves it in the editor.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListCommentsInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.ListComments(ctx, service.ListCommentsRequest{Document: in.Document, HideResolved: in.HideResolved, IncludeDeleted: in.IncludeDeleted})
@@ -68,7 +70,8 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 			"is pinned to that passage; if Google refuses the comments view for the document it quotes the text instead " +
 			"and the editor shows it unanchored, which the result says. Without a target it is a comment on the document as a whole. " +
 			"Nothing in the document text changes. To propose an edit as a comment, use edit_document with mode comment. " +
-			"dry_run resolves the target and stops before posting.",
+			"On a Markdown file (.md) the comment is written into the file under the signed-in account's name, the way " +
+			"the Docs editor writes its own, and needs a target. dry_run resolves the target and stops before posting.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in AddCommentInput) (*mcp.CallToolResult, *service.AddCommentResult, error) {
 		res, err := d.Service.AddComment(ctx, service.AddCommentRequest{Document: in.Document, Target: in.Target.target(), Content: in.Content,
@@ -85,7 +88,8 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 			"are reversible; both may carry a message. action edit replaces the text of the thread's own comment, or of " +
 			"one reply when reply_id names it; Google allows only the author of a comment to rewrite it. Thread and " +
 			"reply ids come from list_comments. With suggestion_id instead of comment_id it replies on a suggested " +
-			"edit's thread; accepting or rejecting one is review_suggestion.",
+			"edit's thread; accepting or rejecting one is review_suggestion. On a Markdown file (.md) a comment the Docs " +
+			"editor keeps takes replies only, written into the file; the person resolves it in the editor.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReplyInput) (*mcp.CallToolResult, *service.ReplyResult, error) {
 		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, SuggestionID: in.SuggestionID,

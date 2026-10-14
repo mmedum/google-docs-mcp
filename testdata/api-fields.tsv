@@ -44,7 +44,6 @@ Post	assigneeEmail	out	list_comments reads the assignee from Drive's listing, wh
 Post	contentHtml	out	published 2026-09; the plain content is what a tool shows
 Post	fromCopiedDocument	out	published 2026-09; no tool reports where a post came from
 Post	fromDocumentComparison	out	published 2026-09; no tool reports where a post came from
-Post	fromImportedDocument	out	published 2026-09; no tool reports where a post came from
 PostAuthor	anonymous	out	published 2026-09; the author's name is what a tool shows
 SuggestionThread	summaryHtml	out	published 2026-09; no tool shows the summary yet
 #

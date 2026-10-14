@@ -36,3 +36,9 @@ func ParseID(s string) (string, error) {
 func DocumentURL(id string) string {
 	return "https://docs.google.com/document/d/" + id + "/edit"
 }
+
+// FileURL is Drive's viewer for a file that is not a Google Doc, such as
+// a Markdown file, which opens in Docs from there.
+func FileURL(id string) string {
+	return "https://drive.google.com/file/d/" + id + "/view"
+}

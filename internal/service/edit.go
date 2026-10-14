@@ -176,11 +176,17 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 		return nil, err
 	}
 	req.Ops = numbered(req.Ops)
-	f, err := s.FetchFresh(ctx, req.Document)
-	if err != nil {
-		return nil, err
+	var res *EditResult
+	var err error
+	if s.isMarkdown(ctx, req.Document) {
+		res, err = s.mdEdit(ctx, req)
+	} else {
+		var f *Fetched
+		if f, err = s.FetchFresh(ctx, req.Document); err != nil {
+			return nil, err
+		}
+		res, _, err = s.editFetched(ctx, f, req)
 	}
-	res, _, err := s.editFetched(ctx, f, req)
 	if res != nil {
 		res.Text = res.text()
 	}

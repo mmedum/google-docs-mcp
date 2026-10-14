@@ -69,7 +69,7 @@ type EditOpInput struct {
 
 // EditInput is the edit_document call.
 type EditInput struct {
-	Document       string        `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string        `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Ops            []EditOpInput `json:"ops" jsonschema:"operations sent together in one batch; the content of a new header, footer or footnote and the tables and images of content follow in later batches. Targets are resolved against the document as it is now"`
 	Mode           string        `json:"mode,omitempty" jsonschema:"suggest (tracked changes a person accepts), direct (edit the text), or comment (post each change as a comment on the passage, changing nothing); default from get_document capabilities"`
 	DryRun         bool          `json:"dry_run,omitempty" jsonschema:"resolve and plan everything, show the exact requests and the current text of the region, but send nothing"`
@@ -119,7 +119,7 @@ type FormatOpInput struct {
 
 // FormatInput is the format_document call.
 type FormatInput struct {
-	Document       string          `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string          `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Ops            []FormatOpInput `json:"ops"`
 	Mode           string          `json:"mode,omitempty" jsonschema:"suggest, direct or comment; default from get_document capabilities"`
 	DryRun         bool            `json:"dry_run,omitempty"`
@@ -141,7 +141,12 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"change lands: suggest = tracked change for a person to accept, direct = edit the text, comment = post " +
 			"each proposed change as a comment and change nothing. Direct edits refuse to delete ranges holding " +
 			"comments, suggestions, images or footnotes unless force is set. Use dry_run to preview the plan. " +
-			"Returns the new revision id, suggestion or comment ids, and a rendered preview of the edited region.",
+			"Returns the new revision id, suggestion or comment ids, and a rendered preview of the edited region. " +
+			"On a Markdown file (.md) the ops are insert, append, replace, delete and replace_all, content is written " +
+			"as the file's own markdown, mode is direct or comment (no suggestions), the comments Docs keeps in the file " +
+			"are never touched, and the whole file is uploaded once per call, which makes an editor that has it open " +
+			"reload; the write waits for, then refuses, changes made there and not saved yet. To work in one together " +
+			"live, use a working copy (create_document from_file).",
 		Annotations: writeSafe,
 	}, "When force lets a direct edit destroy comments, suggestions, images or footnotes", func(ctx context.Context, _ *mcp.CallToolRequest, in EditInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
@@ -216,19 +221,43 @@ func registerWrite(s *mcp.Server, d Deps) {
 		Name: "create_document",
 		Description: "Create a new Google Doc in the signed-in account's Drive, optionally with initial content written " +
 			"as markdown (headings, formatting, lists, tables, images). Returns the id and URL. Initial content is written directly " +
-			"because a new document has nothing to suggest against.",
+			"because a new document has nothing to suggest against. With kind markdown_file it makes a Markdown file " +
+			"(.md) instead, holding the content as written; such a file is edited as text. With from_file it makes a " +
+			"working copy of a Markdown file: a Google Doc holding its text, for working in together live with every " +
+			"write mode, which write_markdown_file writes back into the file.",
 		Annotations: writeSafe,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, *service.CreateResult, error) {
-		res, err := d.Service.Create(ctx, service.CreateRequest{Title: in.Title, Content: in.Content, ContentFormat: in.ContentFormat})
+		res, err := d.Service.Create(ctx, service.CreateRequest{Title: in.Title, Content: in.Content, ContentFormat: in.ContentFormat, Kind: in.Kind, FromFile: in.FromFile})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		msg := fmt.Sprintf("created %q\n%s\nrevision %s", res.Title, res.URL, res.RevisionID)
+		msg := fmt.Sprintf("created %q\n%s", res.Title, res.URL)
+		if res.RevisionID != "" {
+			msg += "\nrevision " + res.RevisionID
+		}
 		for _, w := range res.Warnings {
 			msg += "\nwarning: " + w
 		}
 		return text(msg), res, nil
 	})
+
+	addAsking(s, d, &mcp.Tool{
+		Name: "write_markdown_file",
+		Description: "Write a working copy back into the Markdown file it was made from (create_document from_file makes " +
+			"one). Only what changed in the copy is carried over, block by block; the rest of the file keeps its own " +
+			"Markdown, its front matter and the comments Docs keeps in it. A change to a block that was also changed in " +
+			"the file since the copy was made is a conflict and is refused, unless force keeps the file's version of " +
+			"those and writes the rest. edit_document's guard applies, and a write waits for, then refuses, changes made " +
+			"in the Docs editor on the file and not saved yet. dry_run shows the diff.",
+		Annotations: writeSafe,
+	}, "When force writes past conflicts, unsaved editor changes, or comments, images or footnotes the change would destroy",
+		func(ctx context.Context, _ *mcp.CallToolRequest, in WriteBackInput) (*mcp.CallToolResult, *service.EditResult, error) {
+			res, err := d.Service.WriteBack(ctx, service.WriteBackRequest{Document: in.Document, File: in.File, Force: in.Force, DryRun: in.DryRun})
+			if err != nil {
+				return nil, nil, fail(err)
+			}
+			return text(res.Text), res, nil
+		})
 
 	addAsking(s, d, &mcp.Tool{
 		Name: "review_suggestion",
@@ -250,14 +279,24 @@ func registerWrite(s *mcp.Server, d Deps) {
 
 // CreateInput is the create_document call.
 type CreateInput struct {
-	Title         string `json:"title" jsonschema:"document title"`
+	Title         string `json:"title,omitempty" jsonschema:"document title; required unless from_file"`
 	Content       string `json:"content,omitempty" jsonschema:"initial content as markdown, tables and images included"`
 	ContentFormat string `json:"content_format,omitempty" jsonschema:"markdown (default) or text"`
+	Kind          string `json:"kind,omitempty" jsonschema:"document (default: a Google Doc) or markdown_file (a .md file in Drive that Docs opens in place, holding content exactly as given)"`
+	FromFile      string `json:"from_file,omitempty" jsonschema:"a Markdown file (id or drive.google.com URL) to make a working copy of: a Google Doc holding its text; title then defaults to the file's"`
+}
+
+// WriteBackInput is the write_markdown_file call.
+type WriteBackInput struct {
+	Document string `json:"document" jsonschema:"the working copy: the Google Doc create_document from_file made"`
+	File     string `json:"file,omitempty" jsonschema:"the Markdown file to write into, when it is not the one the copy was made from"`
+	Force    bool   `json:"force,omitempty" jsonschema:"write past conflicts (the file's version of those blocks is kept), changes in the Docs editor not saved yet, and the guard; only when the person chose to"`
+	DryRun   bool   `json:"dry_run,omitempty" jsonschema:"plan and show the diff, write nothing"`
 }
 
 // ReviewInput is the review_suggestion call.
 type ReviewInput struct {
-	Document       string   `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string   `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Action         string   `json:"action" jsonschema:"accept, reject, or discard (author only)"`
 	IDs            []string `json:"ids,omitempty" jsonschema:"suggestion ids from list_suggestions"`
 	All            bool     `json:"all,omitempty" jsonschema:"act on every pending suggestion"`

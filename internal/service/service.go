@@ -37,6 +37,12 @@ type API interface {
 	DeleteReply(ctx context.Context, fileID, commentID, replyID string) error
 	ListRevisions(ctx context.Context, fileID string) ([]*gapi.Revision, error)
 	ExportRevision(ctx context.Context, fileID, revisionID, mimeType string) ([]byte, error)
+	DownloadFile(ctx context.Context, id string) ([]byte, error)
+	DownloadRevision(ctx context.Context, fileID, revisionID string) ([]byte, error)
+	UploadFile(ctx context.Context, id string, data []byte, mimeType string) (*gapi.File, error)
+	CreateFile(ctx context.Context, meta gapi.NewFile, mediaType string, data []byte) (*gapi.File, error)
+	SetAppProperties(ctx context.Context, id string, props map[string]string) error
+	About(ctx context.Context) (*gapi.User, error)
 }
 
 // Options configure the service.
@@ -50,6 +56,8 @@ type Options struct {
 	// CacheTTL coalesces repeated fetches of one document. Default 5s.
 	CacheTTL time.Duration
 	Now      func() time.Time
+	// Sleep waits between a write's tries; tests replace it.
+	Sleep func(context.Context, time.Duration) error
 }
 
 // Service is the read/write orchestrator for one authenticated user.
@@ -62,11 +70,17 @@ type Service struct {
 	mu      sync.Mutex
 	cache   map[string]*Fetched
 	handles map[string]HandleMemory
+	// kinds remembers, per document, whether Drive types it a Markdown
+	// file rather than a Google Doc (§7.5).
+	kinds map[string]kindMemo
+	// accountName is the signed-in account's name, which a comment
+	// written into a Markdown file carries.
+	accountName string
 }
 
 // New builds a service.
 func New(api API, o Options) *Service {
-	s := &Service{api: api, opts: o, log: o.Logger, now: o.Now, cache: map[string]*Fetched{}, handles: map[string]HandleMemory{}}
+	s := &Service{api: api, opts: o, log: o.Logger, now: o.Now, cache: map[string]*Fetched{}, handles: map[string]HandleMemory{}, kinds: map[string]kindMemo{}}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
 	}
@@ -182,6 +196,13 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 	id, err := parseRef(ref)
 	if err != nil {
 		return nil, err
+	}
+	// Every path that reaches here wants a Google Doc's model. The Docs
+	// API serves one for a Markdown file too, with handles no write could
+	// use, and refuses every write to it, so a path that forgot to branch
+	// on the kind stops here instead.
+	if s.isMarkdown(ctx, id) {
+		return nil, mdUnsupported("this needs the Docs API", "")
 	}
 	if !fresh {
 		s.mu.Lock()

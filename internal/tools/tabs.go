@@ -10,7 +10,7 @@ import (
 
 // TabInput is the manage_tabs call.
 type TabInput struct {
-	Document       string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Action         string `json:"action" jsonschema:"add, rename, or move"`
 	Tab            string `json:"tab,omitempty" jsonschema:"rename, move: the tab to change, by id, title or number"`
 	Title          string `json:"title,omitempty" jsonschema:"add, rename: the tab title"`
@@ -23,7 +23,7 @@ type TabInput struct {
 
 // DeleteTabInput is the delete_tab call.
 type DeleteTabInput struct {
-	Document       string `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Tab            string `json:"tab" jsonschema:"the tab to delete, by id, title or number; its child tabs go with it"`
 	ConfirmTab     string `json:"confirm_tab,omitempty" jsonschema:"repeat the tab exactly; the deletion is refused without it"`
 	ExpectRevision string `json:"expect_revision,omitempty"`

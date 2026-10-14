@@ -49,14 +49,20 @@ func instructionsFor(cfg config.Config) string {
 	const readOnly = "This server was started read-only and registers no write tools at all: nothing here can " +
 		"change a document, add a comment or make a suggestion. That is how this server was configured, not a " +
 		"limit of Google Docs, and it is worth saying that way to whoever asked. "
+	const markdown = "A Markdown file in Drive (.md, which Docs opens in place) is a document here too, and " +
+		"get_document says kind markdown_file: it is read as its own text, addressed by exact text, heading_id " +
+		"(a slug from get_outline) or heading, with lines (L12) where a Google Doc has handles. "
+	const markdownWrites = "Its edits take mode direct or comment, since such a file has no suggestions, and every edit uploads " +
+		"the whole file, which makes an editor that has it open reload; to work in one together with a person, make a " +
+		"working copy (create_document from_file), work in that Google Doc, and write it back with write_markdown_file. "
 	const closing = "Handles like p12 are valid for the revision_id they came with. " +
 		"Resources gdocs://<id>, gdocs://<id>/outline and gdocs://<id>/tabs/<tab> hold the same content as markdown " +
 		"for clients that attach a document whole; they carry no handles."
 
 	if cfg.ReadOnly {
-		return opening + readOnly + closing
+		return opening + readOnly + markdown + closing
 	}
-	return opening + writing + closing
+	return opening + writing + markdown + markdownWrites + closing
 }
 
 // Deps are what the server needs.

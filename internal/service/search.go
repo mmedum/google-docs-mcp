@@ -16,14 +16,17 @@ type SearchRequest struct {
 	Title         string // name contains
 	ModifiedAfter string // RFC 3339 or YYYY-MM-DD
 	Owner         string // email
-	Limit         int
-	PageToken     string
+	// Kind is document (the default), markdown_file, or any.
+	Kind      string
+	Limit     int
+	PageToken string
 }
 
 // SearchHit is one document.
 type SearchHit struct {
 	ID         string `json:"id"`
 	Title      string `json:"title"`
+	Kind       string `json:"kind"`
 	URL        string `json:"url"`
 	Modified   string `json:"modified,omitempty"`
 	ModifiedBy string `json:"modified_by,omitempty"`
@@ -38,9 +41,22 @@ type SearchResult struct {
 	Text          string      `json:"-"`
 }
 
-// Search finds Google Docs by title or content, newest first.
+// Search finds Google Docs, and Markdown files when asked, by title or
+// content, newest first. Markdown files are not in the default: a person
+// who syncs a code folder into Drive has hundreds of them.
 func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult, error) {
-	parts := []string{"mimeType = " + gapi.QuoteDriveValue(gapi.DocumentMimeType), "trashed = false"}
+	var kind string
+	switch strings.ToLower(strings.TrimSpace(req.Kind)) {
+	case "", KindDocument:
+		kind = "mimeType = " + gapi.QuoteDriveValue(gapi.DocumentMimeType)
+	case KindMarkdownFile:
+		kind = "mimeType = " + gapi.QuoteDriveValue(gapi.MarkdownMimeType)
+	case "any":
+		kind = "(mimeType = " + gapi.QuoteDriveValue(gapi.DocumentMimeType) + " or mimeType = " + gapi.QuoteDriveValue(gapi.MarkdownMimeType) + ")"
+	default:
+		return nil, Errorf("invalid", "kind %q; use document, markdown_file or any", req.Kind)
+	}
+	parts := []string{kind, "trashed = false"}
 	if t := strings.TrimSpace(req.Title); t != "" {
 		parts = append(parts, "name contains "+gapi.QuoteDriveValue(t))
 	}
@@ -64,7 +80,13 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	}
 	res := &SearchResult{DriveQuery: q, NextPageToken: list.NextPageToken, Hits: []SearchHit{}}
 	for _, f := range list.Files {
-		h := SearchHit{ID: f.ID, Title: f.Name, URL: f.WebViewLink, Modified: f.ModifiedTime, ModifiedBy: userLabel(f.LastModifyingUser)}
+		h := SearchHit{ID: f.ID, Title: f.Name, Kind: KindDocument, URL: f.WebViewLink, Modified: f.ModifiedTime, ModifiedBy: userLabel(f.LastModifyingUser)}
+		if f.MimeType != "" {
+			s.rememberKind(f.ID, f.MimeType == gapi.MarkdownMimeType)
+		}
+		if f.MimeType == gapi.MarkdownMimeType {
+			h.Kind = KindMarkdownFile
+		}
 		if len(f.Owners) > 0 {
 			h.Owner = userLabel(f.Owners[0])
 		}
@@ -81,6 +103,9 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	sb.WriteString("\n")
 	for _, h := range res.Hits {
 		fmt.Fprintf(&sb, "- %s — %s", h.Title, h.URL)
+		if h.Kind == KindMarkdownFile {
+			sb.WriteString(" [Markdown file]")
+		}
 		if h.Modified != "" {
 			fmt.Fprintf(&sb, " (modified %s", h.Modified)
 			if h.ModifiedBy != "" {

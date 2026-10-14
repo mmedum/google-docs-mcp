@@ -3,8 +3,11 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -29,11 +32,28 @@ type fakeAPI struct {
 	batches   []*gapi.BatchUpdateRequest
 	comments  []*gapi.DriveComment
 	deleted   []string
+
+	// A Markdown file, mdFileID, and a working copy of it, copyID: the
+	// file as it is, as it was when the copy was made, the copy's
+	// export, and every upload.
+	md, mdBase, copyExport string
+	uploads                []string
 }
+
+// The Markdown file and its working copy in the fake.
+const (
+	mdFileID = "1SyntheticMarkdownFileIdXXXXXXXXXXXXXXXXXXXXXX"
+	copyID   = "1SyntheticWorkingCopyIdXXXXXXXXXXXXXXXXXXXXXXX"
+)
+
+func (f *fakeAPI) mdHead() string { return fmt.Sprintf("mdrev%d", len(f.uploads)) }
 
 func (f *fakeAPI) GetDocument(_ context.Context, id string, _ gapi.GetOptions) (*gapi.DocumentResult, error) {
 	if f.err != nil {
 		return nil, f.err
+	}
+	if id == mdFileID {
+		return &gapi.DocumentResult{Document: &gdocs.Document{DocumentID: id, RevisionID: "live1"}}, nil
 	}
 	if id != fixtureID {
 		return nil, &gapi.APIError{Status: 404, Message: "missing"}
@@ -46,6 +66,15 @@ func (f *fakeAPI) GetDocument(_ context.Context, id string, _ gapi.GetOptions) (
 }
 
 func (f *fakeAPI) GetFile(_ context.Context, id string) (*gapi.File, error) {
+	switch id {
+	case mdFileID:
+		sum := md5.Sum([]byte(f.md))
+		return &gapi.File{ID: id, Name: "notes.md", MimeType: gapi.MarkdownMimeType, HeadRevisionID: f.mdHead(), MD5Checksum: hex.EncodeToString(sum[:]),
+			Size: fmt.Sprint(len(f.md)), Capabilities: &gapi.FileCapabilities{CanEdit: true, CanModifyContent: true}}, nil
+	case copyID:
+		return &gapi.File{ID: id, Name: "notes (working copy)", MimeType: gapi.DocumentMimeType,
+			AppProperties: map[string]string{"md_source": mdFileID, "md_base": "mdrev0"}}, nil
+	}
 	return &gapi.File{ID: id, Name: "Quarterly Report", Owners: []*gapi.User{{EmailAddress: "o@example.test"}}}, nil
 }
 
@@ -72,6 +101,9 @@ func (f *fakeAPI) SearchFiles(_ context.Context, q string, limit int, pageToken 
 }
 
 func (f *fakeAPI) Export(_ context.Context, id, mimeType string) ([]byte, error) {
+	if id == copyID {
+		return []byte(f.copyExport), nil
+	}
 	return []byte("# exported"), nil
 }
 
@@ -115,11 +147,53 @@ func (f *fakeAPI) DeleteReply(_ context.Context, fileID, commentID, replyID stri
 }
 
 func (f *fakeAPI) ListRevisions(_ context.Context, fileID string) ([]*gapi.Revision, error) {
+	if fileID == mdFileID {
+		revs := make([]*gapi.Revision, 0, len(f.uploads)+1)
+		for i := 0; i <= len(f.uploads); i++ {
+			revs = append(revs, &gapi.Revision{ID: fmt.Sprintf("mdrev%d", i)})
+		}
+		return revs, nil
+	}
 	return []*gapi.Revision{{ID: "1", ModifiedTime: "2026-09-01T00:00:00Z"}, {ID: "2", ModifiedTime: "2026-09-02T00:00:00Z"}}, nil
 }
 
 func (f *fakeAPI) ExportRevision(_ context.Context, fileID, revisionID, mimeType string) ([]byte, error) {
 	return []byte("# exported\n\nold line\n"), nil
+}
+
+func (f *fakeAPI) DownloadFile(_ context.Context, id string) ([]byte, error) {
+	if id == mdFileID {
+		return []byte(f.md), nil
+	}
+	return nil, &gapi.APIError{Status: 403, Message: "only files with binary content can be downloaded"}
+}
+
+func (f *fakeAPI) DownloadRevision(_ context.Context, id, rev string) ([]byte, error) {
+	if id == mdFileID && rev == "mdrev0" {
+		return []byte(f.mdBase), nil
+	}
+	return nil, &gapi.APIError{Status: 404, Message: "revision not found"}
+}
+
+func (f *fakeAPI) CreateFile(context.Context, gapi.NewFile, string, []byte) (*gapi.File, error) {
+	return nil, &gapi.APIError{Status: 403, Message: "no files here"}
+}
+
+func (f *fakeAPI) SetAppProperties(context.Context, string, map[string]string) error {
+	return nil
+}
+
+func (f *fakeAPI) About(context.Context) (*gapi.User, error) {
+	return &gapi.User{DisplayName: "Synthetic Account"}, nil
+}
+
+func (f *fakeAPI) UploadFile(_ context.Context, id string, data []byte, _ string) (*gapi.File, error) {
+	if id != mdFileID {
+		return nil, &gapi.APIError{Status: 403, Message: "not a file with binary content"}
+	}
+	f.uploads = append(f.uploads, string(data))
+	f.md = string(data)
+	return &gapi.File{ID: id, MimeType: gapi.MarkdownMimeType, HeadRevisionID: f.mdHead()}, nil
 }
 
 func connect(t *testing.T, api *fakeAPI) *mcp.ClientSession {
@@ -214,7 +288,7 @@ func TestListToolsAndSchemas(t *testing.T) {
 			t.Errorf("%s schema uses a union or reference", tool.Name)
 		}
 	}
-	want := "add_comment,create_document,diff_revisions,edit_document,edit_table,export_document,find_in_document,format_document,get_document,get_outline,insert_object,layout_document,list_comments,list_revisions,list_suggestions,manage_tabs,read_document,reply_comment,review_suggestion,search_documents"
+	want := "add_comment,create_document,diff_revisions,edit_document,edit_table,export_document,find_in_document,format_document,get_document,get_outline,insert_object,layout_document,list_comments,list_revisions,list_suggestions,manage_tabs,read_document,reply_comment,review_suggestion,search_documents,write_markdown_file"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("tools = %v", names)
 	}
@@ -458,7 +532,7 @@ func TestDumpSchemas(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 20 || out.Tools[0].Name != "add_comment" ||
+	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 21 || out.Tools[0].Name != "add_comment" ||
 		len(out.ResourceTemplates) != 3 || out.ResourceTemplates[0].URITemplate != "gdocs://{document}" {
 		t.Fatalf("dump = %+v", out)
 	}
@@ -726,28 +800,29 @@ func TestResources(t *testing.T) {
 // the fake does not matter here — a refusal is logged too, and a refusal
 // is exactly where a message tends to quote the document.
 var toolArgs = map[string]map[string]any{
-	"add_comment":       {"document": fixtureID, "content": "a note", "target": map[string]any{"text": "Revenue"}},
-	"create_document":   {"title": "scratch"},
-	"delete_comment":    {"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c1"},
-	"delete_tab":        {"document": fixtureID, "tab": "Tab 1", "confirm_tab": "Tab 1"},
-	"diff_revisions":    {"document": fixtureID, "from": "1"},
-	"edit_document":     {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "append", "content": leakCanary}}},
-	"edit_table":        {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "set_cells", "table": "tbl1", "cells": map[string]any{"r1c1": leakCanary}}}},
-	"export_document":   {"document": fixtureID, "format": "md"},
-	"find_in_document":  {"document": fixtureID, "query": "Revenue"},
-	"format_document":   {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "text_style", "target": map[string]any{"text": "Revenue"}, "bold": true}}},
-	"get_document":      {"document": fixtureID},
-	"get_outline":       {"document": fixtureID},
-	"insert_object":     {"document": fixtureID, "mode": "direct", "kind": "date", "date": "2026-09-05"},
-	"layout_document":   {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "page", "page_size": "A4"}}},
-	"list_comments":     {"document": fixtureID},
-	"list_revisions":    {"document": fixtureID},
-	"list_suggestions":  {"document": fixtureID},
-	"manage_tabs":       {"document": fixtureID, "action": "add", "title": "Appendix"},
-	"read_document":     {"document": fixtureID},
-	"reply_comment":     {"document": fixtureID, "comment_id": "c1", "content": "a reply"},
-	"review_suggestion": {"document": fixtureID, "action": "accept", "ids": []any{"suggest.x"}},
-	"search_documents":  {"title": "scratch"},
+	"add_comment":         {"document": fixtureID, "content": "a note", "target": map[string]any{"text": "Revenue"}},
+	"create_document":     {"title": "scratch"},
+	"delete_comment":      {"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c1"},
+	"delete_tab":          {"document": fixtureID, "tab": "Tab 1", "confirm_tab": "Tab 1"},
+	"diff_revisions":      {"document": fixtureID, "from": "1"},
+	"edit_document":       {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "append", "content": leakCanary}}},
+	"edit_table":          {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "set_cells", "table": "tbl1", "cells": map[string]any{"r1c1": leakCanary}}}},
+	"export_document":     {"document": fixtureID, "format": "md"},
+	"find_in_document":    {"document": fixtureID, "query": "Revenue"},
+	"format_document":     {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "text_style", "target": map[string]any{"text": "Revenue"}, "bold": true}}},
+	"get_document":        {"document": fixtureID},
+	"get_outline":         {"document": fixtureID},
+	"insert_object":       {"document": fixtureID, "mode": "direct", "kind": "date", "date": "2026-09-05"},
+	"layout_document":     {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "page", "page_size": "A4"}}},
+	"list_comments":       {"document": fixtureID},
+	"list_revisions":      {"document": fixtureID},
+	"list_suggestions":    {"document": fixtureID},
+	"manage_tabs":         {"document": fixtureID, "action": "add", "title": "Appendix"},
+	"read_document":       {"document": fixtureID},
+	"reply_comment":       {"document": fixtureID, "comment_id": "c1", "content": "a reply"},
+	"review_suggestion":   {"document": fixtureID, "action": "accept", "ids": []any{"suggest.x"}},
+	"search_documents":    {"title": "scratch"},
+	"write_markdown_file": {"document": copyID, "dry_run": true},
 }
 
 // leakCanary is text a call sends in, so the logging test can look for

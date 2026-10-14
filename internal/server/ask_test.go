@@ -48,12 +48,17 @@ func askFixture(t *testing.T) *fakeAPI {
 	t.Helper()
 	raw := strings.Replace(string(doctest.RawFixture(t)), `"inlineObjectId": "kix.img1", "textStyle": {}}`,
 		`"inlineObjectId": "kix.img1", "textStyle": {}, "suggestedInsertionIds": ["s9"]}`, 1)
+	// The Markdown file holds a comment on "ship in May"; its working
+	// copy deleted that sentence.
+	md := "# Notes\n\nWe <!-- gdoc_comment_begin: c1 -->ship in May<!-- gdoc_comment_end: c1 -->.\n\nThe rest.\n\n" +
+		"---\ngdoc_comments:\n  c1:\n    status: ACTIVE\n    head:\n      author: Ann\n      time: '2026-10-14T09:00:00.000Z'\n" +
+		"      body: is May real?\n      quote: ship in May\n---\n"
 	return &fakeAPI{raw: []byte(raw), comments: []*gapi.DriveComment{
 		{ID: "dc1", Content: "hmm", QuotedFileContent: &gapi.QuotedText{Value: "Second point"}},
 		{ID: "c1", Content: "check the figures", Author: &gapi.User{DisplayName: "Ann"},
 			QuotedFileContent: &gapi.QuotedText{Value: "Alpha"},
 			Replies:           []*gapi.DriveReply{{ID: "r1", Content: "agreed"}}},
-	}}
+	}, md: md, mdBase: md, copyExport: "# Notes\n\nThe rest.\n"}
 }
 
 // everything is every tool.
@@ -120,6 +125,11 @@ var askCases = map[string]askCase{
 		args:   map[string]any{"document": fixtureID, "action": "accept", "all": true},
 		writes: batches,
 		shows:  []string{"accept all 2 pending suggestions in `Quarterly Report`", "accepting applies it"},
+	},
+	"write_markdown_file": {
+		args:   map[string]any{"document": copyID, "force": true},
+		writes: func(api *fakeAPI) int { return len(api.uploads) },
+		shows:  []string{"run a forced edit on `notes.md`", "the text of a comment on"},
 	},
 }
 

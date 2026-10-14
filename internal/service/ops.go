@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -75,10 +76,24 @@ type Capabilities struct {
 	ReadOnly         bool     `json:"read_only"`
 }
 
+// Kinds of document.
+const (
+	// KindDocument is a Google Doc.
+	KindDocument = "document"
+	// KindMarkdownFile is a Markdown file Docs opens in place (§7.5).
+	KindMarkdownFile = "markdown_file"
+)
+
 // Info is the get_document result.
 type Info struct {
-	ID             string       `json:"id"`
-	Title          string       `json:"title"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Kind is document or markdown_file; Bytes is a Markdown file's size.
+	Kind  string `json:"kind"`
+	Bytes int    `json:"bytes,omitempty"`
+	// WorkingCopyOf is the Markdown file a Google Doc was made from as a
+	// working copy, which write_markdown_file writes it back into.
+	WorkingCopyOf  string       `json:"working_copy_of,omitempty"`
 	URL            string       `json:"url"`
 	RevisionID     string       `json:"revision_id"`
 	Tabs           []TabInfo    `json:"tabs"`
@@ -112,22 +127,31 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 	if err != nil {
 		return nil, err
 	}
+	md, file := s.kind(ctx, id)
+	if md {
+		return s.mdInfo(ctx, id, file)
+	}
 	type fileResult struct {
 		file *gapi.File
 		err  error
 	}
 	fileCh := make(chan fileResult, 1)
-	go func() {
-		file, err := s.api.GetFile(ctx, id)
-		fileCh <- fileResult{file, err}
-	}()
+	if file != nil {
+		// The type was asked for just now, and the answer was this.
+		fileCh <- fileResult{file, nil}
+	} else {
+		go func() {
+			file, err := s.api.GetFile(ctx, id)
+			fileCh <- fileResult{file, err}
+		}()
+	}
 	f, err := s.Fetch(ctx, id)
 	if err != nil {
 		<-fileCh
 		return nil, err
 	}
 	d := f.Doc
-	info := &Info{ID: d.ID, Title: d.Title, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities(f)}
+	info := &Info{ID: d.ID, Title: d.Title, Kind: KindDocument, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities(f)}
 	for _, t := range d.Tabs {
 		ti := TabInfo{Number: t.Number, ID: t.ID, Title: t.Title, Nesting: t.Nesting, Blocks: len(t.Body.Blocks),
 			Headers: len(t.Headers), Footers: len(t.Footers), Footnotes: len(t.Footnotes), Page: t.Page}
@@ -183,23 +207,16 @@ func (i *Info) fromFile(file *gapi.File) {
 	if file.Trashed {
 		i.Warnings = append(i.Warnings, "this document is in the trash")
 	}
+	if src := file.AppProperties[copySourceKey]; src != "" && file.MimeType != gapi.MarkdownMimeType {
+		i.WorkingCopyOf = src
+	}
 }
 
 // text is what get_document shows: the document's identity, what Drive
 // knows about it, the structure counts and this server's capabilities.
 func (i *Info) text() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n%s\nrevision %s\n", i.Title, i.URL, i.RevisionID)
-	if i.Owner != "" {
-		fmt.Fprintf(&b, "owner %s\n", i.Owner)
-	}
-	if i.LastModified != "" {
-		fmt.Fprintf(&b, "last modified %s", i.LastModified)
-		if i.LastModifiedBy != "" {
-			fmt.Fprintf(&b, " by %s", i.LastModifiedBy)
-		}
-		b.WriteString("\n")
-	}
+	i.writeIdentity(&b, "")
 	st := i.Stats
 	fmt.Fprintf(&b, "%d tab(s), %d paragraphs, %d headings, %d tables, %d inline objects, %d footnotes, %d words",
 		st.Tabs, st.Paragraphs, st.Headings, st.Tables, st.InlineObjects, st.Footnotes, st.Words)
@@ -221,13 +238,42 @@ func (i *Info) text() string {
 		fmt.Fprintf(&b, ": %d headings, %d blocks\n", t.Headings, t.Blocks)
 		t.writeExtras(&b)
 	}
-	c := i.Capabilities
-	fmt.Fprintf(&b, "server: write modes %s (default %s), read-only %t\n", strings.Join(c.WriteModes, "/"), c.DefaultWriteMode, c.ReadOnly)
-	if !c.CommentsView {
+	if i.WorkingCopyOf != "" {
+		fmt.Fprintf(&b, "working copy of the Markdown file %s: write_markdown_file writes what changes here back into it\n", doc.FileURL(i.WorkingCopyOf))
+	}
+	i.writeServer(&b)
+	if !i.Capabilities.CommentsView {
 		b.WriteString(CommentsViewRefused + ": suggestion mode is unavailable and comments are posted unanchored\n")
 	}
 	writeWarnings(&b, i.Warnings)
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// writeIdentity writes what get_document opens with: the title, the
+// link, the revision with a note on what kind it is, the owner and the
+// last change.
+func (i *Info) writeIdentity(b *strings.Builder, revisionNote string) {
+	fmt.Fprintf(b, "%s\n%s\nrevision %s%s\n", i.Title, i.URL, i.RevisionID, revisionNote)
+	if i.Owner != "" {
+		fmt.Fprintf(b, "owner %s\n", i.Owner)
+	}
+	if i.LastModified != "" {
+		fmt.Fprintf(b, "last modified %s", i.LastModified)
+		if i.LastModifiedBy != "" {
+			fmt.Fprintf(b, " by %s", i.LastModifiedBy)
+		}
+		b.WriteString("\n")
+	}
+}
+
+// writeServer is the line on what this server can do with the document.
+func (i *Info) writeServer(b *strings.Builder) {
+	c := i.Capabilities
+	modes := strings.Join(c.WriteModes, "/")
+	if modes == "" {
+		modes = "none"
+	}
+	fmt.Fprintf(b, "server: write modes %s (default %s), read-only %t\n", modes, c.DefaultWriteMode, c.ReadOnly)
 }
 
 // writeExtras lists what a tab holds that a read of its text does not
@@ -314,6 +360,9 @@ type OutlineResult struct {
 
 // Outline renders the heading tree of one tab or all tabs.
 func (s *Service) Outline(ctx context.Context, ref, tab string) (*OutlineResult, error) {
+	if s.isMarkdown(ctx, ref) {
+		return s.mdOutline(ctx, ref, tab)
+	}
 	f, err := s.Fetch(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -362,10 +411,15 @@ type ReadResult struct {
 	Chars        int
 	Truncated    bool
 	ContinueFrom string
+	// unit is what Blocks counts: blocks, or a Markdown file's lines.
+	unit string
 }
 
 // Read renders a scoped view of the document.
 func (s *Service) Read(ctx context.Context, req ReadRequest) (*ReadResult, error) {
+	if s.isMarkdown(ctx, req.Document) {
+		return s.mdRead(ctx, req)
+	}
 	format := strings.ToLower(strings.TrimSpace(req.Format))
 	if format == "" {
 		format = FormatMarkdown
@@ -421,7 +475,7 @@ func (r *ReadResult) header() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- %s", r.Scope)
 	if r.RevisionID != "" {
-		fmt.Fprintf(&b, " · revision %s · %d block(s)", r.RevisionID, r.Blocks)
+		fmt.Fprintf(&b, " · revision %s · %d %s(s)", r.RevisionID, r.Blocks, cmp.Or(r.unit, "block"))
 	}
 	if r.Truncated {
 		b.WriteString(" · truncated")

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,6 +56,89 @@ type fakeAPI struct {
 	// sim, when set, applies each batch to a simulated body and serves
 	// it back on every read.
 	sim *simDoc
+
+	// md, when set, makes the document a Markdown file holding these
+	// bytes: GetFile types it text/markdown, with a head revision and a
+	// checksum that follow every upload.
+	md        *string
+	uploads   []string
+	uploadErr error
+	mdOldRevs map[string]string
+	// onGetFile runs before each GetFile answers, with the call's number
+	// from 1; a test moves the file there as somebody else would.
+	onGetFile func(n int)
+	fileGets  int
+
+	createdMeta []gapi.NewFile
+	createdData []string
+	propsSet    []map[string]string
+	// onGetDocument runs before each documents.get answers, with the
+	// call's number; beforeUpload before each upload lands, where a test
+	// makes somebody else's save land first.
+	onGetDocument func(n int)
+	beforeUpload  func()
+	exports       map[string]string
+	files         map[string]*gapi.File
+}
+
+// mdRevision is the fake Markdown file's head revision: one per upload.
+func (f *fakeAPI) mdRevision() string { return fmt.Sprintf("rev%d", len(f.uploads)+1) }
+
+func (f *fakeAPI) DownloadFile(_ context.Context, id string) ([]byte, error) {
+	if f.md == nil || id != fixtureID {
+		return nil, &gapi.APIError{Status: 403, Message: "only files with binary content can be downloaded", Reason: "fileNotDownloadable"}
+	}
+	return []byte(*f.md), nil
+}
+
+func (f *fakeAPI) DownloadRevision(_ context.Context, fileID, revisionID string) ([]byte, error) {
+	if f.revisionErr != nil {
+		return nil, f.revisionErr
+	}
+	if text, ok := f.mdOldRevs[revisionID]; ok {
+		return []byte(text), nil
+	}
+	return nil, &gapi.APIError{Status: 404, Message: "revision not found"}
+}
+
+func (f *fakeAPI) CreateFile(_ context.Context, meta gapi.NewFile, mediaType string, data []byte) (*gapi.File, error) {
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
+	f.created = append(f.created, meta.Name+" "+meta.MimeType)
+	f.createdMeta, f.createdData = append(f.createdMeta, meta), append(f.createdData, string(data))
+	if meta.MimeType == gapi.DocumentMimeType {
+		return &gapi.File{ID: "1SyntheticWorkingCopyIdXXXXXXXXXXXXXXXXXXXXXX", Name: meta.Name, MimeType: meta.MimeType, AppProperties: meta.AppProperties}, nil
+	}
+	text := string(data)
+	f.md = &text
+	return &gapi.File{ID: fixtureID, Name: meta.Name, MimeType: meta.MimeType, HeadRevisionID: f.mdRevision()}, nil
+}
+
+func (f *fakeAPI) SetAppProperties(_ context.Context, id string, props map[string]string) error {
+	f.propsSet = append(f.propsSet, props)
+	return nil
+}
+
+func (f *fakeAPI) About(context.Context) (*gapi.User, error) {
+	return &gapi.User{DisplayName: "Ada Example", EmailAddress: "ada@example.test"}, nil
+}
+
+func (f *fakeAPI) UploadFile(_ context.Context, id string, data []byte, mimeType string) (*gapi.File, error) {
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
+	if mimeType != "text/markdown" {
+		return nil, fmt.Errorf("uploaded as %s", mimeType)
+	}
+	if f.beforeUpload != nil {
+		f.beforeUpload()
+	}
+	f.uploads = append(f.uploads, string(data))
+	text := string(data)
+	f.md = &text
+	sum := md5.Sum(data)
+	return &gapi.File{ID: id, MimeType: mimeType, HeadRevisionID: f.mdRevision(), MD5Checksum: hex.EncodeToString(sum[:])}, nil
 }
 
 func (f *fakeAPI) GetComment(_ context.Context, fileID, commentID string) (*gapi.DriveComment, error) {
@@ -96,6 +181,14 @@ func (f *fakeAPI) DeleteReply(_ context.Context, fileID, commentID, replyID stri
 func (f *fakeAPI) ListRevisions(_ context.Context, fileID string) ([]*gapi.Revision, error) {
 	if f.revisionErr != nil {
 		return nil, f.revisionErr
+	}
+	if f.md != nil && f.revisions == nil {
+		// One revision per upload, after the first: rev1, rev2, …
+		revs := make([]*gapi.Revision, 0, len(f.uploads)+1)
+		for i := 1; i <= len(f.uploads)+1; i++ {
+			revs = append(revs, &gapi.Revision{ID: fmt.Sprintf("rev%d", i)})
+		}
+		return revs, nil
 	}
 	return f.revisions, nil
 }
@@ -145,6 +238,9 @@ func (f *fakeAPI) SearchFiles(_ context.Context, q string, limit int, pageToken 
 
 func (f *fakeAPI) Export(_ context.Context, id, mimeType string) ([]byte, error) {
 	f.exported = mimeType
+	if text, ok := f.exports[id]; ok {
+		return []byte(text), nil
+	}
 	if mimeType == "application/pdf" {
 		return []byte("%PDF-1.4 fake"), nil
 	}
@@ -167,6 +263,9 @@ func (f *fakeAPI) ListComments(_ context.Context, fileID string, includeDeleted 
 func (f *fakeAPI) GetDocument(_ context.Context, id string, o gapi.GetOptions) (*gapi.DocumentResult, error) {
 	f.getCalls++
 	f.lastOpts = o
+	if f.onGetDocument != nil {
+		f.onGetDocument(f.getCalls)
+	}
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
@@ -194,8 +293,33 @@ func (f *fakeAPI) GetDocument(_ context.Context, id string, o gapi.GetOptions) (
 }
 
 func (f *fakeAPI) GetFile(_ context.Context, id string) (*gapi.File, error) {
+	f.fileGets++
+	if f.onGetFile != nil {
+		f.onGetFile(f.fileGets)
+	}
 	if f.fileErr != nil {
 		return nil, f.fileErr
+	}
+	if file, ok := f.files[id]; ok {
+		return file, nil
+	}
+	if f.md != nil {
+		sum := md5.Sum([]byte(*f.md))
+		file := &gapi.File{ID: id, Name: "notes.md", MimeType: "text/markdown", ModifiedTime: "2026-10-14T10:00:00Z",
+			WebViewLink: "https://drive.google.com/file/d/" + id + "/view", HeadRevisionID: f.mdRevision(),
+			MD5Checksum: hex.EncodeToString(sum[:]), Size: fmt.Sprint(len(*f.md)),
+			Capabilities: &gapi.FileCapabilities{CanEdit: true, CanComment: true, CanModifyContent: true}}
+		if f.file != nil {
+			// A test's own metadata wins where it says something.
+			if f.file.Capabilities != nil {
+				file.Capabilities = f.file.Capabilities
+			}
+			if f.file.MimeType != "" {
+				file.MimeType = f.file.MimeType
+			}
+			file.ContentRestrictions = f.file.ContentRestrictions
+		}
+		return file, nil
 	}
 	if f.file != nil {
 		return f.file, nil

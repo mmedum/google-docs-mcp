@@ -63,23 +63,31 @@ func paragraphText(b *doc.Block) string {
 	return strings.TrimSuffix(alignedSlice(b.Paragraph, b.Start, b.End), "\n")
 }
 
+// findBounds is how many matches a find lists and how much context each
+// gets, from what the caller asked.
+func findBounds(req FindRequest) (limit, contextChars int) {
+	limit = req.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	limit = min(limit, matchLimit)
+	contextChars = req.Context
+	if contextChars <= 0 {
+		contextChars = 60
+	}
+	return limit, contextChars
+}
+
 // Find locates text or a regular expression in one tab's segment and
 // returns handles with context, in document order.
 func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error) {
 	if strings.TrimSpace(req.Query) == "" {
 		return nil, Errorf("invalid", "query is empty")
 	}
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 50
+	if s.isMarkdown(ctx, req.Document) {
+		return s.mdFind(ctx, req)
 	}
-	if limit > matchLimit {
-		limit = matchLimit
-	}
-	contextChars := req.Context
-	if contextChars <= 0 {
-		contextChars = 60
-	}
+	limit, contextChars := findBounds(req)
 	f, err := s.Fetch(ctx, req.Document)
 	if err != nil {
 		return nil, err
@@ -132,26 +140,60 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 		}
 	}
 	for _, l := range found {
-		runes := []rune(l.text)
 		for _, sp := range l.spans {
 			res.Total++
 			if len(res.Matches) >= limit {
 				res.Truncated = true
 				continue
 			}
-			from, to := max(sp[0]-contextChars, 0), min(sp[1]+contextChars, len(runes))
-			ctxText := string(runes[from:sp[0]]) + "«" + string(runes[sp[0]:sp[1]]) + "»" + string(runes[sp[1]:to])
-			if from > 0 {
-				ctxText = "…" + ctxText
-			}
-			if to < len(runes) {
-				ctxText += "…"
-			}
-			res.Matches = append(res.Matches, FindMatch{Handle: l.block.Handle, Match: dropPlaceholders(string(runes[sp[0]:sp[1]])), Offset: sp[0], Context: dropPlaceholders(ctxText)})
+			start, end := runeByte(l.text, sp[0]), runeByte(l.text, sp[1])
+			res.Matches = append(res.Matches, FindMatch{Handle: l.block.Handle, Match: dropPlaceholders(l.text[start:end]), Offset: sp[0],
+				Context: dropPlaceholders(snippet(l.text, start, end, contextChars))})
 		}
 	}
+	res.Text = findText(res, segmentName(tab, seg))
+	return res, nil
+}
+
+// runeByte is where the n-th character of s starts, in bytes.
+func runeByte(s string, n int) int {
+	for i := range s {
+		if n == 0 {
+			return i
+		}
+		n--
+	}
+	return len(s)
+}
+
+// snippet is a match in its context: up to n characters each side, the
+// match between « and », and an ellipsis where the context was cut.
+// start and end are byte offsets.
+func snippet(text string, start, end, n int) string {
+	from, to := start, end
+	for i := 0; i < n && from > 0; i++ {
+		_, size := utf8.DecodeLastRuneInString(text[:from])
+		from -= size
+	}
+	for i := 0; i < n && to < len(text); i++ {
+		_, size := utf8.DecodeRuneInString(text[to:])
+		to += size
+	}
+	s := text[from:start] + "«" + text[start:end] + "»" + text[end:to]
+	if from > 0 {
+		s = "…" + s
+	}
+	if to < len(text) {
+		s += "…"
+	}
+	return s
+}
+
+// findText is what find_in_document shows: the count, then one line per
+// match listed.
+func findText(res *FindResult, where string) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%d match(es) for %q in %s (revision %s)", res.Total, req.Query, segmentName(tab, seg), f.Doc.RevisionID)
+	fmt.Fprintf(&sb, "%d match(es) for %q in %s (revision %s)", res.Total, res.Query, where, res.RevisionID)
 	if res.Truncated {
 		fmt.Fprintf(&sb, ", showing %d", len(res.Matches))
 	}
@@ -159,6 +201,5 @@ func (s *Service) Find(ctx context.Context, req FindRequest) (*FindResult, error
 	for _, m := range res.Matches {
 		fmt.Fprintf(&sb, "[%s] %s\n", m.Handle, m.Context)
 	}
-	res.Text = strings.TrimRight(sb.String(), "\n")
-	return res, nil
+	return strings.TrimRight(sb.String(), "\n")
 }

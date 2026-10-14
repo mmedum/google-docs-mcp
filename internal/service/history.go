@@ -106,6 +106,9 @@ func (s *Service) DiffRevisions(ctx context.Context, req DiffRequest) (*DiffResu
 	if err != nil {
 		return nil, err
 	}
+	if s.isMarkdown(ctx, id) {
+		return s.mdDiff(ctx, id, req, from, strings.TrimSpace(req.To))
+	}
 	type export struct {
 		data []byte
 		err  error
@@ -130,6 +133,11 @@ func (s *Service) DiffRevisions(ctx context.Context, req DiffRequest) (*DiffResu
 	if err != nil {
 		return nil, wrapAPI(err, "revision "+to)
 	}
+	return diffResult(stripDataURIs(string(old.data)), stripDataURIs(string(newText)), from, to, format, req), nil
+}
+
+// diffResult renders the unified diff of two revisions' text.
+func diffResult(oldText, newText, from, to, format string, req DiffRequest) *DiffResult {
 	contextLines := req.Context
 	if contextLines <= 0 {
 		contextLines = 2
@@ -138,7 +146,7 @@ func (s *Service) DiffRevisions(ctx context.Context, req DiffRequest) (*DiffResu
 	if maxChars <= 0 {
 		maxChars = DefaultMaxChars
 	}
-	d := render.UnifiedDiff(stripDataURIs(string(old.data)), stripDataURIs(string(newText)), contextLines, maxChars)
+	d := render.UnifiedDiff(oldText, newText, contextLines, maxChars)
 	res := &DiffResult{From: from, To: to, Format: format, Stats: d.Stats, Truncated: d.Truncated}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "revision %s → %s (%s): +%d −%d lines in %d hunk(s)", from, to, format, d.Stats.Added, d.Stats.Removed, d.Stats.Hunks)
@@ -151,7 +159,7 @@ func (s *Service) DiffRevisions(ctx context.Context, req DiffRequest) (*DiffResu
 		sb.WriteString("\n" + d.Text)
 	}
 	res.Text = sb.String()
-	return res, nil
+	return res
 }
 
 // exportTextFormat maps a short text format name to its MIME type,
@@ -177,6 +185,9 @@ func (s *Service) ReadRevision(ctx context.Context, ref, revision, format string
 	f, mime, err := exportTextFormat(format)
 	if err != nil {
 		return nil, err
+	}
+	if s.isMarkdown(ctx, id) {
+		return s.mdReadRevision(ctx, id, revision, maxChars)
 	}
 	data, err := s.api.ExportRevision(ctx, id, revision, mime)
 	if err != nil {

@@ -87,6 +87,11 @@ func TestTranscriptKeepsPeopleAndDocumentsOut(t *testing.T) {
 			"https://docs.google.com/document/d/<scratch>/edit revision <rev>\n",
 		},
 		{
+			"a Markdown file's Drive link",
+			"https://drive.google.com/file/d/1SyntheticDocumentIdXXXXXXXXXXXX/view\n",
+			"https://drive.google.com/file/d/<scratch>/view\n",
+		},
+		{
 			"a gdocs resource uri",
 			"gdocs://1SyntheticDocumentIdXXXXXXXXXXXX/outline\n",
 			"gdocs://<scratch>/outline\n",

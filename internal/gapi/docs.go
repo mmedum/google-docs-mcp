@@ -22,6 +22,10 @@ const (
 type GetOptions struct {
 	SuggestionsViewMode string
 	CommentsViewMode    string
+	// Fields is a partial response mask. The comments view honors one
+	// only with the tabs' content asked for, which GetDocument always
+	// does (spike D).
+	Fields string
 }
 
 // DocumentResult is a decoded documents.get response. Comment and
@@ -39,6 +43,9 @@ func (c *Client) GetDocument(ctx context.Context, id string, o GetOptions) (*Doc
 	}
 	if o.CommentsViewMode != "" {
 		q.Set("commentsViewMode", o.CommentsViewMode)
+	}
+	if o.Fields != "" {
+		q.Set("fields", o.Fields)
 	}
 	u := c.docs + "/v1/documents/" + url.PathEscape(id) + "?" + q.Encode()
 	body, err := c.do(ctx, kindRead, http.MethodGet, u, nil)

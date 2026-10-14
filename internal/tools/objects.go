@@ -12,7 +12,7 @@ import (
 
 // ObjectInput is the insert_object call.
 type ObjectInput struct {
-	Document       string        `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string        `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Action         string        `json:"action,omitempty" jsonschema:"insert (default), replace to swap an image's source in place, or delete to remove an object"`
 	Kind           string        `json:"kind,omitempty" jsonschema:"insert: image, person, rich_link, or date"`
 	Object         string        `json:"object,omitempty" jsonschema:"replace and delete: the object's id as a read shows it, e.g. kix.img1"`

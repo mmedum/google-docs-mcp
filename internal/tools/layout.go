@@ -74,7 +74,7 @@ type LayoutOpInput struct {
 
 // LayoutInput is the layout_document call.
 type LayoutInput struct {
-	Document       string          `json:"document" jsonschema:"document id or any docs.google.com URL"`
+	Document       string          `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Ops            []LayoutOpInput `json:"ops" jsonschema:"operations applied together as one atomic batch"`
 	Mode           string          `json:"mode,omitempty" jsonschema:"suggest, direct or comment; default from get_document capabilities"`
 	DryRun         bool            `json:"dry_run,omitempty"`

@@ -441,6 +441,162 @@ What markdown cannot say goes through `format_document`: fonts, sizes,
 colors, alignment, spacing, indents, named styles on existing text,
 bullet presets, clearing formatting.
 
+### 7.5 Markdown files (`internal/mdfile`)
+
+Since 2026-10-05 Docs opens a Markdown file stored in Drive and edits it
+in place: the file stays a `text/markdown` blob (spike D, §18). The Docs
+API reads one — `documents.get` answers with a parsed model and the
+comments view — and refuses every write to it, suggestions and
+`insertComment` included, with 400 "The document must not be an Office
+file". The one write is a Drive media upload of the whole file, and an
+upload makes an editor that has the file open reload; no API writes
+through the editor's session. So a Markdown file is edited the way it is
+stored, as text, the server is what keeps that upload from being an
+overwrite (§15), and working on one together live goes through a working
+copy (below).
+
+**Which path.** The service asks Drive for a document's type once per id
+per session. A `text/markdown` file takes the path below; everything
+else is a Google Doc, as before.
+
+**The bytes hold the comments.** A comment made in the editor is a
+marker on each side of its passage, `<!-- gdoc_comment_begin: c1 -->`
+and `<!-- gdoc_comment_end: c1 -->`, and an entry in a `gdoc_comments`
+YAML block between rules that must end the file. Drive cannot see these
+comments: `comments.list` leaves them out and `comments.get` on their id
+is 404. Text after the block turns it into body text, names and tokens
+included. `mdfile` parses that markup out and keeps it byte for byte.
+
+**Reads** come from the bytes, with the markup taken out: what the model
+reads is what its exact-text targets match and what the upload rewrites.
+The outline is the file's headings, each named by its GitHub slug
+(`lists`, `same-1`), which lasts as long as the heading's text; a
+section runs to the next heading of the same or a higher level. A long
+read continues from a line, `continue_from: L120`, or from a character
+in one longer than the budget, `L120:500`, so continuing always moves
+forward. No handles: a line or a slug says what a handle would. With `include_comments` a commented
+passage ends in `{>>c:<id><<}`, the threads coming from the Docs
+comments view and from Drive, which hold disjoint sets.
+
+**Writes** take the content ops (`insert`, `append`, `replace`,
+`delete`, `replace_all`) on targets by exact text, `heading_id` or
+`heading`; content is the file's own markdown and is written as given.
+Each op resolves against one read, a `replace` becomes the minimal diff
+of the old text against the new, and two ops may not reach the same text;
+insertions at one point land in op order, before anything replaced from
+there. Content placed between blocks gets the blank lines that keep it,
+and what follows, a block of its own. The edits are applied to the
+visible text with these rules for the markers, which are never deleted:
+inside a replaced range a begin marker moves before the new text and an
+end marker after it; at a replaced range's edges a marker stays outside
+it; and at an insertion point the new text goes outside a comment that
+begins or ends there. The result is parsed again and must carry the same
+markers and the same block, or the write is refused. Content holding the
+markup is refused, so no write can forge or end a comment.
+
+- **Guard.** A direct edit that would delete commented text, an image or
+  a footnote reference is `[blocked]` unless forced, and a forced one
+  asks the person, as in a Google Doc (§7.3). The probe found a comment
+  survives an edit inside its passage, but the person did not ask for
+  their comment's text to change.
+- **Check, write, verify, repair** (`markdown_write.go`). Drive v3 has
+  no precondition: it serves no ETag and ignores `If-Match`, and
+  `version` moves on metadata changes too. And while a person has the
+  file open, their work is in the live session, which reaches the file
+  only when the editor saves: an upload four seconds after a save
+  overwrote it in spike D, and the editor took the upload. So every
+  write, edits, comments and write-backs alike:
+  1. reads the file and, with a `fields` mask (2 KB against 114 KB), the
+     live session's revision and comments. A comment the live session
+     holds on a passage and the file does not, a reply or a resolve the
+     file does not show, is a person's work not saved yet: the write
+     waits three seconds and tries again, twice, then is `[conflict]`.
+     `force` writes past it, asking the person and naming what it
+     discards;
+  2. plans, then reads `headRevisionId`, `md5Checksum` and the live
+     revision again just before the upload, and plans again if any moved;
+     `expect_revision` names a `headRevisionId`;
+  3. uploads, then finds in `revisions.list` the revision its upload
+     replaced. When it is not the one the plan was made on, somebody's
+     save landed in between: it is read from history and the change made
+     again on top of it, or, when the change no longer fits, the save is
+     put back and the write is `[conflict]`. Nothing is overwritten even
+     in the gap the checks cannot close;
+  4. after writing comment markup, waits for the live session to list
+     the new comments, and puts the bytes back if the Docs API can no
+     longer read the file at all.
+
+  Measured with a person (spike D, stage 5): the editor writes each
+  change into the file about two seconds after the live session has it
+  — typing, a comment, a reply, a resolve alike — so the three-second
+  wait outlasts a save. Text typed and not saved yet is not in the
+  comments view; the live revision catches it when it moves during a
+  write, and the history check catches a save of it that lands in the
+  gap.
+- **One upload per call, none for nothing.** Every upload is a Drive
+  revision, identical bytes included, so a call batches its ops and a
+  call that changes nothing uploads nothing. The upload is sent as
+  `text/markdown`: the media part's type becomes the file's, and a
+  `text/plain` one makes the Docs API refuse the file. Revisions are not
+  pinned: a pin cannot be undone, 200 is the limit, and Drive keeps an
+  unpinned revision at least 30 days unless the file passes 100.
+- **Modes.** `direct` changes the text. `comment` writes each op as a
+  comment proposing it, on the passage it would change, and changes no
+  text. `suggest` is `[unavailable]`: Docs has no suggestion mode for
+  these files and the API takes none. The server never turns one mode
+  into another, so with the default `suggest` a write on a Markdown file
+  is refused until the person chooses.
+- **Comments written into the file.** `add_comment`, comment mode and a
+  reply to a comment the file keeps write the markup the editor writes:
+  markers around the passage and an entry, YAML double-quoted, under the
+  signed-in account's name. The editor shows such a comment, "From
+  imported document", and on a person's save keeps it and gives it a
+  token, which makes it Google's own (spike D, stage 3). Until then its
+  id changes each time the file is written. A resolve is never written:
+  `status: RESOLVED` in the bytes made every `documents.get` on the file
+  answer 500 until the bytes were put back, so the person resolves in
+  the editor. A comment needs a passage, and cannot be assigned.
+- **Front matter.** The editor rewrites front matter into a rule and a
+  `## key: value` heading when a person saves; reads and writes warn
+  when a file has front matter, and when it opens the way that rewrite
+  leaves it.
+- **Size.** Files over 5 MB, Drive's ceiling for a simple upload, are
+  read but not written.
+- **Search** keeps Google Docs as its default: a person who syncs a code
+  folder into Drive has hundreds of `README.md` files. `kind` reaches
+  Markdown files.
+
+Ops that need the Docs API — formatting, tables, objects, layout, tabs,
+footnotes, headers, named ranges, suggestion review — are `[unsupported]`
+on a Markdown file before anything is sent, saying the file is text.
+A path that forgets to branch on the kind stops in `fetch`, which
+refuses a Markdown file rather than serve its Docs model, whose handles
+no write could use.
+
+**Working copies** (`markdown_copy.go`, `mdfile.Merge`). For a person and
+Claude to type in one document together it has to be a Google Doc.
+`create_document` with `from_file` imports the file's text, front matter
+and comment markup left out, into a new Doc through Drive's Markdown
+import, and records in the Doc's `appProperties`, which only this OAuth
+client sees, the file and the revision it was made from. Everything this
+server does on a Google Doc then works live on the copy.
+`write_markdown_file` exports the copy as Markdown and merges it back
+into the file. Docs' export writes Markdown its own way — inline HTML as
+its text, `__x__` as `**x**`, table delimiters re-spaced, list items with
+trailing spaces, `&nbsp;` paragraphs — so the merge works on blocks
+(paragraphs whole, headings, list items, table rows, fenced code) under a
+normalization that takes those out: a block the copy did not change keeps
+the file's own text, separators and all. What the copy changed is the
+difference between the export and the revision the copy was made from;
+what the file changed since is the difference between that revision and
+now. A block changed on both sides is a conflict, refused unless `force`
+keeps the file's version. The result is applied as minimal edits under
+the guard and written by the protocol above, and the copy then records
+the revision it matches. When the base revision is gone from history,
+the write is refused unless forced, which writes the copy over the file
+block by block. An image placed in the copy has no address a Markdown
+file can use and is written empty, with a warning.
+
 ## 8. Collaboration and history
 
 **Comments, two backends behind one tool surface.**
@@ -457,7 +613,11 @@ reply with author, time and action, resolved and deleted state for every
 deployment, and locates each thread through the comments view's anchors
 when the fetch carried them, else by its quoted text (a quote that matches once).
 Resolved threads are included by default, deleted ones on request.
-Resolution is reversible (`reopen`); deletion is gated. The guard, reads
+Resolution is reversible (`reopen`); deletion is gated. A Markdown file
+is the exception (§7.5): Drive cannot see the comments the editor keeps
+in the file, so its listing is the Docs comments view plus Drive's own
+list, which hold disjoint sets, and an editor comment is read-only to
+every API. The guard, reads
 with `include_comments` and the listing share one located thread list
 per fetch.
 
@@ -502,13 +662,13 @@ registers only readOnly rows and requests readonly scopes.
 
 | Tool | Purpose | Annotations | Phase |
 |---|---|---|---|
-| `search_documents` | Locate a Doc by title or content (Drive search restricted to Docs); returns id, title, modified, owner | readOnly | 1 |
+| `search_documents` | Locate a Doc by title or content (Drive search restricted to Docs, or with `kind` to Markdown files or both); returns id, title, kind, modified, owner | readOnly | 1, 2.3 |
 | `get_document` | Title, tabs, revision, owner, counts, capabilities (comments view, available write modes, configured default); per tab the page setup, floating objects, named ranges and the named style definitions its paragraphs carry | readOnly, idempotent | 0, 4 |
 | `get_outline` | Heading tree with `heading_id`, handles, sizes | readOnly | 0 |
 | `read_document` | Scoped, budgeted markdown/text/raw view; `with_styles`; `revision_id` | readOnly | 0 |
 | `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
 | `export_document` | pdf/docx/md/html/txt; writes a local file, so it is a non-destructive write that read-only mode still registers | destructive=false | 1, 2.0 |
-| `create_document` | Title, optional markdown body | — | 1 |
+| `create_document` | Title, optional markdown body; `kind: markdown_file` makes a `.md` file, `from_file` a working copy of one (§7.5) | — | 1, 2.3 |
 | `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2, 4 |
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
 | `list_suggestions` | Pending suggestions with handles, authors and the replies on their threads | readOnly | 1 |
@@ -523,6 +683,7 @@ registers only readOnly rows and requests readonly scopes.
 | `layout_document` | ops: `page`, `section`, `section_break`, `named_style` | — | 4 |
 | `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | — | 2 |
 | `delete_tab` | Gated; child tabs go with it; asks the person; dry_run | destructive | 2, 2.0 |
+| `write_markdown_file` | Merge a working copy back into its Markdown file, block by block (§7.5); conflicts refused unless forced; asks when forced; dry_run | — | 2.3 |
 
 \* `edit_document` changes text by design; it is not gated. The layers
 this server controls are the write mode the person chose, the overwrite
@@ -862,6 +1023,8 @@ accounts. That sets these requirements:
 | Paragraph handles: short labels remembered by the server (option A) | `p12`-style handles with per-document handle memory (§6) |
 | Markdown for new content only; existing content edited in place | `with_styles` reads, format ops, no whole-document round trips |
 | One document, every capability; no folder/move/share/trash/copy | Tool table trimmed; `search_documents` is locate-only |
+| A Markdown file in Drive is a document too, edited as the text it is (2026-10-14). Bet 6 forbade round-tripping a Doc through markdown, which loses what markdown cannot say; minimal edits to a Markdown file's own bytes are no round trip, and are bet 1 applied to text | §7.5: reads from the bytes, the content ops by minimal diff with the comment markup guarded, one Drive upload per call; the server's first Drive content write |
+| Working on a Markdown file together goes through a working copy (2026-10-14): no API writes through an open editor's session, and every upload makes the editor reload | §7.5: `create_document from_file` and `write_markdown_file`, a block merge that keeps the file's own text where the copy did not change it; direct writes check, write, verify and repair |
 | Stdio only | No HTTP auth design |
 | Nothing internal in the repo or in logs | §12 |
 
@@ -1070,6 +1233,20 @@ checked rather than assumed.
 
 | Convention | Verdict | Effect |
 |---|---|---|
+| How far the live session runs ahead of the Markdown file (spike D, stage 5) | Measured live with a person and a watcher reading once a second: typing, a comment, a reply and a resolve each reached the file 1.7–2 s after the live session showed them, a comment with its anchor; the editor's own resolve, carrying its token, left the file readable | The pending check waits 3 s, longer than a save takes. |
+| An upload is safe while a person has the Markdown file open (spike D, stage 3) | Refuted live: an upload four seconds after the editor saved overwrote that save (the write had read the file just before it), and the editor took the upload; the save stayed in Drive's history | Every write checks the live session, re-checks just before uploading, and repairs from history afterwards (§7.5). |
+| A comment written into a Markdown file's bytes is a real comment (spike D, stages 3–4) | Confirmed live with a person: the editor shows it on its passage, "From imported document", under the name the bytes give, and a person's save keeps it and gives it a token. A reply written into the bytes shows too, on an imported comment and on one with a token. YAML double-quoted scalars read back exactly | `add_comment`, comment mode and replies on a Markdown file write the markup. |
+| A resolve can be written into a Markdown file's bytes (spike D, stage 4) | Refuted live: `status: RESOLVED`, with a `RESOLVE` reply or without, made every `documents.get` on the file answer 500 "Internal error encountered." until the bytes were put back | Never written; the person resolves in the editor. |
+| A Doc imported from Markdown can carry where it came from (spike D, stage 4) | Confirmed live: `files.create` with the Docs type and `appProperties`, media `text/markdown`, converts and keeps the properties; `files.update` changes them. Its Markdown export is Docs' dialect | The working copy and its block merge. |
+| The comments view can be read cheaply (spike D, stage 4) | Confirmed live with a condition: a `fields` mask (revisionId, comments, the tabs' commentAnchors) gave 2.4 KB against 114 KB, and only with `includeTabsContent=true`; without it, 400 "Comments view mode may only be specified if tabs content is also requested." | The live-session check on every write. |
+| The Docs API edits a Markdown file Docs opens in place (spike D, 2026-10-13/14) | Refuted live: `documents.get` on a `text/markdown` file answers 200 with a model and the comments view, and every `batchUpdate` — direct, `SUGGEST`, `insertComment` — is 400 "The document must not be an Office file". `files.export` is 403 `fileNotExportable`. A third-party tool measured the same refusal | §7.5: such a file is read from its bytes and written by a Drive upload. |
+| Comments on a Markdown file are Drive comments (spike D) | Refuted live: a comment made in the editor is markers in the bytes plus an end-of-file `gdoc_comments` block; Drive's `comments.list` omits it and `comments.get` and `replies.create` on its id are 404; the Docs comments view lists it. Removing either part, or text after the block, unanchors it; putting the bytes back re-anchors it; text after the block shows the block as body text | The markup is parsed out of reads and guarded on writes; `list_comments` reads the Docs view as well as Drive. |
+| A Drive upload of a Markdown file keeps its comments (spike D) | Confirmed live when the markers and the block are kept: a line inserted elsewhere moved the anchor with the text, and an edit inside the quoted passage grew it. Docs re-parses an upload within about five seconds and writes nothing back; only a person's save rewrites the file | The write path keeps the markup byte for byte and re-parses its own output to prove it. |
+| Drive offers a precondition on uploads (spike D) | Refuted live and in the reference: no ETag on `alt=media`, `If-Match` with a made-up value answered 200 and wrote; v3 maps `etag` to "n/a"; `version` moves on metadata changes too. `md5Checksum` is the MD5 of the bytes and `headRevisionId` changes on every upload, identical bytes included | Best-effort check of `headRevisionId` and `md5Checksum` before uploading; nothing is uploaded for a call that changes nothing. |
+| A media update keeps a file's type (spike D) | Refuted live: a media part sent as `text/plain` retyped a Markdown file `text/plain`, a metadata `mimeType` change did not put it back, and a `text/markdown` media part did; `application/octet-stream` kept the type. The Docs API refuses a `text/plain` `.md` with 400 | Uploads are sent as `text/markdown`. |
+| Old revisions of a blob download only when kept forever (Drive revisions guide) | Refuted live for the owner: all eleven unpinned revisions downloaded through `revisions.get?alt=media` and `files.download`. Pinning a non-head revision could not be undone (400 `illegalKeepForeverModification`), and the limit is 200 per file | Old revisions of a Markdown file are read through `revisions.get`; nothing is pinned. |
+| Markup written through Drive makes a comment (spike D) | Confirmed live: markers and a block entry without a token made an anchored thread in the Docs view, `fromImportedDocument: true`, its author the name the bytes gave, a new id on every re-parse, gone when the bytes no longer held it | Content may not hold the markup. Whether the editor shows such a comment, and keeps it on a save, needs a person. |
+| Docs can suggest on a Markdown file (Docs Help 18289341, Workspace Updates 2026-10-05) | No source says so; both list open, edit, comment and collaborate, and the API refuses a `SUGGEST` batch | `suggest` is `[unavailable]` on a Markdown file. |
 | Asking the person works against Google (2026-09-30) | Confirmed live: the live driver, now a client that can be asked, declined a `delete_comment` (refused, the comment still listed), then accepted it (deleted); a forced `delete_rows` over a pending suggestion, two `delete_tab` calls and `review_suggestion` with `all` each asked once and went through on accept; the four new dry runs left the revision where it was | The driver answers every question and fails a step that should have asked and did not. |
 | An empty form is a valid elicitation, and the SDK skips structured output for a result that asks (2026-09-30) | Adopted from the siblings that verified them: the specification's schema puts no minimum on `properties`; go-sdk v1.8.0 `mcp/server.go` does not marshal the output when `InputRequests` is set | `asked` returns the input request with a zero output. |
 | `blocked` is part of the error vocabulary (2026-09-30) | Refuted: the guard returned `[blocked]` through an `Error` literal the `classes` gate does not scan, so the class was emitted and documented nowhere | Listed in `service.Classes`, with what it asks the reader to do. |

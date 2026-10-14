@@ -45,6 +45,15 @@ type SuggestionsResult struct {
 // ListSuggestions collects suggestions from the inline view, in document
 // order, merged with thread details when the comments view provides them.
 func (s *Service) ListSuggestions(ctx context.Context, ref string) (*SuggestionsResult, error) {
+	if s.isMarkdown(ctx, ref) {
+		id, _ := parseRef(ref)
+		file, err := s.api.GetFile(ctx, id)
+		if err != nil {
+			return nil, wrapAPI(err, "file")
+		}
+		return &SuggestionsResult{RevisionID: file.HeadRevisionID, Suggestions: []Suggestion{},
+			Text: "0 pending suggestion(s): a Markdown file has no suggestion mode, so it never holds any"}, nil
+	}
 	f, err := s.Fetch(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -238,6 +247,9 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	case "accept", "reject", "discard":
 	default:
 		return nil, Errorf("invalid", "action must be accept, reject or discard")
+	}
+	if s.isMarkdown(ctx, req.Document) {
+		return nil, mdUnsupported("it has no suggestions to review", "")
 	}
 	if len(req.IDs) == 0 && !req.All {
 		return nil, Errorf("invalid", "pass ids or all: true")

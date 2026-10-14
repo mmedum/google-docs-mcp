@@ -107,14 +107,25 @@ func commentFooter(seg *doc.Segment, from int, res Result, marks []Mark) string 
 	if res.To > from && res.To <= len(seg.Blocks) {
 		start, end = seg.Blocks[from].Start, seg.Blocks[res.To-1].End
 	}
-	var sb strings.Builder
+	var in []Mark
 	other := 0
 	for _, m := range marks {
-		inRange := m.locatedIn(seg) && m.End > start && m.Start < end
-		if !inRange {
-			other++
+		if m.locatedIn(seg) && m.End > start && m.Start < end {
+			in = append(in, m)
 			continue
 		}
+		other++
+	}
+	return CommentFooter(in, other)
+}
+
+// CommentFooter is the list under a read of the threads marked in it,
+// each written as list_comments writes a thread, and a count of the
+// others. A caller that located the threads itself, as a Markdown file's
+// reader does, writes the same footer through it.
+func CommentFooter(in []Mark, other int) string {
+	var sb strings.Builder
+	for _, m := range in {
 		sb.WriteString("\n")
 		threadLine(&sb, m.Thread, "c:")
 		if n := m.Replies; n > 0 {

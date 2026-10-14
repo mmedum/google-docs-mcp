@@ -1,9 +1,10 @@
 # Architecture — google-docs-mcp
 
-**Status:** v2.3.0 (released 2026-10-14, live run green). A Markdown
+**Status:** v2.3.1 (released 2026-10-14, live run green). A Markdown
 file stored in Drive, which Docs edits in place, is read, edited and
 commented on as the text it is, through a write protocol that keeps the
-editor's unsaved work (§7.5). A Google Doc working copy carries a live
+editor's unsaved work (§7.5), whether Drive types it `text/markdown` or
+the older `text/x-markdown`. A Google Doc working copy carries a live
 session's work back to the file, block by block. Comments and
 suggestions are generally available and detected per read rather than
 gated on a flag (§18). Since v2.0.1 a write that may have landed is

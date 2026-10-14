@@ -76,6 +76,51 @@ func TestMarkdownFileInfo(t *testing.T) {
 	}
 }
 
+func TestMarkdownFileUnderTheOlderType(t *testing.T) {
+	// Drive keeps a .md uploaded as text/x-markdown under that type, and
+	// the Docs API reads it as Markdown and refuses its writes the same
+	// way (§18). It is a Markdown file here, and an edit keeps its type.
+	svc, api := mdService(t, config.WriteSuggest)
+	api.file = &gapi.File{MimeType: "text/x-markdown"}
+	ctx := context.Background()
+	info, err := svc.Info(ctx, fixtureID)
+	if err != nil || info.Kind != KindMarkdownFile {
+		t.Fatalf("Info = %+v, %v; want a markdown_file", info, err)
+	}
+	if !strings.Contains(info.Text, "Markdown file (text/x-markdown)") {
+		t.Errorf("get_document names another type:\n%s", info.Text)
+	}
+	res, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplace, Target: &Target{Text: "**bold**"}, Content: "**strong**"},
+	}})
+	if err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	if len(api.uploads) != 1 || !strings.Contains(api.uploads[0], "**strong**") {
+		t.Errorf("uploads = %q, want one carrying the edit", api.uploads)
+	}
+	if w := strings.Join(res.Warnings, "\n"); strings.Contains(w, "Drive typed the file") {
+		t.Errorf("an upload that kept the file's type warns it was retyped: %s", w)
+	}
+}
+
+func TestSearchFindsAMarkdownFileUnderTheOlderType(t *testing.T) {
+	svc, api := mdService(t, config.WriteSuggest)
+	api.file = &gapi.File{MimeType: "text/x-markdown"}
+	api.searchFiles = []*gapi.File{{ID: fixtureID, Name: "notes.md", MimeType: "text/x-markdown"}}
+	ctx := context.Background()
+	res, err := svc.Search(ctx, SearchRequest{Kind: "any"})
+	if err != nil || len(res.Hits) != 1 || res.Hits[0].Kind != KindMarkdownFile {
+		t.Fatalf("Search = %+v, %v; want one markdown_file hit", res, err)
+	}
+	// The hit's kind is remembered for the session, so a read of it takes
+	// the Markdown path without asking Drive again.
+	info, err := svc.Info(ctx, fixtureID)
+	if err != nil || info.Kind != KindMarkdownFile {
+		t.Fatalf("Info after the search = %+v, %v; want a markdown_file", info, err)
+	}
+}
+
 func TestMarkdownFileReadIsItsText(t *testing.T) {
 	svc, _ := mdService(t, config.WriteDirect)
 	ctx := context.Background()
@@ -406,8 +451,8 @@ func TestSearchKinds(t *testing.T) {
 		kind, query string
 	}{
 		{"", "mimeType = 'application/vnd.google-apps.document' and trashed = false"},
-		{"markdown_file", "mimeType = 'text/markdown' and trashed = false"},
-		{"any", "(mimeType = 'application/vnd.google-apps.document' or mimeType = 'text/markdown') and trashed = false"},
+		{"markdown_file", "(mimeType = 'text/markdown' or mimeType = 'text/x-markdown') and trashed = false"},
+		{"any", "(mimeType = 'application/vnd.google-apps.document' or mimeType = 'text/markdown' or mimeType = 'text/x-markdown') and trashed = false"},
 	}
 	for _, tc := range tests {
 		if _, err := svc.Search(ctx, SearchRequest{Kind: tc.kind}); err != nil || api.searchQ != tc.query {

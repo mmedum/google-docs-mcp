@@ -223,7 +223,7 @@ func (s *Service) stillWhereItWas(ctx context.Context, id string, m *mdFile, vie
 // upload writes the file, then verifies: that nobody's save was
 // overwritten, and that a comment written into it is listed.
 func (s *Service) upload(ctx context.Context, id string, m *mdFile, after *mdfile.File, o mdWriteOpts, change mdChange, res *EditResult) error {
-	up, err := s.api.UploadFile(ctx, id, []byte(after.Source()), gapi.MarkdownMimeType)
+	up, err := s.api.UploadFile(ctx, id, []byte(after.Source()), m.mime())
 	if err != nil {
 		return wrapAPI(err, "file")
 	}
@@ -232,7 +232,7 @@ func (s *Service) upload(ctx context.Context, id string, m *mdFile, after *mdfil
 	if up.MD5Checksum != "" && up.MD5Checksum != md5Hex([]byte(after.Source())) {
 		res.Warnings = append(res.Warnings, "Drive's checksum of the uploaded file is not the checksum of what was sent; read the file before relying on it")
 	}
-	if up.MimeType != "" && up.MimeType != gapi.MarkdownMimeType {
+	if up.MimeType != "" && up.MimeType != m.mime() {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("Drive typed the file %s after the upload", up.MimeType))
 	}
 	if err := s.repair(ctx, m, up, change, res); err != nil {
@@ -276,13 +276,13 @@ func (s *Service) repair(ctx context.Context, m *mdFile, up *gapi.File, change m
 	again, _, _, cerr := change(theirs)
 	if cerr != nil || again == nil {
 		// The change does not fit the save: the save wins.
-		if _, err := s.api.UploadFile(ctx, m.id(), data, gapi.MarkdownMimeType); err != nil {
+		if _, err := s.api.UploadFile(ctx, m.id(), data, m.mime()); err != nil {
 			return Errorf("ambiguous_outcome", "a save landed in the file while this write was uploading (revision %s), the write no longer fits it, and putting the save back failed: %s; "+
 				"restore revision %s from the file's history", prev, messageOf(wrapAPI(err, "file")), prev)
 		}
 		return Errorf("conflict", "a save landed in the file while this write was uploading, and the write no longer fits it (%s); the save was put back and the write is not applied", messageOf(cerr))
 	}
-	up2, err := s.api.UploadFile(ctx, m.id(), []byte(again.Source()), gapi.MarkdownMimeType)
+	up2, err := s.api.UploadFile(ctx, m.id(), []byte(again.Source()), m.mime())
 	if err != nil {
 		return Errorf("ambiguous_outcome", "a save landed in the file while this write was uploading (revision %s), and writing the change again on top of it failed: %s; "+
 			"read the file, and restore revision %s from its history if the save is missing", prev, messageOf(wrapAPI(err, "file")), prev)
@@ -308,7 +308,7 @@ func (s *Service) confirmComments(ctx context.Context, id string, m *mdFile, pos
 		}
 		v := s.live(ctx, id)
 		if errors.Is(v.err, gapi.ErrServer) && try == 3 {
-			if _, err := s.api.UploadFile(ctx, id, []byte(m.md.Source()), gapi.MarkdownMimeType); err != nil {
+			if _, err := s.api.UploadFile(ctx, id, []byte(m.md.Source()), m.mime()); err != nil {
 				return Errorf("ambiguous_outcome", "the Docs API cannot read the file since the comment was written into it, and putting it back failed: %s", messageOf(wrapAPI(err, "file")))
 			}
 			return Errorf("unexpected", "the Docs API could not read the file once the comment was written into it, so the file was put back as it was")

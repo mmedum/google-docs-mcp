@@ -457,8 +457,9 @@ overwrite (§15), and working on one together live goes through a working
 copy (below).
 
 **Which path.** The service asks Drive for a document's type once per id
-per session. A `text/markdown` file takes the path below; everything
-else is a Google Doc, as before.
+per session. A `text/markdown` file, or one Drive keeps under the older
+`text/x-markdown` (§18), takes the path below; everything else is a
+Google Doc, as before.
 
 **The bytes hold the comments.** A comment made in the editor is a
 marker on each side of its passage, `<!-- gdoc_comment_begin: c1 -->`
@@ -536,9 +537,10 @@ markup is refused, so no write can forge or end a comment.
   gap.
 - **One upload per call, none for nothing.** Every upload is a Drive
   revision, identical bytes included, so a call batches its ops and a
-  call that changes nothing uploads nothing. The upload is sent as
-  `text/markdown`: the media part's type becomes the file's, and a
-  `text/plain` one makes the Docs API refuse the file. Revisions are not
+  call that changes nothing uploads nothing. The upload is sent as the
+  file's own type, `text/markdown` or `text/x-markdown`: the media part's
+  type becomes the file's, and a `text/plain` one makes the Docs API
+  refuse the file. Revisions are not
   pinned: a pin cannot be undone, 200 is the limit, and Drive keeps an
   unpinned revision at least 30 days unless the file passes 100.
 - **Modes.** `direct` changes the text. `comment` writes each op as a
@@ -1354,5 +1356,6 @@ checked rather than assumed.
 | Each suggest-mode batch names the suggestions it creates | Refuted live 2026-10-09: the five batches of one suggest-mode content call (text, image, table, fill, tidy) were all filed under the first batch's suggestion, and only the first reply named it. The fill then warned once per cell that its range held a suggestion: the call's own | Later batches carry the suggestions their call made so far, and the guard leaves those out. |
 | A suggest-mode delete of an empty paragraph the same call suggested leaves a suggested deletion | Refuted live 2026-10-09: the read after a suggest-mode content call showed no empty paragraph around the suggested table, and rejecting its one suggestion restored the section exactly | The tidy round needs nothing of its own in suggest mode. |
 | An image address Google cannot fetch fails at the request | Confirmed live 2026-10-09: `insertInlineImage` with an address that answers 404 is refused whole, 400 INVALID_ARGUMENT "The provided image was not found." | A round that places one fails alone: a warning names the image's line, and its text and empty paragraph stay. |
+| A Markdown file is typed `text/markdown` (what v2.3.0 assumed, telling one from a Google Doc by that type alone) | **Refuted live 2026-10-14.** A file created as `text/x-markdown`, the type older tables give a `.md`, kept that type in Drive. `documents.get` read it exactly as it read a `text/markdown` control made the same minute from the same bytes, `# Probe` as `HEADING_1`, and a direct `batchUpdate` was 400 `FAILED_PRECONDITION` "The document must not be an Office file", the refusal a `text/markdown` file gets. A media update sent as `text/x-markdown` kept that type, and `documents.get` then read the new text. `text/x-web-markdown`, another alias, is not one: `documents.get` answered it 400 `INVALID_ARGUMENT`, as it does a `text/plain` `.md`. v2.3.0 took a `text/x-markdown` file for a Google Doc, so every write to it failed | `gapi.IsMarkdownMimeType` takes both types for the path a file takes and for `search_documents`' kinds, and an upload is sent as the file's own type so it is not retyped |
 | Every name in a transcript sits in a position a rule knows, because this project's renderers wrote them all | Refuted 2026-10-09 by reading two live transcripts: a person chip printed the account's display name as `@Name` in markdown and bare in a plain-text read, six times a run, with no label before it for a rule to find | The driver reads the account's display name from `get_document` before any step can print a chip, and `redact.Names` replaces it wherever it appears. The eval traces were redacted as encoded JSON, where a newline is `\n` and no line rule fires, so the owner line kept its name; `redact.TranscriptJSON` now redacts each string. |
 | `deleteContentRange` takes an empty range as a no-op | Refuted live 2026-10-09: "Invalid requests[1].deleteContentRange: The range should not be empty", and the batch it was in was refused whole. A replace over an empty table cell with content of more than one paragraph sent one, so every cell of an `insert_table` fill stayed empty | A replace deletes only a range that holds something; the test simulator refuses an empty one as Google does. |

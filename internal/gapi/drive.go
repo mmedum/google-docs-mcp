@@ -107,6 +107,17 @@ const DocumentMimeType = "application/vnd.google-apps.document"
 // opens in place and leaves a file of this type (architecture §7.5).
 const MarkdownMimeType = "text/markdown"
 
+// LegacyMarkdownMimeType is the type older tables give a .md. Drive keeps
+// a file under it as sent, and the Docs API reads it as Markdown all the
+// same, refusing every write just as it does for text/markdown (§18).
+const LegacyMarkdownMimeType = "text/x-markdown"
+
+// IsMarkdownMimeType reports whether a Drive file of this type is a
+// Markdown file Docs opens in place.
+func IsMarkdownMimeType(mime string) bool {
+	return mime == MarkdownMimeType || mime == LegacyMarkdownMimeType
+}
+
 // ExportMimeTypes maps short format names to Drive export MIME types.
 var ExportMimeTypes = map[string]string{
 	"pdf":  "application/pdf",

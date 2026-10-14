@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-10-14
+
 ### Fixed
 
 - A Markdown file Drive keeps under the older type `text/x-markdown` is a Markdown file. Docs opens one in place and the Docs API refuses to write to it, as it does for `text/markdown`, but the server took it for a Google Doc, so every write failed. It now takes the Markdown path, `search_documents` with `kind: markdown_file` finds it, and a write keeps its type.

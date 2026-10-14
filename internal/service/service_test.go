@@ -44,6 +44,7 @@ type fakeAPI struct {
 	replies         []string
 	created         []string
 	searchQ         string
+	searchFiles     []*gapi.File
 	exported        string
 	comments        []*gapi.DriveComment
 	listErr         error
@@ -239,6 +240,9 @@ func (f *fakeAPI) CreateDocument(_ context.Context, title string) (*gdocs.Docume
 
 func (f *fakeAPI) SearchFiles(_ context.Context, q string, limit int, pageToken string) (*gapi.FileList, error) {
 	f.searchQ = q
+	if f.searchFiles != nil {
+		return &gapi.FileList{Files: f.searchFiles}, nil
+	}
 	return &gapi.FileList{Files: []*gapi.File{{ID: "d1", Name: "Doc One", ModifiedTime: "2026-09-01T00:00:00Z", WebViewLink: "https://docs.google.com/document/d/d1/edit", Owners: []*gapi.User{{EmailAddress: "o@example.test"}}}}, NextPageToken: "next"}, nil
 }
 

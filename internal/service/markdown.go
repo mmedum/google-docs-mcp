@@ -72,13 +72,9 @@ func (m *mdFile) url() string {
 
 // mime is the type an upload to the file is sent as: its own, so that a
 // text/x-markdown file is not retyped, since Drive makes the uploaded
-// type the file's.
-func (m *mdFile) mime() string {
-	if gapi.IsMarkdownMimeType(m.meta.MimeType) {
-		return m.meta.MimeType
-	}
-	return gapi.MarkdownMimeType
-}
+// type the file's. fetchMarkdown refuses any other type, so this is one
+// of the two.
+func (m *mdFile) mime() string { return m.meta.MimeType }
 
 // revision is what a Markdown file's revision_id is: Drive's head
 // revision, which every upload moves.
@@ -165,7 +161,7 @@ func (s *Service) fetchMarkdown(ctx context.Context, ref string, meta *gapi.File
 			// Retyped since this session asked, by an upload sent as
 			// another type: the Docs API refuses a text/plain .md.
 			s.rememberKind(id, false)
-			return nil, Errorf("unsupported", "the file is %s now, not a Markdown file; Docs opens a .md file in place only while it is typed %s", meta.MimeType, gapi.MarkdownMimeType)
+			return nil, Errorf("unsupported", "the file is %s now, not a Markdown file; Docs opens a .md file in place only while it is typed %s or %s", meta.MimeType, gapi.MarkdownMimeType, gapi.LegacyMarkdownMimeType)
 		}
 		if size, _ := strconv.ParseInt(meta.Size, 10, 64); size > mdMaxRead {
 			return nil, Errorf("unsupported", "the Markdown file is %d bytes; this server reads files up to %d", size, mdMaxRead)
@@ -240,7 +236,7 @@ func (s *Service) mdInfo(ctx context.Context, ref string, meta *gapi.File) (*Inf
 	info.Capabilities = s.mdCapabilities(m)
 	var b strings.Builder
 	info.writeIdentity(&b, " (Drive's head revision; it moves on every save and upload)")
-	fmt.Fprintf(&b, "Markdown file (%s), %d bytes: Docs opens it in place, and this server reads and writes it as its own text through Drive\n", gapi.MarkdownMimeType, info.Bytes)
+	fmt.Fprintf(&b, "Markdown file (%s), %d bytes: Docs opens it in place, and this server reads and writes it as its own text through Drive\n", m.mime(), info.Bytes)
 	fmt.Fprintf(&b, "%d headings, %d words, %d comment(s) made in the Docs editor\n", info.Stats.Headings, info.Stats.Words, comments)
 	info.writeServer(&b)
 	if c := info.Capabilities; c.DefaultWriteMode == string(config.WriteSuggest) && len(c.WriteModes) > 0 {

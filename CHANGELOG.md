@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-14
+
 ### Added
 
 - Markdown files. Docs now opens a `.md` file stored in Drive and edits

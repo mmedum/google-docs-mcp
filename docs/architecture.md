@@ -1,9 +1,10 @@
 # Architecture — google-docs-mcp
 
-**Status:** v2.2.0 (released 2026-10-10, live run green). Markdown
-content takes tables and images, and text read as markdown writes back
-unchanged. `replace_all` takes a regular expression, a document can be
-pageless, and a link can point at a heading or a tab. Comments and
+**Status:** v2.3.0 (released 2026-10-14, live run green). A Markdown
+file stored in Drive, which Docs edits in place, is read, edited and
+commented on as the text it is, through a write protocol that keeps the
+editor's unsaved work (§7.5). A Google Doc working copy carries a live
+session's work back to the file, block by block. Comments and
 suggestions are generally available and detected per read rather than
 gated on a flag (§18). Since v2.0.1 a write that may have landed is
 reported as `[ambiguous_outcome]` instead of being repeated. It asks the

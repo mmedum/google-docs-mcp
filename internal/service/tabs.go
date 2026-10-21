@@ -81,6 +81,9 @@ func (s *Service) tabChange(ctx context.Context, req TabRequest, action string, 
 	if err := s.requireWritable(); err != nil {
 		return nil, err
 	}
+	if err := s.wordUnsupported(ctx, req.Document); err != nil {
+		return nil, err
+	}
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
 		return nil, err

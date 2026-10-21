@@ -192,30 +192,38 @@ func runProbes(t *testing.T, probes []probe) {
 	c := probeClient(t)
 	ctx := context.Background()
 	for _, p := range probes {
-		created, err := c.CreateDocument(ctx, "google-docs-mcp suggested-style probe (safe to delete)")
-		if err != nil {
-			t.Fatalf("%s: create: %v", p.name, err)
-		}
-		id := created.DocumentID
-		if _, err := c.BatchUpdate(ctx, id, &BatchUpdateRequest{
-			Requests: []json.RawMessage{insertAt(t, p.seed, 1)}}); err != nil {
-			t.Fatalf("%s: seed: %v", p.name, err)
-		}
-		for i, r := range p.rounds {
-			res, err := c.BatchUpdate(ctx, id, &BatchUpdateRequest{Requests: r.reqs, WriteControl: r.wc})
-			if err != nil {
-				t.Fatalf("%s: round %d: %v", p.name, i, err)
-			}
-			// An empty reply is the tell: the batch was accepted and the
-			// API is saying nothing about what it did.
-			reply, _ := json.Marshal(res.Replies)
-			t.Logf("%s: round %d replies: %s", p.name, i, reply)
-		}
+		id := probeDoc(t, c, ctx, p.name, "google-docs-mcp suggested-style probe (safe to delete)",
+			[]json.RawMessage{insertAt(t, p.seed, 1)}, p.rounds)
 		t.Logf("--- %s ---\n%s", p.name, rawElements(t, c, ctx, id))
 		// Google's own answer to what the suggestions will do.
 		t.Logf("--- %s accepted ---\n%s", p.name, rawView(t, c, ctx, id, SuggestionsPreviewAccepted))
 	}
 	t.Logf("=== %d scratch documents left behind; Drive search title:\"safe to delete\" finds them ===", len(probes))
+}
+
+// probeDoc makes one scratch document under title, sends the seed batch
+// and then each round, logging the replies, and returns its id.
+func probeDoc(t *testing.T, c *Client, ctx context.Context, name, title string, seed []json.RawMessage, rounds []round) string {
+	t.Helper()
+	created, err := c.CreateDocument(ctx, title)
+	if err != nil {
+		t.Fatalf("%s: create: %v", name, err)
+	}
+	id := created.DocumentID
+	if _, err := c.BatchUpdate(ctx, id, &BatchUpdateRequest{Requests: seed}); err != nil {
+		t.Fatalf("%s: seed: %v", name, err)
+	}
+	for i, r := range rounds {
+		res, err := c.BatchUpdate(ctx, id, &BatchUpdateRequest{Requests: r.reqs, WriteControl: r.wc})
+		if err != nil {
+			t.Fatalf("%s: round %d: %v", name, i, err)
+		}
+		// An empty reply is the tell: the batch was accepted and the
+		// API is saying nothing about what it did.
+		reply, _ := json.Marshal(res.Replies)
+		t.Logf("%s: round %d replies: %s", name, i, reply)
+	}
+	return id
 }
 
 // rawElements is the first tab's paragraph elements, from the untouched
@@ -228,6 +236,18 @@ func rawElements(t *testing.T, c *Client, ctx context.Context, id string) string
 
 func rawView(t *testing.T, c *Client, ctx context.Context, id, view string) string {
 	t.Helper()
+	var whole map[string]any
+	if err := json.Unmarshal(rawBody(t, c, ctx, id, view), &whole); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	out, _ := json.Marshal(elementsOf(whole))
+	return string(out)
+}
+
+// rawBody is the untouched documents.get body, with every tab's content
+// and suggestions in the given view.
+func rawBody(t *testing.T, c *Client, ctx context.Context, id, view string) []byte {
+	t.Helper()
 	q := url.Values{}
 	q.Set("includeTabsContent", "true")
 	q.Set("suggestionsViewMode", view)
@@ -235,12 +255,7 @@ func rawView(t *testing.T, c *Client, ctx context.Context, id, view string) stri
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	var whole map[string]any
-	if err := json.Unmarshal(body, &whole); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	out, _ := json.Marshal(elementsOf(whole))
-	return string(out)
+	return body
 }
 
 // elementsOf digs the first tab's body elements out of a decoded

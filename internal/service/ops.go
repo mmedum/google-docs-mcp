@@ -127,8 +127,8 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	md, file := s.kind(ctx, id)
-	if md {
+	mime, file := s.kind(ctx, id)
+	if gapi.IsMarkdownMimeType(mime) {
 		return s.mdInfo(ctx, id, file)
 	}
 	type fileResult struct {
@@ -152,6 +152,10 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 	}
 	d := f.Doc
 	info := &Info{ID: d.ID, Title: d.Title, Kind: KindDocument, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities(f)}
+	if mime == gapi.WordMimeType {
+		info.Capabilities.WriteModes, info.Capabilities.DefaultWriteMode = []string{}, ""
+		info.Warnings = append(info.Warnings, wordFileNote)
+	}
 	for _, t := range d.Tabs {
 		ti := TabInfo{Number: t.Number, ID: t.ID, Title: t.Title, Nesting: t.Nesting, Blocks: len(t.Body.Blocks),
 			Headers: len(t.Headers), Footers: len(t.Footers), Footnotes: len(t.Footnotes), Page: t.Page}
@@ -269,11 +273,11 @@ func (i *Info) writeIdentity(b *strings.Builder, revisionNote string) {
 // writeServer is the line on what this server can do with the document.
 func (i *Info) writeServer(b *strings.Builder) {
 	c := i.Capabilities
-	modes := strings.Join(c.WriteModes, "/")
-	if modes == "" {
-		modes = "none"
+	if len(c.WriteModes) == 0 {
+		fmt.Fprintf(b, "server: write modes none, read-only %t\n", c.ReadOnly)
+		return
 	}
-	fmt.Fprintf(b, "server: write modes %s (default %s), read-only %t\n", modes, c.DefaultWriteMode, c.ReadOnly)
+	fmt.Fprintf(b, "server: write modes %s (default %s), read-only %t\n", strings.Join(c.WriteModes, "/"), c.DefaultWriteMode, c.ReadOnly)
 }
 
 // writeExtras lists what a tab holds that a read of its text does not

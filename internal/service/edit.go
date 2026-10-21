@@ -181,6 +181,9 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 	if s.isMarkdown(ctx, req.Document) {
 		res, err = s.mdEdit(ctx, req)
 	} else {
+		if err := s.wordUnsupported(ctx, req.Document); err != nil {
+			return nil, err
+		}
 		var f *Fetched
 		if f, err = s.FetchFresh(ctx, req.Document); err != nil {
 			return nil, err
@@ -600,7 +603,7 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	p.TargetText = r.Text
 	p.TargetAligned = r.Aligned
 	p.Description = r.Description
-	p.NearBullet = hasBullet(r.Block)
+	p.List = targetList(r)
 	if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
 		p.Anchors = f.anchorsIn(r.Segment, r.Start, r.End, out.threads)
 	}
@@ -747,7 +750,7 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 				end := b.Start + doc.UTF16Len(aligned[:m[1]])
 				rng := plan.Rng{Start: start, End: end, SegmentID: seg.ID, TabID: tab.ID}
 				p := plan.Op{Seq: op.Seq, Kind: plan.OpDelete, Seg: bounds, Target: &rng, TargetText: aligned[m[0]:m[1]],
-					TargetAligned: aligned[m[0]:m[1]], NearBullet: hasBullet(b), Anchors: f.anchorsIn(seg, start, end, out.threads)}
+					TargetAligned: aligned[m[0]:m[1]], List: plan.ListContext{At: listItem(tab, b)}, Anchors: f.anchorsIn(seg, start, end, out.threads)}
 				if repl := string(re.ExpandString(nil, op.Replace, aligned, m)); repl != "" {
 					p.Kind, p.Fragment = plan.OpReplace, markdown.Plain(repl)
 				}
@@ -864,7 +867,7 @@ type insertPoint struct {
 	inline      bool
 	fills       bool  // the paragraph is blank, so the content styles it
 	clearTo     int64 // whitespace in that paragraph the content replaces
-	nearBullet  bool
+	list        plan.ListContext
 	description string
 	anchor      *plan.Rng
 }
@@ -882,7 +885,7 @@ func (ip *insertPoint) atBlank(b *doc.Block) {
 func (ip *insertPoint) fill(p *plan.Op, out *resolvedOps) {
 	p.Seg = ip.bounds()
 	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
-	p.AtEnd, p.Inline, p.Fill, p.ClearTo, p.NearBullet = ip.atEnd, ip.inline, ip.fills, ip.clearTo, ip.nearBullet
+	p.AtEnd, p.Inline, p.Fill, p.ClearTo, p.List = ip.atEnd, ip.inline, ip.fills, ip.clearTo, ip.list
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
 	out.note(ip.tab.ID, ip.segment.ID, ip.index)
@@ -931,19 +934,19 @@ func (s *Service) segmentEdge(f *Fetched, t Target, at string) (*insertPoint, er
 		if first.Kind == doc.KindTable {
 			return nil, Errorf("invalid", "%s starts with a table; insert after it or before the first paragraph", segmentName(tab, seg))
 		}
-		ip.index, ip.nearBullet, ip.description, ip.anchor = first.Start, hasBullet(first), "start of "+segmentName(tab, seg), blockRng(tab, seg, first)
+		ip.index, ip.list, ip.description, ip.anchor = first.Start, listAround(tab, seg, first), "start of "+segmentName(tab, seg), blockRng(tab, seg, first)
 		if first.IsBlankParagraph() {
 			ip.atBlank(first)
 		}
 	case "end":
 		last := content[len(content)-1]
 		ip.description, ip.anchor = "end of "+segmentName(tab, seg), blockRng(tab, seg, last)
-		ip.nearBullet = hasBullet(last)
 		if last.IsBlankParagraph() {
 			// Fill the blank paragraph instead of leaving it above the content.
 			ip.atBlank(last)
+			ip.list = listAround(tab, seg, last)
 		} else {
-			ip.index, ip.atEnd = last.End-1, true
+			ip.index, ip.atEnd, ip.list = last.End-1, true, listAfter(tab, seg, last, last)
 		}
 	default:
 		return nil, Errorf("invalid", "location %q needs a target (of) to be before or after", at)
@@ -964,9 +967,9 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 			if prev == nil {
 				return nil, Errorf("invalid", "cannot insert before %s: the table is the first block; insert after it instead", first.Handle)
 			}
-			ip.index, ip.atEnd, ip.nearBullet, ip.anchor = prev.End-1, true, hasBullet(prev), blockRng(tab, seg, prev)
+			ip.index, ip.atEnd, ip.list, ip.anchor = prev.End-1, true, listAfter(tab, seg, prev, prev), blockRng(tab, seg, prev)
 		} else {
-			ip.index, ip.nearBullet, ip.anchor = first.Start, hasBullet(first), blockRng(tab, seg, first)
+			ip.index, ip.list, ip.anchor = first.Start, listAround(tab, seg, first), blockRng(tab, seg, first)
 		}
 		ip.description = "before " + r.Description
 	case "after", "end":
@@ -978,16 +981,16 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 			if last.Kind == doc.KindTable {
 				return nil, Errorf("invalid", "cannot insert after %s: a table with no paragraph after it; insert before the next paragraph instead", last.Handle)
 			}
-			ip.index, ip.atEnd, ip.nearBullet = last.End-1, true, hasBullet(last)
+			ip.index, ip.atEnd, ip.list = last.End-1, true, listAfter(tab, seg, last, last)
 		default:
-			ip.index, ip.nearBullet = last.End, hasBullet(next)
+			ip.index, ip.list = last.End, listAfter(tab, seg, last, next)
 		}
 		ip.anchor, ip.description = blockRng(tab, seg, last), "after "+r.Description
 	case "start":
 		if first.Kind != doc.KindParagraph {
 			return nil, Errorf("invalid", "start of %s is not a paragraph", first.Handle)
 		}
-		ip.index, ip.inline, ip.nearBullet, ip.anchor, ip.description = first.Start, true, hasBullet(first), blockRng(tab, seg, first), "start of "+r.Description
+		ip.index, ip.inline, ip.list, ip.anchor, ip.description = first.Start, true, listAround(tab, seg, first), blockRng(tab, seg, first), "start of "+r.Description
 		if first.IsBlankParagraph() {
 			ip.atBlank(first)
 		}
@@ -999,7 +1002,7 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 
 // textRelative positions inline next to a text match or cell content.
 func textRelative(r *TargetRange, at string) (*insertPoint, error) {
-	ip := &insertPoint{tab: r.Tab, segment: r.Segment, inline: true, nearBullet: hasBullet(r.Block)}
+	ip := &insertPoint{tab: r.Tab, segment: r.Segment, inline: true, list: listAround(r.Tab, r.Segment, r.Block)}
 	switch at {
 	case "before", "start":
 		ip.index = r.Start
@@ -1018,8 +1021,72 @@ func textRelative(r *TargetRange, at string) (*insertPoint, error) {
 	return ip, nil
 }
 
-func hasBullet(b *doc.Block) bool {
-	return b != nil && b.Paragraph != nil && b.Paragraph.Bullet != nil
+// listItem is b as the planner sees a list item, nil when it is none.
+func listItem(tab *doc.Tab, b *doc.Block) *plan.ListItem {
+	if b == nil || b.Paragraph == nil || b.Paragraph.Bullet == nil {
+		return nil
+	}
+	bl := b.Paragraph.Bullet
+	return &plan.ListItem{Level: bl.Nesting, Ordered: bl.Ordered, Preset: plan.PresetOf(tab.Lists[bl.ListID]), Start: b.Start}
+}
+
+// siblings is the run of blocks b sits in: those of the table cell
+// holding it, or the segment's own.
+func siblings(seg *doc.Segment, b *doc.Block) []*doc.Block {
+	if b != nil && b.Cell != nil {
+		return b.Cell.Blocks
+	}
+	return seg.Blocks
+}
+
+// listFrom is blocks[i] and the list items before it, nearest first, back
+// to a top-level one or to the first block that is no list item: as far
+// back as the planner can need to rebuild.
+func listFrom(tab *doc.Tab, blocks []*doc.Block, i int) []plan.ListItem {
+	var out []plan.ListItem
+	for ; i >= 0; i-- {
+		it := listItem(tab, blocks[i])
+		if it == nil {
+			break
+		}
+		out = append(out, *it)
+		if it.Level == 0 {
+			break
+		}
+	}
+	return out
+}
+
+// listAround is the list for content placed against b that lands at its
+// start, or in it.
+func listAround(tab *doc.Tab, seg *doc.Segment, b *doc.Block) plan.ListContext {
+	bs := siblings(seg, b)
+	return plan.ListContext{At: listItem(tab, b), Anchor: listItem(tab, b), Preceding: listFrom(tab, bs, slices.Index(bs, b)-1)}
+}
+
+// listAfter is the list for content that lands after anchor's text, in
+// at: anchor itself when the content borrows its newline, else the
+// block after it.
+func listAfter(tab *doc.Tab, seg *doc.Segment, anchor, at *doc.Block) plan.ListContext {
+	bs := siblings(seg, anchor)
+	return plan.ListContext{At: listItem(tab, at), Anchor: listItem(tab, anchor), Preceding: listFrom(tab, bs, slices.Index(bs, anchor))}
+}
+
+// targetList is the list around a target a replacement writes over: its
+// first block is what the content is placed against and first lands in.
+func targetList(r *TargetRange) plan.ListContext {
+	first, last := r.Block, r.Block
+	if len(r.Blocks) > 0 {
+		first, last = r.Blocks[0], r.Blocks[len(r.Blocks)-1]
+	}
+	lc := listAround(r.Tab, r.Segment, first)
+	if r.IsBlock {
+		bs := siblings(r.Segment, last)
+		if i := slices.Index(bs, last); i >= 0 && i+1 < len(bs) {
+			lc.After = listItem(r.Tab, bs[i+1])
+		}
+	}
+	return lc
 }
 
 func blockRng(tab *doc.Tab, seg *doc.Segment, b *doc.Block) *plan.Rng {

@@ -61,7 +61,7 @@ func TestCompileFragmentLayout(t *testing.T) {
 	for _, r := range c.Requests {
 		kinds = append(kinds, Kind(r))
 	}
-	want := "insertText updateTextStyle updateParagraphStyle updateParagraphStyle updateTextStyle updateParagraphStyle updateParagraphStyle updateParagraphStyle updateParagraphStyle updateTextStyle createParagraphBullets createParagraphBullets"
+	want := "insertText updateTextStyle updateParagraphStyle updateParagraphStyle updateTextStyle updateParagraphStyle updateParagraphStyle updateParagraphStyle updateParagraphStyle updateTextStyle updateParagraphStyle createParagraphBullets updateParagraphStyle createParagraphBullets"
 	if got := strings.Join(kinds, " "); got != want {
 		t.Fatalf("kinds:\n got %s\nwant %s", got, want)
 	}
@@ -87,10 +87,12 @@ func TestCompileFragmentLayout(t *testing.T) {
 	if code.rng != [2]int64{48, 52} || code.body["textStyle"].(map[string]any)["weightedFontFamily"].(map[string]any)["fontFamily"] != CodeFont {
 		t.Fatalf("code: %+v", code)
 	}
-	// Lists last, descending: numbered "first" (42..47) before bullets (33..41 covers "one\n\ttwo").
-	num := view(t, c.Requests[10])
+	// Lists last, lowest first: bullets (33..41 covers "one\n\ttwo"), then
+	// numbered "first", laid out at 42..47 and one earlier once the bullets
+	// have consumed their tab.
 	bul := view(t, c.Requests[11])
-	if num.rng != [2]int64{42, 47} || num.body["bulletPreset"] != NumberedPreset {
+	num := view(t, c.Requests[13])
+	if num.rng != [2]int64{41, 46} || num.body["bulletPreset"] != NumberedPreset {
 		t.Fatalf("numbered: %+v", num)
 	}
 	if bul.rng != [2]int64{33, 41} || bul.body["bulletPreset"] != BulletPreset {
@@ -100,7 +102,7 @@ func TestCompileFragmentLayout(t *testing.T) {
 
 func TestCompileFragmentPrefixAndBullets(t *testing.T) {
 	f := frag(t, "tail")
-	c, err := CompileFragment(f, Loc{Index: 99, SegmentID: "kix.h1"}, FragmentOptions{Prefix: true, NearBullet: true})
+	c, err := CompileFragment(f, Loc{Index: 99, SegmentID: "kix.h1"}, FragmentOptions{Prefix: true, Inherited: &ListItem{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +113,7 @@ func TestCompileFragmentPrefixAndBullets(t *testing.T) {
 	for _, r := range c.Requests {
 		kinds = append(kinds, Kind(r))
 	}
-	if strings.Join(kinds, " ") != "insertText updateTextStyle updateParagraphStyle deleteParagraphBullets" {
+	if strings.Join(kinds, " ") != "insertText updateTextStyle updateParagraphStyle deleteParagraphBullets updateParagraphStyle" {
 		t.Fatalf("kinds = %v", kinds)
 	}
 	if v := view(t, c.Requests[3]); v.rng != [2]int64{100, 104} || v.body["range"].(map[string]any)["segmentId"] != "kix.h1" {
@@ -137,7 +139,7 @@ func TestCompileFragmentPrefixAndBullets(t *testing.T) {
 // where a later round puts it, at the index it has once the batch lands.
 func TestCompileFragmentSlots(t *testing.T) {
 	f := frag(t, "Intro\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n![x](https://e.test/x.png)\n\nEnd")
-	c, err := CompileFragment(f, Loc{Index: 10}, FragmentOptions{Suffix: true, NearBullet: true, Slots: true})
+	c, err := CompileFragment(f, Loc{Index: 10}, FragmentOptions{Suffix: true, Inherited: &ListItem{}, Slots: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,8 +159,8 @@ func TestCompileFragmentSlots(t *testing.T) {
 			styled = append(styled, fmt.Sprintf("%s %d-%d", v.kind, v.rng[0], v.rng[1]))
 		}
 	}
-	want := "updateParagraphStyle 10-15, deleteParagraphBullets 10-15, updateParagraphStyle 16-17, deleteParagraphBullets 16-17, " +
-		"updateParagraphStyle 17-18, deleteParagraphBullets 17-18, updateParagraphStyle 18-21, deleteParagraphBullets 18-21"
+	want := "updateParagraphStyle 10-15, deleteParagraphBullets 10-15, updateParagraphStyle 10-15, updateParagraphStyle 16-17, deleteParagraphBullets 16-17, updateParagraphStyle 16-17, " +
+		"updateParagraphStyle 17-18, deleteParagraphBullets 17-18, updateParagraphStyle 17-18, updateParagraphStyle 18-21, deleteParagraphBullets 18-21, updateParagraphStyle 18-21"
 	if got := strings.Join(styled, ", "); got != want {
 		t.Fatalf("paragraphs:\n got %s\nwant %s", got, want)
 	}

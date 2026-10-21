@@ -8,6 +8,14 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Nested list items written next to an existing list land at their level. Google turns a list item's leading tabs into its level only on a paragraph without a bullet, and inserted paragraphs take the bullet of the one they land in, so content inserted before, into or in place of a list item came out with its sub-items at the top level, a literal tab before their text, in every write mode. A list item that took the right bullet now keeps it, staying in its list; the rest are rebuilt so levels count from the right item. A list written against a list item continues it at that item's level when their kinds match. Reported by a user.
+- A paragraph or list inserted inside a list no longer keeps the indent of the bullet it dropped.
+- Replacing text inside a paragraph with content that is not plain text, such as **bold** or more than one paragraph, keeps that paragraph's style. A list item lost its bullet and a heading became body text, because the content's first paragraph, which merges into the one it lands in, was styled as a paragraph of its own.
+- A table or image placed after a nested list in the same content lands where it should: its place now counts the tabs the list consumes.
+- A Word file (.docx) is refused up front by every write that goes through the Docs API (edits of every kind, reviewing suggestions, tabs, a comment pinned to a passage, a reply on a suggestion), a dry run included, and `get_document` offers it no write mode. Docs reads one like a Google Doc, but Google refuses every edit to an Office file, so these used to plan the change and then fail; the refusal now says how to edit one.
+
 ## [2.3.1] - 2026-10-14
 
 ### Fixed

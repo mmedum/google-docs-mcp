@@ -135,6 +135,9 @@ type AddCommentResult struct {
 	Text       string   `json:"-"`
 }
 
+// pinned says the comment names a passage to be pinned to.
+func (r AddCommentRequest) pinned() bool { return r.Target != nil && r.Target.selectorCount() > 0 }
+
 // AddComment posts a comment on a target. When the read had the comments
 // view it is pinned to the target's range; otherwise it goes through the
 // Drive API quoting the text, which the editor shows unanchored.
@@ -149,6 +152,12 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	if s.isMarkdown(ctx, req.Document) {
 		return s.mdAddComment(ctx, req, content)
 	}
+	if req.pinned() {
+		// Pinned to a passage is a Docs API write.
+		if err := s.wordUnsupported(ctx, req.Document); err != nil {
+			return nil, err
+		}
+	}
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
 		return nil, err
@@ -158,7 +167,7 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	}
 	res := &AddCommentResult{RevisionID: f.Doc.RevisionID}
 	var r *TargetRange
-	if req.Target != nil && req.Target.selectorCount() > 0 {
+	if req.pinned() {
 		if r, err = s.ResolveTarget(f, *req.Target); err != nil {
 			return nil, err
 		}
@@ -360,6 +369,9 @@ func replyAction(req ReplyRequest) (string, string, error) {
 // comments do not include these threads, so the reply goes through the
 // Docs API and needs the comments view.
 func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, content string) (*ReplyResult, error) {
+	if err := s.wordUnsupported(ctx, ref); err != nil {
+		return nil, err
+	}
 	f, err := s.FetchFresh(ctx, ref)
 	if err != nil {
 		return nil, err

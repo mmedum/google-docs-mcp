@@ -44,7 +44,7 @@ func TestTableOpsResolve(t *testing.T) {
 		{"style", EditOp{Kind: plan.OpStyleCells, Table: &TableOp{Table: "tbl1", FromCell: "r2c1", Style: plan.CellStyleSpec{Background: "#ffff00"}}}, "updateTableCellStyle", []string{`"rowIndex":1`, `"columnIndex":0`, `"rowSpan":1`, `"backgroundColor"`}},
 		{"pin", EditOp{Kind: plan.OpPinHeaderRows, Table: &TableOp{Table: "tbl1", Count: 1}}, "pinTableHeaderRows", []string{`"pinnedHeaderRowsCount":1`}},
 		{"set cells grid", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Data: [][]string{{"Name", "Score"}, {"Beta", "2"}}}}, "deleteContentRange[155,156) insertText@155 deleteContentRange[148,152) insertText@148 deleteContentRange[141,145) insertText@141", []string{`"text":"Bet"`, `"text":"Scor"`}},
-		{"set cells list with markdown", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: "**two**\nlines"}}}}, "deleteContentRange[155,156) insertText@155 updateTextStyle[155,164) updateParagraphStyle[155,164) updateTextStyle[155,158)", []string{`"text":"two lines"`}},
+		{"set cells list with markdown", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: "**two**\nlines"}}}}, "deleteContentRange[155,156) insertText@155 updateTextStyle[155,164) updateTextStyle[155,158)", []string{`"text":"two lines"`}},
 		{"set cells clears", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: ""}}}}, "deleteContentRange[155,156)", nil},
 	}
 	for _, tc := range cases {

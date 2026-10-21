@@ -118,10 +118,15 @@ func IsMarkdownMimeType(mime string) bool {
 	return mime == MarkdownMimeType || mime == LegacyMarkdownMimeType
 }
 
+// WordMimeType is the Drive MIME type of a Word file (.docx). The Docs
+// API reads one as a document and refuses every write to it, as an
+// Office file (spike G).
+const WordMimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
 // ExportMimeTypes maps short format names to Drive export MIME types.
 var ExportMimeTypes = map[string]string{
 	"pdf":  "application/pdf",
-	"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	"docx": WordMimeType,
 	"odt":  "application/vnd.oasis.opendocument.text",
 	"rtf":  "application/rtf",
 	"txt":  "text/plain",

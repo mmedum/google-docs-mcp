@@ -86,7 +86,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	for _, f := range list.Files {
 		h := SearchHit{ID: f.ID, Title: f.Name, Kind: KindDocument, URL: f.WebViewLink, Modified: f.ModifiedTime, ModifiedBy: userLabel(f.LastModifyingUser)}
 		if f.MimeType != "" {
-			s.rememberKind(f.ID, gapi.IsMarkdownMimeType(f.MimeType))
+			s.rememberKind(f.ID, f.MimeType)
 		}
 		if gapi.IsMarkdownMimeType(f.MimeType) {
 			h.Kind = KindMarkdownFile

@@ -114,8 +114,8 @@ type Op struct {
 	// than the insertion point, is the whitespace the fill replaces.
 	Fill    bool
 	ClearTo int64
-	// NearBullet says the paragraph at the insertion point is a list item.
-	NearBullet bool
+	// List is the list around the insertion point or the target.
+	List ListContext
 
 	Fragment *markdown.Fragment
 	// Slots are where the fragment's tables and images wait, set when
@@ -701,7 +701,7 @@ func contentRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
 		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline,
-			Inline: op.Inline, Fill: op.Fill, NearBullet: op.NearBullet, Slots: inBody(op),
+			Inline: op.Inline, Fill: op.Fill, Inherited: op.List.At, List: op.List, Slots: inBody(op),
 			Isolate: mode == ModeSuggest && op.ClearTo > op.Insert.Index})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
@@ -794,19 +794,33 @@ func replaceRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	if del.End > del.Start {
 		reqs = append(reqs, DeleteRange(del))
 	}
-	opts := FragmentOptions{NearBullet: op.NearBullet, Slots: inBody(op) && op.TargetIsBlock}
+	// The new paragraphs take the style of the paragraph the text lands
+	// in (spike F): the target's own while its deletion is a suggestion
+	// or it is the segment's only block, the one after it once it is
+	// gone, and the one before a last block, whose newline it lost.
+	opts := FragmentOptions{Inherited: op.List.At, List: op.List, Slots: inBody(op) && op.TargetIsBlock}
 	at := Loc{Index: del.Start, SegmentID: seg.ID, TabID: seg.TabID}
 	switch {
 	case !op.TargetIsBlock:
-		// Inside a paragraph: the first fragment paragraph merges with it.
+		// Inside a paragraph: the first fragment paragraph merges with it
+		// and keeps its style, as an insertion inside one does. A list
+		// item keeps its bullet, a heading its level.
+		opts.Inline = true
 	case op.Target.End >= seg.End && op.Target.Start > seg.Start:
 		// Last block: we deleted the newline before it; re-add it in front.
 		opts.Prefix = true
+		opts.Inherited = nil
+		if len(op.List.Preceding) > 0 {
+			opts.Inherited = &op.List.Preceding[0]
+		}
 	case op.Target.End >= seg.End:
 		// Only block in the segment: text sits before the final newline.
 		opts.Isolate = mode == ModeSuggest
 	default:
 		opts.Suffix = true
+		if mode != ModeSuggest {
+			opts.Inherited = op.List.After
+		}
 	}
 	c, err := CompileFragment(op.Fragment, at, opts)
 	if err != nil {

@@ -80,47 +80,46 @@ func (m *mdFile) mime() string { return m.meta.MimeType }
 // revision, which every upload moves.
 func (m *mdFile) revision() string { return m.meta.HeadRevisionID }
 
-// kind asks Drive once per id per session whether a document is a
-// Markdown file, and returns the metadata when this call is the one
-// that asked, for a caller that would fetch it anyway. Drive refusing
-// the id is remembered as a Google Doc, which the Docs API then answers
-// for; a failure that may pass is not remembered.
-func (s *Service) kind(ctx context.Context, ref string) (bool, *gapi.File) {
+// kind asks Drive once per id per session what type a document is, and
+// returns the metadata when this call is the one that asked, for a caller
+// that would fetch it anyway. Drive refusing the id is remembered as a
+// Google Doc, which the Docs API then answers for; a failure that may
+// pass is not remembered.
+func (s *Service) kind(ctx context.Context, ref string) (string, *gapi.File) {
 	id, err := parseRef(ref)
 	if err != nil {
-		return false, nil
+		return "", nil
 	}
 	s.mu.Lock()
 	k, ok := s.kinds[id]
 	s.mu.Unlock()
 	if ok && (k.until.IsZero() || s.now().Before(k.until)) {
-		return k.md, nil
+		return k.mime, nil
 	}
 	file, err := s.api.GetFile(ctx, id)
 	switch {
 	case err == nil && file != nil:
-		md := gapi.IsMarkdownMimeType(file.MimeType)
-		s.rememberKind(id, md)
-		return md, file
+		s.rememberKind(id, file.MimeType)
+		return file.MimeType, file
 	case errors.Is(err, gapi.ErrNotFound) || errors.Is(err, gapi.ErrForbidden):
-		s.rememberKind(id, false)
+		s.rememberKind(id, gapi.DocumentMimeType)
 	default:
 		// Drive may be failing for a while; every call paying a failing
 		// round trip, retries included, before the Docs API is asked
 		// would make that the Docs API's outage too.
 		s.mu.Lock()
-		s.kinds[id] = kindMemo{until: s.now().Add(kindRetryAfter)}
+		s.kinds[id] = kindMemo{mime: gapi.DocumentMimeType, until: s.now().Add(kindRetryAfter)}
 		s.mu.Unlock()
 	}
 	s.log.DebugContext(ctx, "could not ask Drive for the file's type; reading it as a Google Doc", "class", gapi.Class(err))
-	return false, nil
+	return gapi.DocumentMimeType, nil
 }
 
-// kindMemo is what a session remembers of a document's type: whether it
-// is a Markdown file, and, for a guess made because Drive could not be
-// asked, until when.
+// kindMemo is what a session remembers of a document's type: its Drive
+// type, and, for a guess made because Drive could not be asked, until
+// when.
 type kindMemo struct {
-	md    bool
+	mime  string
 	until time.Time
 }
 
@@ -131,13 +130,27 @@ const kindRetryAfter = time.Minute
 // that does not parse is not a Markdown file; the path it falls through
 // to says what is wrong with it.
 func (s *Service) isMarkdown(ctx context.Context, ref string) bool {
-	md, _ := s.kind(ctx, ref)
-	return md
+	mime, _ := s.kind(ctx, ref)
+	return gapi.IsMarkdownMimeType(mime)
 }
 
-func (s *Service) rememberKind(id string, md bool) {
+// wordUnsupported refuses a Docs API write to a Word file, which Google
+// reads like a Google Doc and refuses every write to (spike G); nil for
+// any other document.
+func (s *Service) wordUnsupported(ctx context.Context, ref string) error {
+	if mime, _ := s.kind(ctx, ref); mime == gapi.WordMimeType {
+		return Errorf("unsupported", "%s", wordFileNote)
+	}
+	return nil
+}
+
+// wordFileNote is what a person is told about a Word file.
+const wordFileNote = "this is a Word file (.docx): it reads like a Google Doc, but Google refuses every edit to an " +
+	"Office file, directly or as a suggestion; to edit it, save it as a Google Doc (File > Save as Google Docs) and edit that"
+
+func (s *Service) rememberKind(id string, mime string) {
 	s.mu.Lock()
-	s.kinds[id] = kindMemo{md: md}
+	s.kinds[id] = kindMemo{mime: mime}
 	s.mu.Unlock()
 }
 
@@ -160,7 +173,7 @@ func (s *Service) fetchMarkdown(ctx context.Context, ref string, meta *gapi.File
 		if !gapi.IsMarkdownMimeType(meta.MimeType) {
 			// Retyped since this session asked, by an upload sent as
 			// another type: the Docs API refuses a text/plain .md.
-			s.rememberKind(id, false)
+			s.rememberKind(id, meta.MimeType)
 			return nil, Errorf("unsupported", "the file is %s now, not a Markdown file; Docs opens a .md file in place only while it is typed %s or %s", meta.MimeType, gapi.MarkdownMimeType, gapi.LegacyMarkdownMimeType)
 		}
 		if size, _ := strconv.ParseInt(meta.Size, 10, 64); size > mdMaxRead {

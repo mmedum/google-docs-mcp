@@ -28,6 +28,9 @@ type FragmentOptions struct {
 	// List is the list around the insertion, which the list the content
 	// starts with lands in.
 	List ListContext
+	// ListLevel, when set, is the level that list takes, in place of the
+	// level of the list item the content is placed against.
+	ListLevel *int
 	// Inline says the insertion point is inside an existing paragraph:
 	// the first fragment paragraph merges into it and keeps its style.
 	Inline bool
@@ -66,6 +69,8 @@ type Compiled struct {
 	End   int64
 	// Slots are where the tables and images go, in order.
 	Slots []Slot
+	// Rebuilt counts the existing list items the lists rebuild.
+	Rebuilt int
 }
 
 type piece struct {
@@ -131,6 +136,9 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 	}
 
 	c := &Compiled{Text: text, Length: doc.UTF16Len(text), Start: contentStart, End: cursor}
+	for _, w := range windows {
+		c.Rebuilt += len(w.existing)
+	}
 	// A slot moves back by the tabs the lists before it consume.
 	var consumed int64
 	for _, p := range pieces {

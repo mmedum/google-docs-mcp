@@ -56,8 +56,9 @@ type EditOpInput struct {
 	Op            string         `json:"op" jsonschema:"insert, append, replace, delete, replace_all, insert_break (page break), insert_footnote, create_header, create_footer, delete_header, delete_footer, create_named_range, delete_named_range, replace_named_range"`
 	Target        *TargetInput   `json:"target,omitempty" jsonschema:"what replace, delete or replace_all (tab only) act on"`
 	Location      *LocationInput `json:"location,omitempty" jsonschema:"where insert, insert_break and insert_footnote go; append defaults to the end of the body"`
-	Content       string         `json:"content,omitempty" jsonschema:"new content as markdown: paragraphs, # headings, **bold**, *italic*, ~~strike~~, code, [links](url), bullet and numbered lists (nested by indentation; a list placed against a list item continues its list at its level, so to nest items under one, replace it with itself and them), tables (cells are plain text) and images (![alt](https://…) on a line of its own). Content with a table or image must be the only op in its call: its text lands first, then later batches place up to 10 tables and images."`
+	Content       string         `json:"content,omitempty" jsonschema:"new content as markdown: paragraphs, # headings, **bold**, *italic*, ~~strike~~, code, [links](url), bullet and numbered lists (nested by indentation; a list placed against a list item continues its list at its level unless list_level says otherwise), tables (cells are plain text) and images (![alt](https://…) on a line of its own). Content with a table or image must be the only op in its call: its text lands first, then later batches place up to 10 tables and images."`
 	ContentFormat string         `json:"content_format,omitempty" jsonschema:"markdown (default) or text for verbatim text, one paragraph per line"`
+	ListLevel     *int           `json:"list_level,omitempty" jsonschema:"insert, append and replace, for content that starts with a list: the level its top items take, 0 for the top of the list; by default the level of the list item it is placed against. One more than an item's level nests the content under it; 0 after a nested item puts it back at the top"`
 	Find          string         `json:"find,omitempty" jsonschema:"replace_all: the text to find"`
 	Replace       string         `json:"replace,omitempty" jsonschema:"replace_all: the replacement text (may be empty)"`
 	MatchCase     bool           `json:"match_case,omitempty" jsonschema:"replace_all: match case exactly. With regex the pattern decides instead: it is case-sensitive unless it starts with (?i)"`
@@ -156,7 +157,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolEdit)))
 			}
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
-				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}, Regex: o.Regex}
+				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase, ListLevel: o.ListLevel}, Regex: o.Regex}
 			eo.Location = o.Location.location()
 			if o.Name != "" || o.RangeID != "" || o.Text != "" {
 				eo.NamedRange = &plan.NamedRangeParams{Name: strings.TrimSpace(o.Name), ID: strings.TrimSpace(o.RangeID), Text: o.Text}

@@ -26,7 +26,13 @@ func listView(t *testing.T, reqs []json.RawMessage) string {
 		case "createParagraphBullets":
 			out = append(out, "bullets"+rangeStr(v.rng)+" "+v.body["bulletPreset"].(string))
 		case "updateParagraphStyle":
-			if v.body["fields"] == "indentStart,indentFirstLine" {
+			if v.body["fields"] != "indentStart,indentFirstLine" {
+				break
+			}
+			if ps := v.body["paragraphStyle"].(map[string]any); len(ps) > 0 {
+				dim := func(k string) any { return ps[k].(map[string]any)["magnitude"] }
+				out = append(out, fmt.Sprintf("setindent%s %v/%v", rangeStr(v.rng), dim("indentStart"), dim("indentFirstLine")))
+			} else {
 				out = append(out, "indent"+rangeStr(v.rng))
 			}
 		}
@@ -133,6 +139,37 @@ func TestCompileFragmentListLevels(t *testing.T) {
 			text: "a\n\tb\nc\n",
 			want: "indent[10,16) bullets[10,16) BULLET_DISC_CIRCLE_SQUARE",
 		},
+		{
+			// One level deeper than the item it follows: the list starts
+			// deeper than the item before it, so a temporary paragraph
+			// pins its fewest tabs.
+			name: "nested under an item by list_level",
+			src:  "- a\n  - b",
+			o: FragmentOptions{Suffix: true, ListLevel: new(1),
+				List: ListContext{Anchor: item(0), Preceding: []ListItem{{Level: 0, Preset: BulletPreset, Start: 4}}}},
+			text: "\ta\n\t\tb\n",
+			want: `indent[10,16) ins@10 "\n" bullets[10,17) BULLET_DISC_CIRCLE_SQUARE del[10,11)`,
+		},
+		{
+			// Back to the top after a nested item, which is rebuilt at its
+			// own level so the list can start above it.
+			name: "back to the top by list_level",
+			src:  "- t",
+			o: FragmentOptions{Suffix: true, ListLevel: new(0),
+				List: ListContext{Anchor: item(1), Preceding: []ListItem{{Level: 1, Preset: BulletPreset, Start: 6}, {Level: 0, Preset: BulletPreset, Start: 2}}}},
+			text: "t\n",
+			want: `ins@6 "\t" nobullets[6,12) indent[6,12) bullets[6,12) BULLET_DISC_CIRCLE_SQUARE`,
+		},
+		{
+			// The same, with the rebuilt item indented by hand: it gets
+			// its own indents back once its bullet is made again.
+			name: "a rebuilt item keeps a hand-set indent",
+			src:  "- t",
+			o: FragmentOptions{Suffix: true, ListLevel: new(0),
+				List: ListContext{Anchor: item(1), Preceding: []ListItem{{Level: 1, Preset: BulletPreset, Start: 6, IndentStart: 90, IndentFirstLine: 80}, {Level: 0, Preset: BulletPreset, Start: 2}}}},
+			text: "t\n",
+			want: `ins@6 "\t" nobullets[6,12) indent[6,12) bullets[6,12) BULLET_DISC_CIRCLE_SQUARE setindent[6,7) 90/80`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -237,5 +274,36 @@ func TestPlanReplaceTextInListItem(t *testing.T) {
 	}
 	if got := kinds(t, res); got != "del[32,35) ins@32 updateTextStyle[32,35) updateTextStyle[32,35)" {
 		t.Fatalf("requests = %s", got)
+	}
+}
+
+// list_level goes only where a list starts the content, at a level a list
+// has, and a rebuild in suggest mode says what the person will see.
+func TestPlanListLevel(t *testing.T) {
+	list := ListContext{Anchor: &ListItem{Level: 1}, Preceding: []ListItem{{Level: 1, Preset: BulletPreset, Start: 6}, {Level: 0, Preset: BulletPreset, Start: 2}}}
+	insert := func(src string, level int) Op {
+		return Op{Kind: OpInsert, Seg: seg(), Insert: &Loc{Index: 10}, Fragment: frag(t, src), Params: Params{ListLevel: &level}, List: list}
+	}
+	for name, op := range map[string]Op{
+		"on a footnote":        {Kind: OpFootnote, Seg: seg(), Insert: &Loc{Index: 10}, Fragment: frag(t, "- t"), Params: Params{ListLevel: new(0)}},
+		"below the top":        insert("- t", -1),
+		"deeper than a list":   insert("- t", 9),
+		"content with no list": insert("Para", 0),
+	} {
+		if _, err := Plan([]Op{op}, Options{}); err == nil {
+			t.Errorf("%s: planned, want refused", name)
+		}
+	}
+	if _, err := Plan([]Op{insert("- t", 8)}, Options{}); err != nil {
+		t.Errorf("level 8: %v", err)
+	}
+	for mode, want := range map[Mode]int{ModeDirect: 0, ModeSuggest: 1} {
+		res, err := Plan([]Op{insert("- t", 0)}, Options{Mode: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Warnings) != want {
+			t.Errorf("%s: warnings %q, want %d", mode, res.Warnings, want)
+		}
 	}
 }

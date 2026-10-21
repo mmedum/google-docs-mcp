@@ -179,6 +179,11 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 	var res *EditResult
 	var err error
 	if s.isMarkdown(ctx, req.Document) {
+		for _, op := range req.Ops {
+			if op.ListLevel != nil {
+				return nil, Errorf("invalid", "op %d: list_level sets a list's level in a Google Doc; in a Markdown file, indent the content's list instead", op.Seq)
+			}
+		}
 		res, err = s.mdEdit(ctx, req)
 	} else {
 		if err := s.wordUnsupported(ctx, req.Document); err != nil {
@@ -1027,7 +1032,8 @@ func listItem(tab *doc.Tab, b *doc.Block) *plan.ListItem {
 		return nil
 	}
 	bl := b.Paragraph.Bullet
-	return &plan.ListItem{Level: bl.Nesting, Ordered: bl.Ordered, Preset: plan.PresetOf(tab.Lists[bl.ListID]), Start: b.Start}
+	return &plan.ListItem{Level: bl.Nesting, Ordered: bl.Ordered, Preset: plan.PresetOf(tab.Lists[bl.ListID]), Start: b.Start,
+		IndentStart: b.Paragraph.IndentStartPt, IndentFirstLine: b.Paragraph.IndentFirstLinePt}
 }
 
 // siblings is the run of blocks b sits in: those of the table cell

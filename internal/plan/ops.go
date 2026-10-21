@@ -76,6 +76,9 @@ type Params struct {
 	Text      TextStyleSpec
 	Para      ParagraphStyleSpec
 	Bullets   string // bullet, numbered, checkbox, none
+	// ListLevel is the level a list starting the content takes, in place
+	// of the level of the list item it is placed against.
+	ListLevel *int
 }
 
 // Op is one resolved operation. The service fills in ranges, text and
@@ -121,6 +124,9 @@ type Op struct {
 	// Slots are where the fragment's tables and images wait, set when
 	// the op is compiled.
 	Slots []Slot
+	// Rebuilt counts the existing list items the op rebuilds, set when
+	// the op is compiled.
+	Rebuilt int
 
 	// CommentAnchor is where a comment-mode proposal attaches. Defaults to Target.
 	CommentAnchor *Rng
@@ -257,6 +263,12 @@ func Plan(ops []Op, o Options) (*Result, error) {
 		if err := suggestable(ops, res.Requests); err != nil {
 			return nil, err
 		}
+		for _, op := range ops {
+			if op.Rebuilt > 0 {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("op %d: %d list item(s) before the content are rebuilt at their own level so its list can start above them; "+
+					"as a suggestion each shows a bullet change that changes nothing, to accept with the rest", op.Seq, op.Rebuilt))
+			}
+		}
 	}
 	return finish(), nil
 }
@@ -379,6 +391,9 @@ func validateShape(op *Op, info KindInfo) error {
 }
 
 func validateParams(op *Op, info KindInfo) error {
+	if err := validateListLevel(op); err != nil {
+		return err
+	}
 	switch op.Kind {
 	case OpTextStyle:
 		if op.Text.IsZero() {
@@ -420,6 +435,26 @@ func validateParams(op *Op, info KindInfo) error {
 	}
 	if info.Tool == ToolTable {
 		return validateTableOp(op)
+	}
+	return nil
+}
+
+// maxListLevel is the deepest level a Google Docs list has.
+const maxListLevel = 8
+
+// validateListLevel holds list_level to the ops that write content, to
+// content that starts with a list, and to the levels a list has.
+func validateListLevel(op *Op) error {
+	if op.ListLevel == nil {
+		return nil
+	}
+	switch {
+	case op.Kind != OpInsert && op.Kind != OpAppend && op.Kind != OpReplace:
+		return fmt.Errorf("op %d: list_level applies to insert, append and replace", op.Seq)
+	case *op.ListLevel < 0 || *op.ListLevel > maxListLevel:
+		return fmt.Errorf("op %d: list_level must be 0 (the top) to %d", op.Seq, maxListLevel)
+	case op.Fragment == nil || len(op.Fragment.Blocks) == 0 || op.Fragment.Blocks[0].Kind != markdown.KindListItem:
+		return fmt.Errorf("op %d: list_level sets the level of a list the content starts with, and this content does not start with one", op.Seq)
 	}
 	return nil
 }
@@ -685,7 +720,8 @@ func formatRequests(op *Op) []json.RawMessage {
 	case OpBullets:
 		switch op.Bullets {
 		case "none":
-			return []json.RawMessage{DeleteBullets(r)}
+			// The bullet's indent outlives it.
+			return []json.RawMessage{DeleteBullets(r), ClearIndent(r)}
 		case "numbered":
 			return []json.RawMessage{CreateBullets(r, NumberedPreset)}
 		case "checkbox":
@@ -701,12 +737,12 @@ func contentRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
 		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline,
-			Inline: op.Inline, Fill: op.Fill, Inherited: op.List.At, List: op.List, Slots: inBody(op),
+			Inline: op.Inline, Fill: op.Fill, Inherited: op.List.At, List: op.List, ListLevel: op.ListLevel, Slots: inBody(op),
 			Isolate: mode == ModeSuggest && op.ClearTo > op.Insert.Index})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 		}
-		op.Slots = c.Slots
+		op.Slots, op.Rebuilt = c.Slots, c.Rebuilt
 		if op.ClearTo > op.Insert.Index {
 			// The paragraph being filled holds whitespace; clear it first
 			// so the later requests see the indices they were built for.
@@ -798,7 +834,7 @@ func replaceRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	// in (spike F): the target's own while its deletion is a suggestion
 	// or it is the segment's only block, the one after it once it is
 	// gone, and the one before a last block, whose newline it lost.
-	opts := FragmentOptions{Inherited: op.List.At, List: op.List, Slots: inBody(op) && op.TargetIsBlock}
+	opts := FragmentOptions{Inherited: op.List.At, List: op.List, ListLevel: op.ListLevel, Slots: inBody(op) && op.TargetIsBlock}
 	at := Loc{Index: del.Start, SegmentID: seg.ID, TabID: seg.TabID}
 	switch {
 	case !op.TargetIsBlock:
@@ -826,7 +862,7 @@ func replaceRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 	}
-	op.Slots = c.Slots
+	op.Slots, op.Rebuilt = c.Slots, c.Rebuilt
 	return append(reqs, c.Requests...), false, nil
 }
 

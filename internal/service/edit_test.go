@@ -545,7 +545,7 @@ func TestFormatOps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kindsOf(t, api.batches[0].Requests); got != "updateTextStyle[29,36) updateParagraphStyle[158,184) updateTextStyle[213,226) deleteParagraphBullets[115,133)" {
+	if got := kindsOf(t, api.batches[0].Requests); got != "updateTextStyle[29,36) updateParagraphStyle[158,184) updateTextStyle[213,226) deleteParagraphBullets[115,133) updateParagraphStyle[115,133)" {
 		t.Fatalf("format requests: %s", got)
 	}
 	if res.Applied != 4 {

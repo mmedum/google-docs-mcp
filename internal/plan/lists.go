@@ -46,6 +46,17 @@ type ListItem struct {
 	Ordered bool
 	Preset  string
 	Start   int64
+	// IndentStart and IndentFirstLine are the paragraph's own indents in
+	// points, 0 when it sets none.
+	IndentStart, IndentFirstLine float64
+}
+
+// handIndented says a list item's indents are its own, not its level's:
+// a list from one of the server's presets indents each level 36pt more,
+// its first line 18pt less (spike F). A rebuilt item gets its level's.
+func (it ListItem) handIndented() bool {
+	level := 36 * float64(it.Level+1)
+	return (it.IndentStart != 0 || it.IndentFirstLine != 0) && (it.IndentStart != level || it.IndentFirstLine != level-18)
 }
 
 // ListContext is the list around an insertion, from the document as the
@@ -214,7 +225,10 @@ func leadingWindows(group []*piece, o FragmentOptions) []*listWindow {
 func markKept(group []*piece, o FragmentOptions, ordered bool) []bool {
 	inh := o.Inherited
 	lead := 0
-	if a := o.List.Anchor; a != nil && a.Ordered == ordered {
+	switch a := o.List.Anchor; {
+	case o.ListLevel != nil:
+		lead = *o.ListLevel
+	case a != nil && a.Ordered == ordered:
 		lead = a.Level
 	}
 	kept := make([]bool, len(group))
@@ -322,9 +336,16 @@ func listRequests(windows []*listWindow, o FragmentOptions, at Loc, rng func(int
 		reqs = append(reqs, ClearIndent(rng(start, end)))
 		if least > 0 {
 			reqs = append(reqs, InsertText("\n", loc(start)), CreateBullets(rng(start, end+1), preset), DeleteRange(rng(start, start+1)))
-			continue
+		} else {
+			reqs = append(reqs, CreateBullets(rng(start, end), preset))
 		}
-		reqs = append(reqs, CreateBullets(rng(start, end), preset))
+		// A rebuilt item set apart by hand gets its own indents back.
+		for _, e := range w.existing {
+			if e.handIndented() {
+				in, first := e.IndentStart, e.IndentFirstLine
+				reqs = append(reqs, UpdateParagraphStyle(rng(e.Start, e.Start+1), ParagraphStyleSpec{IndentStartPt: &in, IndentFirstLine: &first}))
+			}
+		}
 	}
 	return reqs
 }

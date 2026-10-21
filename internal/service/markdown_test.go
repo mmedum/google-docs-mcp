@@ -980,3 +980,19 @@ func TestInfoNamesAWorkingCopy(t *testing.T) {
 		t.Errorf("Info of a working copy: %v\n%s", err, info.Text)
 	}
 }
+
+// A Markdown file's lists nest by their own indentation; list_level, a
+// Google Doc's, is refused rather than ignored.
+func TestMarkdownRefusesListLevel(t *testing.T) {
+	svc, api := mdService(t, config.WriteDirect)
+	level := 1
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpAppend, Content: "- item", Params: plan.Params{ListLevel: &level}}}})
+	var se *Error
+	if !errors.As(err, &se) || se.Class != "invalid" {
+		t.Fatalf("got %v, want invalid", err)
+	}
+	if len(api.uploads) != 0 {
+		t.Fatalf("%d uploads", len(api.uploads))
+	}
+}

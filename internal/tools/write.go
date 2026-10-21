@@ -147,7 +147,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"as the file's own markdown, mode is direct or comment (no suggestions), the comments Docs keeps in the file " +
 			"are never touched, and the whole file is uploaded once per call, which makes an editor that has it open " +
 			"reload; the write waits for, then refuses, changes made there and not saved yet. To work in one together " +
-			"live, use a working copy (create_document from_file).",
+			"live, use a working copy (create_document from_file). On a Word file (.docx) the same ops write its body's " +
+			"text into the file, addressed as on a Google Doc, a suggestion as a tracked change and comment mode as Word " +
+			"comments, and the file is uploaded whole; formatting, tables and images need it saved as a Google Doc.",
 		Annotations: writeSafe,
 	}, "When force lets a direct edit destroy comments, suggestions, images or footnotes", func(ctx context.Context, _ *mcp.CallToolRequest, in EditInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))

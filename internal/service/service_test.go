@@ -16,7 +16,6 @@ import (
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
 	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
@@ -485,63 +484,6 @@ func TestInfoCommentsViewRefused(t *testing.T) {
 	}
 	if !strings.Contains(info.Text, "Google refused the comments view for this document: suggestion mode is unavailable and comments are posted unanchored") {
 		t.Fatalf("text: %s", info.Text)
-	}
-}
-
-// A Word file reads like a Google Doc, but Google refuses every write to
-// one (spike G), so get_document offers no write mode and says why.
-func TestInfoWordFile(t *testing.T) {
-	api := &fakeAPI{raw: doctest.RawFixture(t), file: &gapi.File{ID: fixtureID, Name: "brief.docx",
-		MimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}}
-	info, err := New(api, Options{DefaultWriteMode: config.WriteSuggest}).Info(context.Background(), fixtureID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c := info.Capabilities; info.Kind != "document" || len(c.WriteModes) != 0 || c.DefaultWriteMode != "" {
-		t.Fatalf("kind %q, write modes %v, default %q", info.Kind, c.WriteModes, c.DefaultWriteMode)
-	}
-	if !strings.Contains(info.Text, "server: write modes none") || !strings.Contains(info.Text, "save it as a Google Doc") {
-		t.Fatalf("text: %s", info.Text)
-	}
-}
-
-// The writes Google would refuse are refused before anything is planned
-// or sent, a dry run included.
-func TestWordFileRefusesWrites(t *testing.T) {
-	api := &fakeAPI{raw: doctest.RawFixture(t), file: &gapi.File{ID: fixtureID, Name: "brief.docx",
-		MimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}}
-	svc := New(api, Options{DefaultWriteMode: config.WriteSuggest})
-	ctx := context.Background()
-	edit := EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpAppend, Content: "tail"}}}
-	dry := edit
-	dry.DryRun = true
-	for name, call := range map[string]func() error{
-		"edit":    func() error { _, err := svc.Edit(ctx, edit); return err },
-		"dry run": func() error { _, err := svc.Edit(ctx, dry); return err },
-		"review": func() error {
-			_, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", All: true})
-			return err
-		},
-		"tabs": func() error {
-			_, err := svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "add", Title: "New"})
-			return err
-		},
-		"pinned comment": func() error {
-			_, err := svc.AddComment(ctx, AddCommentRequest{Document: fixtureID, Content: "note", Target: &Target{Handle: "p2"}})
-			return err
-		},
-		"suggestion reply": func() error {
-			_, err := svc.Reply(ctx, ReplyRequest{Document: fixtureID, SuggestionID: "suggest.x", Content: "ok"})
-			return err
-		},
-	} {
-		var se *Error
-		if err := call(); !errors.As(err, &se) || se.Class != "unsupported" {
-			t.Errorf("%s: got %v, want unsupported", name, err)
-		}
-	}
-	if len(api.batches) != 0 {
-		t.Fatalf("%d batches sent to a Word file", len(api.batches))
 	}
 }
 

@@ -43,9 +43,12 @@ type EditOp struct {
 	plan.Params
 	// Regex makes Find an RE2 pattern; such a replace_all is expanded
 	// here into one replace per match and never reaches the planner.
-	Regex  bool
-	Table  *TableOp
-	Object *plan.ObjectParams
+	Regex bool
+	// eachMatch expands a plain replace_all the same way, for a file the
+	// Docs API does not write and so has no replaceAllText (a Word file).
+	eachMatch bool
+	Table     *TableOp
+	Object    *plan.ObjectParams
 	// Layout carries the page, section and named-style specs, and the
 	// section type a section_break starts.
 	Layout *LayoutOp
@@ -178,17 +181,17 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 	req.Ops = numbered(req.Ops)
 	var res *EditResult
 	var err error
-	if s.isMarkdown(ctx, req.Document) {
+	switch mime, _ := s.kind(ctx, req.Document); {
+	case gapi.IsMarkdownMimeType(mime):
 		for _, op := range req.Ops {
 			if op.ListLevel != nil {
 				return nil, Errorf("invalid", "op %d: list_level sets a list's level in a Google Doc; in a Markdown file, indent the content's list instead", op.Seq)
 			}
 		}
 		res, err = s.mdEdit(ctx, req)
-	} else {
-		if err := s.wordUnsupported(ctx, req.Document); err != nil {
-			return nil, err
-		}
+	case mime == gapi.WordMimeType:
+		res, err = s.docxEdit(ctx, req)
+	default:
 		var f *Fetched
 		if f, err = s.FetchFresh(ctx, req.Document); err != nil {
 			return nil, err
@@ -199,6 +202,18 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 		res.Text = res.text()
 	}
 	return res, err
+}
+
+// planError is a planner's refusal as the error a caller sees.
+func planError(err error) error {
+	var unsupported *markdown.UnsupportedError
+	switch {
+	case errors.Is(err, plan.ErrBlocked):
+		return &Error{Class: "blocked", Message: strings.TrimPrefix(err.Error(), "blocked: "), Err: err}
+	case errors.As(err, &unsupported):
+		return &Error{Class: "unsupported", Message: err.Error(), Err: err}
+	}
+	return Errorf("invalid", "%v", err)
 }
 
 // numbered stamps each op with its place in the call.
@@ -362,14 +377,7 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 	}
 	planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})
 	if err != nil {
-		var unsupported *markdown.UnsupportedError
-		switch {
-		case errors.Is(err, plan.ErrBlocked):
-			return nil, nil, &Error{Class: "blocked", Message: strings.TrimPrefix(err.Error(), "blocked: "), Err: err}
-		case errors.As(err, &unsupported):
-			return nil, nil, &Error{Class: "unsupported", Message: err.Error(), Err: err}
-		}
-		return nil, nil, Errorf("invalid", "%v", err)
+		return nil, nil, planError(err)
 	}
 	ro.planned = planned
 	result := &EditResult{RevisionID: f.Doc.RevisionID, Mode: string(mode), DryRun: req.DryRun, Changes: planned.Summary, Warnings: planned.Warnings, Proposals: planned.Proposals}
@@ -698,35 +706,41 @@ func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op
 	switch {
 	case op.Kind == plan.OpSetCells:
 		ops, err = s.expandSetCells(f, op.Seq, op, out)
-	case op.Kind == plan.OpReplaceAll && op.Regex:
-		ops, err = s.expandRegexReplaceAll(f, op, out)
+	case op.Kind == plan.OpReplaceAll && (op.Regex || op.eachMatch):
+		ops, err = s.expandReplaceAll(f, op, out)
 	default:
 		return nil, false, nil
 	}
 	return ops, true, err
 }
 
-// expandRegexReplaceAll turns a regex replace_all into one replace per
-// match, or a delete where the replacement expands to nothing. The
-// matches are found here, with find_in_document's matcher over each
-// paragraph's index-aligned text, rather than by Google's searchByRegex:
-// Google does not document its regex flavor, and the guard has to see
-// exactly the ranges that change.
+// expandReplaceAll turns a regex replace_all, or a plain one marked
+// eachMatch, into one replace per match, or a delete where the
+// replacement expands to nothing. The matches are found here, with
+// find_in_document's matcher over each paragraph's index-aligned text,
+// rather than by Google's searchByRegex: Google does not document its
+// regex flavor, and the guard has to see exactly the ranges that change.
 //
 // A match never crosses a paragraph, never covers anything but text (a
 // chip, a break or an element this server does not model is a
 // placeholder the guard cannot judge), and skips a table of contents,
-// which Google maintains. The pattern decides case: a write that ignored
-// it by default would turn [A-Z] into every letter.
-func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]plan.Op, error) {
+// which Google maintains. A pattern decides case: a write that ignored it
+// by default would turn [A-Z] into every letter. Plain text matches
+// itself, its case as match_case says, and is replaced by the text as
+// given.
+func (s *Service) expandReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]plan.Op, error) {
 	if op.Find == "" {
 		return nil, Errorf("invalid", "replace_all needs find")
 	}
-	re, err := compileFind(op.Find, true)
+	pattern, tmpl, matchCase := op.Find, op.Replace, true
+	if !op.Regex {
+		pattern, tmpl, matchCase = regexp.QuoteMeta(op.Find), strings.ReplaceAll(op.Replace, "$", "$$"), op.MatchCase
+	}
+	re, err := compileFind(pattern, matchCase)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkTemplate(re, op.Replace); err != nil {
+	if err := checkTemplate(re, tmpl); err != nil {
 		return nil, err
 	}
 	tab, err := tabOf(f.Doc, targetTab(op.Target))
@@ -756,7 +770,7 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 				rng := plan.Rng{Start: start, End: end, SegmentID: seg.ID, TabID: tab.ID}
 				p := plan.Op{Seq: op.Seq, Kind: plan.OpDelete, Seg: bounds, Target: &rng, TargetText: aligned[m[0]:m[1]],
 					TargetAligned: aligned[m[0]:m[1]], List: plan.ListContext{At: listItem(tab, b)}, Anchors: f.anchorsIn(seg, start, end, out.threads)}
-				if repl := string(re.ExpandString(nil, op.Replace, aligned, m)); repl != "" {
+				if repl := string(re.ExpandString(nil, tmpl, aligned, m)); repl != "" {
 					p.Kind, p.Fragment = plan.OpReplace, markdown.Plain(repl)
 				}
 				ops = append(ops, p)
@@ -765,7 +779,7 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 		}
 	}
 	if len(ops) == 0 {
-		return nil, Errorf("not_found", "%q matches nothing in tab %d; find_in_document with regex shows what a pattern matches, and a chip's text is not matched", op.Find, tab.Number)
+		return nil, Errorf("not_found", "%q matches nothing in tab %d; find_in_document shows what a find matches, and a chip's text is not matched", op.Find, tab.Number)
 	}
 	// One caller op, so one line in the summary, as set_cells does.
 	desc := fmt.Sprintf("%d match(es) of %q in tab %d", len(ops), op.Find, tab.Number)

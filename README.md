@@ -213,6 +213,39 @@ that text, uploaded once per call:
   `any`; its default is Google Docs only. `create_document` with `kind:
   markdown_file` makes a new one.
 
+### Word files
+
+Docs opens a Word file stored in Drive (`.docx`) and edits it in place,
+leaving it a Word file. The Docs API reads one, its tracked changes as
+suggestions and its comments as comments, and refuses every write to it.
+So this server writes the file itself: `get_document` says `kind:
+word_file`, reads work as on a Google Doc, handles included, and an edit
+is made in the file's XML and uploaded whole through Drive.
+
+- `edit_document` takes `insert`, `append`, `replace`, `delete` and
+  `replace_all` on the body's text, addressed as on a Google Doc. Text
+  replaced inside a paragraph changes by its minimal difference and keeps
+  its look; content of several paragraphs goes between paragraphs or
+  replaces whole ones. Headings take the file's own heading styles, and
+  lists continue the list they are placed against, at a level
+  `list_level` can set.
+- `mode: suggest` writes Word tracked changes under your account's name,
+  which Docs shows as suggestions and Word as tracked changes.
+  `mode: direct` changes the text. `mode: comment` and `add_comment`
+  write Word comments. `list_comments` lists them; replying to, resolving
+  or deleting one is done in the Docs editor.
+- Formatting, tables, images, layout, tabs and reviewing suggestions are
+  refused, saying so: save the file as a Google Doc (File > Save as Google
+  Docs) for those.
+- The guard is a Google Doc's: a direct edit that deletes commented text,
+  a suggestion, an image or a footnote reference is refused unless forced.
+- **Writing while someone has the file open.** Each write checks that
+  Docs and the file still agree on every paragraph it reaches, waits and
+  then refuses when they do not, checks again just before the upload, and
+  afterwards checks the file's history: a save that landed in between is
+  put back and the write not applied. An editor that has the file open
+  reloads it. The write then waits until Docs has read the new revision.
+
 ## Connect a client
 
 Claude Code:

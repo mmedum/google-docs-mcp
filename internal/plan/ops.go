@@ -210,7 +210,15 @@ var ErrBlocked = errors.New("blocked")
 // Plan compiles ops for the mode. Formatting requests come first (they
 // shift nothing), then content ops in descending index order, then
 // replace_all.
-func Plan(ops []Op, o Options) (*Result, error) {
+func Plan(ops []Op, o Options) (*Result, error) { return planOps(ops, o, true) }
+
+// Check is Plan without the requests: the ops validated, the guard and the
+// overlaps checked, comment mode's proposals made and each op summarized.
+// A write made other than through the Docs API, into a Word file, is
+// checked with it.
+func Check(ops []Op, o Options) (*Result, error) { return planOps(ops, o, false) }
+
+func planOps(ops []Op, o Options, requests bool) (*Result, error) {
 	if o.Mode == "" {
 		o.Mode = ModeDirect
 	}
@@ -255,6 +263,12 @@ func Plan(ops []Op, o Options) (*Result, error) {
 	}
 	if err := checkOverlaps(ops); err != nil {
 		return nil, err
+	}
+	if !requests {
+		for i := range ops {
+			add(&ops[i], nil, false)
+		}
+		return finish(), nil
 	}
 	if err := compile(ops, o.Mode, res, add); err != nil {
 		return nil, err

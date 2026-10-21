@@ -170,7 +170,7 @@ func (s *Service) mdWriteOnce(ctx context.Context, id string, o mdWriteOpts, cha
 			return nil, false, err
 		}
 	}
-	if again, err := s.stillWhereItWas(ctx, id, m, view, attempt); again || err != nil {
+	if again, err := s.stillWhereItWas(ctx, id, m.meta, view, attempt); again || err != nil {
 		return nil, again, err
 	}
 	return res, false, s.upload(ctx, id, m, after, o, change, res)
@@ -196,8 +196,9 @@ func (s *Service) awaitEditor(ctx context.Context, o mdWriteOpts, m *mdFile, vie
 }
 
 // stillWhereItWas is the check just before an upload, which is all Drive
-// offers: the file and the live session where the plan was made.
-func (s *Service) stillWhereItWas(ctx context.Context, id string, m *mdFile, view liveView, attempt int) (bool, error) {
+// offers: the file, as meta had it, and the live session where the plan
+// was made.
+func (s *Service) stillWhereItWas(ctx context.Context, id string, meta *gapi.File, view liveView, attempt int) (bool, error) {
 	nowCh := make(chan liveView, 1)
 	go func() { nowCh <- s.live(ctx, id) }()
 	now, err := s.api.GetFile(ctx, id)
@@ -205,7 +206,7 @@ func (s *Service) stillWhereItWas(ctx context.Context, id string, m *mdFile, vie
 	if err != nil {
 		return false, wrapAPI(err, "file")
 	}
-	moved := now.HeadRevisionID != m.meta.HeadRevisionID || now.MD5Checksum != m.meta.MD5Checksum
+	moved := now.HeadRevisionID != meta.HeadRevisionID || now.MD5Checksum != meta.MD5Checksum
 	edited := view.err == nil && viewNow.err == nil && viewNow.revision != view.revision
 	switch {
 	case !moved && !edited:
@@ -213,7 +214,7 @@ func (s *Service) stillWhereItWas(ctx context.Context, id string, m *mdFile, vie
 	case attempt >= mdWriteAttempts:
 		return false, Errorf("conflict", "the file kept changing while this write was planned; read it again and retry")
 	}
-	s.log.InfoContext(ctx, "the Markdown file moved while planning; planning again", "saved", moved, "edited", edited)
+	s.log.InfoContext(ctx, "the file moved while planning; planning again", "saved", moved, "edited", edited)
 	if edited {
 		return true, s.sleep(ctx, mdWait)
 	}
@@ -229,12 +230,7 @@ func (s *Service) upload(ctx context.Context, id string, m *mdFile, after *mdfil
 	}
 	res.RevisionID = up.HeadRevisionID
 	res.Warnings = append(res.Warnings, fmt.Sprintf("the text before this write is Drive revision %s (diff_revisions from it shows the change; Drive keeps it at least 30 days unless the file passes 100 revisions)", m.revision()))
-	if up.MD5Checksum != "" && up.MD5Checksum != md5Hex([]byte(after.Source())) {
-		res.Warnings = append(res.Warnings, "Drive's checksum of the uploaded file is not the checksum of what was sent; read the file before relying on it")
-	}
-	if up.MimeType != "" && up.MimeType != m.mime() {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("Drive typed the file %s after the upload", up.MimeType))
-	}
+	checkUpload(res, up, []byte(after.Source()), m.mime())
 	if err := s.repair(ctx, m, up, change, res); err != nil {
 		return err
 	}
@@ -248,6 +244,27 @@ func (s *Service) upload(ctx context.Context, id string, m *mdFile, after *mdfil
 	return s.confirmComments(ctx, id, m, posts, res)
 }
 
+// checkUpload warns when what Drive says it stored is not what was sent.
+func checkUpload(res *EditResult, up *gapi.File, sent []byte, mime string) {
+	if up.MD5Checksum != "" && up.MD5Checksum != md5Hex(sent) {
+		res.Warnings = append(res.Warnings, "Drive's checksum of the uploaded file is not the checksum of what was sent; read the file before relying on it")
+	}
+	if up.MimeType != "" && up.MimeType != mime {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("Drive typed the file %s after the upload", up.MimeType))
+	}
+}
+
+// revisionBefore is the revision before head in a file's history, the
+// one an upload that made head replaced; "" when head is the first.
+func revisionBefore(revs []*gapi.Revision, head string) string {
+	for i, r := range revs {
+		if r.ID == head && i > 0 {
+			return revs[i-1].ID
+		}
+	}
+	return ""
+}
+
 // repair finds the revision the upload replaced. When it is not the one
 // the change was planned on, somebody's save landed in between: it is
 // taken from Drive's history and the change made again on top of it,
@@ -258,12 +275,7 @@ func (s *Service) repair(ctx context.Context, m *mdFile, up *gapi.File, change m
 		res.Warnings = append(res.Warnings, "could not read the file's history to confirm nothing was saved in between: "+messageOf(wrapAPI(err, "revisions")))
 		return nil
 	}
-	prev := ""
-	for i, r := range revs {
-		if r.ID == up.HeadRevisionID && i > 0 {
-			prev = revs[i-1].ID
-		}
-	}
+	prev := revisionBefore(revs, up.HeadRevisionID)
 	if prev == "" || prev == m.revision() {
 		return nil
 	}

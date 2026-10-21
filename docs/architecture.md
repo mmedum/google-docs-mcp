@@ -607,6 +607,71 @@ the write is refused unless forced, which writes the copy over the file
 block by block. An image placed in the copy has no address a Markdown
 file can use and is written empty, with a warning.
 
+
+### 7.6 Word files (`internal/ooxml`)
+
+The Docs API reads a Word file (`.docx`) stored in Drive: `documents.get`
+answers with a model, the file's tracked changes as suggestions and its
+comments as anchored comments in the comments view (`fromImportedDocument`).
+It refuses every write to one, with 400 "The document must not be an
+Office file" (spike G, §18). So a Word file is written the way it is
+stored, as with a Markdown file, but read as a Google Doc: reads,
+outlines, handles and the comments view all work, and `get_document` says
+`kind: word_file`.
+
+**Addressing.** An op resolves against the Docs model exactly as on a
+Google Doc, and the planner's checks run, the overwrite guard (§7.3)
+among them, without building requests. Without the comments view, which
+lists a Word file's comments, the guard learns the comments a change to
+whole paragraphs would cut out from the file's own markers; text changed
+inside a paragraph keeps them. `replace_all`, which has no request here,
+is one replace per match, as a regex one is everywhere. The body's
+paragraphs, tables' included, are the file's `w:p` elements in order:
+spike H found the two lists the same, text for text. Each paragraph an op
+reaches is checked to hold the same text in both, deleted text, tabs and
+a content control's text counted as Docs counts them; a difference means
+Docs has not read a revision yet or a person's edit has not reached the
+file, and the write waits and then refuses.
+
+**Writing** (`internal/ooxml`). `encoding/xml` cannot write a document
+back with its namespace prefixes, so the file is never re-encoded: edits
+are splices of `word/document.xml`, and a part not changed is copied from
+the zip untouched. A paragraph is runs; text replaced inside one takes the
+look of the text it replaces, and plain text changes by its minimal
+difference. Content of several paragraphs is new `w:p` elements between
+paragraphs; a heading takes the paragraph style the file names "heading
+N" (the name is the same in every language, the id is not), added when
+missing; a list item takes `numPr` with its level, continuing the list it
+is placed against, its own or the one its paragraph style numbers ("List
+Bullet"), or a list of its own, added to `numbering.xml`.
+Suggestions are tracked changes, `w:ins` and `w:del` under the account's
+name, a new paragraph's mark marked inserted, a deleted one's deleted; a
+tracked insertion goes inside a link, which may not go inside one (spike
+H). Comments are Word comments: range markers and a reference in the
+text, the text in `comments.xml`, which a file without one gets, with its
+content type and relationship. A change may not reach into a link from
+outside it, nor, in either mode, text a pending suggestion inserted or
+deleted, or a point inside it: written into the suggestion, a direct
+change would go with it when it is accepted or rejected. A tracked
+deletion of paragraphs leaves what a suggestion already deleted as it
+is. A field's code counts no unit, so a change across a field keeps it.
+
+**The write** follows §7.5's: the file, its Drive metadata and its Docs
+model are read together; the change is made and the result read back; just
+before the upload the file's head revision and checksum and the Docs
+revision must be where they were, or it is planned again; the file is
+uploaded whole as its own type, unless the change leaves it as it is; and
+the revision the upload replaced must
+be the one planned on, or that save is put back and the write is
+`[conflict]`. Then the write waits for Docs to read the new revision,
+which took four seconds in spike H, so the next read shows it.
+
+Formatting, tables, images, layout, tabs and reviewing suggestions are
+`[unsupported]` on a Word file, saying to save it as a Google Doc.
+`list_comments` lists the file's comments from the Docs view besides
+Drive's, which are disjoint sets; replying to, resolving or deleting one
+the file holds is done in the editor.
+
 ## 8. Collaboration and history
 
 **Comments, two backends behind one tool surface.**
@@ -1370,4 +1435,8 @@ checked rather than assumed.
 | Leading tabs give absolute levels | Refuted live (spike F, 30 probes): a level is the level of the list item just before the range plus the tabs beyond the fewest in the range, and the range joins that item's list when the presets match (documented: "added to that preceding list"). So a run can start neither deeper nor shallower than the item before it: a lone tabbed item came out at level 0, and a top-level item after a level-1 one at level 1, also when appended after a list that ends on a nested item. A numbered run does not join a bulleted list, nor a list made from another preset (a checklist, arrows), which the server tells by the glyphs of a list's first three levels, measured for five presets; a new list does not take in the items after it, so one made at the top of a numbered list split it and restarted its numbering | gdoc's window, measured there and here: a temporary empty paragraph pins the fewest tabs to none so a window can start deeper than its base; a window takes in the items before it, rebuilt at their own levels, until the one before is no deeper; a right inherited bullet is kept, so no list is split. The content's leading list continues the list it is placed against, at its level, when their kinds match, and starts its own otherwise. |
 | `deleteParagraphBullets` leaves a plain paragraph | Refuted live (spike F): it keeps the removed level's indent, as documented ("visually preserved by adding indent"), and a bullet made over it adds its own: a list after a paragraph, inserted into a nested list, had the right levels at 72 and 108pt, and the paragraph kept 36pt. Not reproduced where the list joined the one before it | Every bullet deletion is followed by clearing `indentStart` and `indentFirstLine` back to the named style: rebuilding a list, dropping a bullet a new paragraph took, and `format_document`'s bullets `none`, whose paragraphs Google would leave indented as if still in the list. |
 | Which bullet a replacement's paragraphs take | Measured live (spike F): the replaced block's while its deletion is only suggested; the next block's once a direct deletion removed it; the block before's on a segment's last block, whose newline goes, the merged paragraph keeping the first paragraph's style | The planner picks the inherited bullet by layout and mode. |
-| The Docs API refuses to read a Word file (.docx) (community reports, 2024–2025: 400 "This operation is not supported for this document") | **Refuted live 2026-10-21** (spike G, a synthetic file). `documents.get` answers 200 with the model: a Word tracked insertion and deletion read as suggestions (`suggestedInsertionIds`, `suggestedDeletionIds`, ids `suggestIdImport…`), a Word comment as an anchored comment in the comments view (`fromImportedDocument: true`, its author kept). Every `batchUpdate`, direct or `SUGGEST`, is 400 FAILED_PRECONDITION "The document must not be an Office file". Drive's `comments.list` on the file is empty; a comment made through Drive's `comments.create` lands there but not in the Docs comments view. A copy converted to a Google Doc keeps the suggestions and the comment, and its .docx export holds `w:ins`, `w:del` and the comment | A Word file takes no Docs API write: `get_document` offers no write mode, and `edit_document` (with every tool built on it), `review_suggestion`, `manage_tabs`, a comment pinned to a passage and a reply on a suggestion refuse it up front, a dry run included, saying how to edit one. A comment not pinned to a passage still goes through Drive, as before. Editing Word files, by OOXML edits uploaded through Drive as for Markdown files, is a later phase. |
+| The Docs API refuses to read a Word file (.docx) (community reports, 2024–2025: 400 "This operation is not supported for this document") | **Refuted live 2026-10-21** (spike G, a synthetic file). `documents.get` answers 200 with the model: a Word tracked insertion and deletion read as suggestions (`suggestedInsertionIds`, `suggestedDeletionIds`, ids `suggestIdImport…`), a Word comment as an anchored comment in the comments view (`fromImportedDocument: true`, its author kept). Every `batchUpdate`, direct or `SUGGEST`, is 400 FAILED_PRECONDITION "The document must not be an Office file". Drive's `comments.list` on the file is empty; a comment made through Drive's `comments.create` lands there but not in the Docs comments view. A copy converted to a Google Doc keeps the suggestions and the comment, and its .docx export holds `w:ins`, `w:del` and the comment | A Word file takes no Docs API write. What only the Docs API does (formatting, tables, images, layout, `manage_tabs`, `review_suggestion`, a reply on a suggestion) refuses it up front, a dry run included, saying to save it as a Google Doc; text, suggestions and comments are written into the file and uploaded through Drive (§7.6). A comment not pinned to a passage still goes through Drive, as before. |
+| A Word file's paragraphs in the Docs model are the file's `w:p` elements, in order | Confirmed live 2026-10-21 (spike H) for a Google Doc exported as .docx: 15 paragraphs on each side, tables' cells included, the same text in the same order | Ops resolve against the Docs model and reach the file's paragraphs by order, each checked to hold the same text, a difference waited out and then refused (§7.6). |
+| Docs reads a revision of a Word file uploaded through Drive | Confirmed live (spike H): about four seconds after the upload, with Word tracked changes as suggestions, a new paragraph with `ilvl` 1 at level 1 of its list, and a Word comment anchored | A write waits for Docs to read the revision it uploaded, so the next read shows it. |
+| A Docs suggestion id names a Word tracked change | Refuted live (spike H): the ids are `suggestIdImport<uuid>_<n>`, the uuid new on every revision and `n` not the `w:id`; adjacent changes by one author at one time share one | Reviewing a Word file's suggestions would go by position; it is not offered, and refused saying so. |
+| A tracked insertion may wrap a link | Refuted live (spike H): with `w:hyperlink` inside `w:ins`, Docs read the paragraph without the link's text; with `w:ins` inside `w:hyperlink` it read it | A tracked insertion goes inside the link (`internal/ooxml`). |

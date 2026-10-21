@@ -134,19 +134,19 @@ func (s *Service) isMarkdown(ctx context.Context, ref string) bool {
 	return gapi.IsMarkdownMimeType(mime)
 }
 
-// wordUnsupported refuses a Docs API write to a Word file, which Google
-// reads like a Google Doc and refuses every write to (spike G); nil for
-// any other document.
-func (s *Service) wordUnsupported(ctx context.Context, ref string) error {
-	if mime, _ := s.kind(ctx, ref); mime == gapi.WordMimeType {
-		return Errorf("unsupported", "%s", wordFileNote)
+// wordUnsupported refuses on a Word file what only the Docs API does,
+// which refuses every write to one (spike G); nil for any other document.
+func (s *Service) wordUnsupported(ctx context.Context, ref, what string) error {
+	if s.isWord(ctx, ref) {
+		return Errorf("unsupported", "this is a Word file (.docx), whose text this server writes into the file itself, "+
+			"with edit_document and comments; %s needs the file saved as a Google Doc (File > Save as Google Docs)", what)
 	}
 	return nil
 }
 
-// wordFileNote is what a person is told about a Word file.
-const wordFileNote = "this is a Word file (.docx): it reads like a Google Doc, but Google refuses every edit to an " +
-	"Office file, directly or as a suggestion; to edit it, save it as a Google Doc (File > Save as Google Docs) and edit that"
+// wordFileNote is what get_document tells a person about a Word file.
+const wordFileNote = "a Word file (.docx): edit_document writes its text into the file and uploads it whole through Drive, " +
+	"a suggestion as a tracked change and a comment as a Word comment, which an editor that has it open reloads; " + wordElsewhere
 
 func (s *Service) rememberKind(id string, mime string) {
 	s.mu.Lock()

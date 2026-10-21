@@ -10,6 +10,7 @@ diff in CI flags them.
 
 ### Added
 
+- Word files (.docx). The Docs API reads one and refuses every write to it, so the server now writes the file itself: `edit_document`'s text ops are made in the file's XML, addressed by exact text, `heading_id` or handle as on a Google Doc, and the file is uploaded whole through Drive. `mode: suggest` writes Word tracked changes, which Docs shows as suggestions; `mode: comment` and `add_comment` write Word comments, which `list_comments` lists. Headings take the file's heading styles and lists continue the list they are placed against. A write checks Docs and the file agree, puts back a save that lands in between, and waits for Docs to read the new revision. `get_document` says `kind: word_file`. Formatting, tables, images, layout, tabs and reviewing suggestions are refused, saying to save the file as a Google Doc. See "Word files" in the README.
 - `edit_document` takes `list_level` on insert, append and replace: the level a list starting the content takes, in place of the level of the list item it is placed against. One more than an item's level nests the content under it, and 0 after a nested item puts it back at the top; neither could be written before without replacing the items around it.
 
 ### Fixed
@@ -18,7 +19,7 @@ diff in CI flags them.
 - A paragraph or list inserted inside a list, and a paragraph `format_document` takes out of a list, no longer keeps the indent of the bullet it dropped.
 - Replacing text inside a paragraph with content that is not plain text, such as **bold** or more than one paragraph, keeps that paragraph's style. A list item lost its bullet and a heading became body text, because the content's first paragraph, which merges into the one it lands in, was styled as a paragraph of its own.
 - A table or image placed after a nested list in the same content lands where it should: its place now counts the tabs the list consumes.
-- A Word file (.docx) is refused up front by every write that goes through the Docs API (edits of every kind, reviewing suggestions, tabs, a comment pinned to a passage, a reply on a suggestion), a dry run included, and `get_document` offers it no write mode. Docs reads one like a Google Doc, but Google refuses every edit to an Office file, so these used to plan the change and then fail; the refusal now says how to edit one.
+- Writing to a Word file used to plan the change and then fail with Google's refusal of every edit to an Office file. What the server does not write into one now refuses up front, a dry run included, saying where it goes.
 
 ## [2.3.1] - 2026-10-14
 

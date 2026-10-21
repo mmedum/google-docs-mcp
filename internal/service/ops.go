@@ -82,13 +82,17 @@ const (
 	KindDocument = "document"
 	// KindMarkdownFile is a Markdown file Docs opens in place (§7.5).
 	KindMarkdownFile = "markdown_file"
+	// KindWordFile is a Word file (.docx), read through Docs and written
+	// into the file itself (§7.6).
+	KindWordFile = "word_file"
 )
 
 // Info is the get_document result.
 type Info struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	// Kind is document or markdown_file; Bytes is a Markdown file's size.
+	// Kind is document, markdown_file or word_file; Bytes is a Markdown
+	// file's size.
 	Kind  string `json:"kind"`
 	Bytes int    `json:"bytes,omitempty"`
 	// WorkingCopyOf is the Markdown file a Google Doc was made from as a
@@ -153,7 +157,7 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 	d := f.Doc
 	info := &Info{ID: d.ID, Title: d.Title, Kind: KindDocument, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities(f)}
 	if mime == gapi.WordMimeType {
-		info.Capabilities.WriteModes, info.Capabilities.DefaultWriteMode = []string{}, ""
+		info.Kind = KindWordFile
 		info.Warnings = append(info.Warnings, wordFileNote)
 	}
 	for _, t := range d.Tabs {

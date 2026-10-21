@@ -40,9 +40,11 @@ func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*C
 	if err != nil {
 		return nil, err
 	}
-	if s.isMarkdown(ctx, id) {
+	mime, _ := s.kind(ctx, id)
+	if gapi.IsMarkdownMimeType(mime) {
 		return s.mdListComments(ctx, req)
 	}
+	word := mime == gapi.WordMimeType
 	type listed struct {
 		list []*gapi.DriveComment
 		err  error
@@ -61,7 +63,19 @@ func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*C
 	if l.err != nil {
 		return nil, wrapAPI(l.err, "comments")
 	}
-	return tallyThreads(locateComments(f, driveThreads(l.list)), f.Doc.RevisionID, req.HideResolved), nil
+	threads := driveThreads(l.list)
+	if word && f.Wire != nil {
+		// A Word file's own comments are in the file, which Drive cannot
+		// see and the Docs comments view lists; the two sets are disjoint
+		// (spike G).
+		threads = append(threads, viewThreads(f.Wire)...)
+	}
+	res := tallyThreads(locateComments(f, threads), f.Doc.RevisionID, req.HideResolved)
+	if word {
+		res.Text += "\nOn a Word file, comments live in the file itself: they are read here, and add_comment writes new ones; " +
+			"replying to, resolving or deleting one is done in the Docs editor."
+	}
+	return res, nil
 }
 
 // tallyThreads is a listing's result: the threads counted, the resolved
@@ -135,6 +149,25 @@ type AddCommentResult struct {
 	Text       string   `json:"-"`
 }
 
+// commentTarget is the passage a comment is pinned to, which must hold
+// text; res gets its quote and its block's handle.
+func (s *Service) commentTarget(f *Fetched, t Target, res *AddCommentResult) (*TargetRange, error) {
+	r, err := s.ResolveTarget(f, t)
+	if err != nil {
+		return nil, err
+	}
+	if r.Start == r.End {
+		return nil, Errorf("invalid", "%s is empty; a comment needs text to attach to", r.Description)
+	}
+	res.Quote = r.Text
+	if r.Block != nil {
+		res.Handle = r.Block.Handle
+	} else if len(r.Blocks) > 0 {
+		res.Handle = r.Blocks[0].Handle
+	}
+	return r, nil
+}
+
 // pinned says the comment names a passage to be pinned to.
 func (r AddCommentRequest) pinned() bool { return r.Target != nil && r.Target.selectorCount() > 0 }
 
@@ -152,11 +185,8 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	if s.isMarkdown(ctx, req.Document) {
 		return s.mdAddComment(ctx, req, content)
 	}
-	if req.pinned() {
-		// Pinned to a passage is a Docs API write.
-		if err := s.wordUnsupported(ctx, req.Document); err != nil {
-			return nil, err
-		}
+	if req.pinned() && s.isWord(ctx, req.Document) {
+		return s.docxAddComment(ctx, req, content)
 	}
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
@@ -168,17 +198,8 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	res := &AddCommentResult{RevisionID: f.Doc.RevisionID}
 	var r *TargetRange
 	if req.pinned() {
-		if r, err = s.ResolveTarget(f, *req.Target); err != nil {
+		if r, err = s.commentTarget(f, *req.Target, res); err != nil {
 			return nil, err
-		}
-		if r.Start == r.End {
-			return nil, Errorf("invalid", "%s is empty; a comment needs text to attach to", r.Description)
-		}
-		res.Quote = r.Text
-		if r.Block != nil {
-			res.Handle = r.Block.Handle
-		} else if len(r.Blocks) > 0 {
-			res.Handle = r.Blocks[0].Handle
 		}
 	}
 	anchored := f.CommentsView && r != nil
@@ -369,7 +390,7 @@ func replyAction(req ReplyRequest) (string, string, error) {
 // comments do not include these threads, so the reply goes through the
 // Docs API and needs the comments view.
 func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, content string) (*ReplyResult, error) {
-	if err := s.wordUnsupported(ctx, ref); err != nil {
+	if err := s.wordUnsupported(ctx, ref, "a reply on a suggestion's thread"); err != nil {
 		return nil, err
 	}
 	f, err := s.FetchFresh(ctx, ref)
@@ -434,9 +455,13 @@ func (s *Service) commentRef(ctx context.Context, docRef, commentID string) (str
 	}
 	thread, err := s.api.GetComment(ctx, id, commentID)
 	if errors.Is(err, gapi.ErrNotFound) {
-		if s.isMarkdown(ctx, id) {
+		switch mime, _ := s.kind(ctx, id); {
+		case gapi.IsMarkdownMimeType(mime):
 			return "", "", nil, mdUnsupported("Drive has no comment "+commentID+"; a comment the Docs editor keeps in the file is not Drive's to delete",
 				"the person can delete it in the Docs editor")
+		case mime == gapi.WordMimeType:
+			return "", "", nil, Errorf("unsupported", "Drive has no comment %s: a comment a Word file holds lives in the file itself, "+
+				"and replying to, resolving or deleting one is done in the Docs editor", commentID)
 		}
 	}
 	if err != nil {

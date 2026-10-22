@@ -138,6 +138,14 @@ func para(t *testing.T, f *File, text string) int {
 
 var track = &Track{Author: "Probe Author", Date: "2026-10-21T12:00:00Z"}
 
+// A symbol is the character its code names; a code beyond Unicode is none.
+func TestSymbol(t *testing.T) {
+	f := open(t, docx(t, `<w:p><w:r><w:sym w:font="Wingdings" w:char="F0E0"/><w:sym w:font="Wingdings" w:char="110000"/><w:t>x</w:t></w:r></w:p>`))
+	if got, want := f.Paras[0].Text, "x"; got != want {
+		t.Fatalf("text %q, want %q", got, want)
+	}
+}
+
 // A change inside one run keeps the run's own look, and every byte of
 // document.xml outside the run.
 func TestReplaceInRun(t *testing.T) {

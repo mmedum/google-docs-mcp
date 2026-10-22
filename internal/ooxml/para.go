@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
 )
@@ -370,7 +371,7 @@ func (p *parser) kid(t xml.StartElement, at int, r *run) (kid, error) {
 	case "softHyphen":
 		k.text = "\u00ad"
 	case "sym":
-		if n, err := strconv.ParseUint(attr(t, "char"), 16, 32); err == nil {
+		if n, err := strconv.ParseUint(attr(t, "char"), 16, 32); err == nil && n <= unicode.MaxRune {
 			k.text = string(rune(n))
 		}
 	case "drawing":

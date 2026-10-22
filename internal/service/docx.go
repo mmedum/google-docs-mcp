@@ -456,8 +456,8 @@ func (s *Service) readWord(ctx context.Context, id string) (*wordRead, error) {
 			ch <- file{err: Errorf("unsupported", "the file is %s now, not a Word file; read it again", meta.MimeType)}
 			return
 		}
-		if size, _ := strconv.ParseInt(meta.Size, 10, 64); size > maxUpload {
-			ch <- file{err: tooLarge(int(size))}
+		if size, _ := strconv.Atoi(meta.Size); size > maxUpload {
+			ch <- file{err: tooLarge(size)}
 			return
 		}
 		data, err := s.api.DownloadFile(ctx, id)

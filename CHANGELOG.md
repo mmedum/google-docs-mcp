@@ -22,6 +22,10 @@ diff in CI flags them.
 - A table or image placed after a nested list in the same content lands where it should: its place now counts the tabs the list consumes.
 - Writing to a Word file used to plan the change and then fail with Google's refusal of every edit to an Office file. What the server does not write into one now refuses up front, a dry run included, saying where it goes.
 
+### Security
+
+- Built with Go 1.27.3, whose `crypto/x509` refuses intermediate certificates known to be compromised where a system trust store may not (GO-2026-6809). `govulncheck` found it reachable from this server.
+
 ## [2.3.1] - 2026-10-14
 
 ### Fixed

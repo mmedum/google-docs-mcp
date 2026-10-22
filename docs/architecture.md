@@ -1,6 +1,11 @@
 # Architecture — google-docs-mcp
 
-**Status:** v2.3.1 (released 2026-10-14, live run green). A Markdown
+**Status:** v2.4.0 (released 2026-10-22, live run green). A Word file
+(.docx) is edited by writing the file itself, since the Docs API reads
+one and refuses every write to it: text, tracked changes and comments
+go into its XML and up through Drive (§7.6). Nested list items written
+next to a list land at their level, and `list_level` sets the level the
+content's list takes (§7.3). A Markdown
 file stored in Drive, which Docs edits in place, is read, edited and
 commented on as the text it is, through a write protocol that keeps the
 editor's unsaved work (§7.5), whether Drive types it `text/markdown` or

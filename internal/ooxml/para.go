@@ -37,11 +37,15 @@ type Para struct {
 	// markDel say they mark it a tracked insertion or deletion.
 	markRPr          span
 	markIns, markDel bool
-	// Style is the paragraph style id; NumID and Ilvl its list and level,
-	// NumID "" when it is no list item.
+	// Style is the paragraph style id; NumID and Ilvl the list and level
+	// it sets itself, NumID "" when it sets none. ListOf is the list it is
+	// in.
 	Style string
 	NumID string
 	Ilvl  int
+	// ilvlSet says the paragraph sets its level, over its style's;
+	// unlisted that it sets numId 0, out of the list its style gives.
+	ilvlSet, unlisted bool
 	// section says the paragraph ends a section, which deleting it would
 	// remove; last that it is the last of a table cell, which a cell may
 	// not be without.
@@ -241,6 +245,7 @@ func (p *parser) pPr(para *Para) error {
 				para.NumID = attr(t, "val")
 			case "ilvl":
 				para.Ilvl, _ = strconv.Atoi(attr(t, "val"))
+				para.ilvlSet = true
 			case "sectPr":
 				para.section = true
 				if depth == 2 && para.pPrTail == 0 {
@@ -278,8 +283,7 @@ func (p *parser) pPr(para *Para) error {
 		}
 	}
 	if para.NumID == "0" {
-		// numId 0 takes a paragraph out of the list its style puts it in.
-		para.NumID = ""
+		para.NumID, para.unlisted = "", true
 	}
 	return nil
 }

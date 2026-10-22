@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"slices"
@@ -22,16 +23,23 @@ import (
 // H, ids made synthetic).
 func wordService(t *testing.T) (*Service, *fakeAPI) {
 	t.Helper()
-	data, err := os.ReadFile("../ooxml/testdata/brief.docx")
+	return wordFixture(t, "brief")
+}
+
+// wordFixture serves internal/ooxml/testdata/<name>.docx with the Docs
+// model in <name>.json, which TestRawDocxModel captures.
+func wordFixture(t *testing.T, name string) (*Service, *fakeAPI) {
+	t.Helper()
+	data, err := os.ReadFile("../ooxml/testdata/" + name + ".docx")
 	if err != nil {
 		t.Fatal(err)
 	}
-	model, err := os.ReadFile("../ooxml/testdata/brief.json")
+	model, err := os.ReadFile("../ooxml/testdata/" + name + ".json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(data)
-	api := &fakeAPI{raw: model, md: &text, mdOldRevs: map[string]string{}, file: &gapi.File{ID: fixtureID, Name: "brief.docx", MimeType: gapi.WordMimeType}}
+	api := &fakeAPI{raw: model, md: &text, mdOldRevs: map[string]string{}, file: &gapi.File{ID: fixtureID, Name: name + ".docx", MimeType: gapi.WordMimeType}}
 	return New(api, Options{DefaultWriteMode: config.WriteSuggest, Sleep: noSleep}), api
 }
 
@@ -157,6 +165,47 @@ func TestWordEditBlocks(t *testing.T) {
 	}
 	if ordered, ok := f.ListOrdered("3", 0); !ordered || !ok {
 		t.Fatal("the numbered list is not numbered")
+	}
+}
+
+// A cell spanning columns is one cell in a Word file and several in Docs,
+// the covered ones empty, while a span of rows is a cell in each row in
+// both (internal/ooxml/testdata/merged.docx, read live): paragraphs after
+// such cells still line up, in the table and after it.
+func TestWordMergedCells(t *testing.T) {
+	svc, api := wordFixture(t, "merged")
+	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplace, Target: &Target{Text: "Gamma six"}, Content: "Gamma sixth"},
+		{Kind: plan.OpReplace, Target: &Target{Text: "After the table"}, Content: "After the grid"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := uploaded(t, api, "word/document.xml")
+	want := "Before the table\nAlpha one\nBeta one\nGamma one\nWide row\nTall cell\nBeta three\nGamma three\n\nBeta four\nGamma four\n" +
+		"Block cell\nGamma five\n\nGamma sixth\nAfter the grid\n"
+	if got != want {
+		t.Fatalf("the file reads %q, want %q", got, want)
+	}
+}
+
+// A cell a column span covers has no paragraph in the file: an op placed
+// in it is refused before anything is written, naming the cell to use.
+func TestWordCoveredCell(t *testing.T) {
+	svc, api := wordFixture(t, "merged")
+	f, err := svc.Fetch(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Remember(f)
+	_, err = svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpInsert, Location: &Location{At: "start", Of: &Target{Cell: "tbl1:r2c3"}}, Content: "Into the span"},
+	}})
+	var se *Error
+	if !errors.As(err, &se) || se.Class != "invalid" || !strings.Contains(se.Message, "merged into tbl1:r2c1") {
+		t.Fatalf("err = %v, want [invalid] naming tbl1:r2c1", err)
+	}
+	if len(api.uploads) != 0 {
+		t.Fatal("something was uploaded")
 	}
 }
 

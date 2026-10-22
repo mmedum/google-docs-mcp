@@ -141,12 +141,16 @@ type styleSheet struct {
 	ids     map[string]bool
 	basedOn map[string]string
 	lists   map[string]*styleList
+	// defaultPara is the paragraph style a paragraph naming none takes.
+	defaultPara string
 }
 
-// styleList is the numbering a style gives, as far as it says.
+// styleList is the numbering a style gives, as far as it says: a list,
+// a level, or both.
 type styleList struct {
-	numID string
-	ilvl  int
+	numID   string
+	ilvl    int
+	ilvlSet bool
 }
 
 func (f *File) styles() (*styleSheet, error) {
@@ -182,6 +186,9 @@ func (f *File) styles() (*styleSheet, error) {
 		case "style":
 			id, typ = attr(t, "styleId"), attr(t, "type")
 			h.ids[id] = true
+			if d := attr(t, "default"); typ == "paragraph" && (d == "1" || d == "true") {
+				h.defaultPara = id
+			}
 		case "name":
 			if typ == "paragraph" {
 				h.byName[strings.ToLower(attr(t, "val"))] = id
@@ -192,33 +199,69 @@ func (f *File) styles() (*styleSheet, error) {
 			list().numID = attr(t, "val")
 		case "ilvl":
 			list().ilvl, _ = strconv.Atoi(attr(t, "val"))
+			list().ilvlSet = true
 		}
 	}
 	f.sheet = h
 	return h, nil
 }
 
-// StyleList is the list and the level paragraph style id puts a paragraph
-// in, its own or from a style it is based on; "" for none. A list made by
-// a style ("List Bullet") is numbered in styles.xml, not on the paragraph.
-func (f *File) StyleList(id string) (string, int) {
+// ListOf is the list and the level paragraph i is in; "" for none. The
+// list and the level are each the paragraph's own, else what its style
+// gives ("List Bullet", which is numbered in styles.xml, not on the
+// paragraph), the default paragraph style's for a paragraph naming none;
+// Docs reads them so. numId 0 on the paragraph takes it out of its
+// style's list (ISO/IEC 29500-1, numId), and Docs reads it as no list
+// item.
+func (f *File) ListOf(i int) (string, int) {
+	p := f.Paras[i]
+	if p.unlisted {
+		return "", 0
+	}
+	style := p.Style
+	if h, err := f.styles(); err == nil && style == "" {
+		style = h.defaultPara
+	}
+	id, lvl := f.styleList(style)
+	if p.NumID != "" {
+		id = p.NumID
+	}
+	if p.ilvlSet {
+		lvl = p.Ilvl
+	}
+	if id == "" {
+		return "", 0
+	}
+	return id, lvl
+}
+
+// styleList is the list and the level paragraph style id gives, each its
+// own or from the nearest style it is based on that sets it; "" for no
+// list, which numId 0 also says.
+func (f *File) styleList(id string) (string, int) {
 	h, err := f.styles()
 	if err != nil {
 		return "", 0
 	}
+	numID, ilvl, lvlSet := "", 0, false
 	// Bounded: a cycle of basedOn is a broken file, not a reason to hang.
 	for range 16 {
-		if l := h.lists[id]; l != nil && l.numID != "" {
-			if l.numID == "0" {
-				return "", 0
+		if l := h.lists[id]; l != nil {
+			if numID == "" {
+				numID = l.numID
 			}
-			return l.numID, l.ilvl
+			if !lvlSet && l.ilvlSet {
+				ilvl, lvlSet = l.ilvl, true
+			}
 		}
-		if id = h.basedOn[id]; id == "" {
+		if id = h.basedOn[id]; id == "" || numID != "" && lvlSet {
 			break
 		}
 	}
-	return "", 0
+	if numID == "0" {
+		numID = ""
+	}
+	return numID, ilvl
 }
 
 // HeadingStyle is the id of the paragraph style for a heading of the

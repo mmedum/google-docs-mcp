@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf16"
 )
 
 // brief is a Google Doc exported as .docx (spike H): headings, a link, a
@@ -399,22 +401,69 @@ func TestTrackedPropertyChange(t *testing.T) {
 }
 
 // A list made by a paragraph style is numbered in styles.xml, by the
-// style or one it is based on; numId 0 takes a style out of its base's.
+// style or one it is based on, the list and the level each from the
+// nearest that sets it; numId 0 takes a style out of its base's.
 func TestStyleList(t *testing.T) {
 	styles := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
 		`<w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/><w:pPr><w:numPr><w:numId w:val="4"/></w:numPr></w:pPr></w:style>` +
 		`<w:style w:type="paragraph" w:styleId="ListBullet2"><w:name w:val="List Bullet 2"/><w:basedOn w:val="ListBullet"/><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="4"/></w:numPr></w:pPr></w:style>` +
 		`<w:style w:type="paragraph" w:styleId="Mine"><w:name w:val="Mine"/><w:basedOn w:val="ListBullet"/></w:style>` +
 		`<w:style w:type="paragraph" w:styleId="Off"><w:name w:val="Off"/><w:basedOn w:val="ListBullet"/><w:pPr><w:numPr><w:numId w:val="0"/></w:numPr></w:pPr></w:style>` +
+		`<w:style w:type="paragraph" w:styleId="Deeper"><w:name w:val="Deeper"/><w:basedOn w:val="ListBullet"/><w:pPr><w:numPr><w:ilvl w:val="1"/></w:numPr></w:pPr></w:style>` +
 		`</w:styles>`
 	f := open(t, docxWith(t, `<w:p/>`, map[string]string{partStyles: styles}))
 	for style, want := range map[string]struct {
 		numID string
 		ilvl  int
-	}{"ListBullet": {"4", 0}, "ListBullet2": {"4", 1}, "Mine": {"4", 0}, "Off": {"", 0}, "Normal": {"", 0}} {
-		if id, lvl := f.StyleList(style); id != want.numID || lvl != want.ilvl {
+	}{"ListBullet": {"4", 0}, "ListBullet2": {"4", 1}, "Mine": {"4", 0}, "Off": {"", 0}, "Deeper": {"4", 1}, "Normal": {"", 0}} {
+		if id, lvl := f.styleList(style); id != want.numID || lvl != want.ilvl {
 			t.Errorf("%s: list %q level %d, want %q %d", style, id, lvl, want.numID, want.ilvl)
 		}
+	}
+}
+
+// A paragraph's list and level are each its own, else its style's;
+// numId 0 takes it out of its style's list.
+func TestListOf(t *testing.T) {
+	styles := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:style w:type="paragraph" w:styleId="Clause"><w:name w:val="Clause"/><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="4"/></w:numPr></w:pPr></w:style>` +
+		`</w:styles>`
+	para := func(pPr string) string { return `<w:p><w:pPr>` + pPr + `</w:pPr><w:r><w:t>x</w:t></w:r></w:p>` }
+	clause := `<w:pStyle w:val="Clause"/>`
+	f := open(t, docxWith(t,
+		para(clause+`<w:numPr><w:ilvl w:val="2"/><w:numId w:val="7"/></w:numPr>`)+
+			para(clause)+
+			para(clause+`<w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>`)+
+			para(clause+`<w:numPr><w:ilvl w:val="0"/></w:numPr>`)+
+			para(clause+`<w:numPr><w:ilvl w:val="2"/></w:numPr>`)+
+			para(`<w:numPr><w:ilvl w:val="2"/></w:numPr>`)+
+			para(clause+`<w:numPr><w:numId w:val="7"/></w:numPr>`),
+		map[string]string{partStyles: styles}))
+	type list struct {
+		numID string
+		ilvl  int
+	}
+	want := []list{{"7", 2}, {"4", 1}, {"", 0}, {"4", 0}, {"4", 2}, {"", 0}, {"7", 1}}
+	for i, w := range want {
+		if id, lvl := f.ListOf(i); id != w.numID || lvl != w.ilvl {
+			t.Errorf("paragraph %d: list %q level %d, want %q %d", i, id, lvl, w.numID, w.ilvl)
+		}
+	}
+}
+
+// A paragraph naming no style takes the default paragraph style's list.
+func TestListOfDefaultStyle(t *testing.T) {
+	styles := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:pPr><w:numPr><w:numId w:val="4"/></w:numPr></w:pPr></w:style>` +
+		`<w:style w:type="paragraph" w:styleId="Body"><w:name w:val="Body"/></w:style>` +
+		`</w:styles>`
+	f := open(t, docxWith(t, `<w:p><w:r><w:t>a</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val="Body"/></w:pPr><w:r><w:t>b</w:t></w:r></w:p>`,
+		map[string]string{partStyles: styles}))
+	if id, lvl := f.ListOf(0); id != "4" || lvl != 0 {
+		t.Errorf("unstyled: list %q level %d, want 4 0", id, lvl)
+	}
+	if id, lvl := f.ListOf(1); id != "" || lvl != 0 {
+		t.Errorf("Body: list %q level %d, want none", id, lvl)
 	}
 }
 
@@ -475,4 +524,145 @@ func TestBytesCopiesUntouchedParts(t *testing.T) {
 			t.Errorf("%s: changed %v", zf.Name, !same)
 		}
 	}
+}
+
+// fuzzSeeds are bodies the fuzzer starts from: the fixtures' and
+// markup Word writes that the parser treats apart.
+func fuzzSeeds(f *testing.F) []string {
+	seeds := []string{
+		`<w:p><w:r><w:t>Hello world</w:t></w:r></w:p>`,
+		`<w:p><w:r><w:t xml:space="preserve">kept </w:t></w:r><w:ins w:id="1" w:author="A"><w:r><w:t>added</w:t></w:r></w:ins><w:del w:id="2" w:author="A"><w:r><w:delText>gone</w:delText></w:r></w:del></w:p>`,
+		`<w:p><w:r><w:t>ab</w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>PAGE</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>7</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>`,
+		`<w:tbl><w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p/>`,
+		`<w:sdt><w:sdtPr/><w:sdtContent><w:p><w:r><w:t>Ann</w:t></w:r></w:p></w:sdtContent></w:sdt>`,
+		`<w:p><w:commentRangeStart w:id="3"/><w:r><w:t>noted</w:t></w:r><w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r></w:p>`,
+		`<w:p><w:hyperlink r:id="rId9"><w:r><w:t>link</w:t></w:r></w:hyperlink><w:r><w:tab/><w:t>x</w:t><w:br/></w:r></w:p>`,
+		`<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:numPr><w:ilvl w:val="1"/><w:numId w:val="0"/></w:numPr><w:rPr><w:ins w:id="4" w:author="A"/></w:rPr></w:pPr><w:r><w:t>😀 wide</w:t></w:r></w:p>`,
+	}
+	for _, name := range []string{"brief.docx", "merged.docx"} {
+		data, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			f.Fatal(err)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			f.Fatal(err)
+		}
+		for _, zf := range zr.File {
+			if zf.Name != partDocument {
+				continue
+			}
+			rc, err := zf.Open()
+			if err != nil {
+				f.Fatalf("%s: %v", name, err)
+			}
+			doc, err := io.ReadAll(rc)
+			_ = rc.Close()
+			if err != nil {
+				f.Fatalf("%s: %v", name, err)
+			}
+			s := string(doc)
+			from, to := strings.Index(s, "<w:body>"), strings.LastIndex(s, "<w:sectPr")
+			if from < 0 || to < from {
+				f.Fatalf("%s: no body", name)
+			}
+			seeds = append(seeds, s[from+len("<w:body>"):to])
+		}
+	}
+	return seeds
+}
+
+// FuzzEdit reads a body of any markup and, when it reads as a document,
+// makes one change in it, direct or tracked: whatever is accepted is
+// written into a file that reads back, the other paragraphs as they were
+// and, made directly, the one changed as asked.
+func FuzzEdit(f *testing.F) {
+	for k, body := range fuzzSeeds(f) {
+		f.Add(body, uint8(k), 0, 1, 2, "new", k/4 == 1) // ops 0 to 3 direct, then tracked, then direct
+	}
+	f.Fuzz(func(t *testing.T, body string, op uint8, i, a, n int, insert string, tracked bool) {
+		file, err := Open(docx(t, body))
+		if err != nil || len(file.Paras) == 0 {
+			return
+		}
+		insert = strings.Map(func(r rune) rune {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' {
+				return r
+			}
+			return -1
+		}, insert)
+		before := make([]string, len(file.Paras))
+		for k, p := range file.Paras {
+			before[k] = p.Text
+		}
+		mod := func(x, m int) int { return ((x % m) + m) % m }
+		i = mod(i, len(file.Paras))
+		units := utf16.Encode([]rune(before[i]))
+		if len(units) != file.Paras[i].Len() {
+			t.Fatalf("paragraph %d: Len %d, its text %d units", i, file.Paras[i].Len(), len(units))
+		}
+		a = mod(a, len(units)+1)
+		b := a + mod(n, len(units)-a+1)
+		// A low surrogate is the second half of a character; no target
+		// found by text lands before one.
+		low := func(k int) bool { return k < len(units) && units[k] >= 0xDC00 && units[k] <= 0xDFFF }
+		if low(a) || low(b) {
+			return
+		}
+		var tr *Track
+		if tracked {
+			tr = &Track{Author: "Fuzz", Date: "2026-01-01T00:00:00Z"}
+		}
+		want := slices.Clone(before) // paragraphs as a direct change leaves them
+		switch op % 4 {
+		case 0:
+			err = file.Replace(i, a, b, []Run{{Text: insert}}, tr)
+			want[i] = string(utf16.Decode(slices.Concat(units[:a], utf16.Encode([]rune(insert)), units[b:])))
+		case 1:
+			err = file.InsertParas(i, true, []NewPara{{Runs: []Run{{Text: insert}}}}, tr)
+			want = slices.Insert(want, i+1, insert)
+		case 2:
+			err = file.DeleteParas(i, i, false, tr)
+			want = slices.Delete(want, i, i+1)
+		case 3:
+			_, err = file.Comment(i, a, i, b, NewComment{Author: "Fuzz", Initials: "F", Date: "2026-01-01T00:00:00Z", Text: insert})
+		}
+		if err != nil {
+			if !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("op %d refused with %v, not ErrUnsupported", op%4, err)
+			}
+			return
+		}
+		_, after, err := file.Bytes()
+		if err != nil {
+			t.Fatalf("op %d accepted and then not written: %v", op%4, err)
+		}
+		got := make([]string, len(after.Paras))
+		for k, p := range after.Paras {
+			got[k] = p.Text
+		}
+		if !tracked || op%4 == 3 {
+			if !slices.Equal(got, want) {
+				t.Fatalf("op %d on paragraph %d [%d,%d) %q:\nbefore %q\nafter  %q\nwant   %q", op%4, i, a, b, insert, before, got, want)
+			}
+			return
+		}
+		// Tracked, nothing goes: text deleted stays, marked, and a paragraph
+		// deleted keeps its text.
+		switch op % 4 {
+		case 0:
+			others := slices.Equal(slices.Delete(slices.Clone(got), i, i+1), slices.Delete(slices.Clone(before), i, i+1))
+			if len(got) != len(before) || !others || len(utf16.Encode([]rune(got[i]))) != len(units)+len(utf16.Encode([]rune(insert))) {
+				t.Fatalf("tracked replace on paragraph %d [%d,%d) %q:\nbefore %q\nafter  %q", i, a, b, insert, before, got)
+			}
+		case 1:
+			if len(got) != len(before)+1 || got[i+1] != insert || !slices.Equal(slices.Delete(slices.Clone(got), i+1, i+2), before) {
+				t.Fatalf("tracked insert after paragraph %d %q:\nbefore %q\nafter  %q", i, insert, before, got)
+			}
+		case 2:
+			if !slices.Equal(got, before) {
+				t.Fatalf("tracked delete of paragraph %d:\nbefore %q\nafter  %q", i, before, got)
+			}
+		}
+	})
 }

@@ -12,6 +12,7 @@ package gapi
 import (
 	"archive/zip"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -335,17 +336,19 @@ func TestRawDocxEngine(t *testing.T) {
 	t.Logf("=== left behind: %s ===", up.ID)
 }
 
-// TestRawDocxModel saves what documents.get answers for the fixture
-// internal/ooxml/testdata/brief.docx, as the service reads it, for the
-// service's tests: GDOCS_DOCX_MODEL names the file to write.
+// TestRawDocxModel saves what documents.get answers for a fixture in
+// internal/ooxml/testdata, brief.docx unless GDOCS_DOCX_FIXTURE names
+// another, as the service reads it, for the service's tests:
+// GDOCS_DOCX_MODEL names the file to write.
 func TestRawDocxModel(t *testing.T) {
 	c := probeClient(t)
 	ctx := context.Background()
-	src, err := os.ReadFile("../ooxml/testdata/brief.docx")
+	name := cmp.Or(os.Getenv("GDOCS_DOCX_FIXTURE"), "brief.docx")
+	src, err := os.ReadFile("../ooxml/testdata/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	up, err := c.CreateFile(ctx, NewFile{Name: "brief.docx", MimeType: WordMimeType}, WordMimeType, src)
+	up, err := c.CreateFile(ctx, NewFile{Name: name, MimeType: WordMimeType}, WordMimeType, src)
 	if err != nil {
 		t.Fatal(err)
 	}

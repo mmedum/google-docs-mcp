@@ -627,7 +627,10 @@ whole paragraphs would cut out from the file's own markers; text changed
 inside a paragraph keeps them. `replace_all`, which has no request here,
 is one replace per match, as a regex one is everywhere. The body's
 paragraphs, tables' included, are the file's `w:p` elements in order:
-spike H found the two lists the same, text for text. Each paragraph an op
+spike H found the two lists the same, text for text. A cell spanning
+columns is the exception: Docs keeps each cell it covers, empty, and the
+file has none, so those are passed over; a span of rows is a cell in
+each of its rows in both. Each paragraph an op
 reaches is checked to hold the same text in both, deleted text, tabs and
 a content control's text counted as Docs counts them; a difference means
 Docs has not read a revision yet or a person's edit has not reached the
@@ -643,7 +646,10 @@ paragraphs; a heading takes the paragraph style the file names "heading
 N" (the name is the same in every language, the id is not), added when
 missing; a list item takes `numPr` with its level, continuing the list it
 is placed against, its own or the one its paragraph style numbers ("List
-Bullet"), or a list of its own, added to `numbering.xml`.
+Bullet"), or a list of its own, added to `numbering.xml`. A paragraph's
+list and level are each its own, else the nearest style's in its chain
+that sets it, the default paragraph style's for a paragraph naming none;
+its `numId` 0 takes it out of its style's list.
 Suggestions are tracked changes, `w:ins` and `w:del` under the account's
 name, a new paragraph's mark marked inserted, a deleted one's deleted; a
 tracked insertion goes inside a link, which may not go inside one (spike
@@ -1437,6 +1443,10 @@ checked rather than assumed.
 | Which bullet a replacement's paragraphs take | Measured live (spike F): the replaced block's while its deletion is only suggested; the next block's once a direct deletion removed it; the block before's on a segment's last block, whose newline goes, the merged paragraph keeping the first paragraph's style | The planner picks the inherited bullet by layout and mode. |
 | The Docs API refuses to read a Word file (.docx) (community reports, 2024–2025: 400 "This operation is not supported for this document") | **Refuted live 2026-10-21** (spike G, a synthetic file). `documents.get` answers 200 with the model: a Word tracked insertion and deletion read as suggestions (`suggestedInsertionIds`, `suggestedDeletionIds`, ids `suggestIdImport…`), a Word comment as an anchored comment in the comments view (`fromImportedDocument: true`, its author kept). Every `batchUpdate`, direct or `SUGGEST`, is 400 FAILED_PRECONDITION "The document must not be an Office file". Drive's `comments.list` on the file is empty; a comment made through Drive's `comments.create` lands there but not in the Docs comments view. A copy converted to a Google Doc keeps the suggestions and the comment, and its .docx export holds `w:ins`, `w:del` and the comment | A Word file takes no Docs API write. What only the Docs API does (formatting, tables, images, layout, `manage_tabs`, `review_suggestion`, a reply on a suggestion) refuses it up front, a dry run included, saying to save it as a Google Doc; text, suggestions and comments are written into the file and uploaded through Drive (§7.6). A comment not pinned to a passage still goes through Drive, as before. |
 | A Word file's paragraphs in the Docs model are the file's `w:p` elements, in order | Confirmed live 2026-10-21 (spike H) for a Google Doc exported as .docx: 15 paragraphs on each side, tables' cells included, the same text in the same order | Ops resolve against the Docs model and reach the file's paragraphs by order, each checked to hold the same text, a difference waited out and then refused (§7.6). |
+| A paragraph setting `numId` 0 is out of the list its style numbers (ISO/IEC 29500-1, numId: "A value of 0 for the val attribute shall never be used to point to a numbering definition instance, and shall instead only be used to designate the removal of numbering properties at a particular level in the style hierarchy (typically via direct formatting)" — <https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.numberingid>) | Confirmed live 2026-10-22 on a synthetic file: a paragraph in a numbered style with its own `numId` 0 reads in Docs with no bullet; the server had read it as an item of the style's list | A list written against such a paragraph is a list of its own (`ooxml.File.ListOf`). |
+| Docs reads a Word table's merged cells as the file holds them | Refuted live 2026-10-22 for column spans, on the synthetic `internal/ooxml/testdata/merged.docx`: Docs read 20 paragraphs where the file holds 16, the four extra exactly the empty covered cells right of a span's first column (`gridSpan`); the covered cells under a span of rows matched the file's own `vMerge` cells | The paragraph map passes over a covered cell right of its span's first column (`spanned`, `internal/service/docx.go`). |
+| A Word paragraph's list and level come together, from its own `numPr` or else its style's | Refuted live 2026-10-22 on synthetic files: Docs takes the list and the level each from the nearest that sets it. A style setting only `ilvl`, based on a numbered style, is at that level of its base's list; a paragraph setting only `numId` is at its style's level; a paragraph naming no style is numbered as the default paragraph style is. Setting only `ilvl` on the paragraph, and `numId` 0, read as expected | `ooxml.File.ListOf` resolves the two apart, through `basedOn` and the default paragraph style. |
+| A legacy horizontal merge (`hMerge`) reads in Docs as a column span | Refuted live 2026-10-22 on a synthetic file: Docs kept the merged cells as cells of their own, each with its paragraph, as the file holds them | Only a `gridSpan`'s covered cells are passed over in the paragraph map. |
 | Docs reads a revision of a Word file uploaded through Drive | Confirmed live (spike H): about four seconds after the upload, with Word tracked changes as suggestions, a new paragraph with `ilvl` 1 at level 1 of its list, and a Word comment anchored | A write waits for Docs to read the revision it uploaded, so the next read shows it. |
 | A Docs suggestion id names a Word tracked change | Refuted live (spike H): the ids are `suggestIdImport<uuid>_<n>`, the uuid new on every revision and `n` not the `w:id`; adjacent changes by one author at one time share one | Reviewing a Word file's suggestions would go by position; it is not offered, and refused saying so. |
 | A tracked insertion may wrap a link | Refuted live (spike H): with `w:hyperlink` inside `w:ins`, Docs read the paragraph without the link's text; with `w:ins` inside `w:hyperlink` it read it | A tracked insertion goes inside the link (`internal/ooxml`). |

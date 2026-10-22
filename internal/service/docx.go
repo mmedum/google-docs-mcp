@@ -63,6 +63,9 @@ func newWordMap(f *Fetched, file *ooxml.File) (*wordMap, error) {
 		for _, b := range doc.Flatten(f.Doc.Tabs[0].Body.Blocks) {
 			switch b.Kind {
 			case doc.KindParagraph:
+				if spanned(b) {
+					continue
+				}
 				w.blocks = append(w.blocks, b)
 			case doc.KindTable:
 				w.tables = append(w.tables, b)
@@ -73,6 +76,16 @@ func newWordMap(f *Fetched, file *ooxml.File) (*wordMap, error) {
 		return nil, errStale(fmt.Sprintf("Docs reads %d paragraphs and the file holds %d", len(w.blocks), len(file.Paras)))
 	}
 	return w, nil
+}
+
+// spanned says paragraph b is in a cell another cell's column span covers.
+// Docs keeps such a cell, empty, and a Word file has none: Word writes a
+// cell spanning columns once (gridSpan), and only a row span's later rows
+// as cells of their own (vMerge), which Docs reads as the covered cells
+// under the span's first column.
+func spanned(b *doc.Block) bool {
+	c := b.Cell
+	return c != nil && c.Covered() && c.Col != c.MergedInto.Col
 }
 
 // staleError says the Docs model and the file disagree: Docs has not read
@@ -309,7 +322,7 @@ func (w *wordMap) listFor(op *plan.Op, leading, ordered bool) (string, int, erro
 	numID, level := "", 0
 	if leading && op.List.Anchor != nil {
 		if i, _, err := w.para(op.List.Anchor.Start); err == nil {
-			id, lvl := w.listOf(i)
+			id, lvl := w.file.ListOf(i)
 			if kind, ok := w.file.ListOrdered(id, lvl); id != "" && ok && kind == ordered {
 				numID, level = id, lvl
 			}
@@ -326,20 +339,6 @@ func (w *wordMap) listFor(op *plan.Op, leading, ordered bool) (string, int, erro
 		level = *op.ListLevel
 	}
 	return numID, level, nil
-}
-
-// listOf is the list and the level paragraph i is in: its own, or those
-// its style gives it ("List Bullet"), its own level over the style's.
-func (w *wordMap) listOf(i int) (string, int) {
-	p := w.file.Paras[i]
-	if p.NumID != "" {
-		return p.NumID, p.Ilvl
-	}
-	id, lvl := w.file.StyleList(p.Style)
-	if p.Ilvl > 0 {
-		lvl = p.Ilvl
-	}
-	return id, lvl
 }
 
 // fileComments gives the guard, from the file itself, the comments a

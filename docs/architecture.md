@@ -373,7 +373,10 @@ guard below only reports.
    a window takes in when it is deeper (`internal/plan/lists.go`). The
    content's leading list continues the list item it is placed against,
    at its level, unless `list_level` names one; a rebuilt item set apart
-   by hand gets its indents back. Order by descending start index per segment;
+   by hand gets its indents back, as does one bullets `none` takes out of
+   its list. Content written inside a paragraph merges its first item into
+   it, and that paragraph keeps its style, list item or not; the list
+   starts after it. Order by descending start index per segment;
    overlapping ops rejected up front.
 6. `batchUpdate` with `writeControl.requiredRevisionId` (and
    `writeMode: SUGGEST`). On revision conflict: re-fetch, re-resolve,
@@ -625,7 +628,9 @@ among them, without building requests. Without the comments view, which
 lists a Word file's comments, the guard learns the comments a change to
 whole paragraphs would cut out from the file's own markers; text changed
 inside a paragraph keeps them. `replace_all`, which has no request here,
-is one replace per match, as a regex one is everywhere. The body's
+is one replace per match, as a regex one is everywhere; matches in
+headers, footers or footnotes, which no op here writes, are left with a
+warning, and one matching only there is refused. The body's
 paragraphs, tables' included, are the file's `w:p` elements in order:
 spike H found the two lists the same, text for text. A cell spanning
 columns is the exception: Docs keeps each cell it covers, empty, and the
@@ -646,7 +651,8 @@ paragraphs; a heading takes the paragraph style the file names "heading
 N" (the name is the same in every language, the id is not), added when
 missing; a list item takes `numPr` with its level, continuing the list it
 is placed against, its own or the one its paragraph style numbers ("List
-Bullet"), or a list of its own, added to `numbering.xml`. A paragraph's
+Bullet"), or a list of its own, added to `numbering.xml` ahead of the
+cleanup mark Word for Mac may end that part with. A paragraph's
 list and level are each its own, else the nearest style's in its chain
 that sets it, the default paragraph style's for a paragraph naming none;
 its `numId` 0 takes it out of its style's list.
@@ -673,7 +679,10 @@ be the one planned on, or that save is put back and the write is
 which took four seconds in spike H, so the next read shows it.
 
 Formatting, tables, images, layout, tabs and reviewing suggestions are
-`[unsupported]` on a Word file, saying to save it as a Google Doc.
+`[unsupported]` on a Word file, saying to save it as a Google Doc. So is
+more than one paragraph in place of text inside one, a newline in a
+`replace_all` replacement included, since a paragraph is not split in
+the file; replacing the whole paragraph by its handle writes several.
 `list_comments` lists the file's comments from the Docs view besides
 Drive's, which are disjoint sets; replying to, resolving or deleting one
 the file holds is done in the editor.
@@ -714,7 +723,8 @@ API fills with every inherited property. Reads mark one as CriticMarkup
 added or removed. A direct formatting change over a property a pending
 suggestion already sets comes back with a warning (§18). `review_suggestion`
 (`action: accept | reject`, ids or `all`) goes to Google whatever the
-read said; `mode: suggest` needs the comments view (§7). In SUGGEST mode the API refuses `AddDocumentTab`,
+read said; `mode: suggest` needs the comments view (§7), except on a Word
+file, where a suggestion is a tracked change in the file (§7.6). In SUGGEST mode the API refuses `AddDocumentTab`,
 `CreateNamedRange`, `DeleteFooter`, `DeleteHeader`, `DeleteNamedRange`,
 `DeleteTab`, `UpdateDocumentTabProperties`, `UpdateTableColumnProperties`,
 and cannot suggest document-format or header/footer settings; the planner
@@ -1439,7 +1449,7 @@ checked rather than assumed.
 | `deleteContentRange` takes an empty range as a no-op | Refuted live 2026-10-09: "Invalid requests[1].deleteContentRange: The range should not be empty", and the batch it was in was refused whole. A replace over an empty table cell with content of more than one paragraph sent one, so every cell of an `insert_table` fill stayed empty | A replace deletes only a range that holds something; the test simulator refuses an empty one as Google does. |
 | `createParagraphBullets` turns the leading tabs of every paragraph in its range into nesting (what the planner assumed) | **Refuted live 2026-10-21** (spike F, after nested list items were seen landing at the wrong level). It does not re-nest a paragraph that already has a bullet, leaving the tab as text and the level as it was (a new preset it does apply to that paragraph's list, which keeps `format_document`'s bullets op working), and inserted paragraphs take the bullet of the paragraph at the insertion point (InsertTextRequest says so). So content inserted before, into or in place of a list item came out that way, in direct and suggest mode alike. The lists guide: "You can't adjust the nesting level of an existing bullet. Instead, you must delete the bullet, set the leading tabs in front of the paragraph, and then create the bullet again." Two other projects saw the skip live (mcp-gee-sweet #524, gdoc `listnest.py`) | A list item whose inherited bullet has the right level and kind keeps it; every other run is rebuilt: bullets deleted, indent cleared, tabs, the list made (§7.3, `internal/plan/lists.go`). |
 | Leading tabs give absolute levels | Refuted live (spike F, 30 probes): a level is the level of the list item just before the range plus the tabs beyond the fewest in the range, and the range joins that item's list when the presets match (documented: "added to that preceding list"). So a run can start neither deeper nor shallower than the item before it: a lone tabbed item came out at level 0, and a top-level item after a level-1 one at level 1, also when appended after a list that ends on a nested item. A numbered run does not join a bulleted list, nor a list made from another preset (a checklist, arrows), which the server tells by the glyphs of a list's first three levels, measured for five presets; a new list does not take in the items after it, so one made at the top of a numbered list split it and restarted its numbering | gdoc's window, measured there and here: a temporary empty paragraph pins the fewest tabs to none so a window can start deeper than its base; a window takes in the items before it, rebuilt at their own levels, until the one before is no deeper; a right inherited bullet is kept, so no list is split. The content's leading list continues the list it is placed against, at its level, when their kinds match, and starts its own otherwise. |
-| `deleteParagraphBullets` leaves a plain paragraph | Refuted live (spike F): it keeps the removed level's indent, as documented ("visually preserved by adding indent"), and a bullet made over it adds its own: a list after a paragraph, inserted into a nested list, had the right levels at 72 and 108pt, and the paragraph kept 36pt. Not reproduced where the list joined the one before it | Every bullet deletion is followed by clearing `indentStart` and `indentFirstLine` back to the named style: rebuilding a list, dropping a bullet a new paragraph took, and `format_document`'s bullets `none`, whose paragraphs Google would leave indented as if still in the list. |
+| `deleteParagraphBullets` leaves a plain paragraph | Refuted live (spike F): it keeps the removed level's indent, as documented ("visually preserved by adding indent"), and a bullet made over it adds its own: a list after a paragraph, inserted into a nested list, had the right levels at 72 and 108pt, and the paragraph kept 36pt. Not reproduced where the list joined the one before it | Every bullet deletion is followed by clearing `indentStart` and `indentFirstLine` back to the named style: rebuilding a list, dropping a bullet a new paragraph took, and `format_document`'s bullets `none`, whose paragraphs Google would leave indented as if still in the list. An item indented by hand gets its own indents back after the clear. |
 | Which bullet a replacement's paragraphs take | Measured live (spike F): the replaced block's while its deletion is only suggested; the next block's once a direct deletion removed it; the block before's on a segment's last block, whose newline goes, the merged paragraph keeping the first paragraph's style | The planner picks the inherited bullet by layout and mode. |
 | The Docs API refuses to read a Word file (.docx) (community reports, 2024–2025: 400 "This operation is not supported for this document") | **Refuted live 2026-10-21** (spike G, a synthetic file). `documents.get` answers 200 with the model: a Word tracked insertion and deletion read as suggestions (`suggestedInsertionIds`, `suggestedDeletionIds`, ids `suggestIdImport…`), a Word comment as an anchored comment in the comments view (`fromImportedDocument: true`, its author kept). Every `batchUpdate`, direct or `SUGGEST`, is 400 FAILED_PRECONDITION "The document must not be an Office file". Drive's `comments.list` on the file is empty; a comment made through Drive's `comments.create` lands there but not in the Docs comments view. A copy converted to a Google Doc keeps the suggestions and the comment, and its .docx export holds `w:ins`, `w:del` and the comment | A Word file takes no Docs API write. What only the Docs API does (formatting, tables, images, layout, `manage_tabs`, `review_suggestion`, a reply on a suggestion) refuses it up front, a dry run included, saying to save it as a Google Doc; text, suggestions and comments are written into the file and uploaded through Drive (§7.6). A comment not pinned to a passage still goes through Drive, as before. |
 | A Word file's paragraphs in the Docs model are the file's `w:p` elements, in order | Confirmed live 2026-10-21 (spike H) for a Google Doc exported as .docx: 15 paragraphs on each side, tables' cells included, the same text in the same order | Ops resolve against the Docs model and reach the file's paragraphs by order, each checked to hold the same text, a difference waited out and then refused (§7.6). |

@@ -88,7 +88,7 @@ func (s *Service) createMarkdown(ctx context.Context, title, content string) (*C
 	if mdfile.ContainsMarkup(content) {
 		return nil, Errorf("invalid", "%s", markupRefused)
 	}
-	if len(content) > mdMaxWrite {
+	if len(content) > maxUpload {
 		return nil, tooLarge(len(content))
 	}
 	name := title

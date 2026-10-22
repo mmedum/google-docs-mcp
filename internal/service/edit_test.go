@@ -553,6 +553,39 @@ func TestFormatOps(t *testing.T) {
 	}
 }
 
+// Removing bullets puts back the indents of an item set apart by hand,
+// which clearing the indent Google leaves behind would take with it.
+func TestBulletsNoneKeepsHandIndents(t *testing.T) {
+	svc, api := writable(t, false)
+	var d map[string]any
+	if err := json.Unmarshal(api.raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	pt := func(v float64) map[string]any { return map[string]any{"magnitude": v, "unit": "PT"} }
+	body := d["tabs"].([]any)[0].(map[string]any)["documentTab"].(map[string]any)["body"]
+	for _, e := range body.(map[string]any)["content"].([]any) {
+		if e := e.(map[string]any); e["startIndex"] == 115.0 {
+			ps := e["paragraph"].(map[string]any)["paragraphStyle"].(map[string]any)
+			ps["indentStart"], ps["indentFirstLine"] = pt(90), pt(80)
+		}
+	}
+	var err error
+	if api.raw, err = json.Marshal(d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: []EditOp{
+		{Kind: plan.OpBullets, Target: &Target{From: "p9", To: "p10"}, Params: plan.Params{Bullets: "none"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	reqs := api.batches[0].Requests
+	if got := kindsOf(t, reqs); got != "deleteParagraphBullets[115,133) updateParagraphStyle[115,133) updateParagraphStyle[115,116)" {
+		t.Fatalf("requests: %s", got)
+	}
+	if last := string(reqs[len(reqs)-1]); !strings.Contains(last, `"indentStart":{"magnitude":90,"unit":"PT"}`) || !strings.Contains(last, `"indentFirstLine":{"magnitude":80,"unit":"PT"}`) {
+		t.Fatalf("the hand-set indents put back: %s", last)
+	}
+}
+
 func TestFindSearchCreateExportSuggestions(t *testing.T) {
 	svc, api := writable(t, true)
 	ctx := accepting(context.Background())

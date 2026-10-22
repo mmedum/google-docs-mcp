@@ -219,7 +219,7 @@ func pieceRequests(p *piece, o FragmentOptions, merged bool, rng func(int64, int
 	if !merged {
 		ps := ParagraphStyleSpec{NamedStyle: "NORMAL_TEXT"}
 		if p.block.Kind == markdown.KindHeading {
-			ps.NamedStyle = fmt.Sprintf("HEADING_%d", min(max(p.block.Level, 1), 6))
+			ps.NamedStyle = fmt.Sprintf("HEADING_%d", p.block.HeadingLevel())
 		}
 		reqs = append(reqs, UpdateParagraphStyle(paraRange(p), ps))
 		if o.Inherited != nil && !p.listItem {

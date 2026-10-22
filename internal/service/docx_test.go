@@ -6,11 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/mmedum/google-docs-mcp/v2/internal/config"
 	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
@@ -279,6 +282,121 @@ func TestWordReplaceAll(t *testing.T) {
 	text, _ := uploaded(t, api, "word/document.xml")
 	if want := "Brief\nIntro paragraph with bold and a link.\nPoints\nFirst $5 item\nNested $5 item\nSecond $5 item\nOne\nTwo\n\nA\nB\n1\n2\n\nClosing line.\n"; text != want {
 		t.Fatalf("text:\n%s\nwant:\n%s", text, want)
+	}
+}
+
+// withHeader gives the Docs model the fake serves a default header holding
+// text. The file has none: only the body's paragraphs are matched to it.
+func withHeader(t *testing.T, api *fakeAPI, text string) {
+	t.Helper()
+	var d map[string]any
+	if err := json.Unmarshal(api.raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	dt := d["tabs"].([]any)[0].(map[string]any)["documentTab"].(map[string]any)
+	n := len(utf16.Encode([]rune(text)))
+	run := map[string]any{"endIndex": n, "textRun": map[string]any{"content": text, "textStyle": map[string]any{}}}
+	para := map[string]any{"endIndex": n, "paragraph": map[string]any{"elements": []any{run}, "paragraphStyle": map[string]any{"namedStyleType": "NORMAL_TEXT"}}}
+	dt["headers"] = map[string]any{"kix.header": map[string]any{"headerId": "kix.header", "content": []any{para}}}
+	dt["documentStyle"].(map[string]any)["defaultHeaderId"] = "kix.header"
+	var err error
+	if api.raw, err = json.Marshal(d); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A Word file's text is written in its body only, so replace_all replaces
+// the matches there and warns of those it left in a header; one matching
+// only outside the body is refused.
+func TestWordReplaceAllBodyOnly(t *testing.T) {
+	svc, api := wordService(t)
+	withHeader(t, api, "Header point\n")
+	res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: "point", Replace: "item", MatchCase: true}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _ := uploaded(t, api, "word/document.xml")
+	if want := "Brief\nIntro paragraph with bold and a link.\nPoints\nFirst item\nNested item\nSecond item\nOne\nTwo\n\nA\nB\n1\n2\n\nClosing line.\n"; text != want {
+		t.Fatalf("text:\n%s\nwant:\n%s", text, want)
+	}
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool {
+		return strings.Contains(w, "1 match(es)") && strings.Contains(w, "outside the body")
+	}) {
+		t.Errorf("warnings %q, want one for the match left in the header", res.Warnings)
+	}
+	_, err = svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpReplaceAll, Params: plan.Params{Find: "Header", Replace: "Top", MatchCase: true}}}})
+	var se *Error
+	if !errors.As(err, &se) || se.Class != "unsupported" || len(api.uploads) != 1 {
+		t.Fatalf("a match only in the header: %v, %d uploads; want unsupported and still 1", err, len(api.uploads))
+	}
+}
+
+// A Word file's suggestions are tracked changes written into the file, so
+// get_document offers suggest mode on one whose comments view Google
+// refused; and the one function every Docs API write goes through refuses
+// a Word file before sending anything.
+func TestWordSuggestWithoutCommentsView(t *testing.T) {
+	svc, api := wordService(t)
+	api.viewErr = viewRefused
+	info, err := svc.Info(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Capabilities.CommentsView || !slices.Contains(info.Capabilities.WriteModes, "suggest") {
+		t.Fatalf("comments view %v, write modes %q; want no view and suggest offered", info.Capabilities.CommentsView, info.Capabilities.WriteModes)
+	}
+	f, err := svc.Fetch(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var se *Error
+	if _, _, err := svc.batchUpdate(context.Background(), f, nil, ""); !errors.As(err, &se) || se.Class != "unsupported" || len(api.batches) != 0 {
+		t.Fatalf("a batch for a Word file: %v, %d sent; want unsupported and none", err, len(api.batches))
+	}
+}
+
+// An edit that takes a Word file past what Drive takes in one upload is
+// refused before uploading.
+func TestWordEditTooLarge(t *testing.T) {
+	svc, api := wordService(t)
+	// Text a zip cannot squeeze under the ceiling: random letters, about
+	// 4.7 bits each.
+	r := rand.New(rand.NewPCG(1, 2))
+	b := make([]byte, maxUpload*2)
+	for i := range b {
+		b[i] = 'a' + byte(r.IntN(26))
+	}
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpAppend, Content: string(b)}}})
+	var se *Error
+	if !errors.As(err, &se) || se.Class != "unsupported" || len(api.uploads) != 0 {
+		t.Fatalf("a file past the ceiling: %v, %d uploads; want unsupported and none", err, len(api.uploads))
+	}
+}
+
+// An error from internal/ooxml is classed: an edit it will not make is
+// unsupported, any other failure invalid, and an op's names the op.
+func TestWordErrorClasses(t *testing.T) {
+	for _, c := range []struct {
+		err         error
+		class, text string
+	}{
+		{fmt.Errorf("%w: inside a suggestion", ooxml.ErrUnsupported), "unsupported", "op 3: inside a suggestion"},
+		{errors.New("two edits reach the same text"), "invalid", "op 3: two edits reach the same text"},
+	} {
+		var se *Error
+		if err := docxError(&plan.Op{Seq: 3}, c.err); !errors.As(err, &se) || se.Class != c.class || se.Message != c.text {
+			t.Errorf("%v: got %v, want [%s] %s", c.err, err, c.class, c.text)
+		}
+	}
+	if err := docxError(&plan.Op{Seq: 3}, nil); err != nil {
+		t.Errorf("no error: got %v", err)
+	}
+	var se *Error
+	if err := wordError(errors.New("comments.xml has no end tag")); !errors.As(err, &se) || se.Class != "invalid" {
+		t.Errorf("a comment's failure: got %v, want invalid", err)
 	}
 }
 

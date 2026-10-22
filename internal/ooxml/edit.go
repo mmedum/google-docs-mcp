@@ -187,7 +187,7 @@ func (f *File) DeleteParas(i, j int, replaced bool, tr *Track) error {
 			return unsupported("a paragraph there ends a section; deleting it would remove the section break")
 		case p.cell != f.Paras[i].cell:
 			return unsupported("the paragraphs are in different table cells")
-		case (p.last || k == len(f.Paras)-1) && !replaced:
+		case (k+1 == len(f.Paras) || p.cell >= 0 && f.Paras[k+1].cell != p.cell) && !replaced:
 			return unsupported("the paragraph is the last of its table cell or of the document, which keeps one")
 		case k > i && strings.Contains(string(f.doc[f.Paras[k-1].el.end:p.el.start]), "<"+f.w.tag("tbl")):
 			return unsupported("a table lies between the paragraphs")
@@ -346,7 +346,7 @@ func (f *File) textXML(s string) string {
 	start := 0
 	flush := func(end int) {
 		if end > start {
-			b.WriteString(f.text("t", s[start:end]))
+			b.WriteString(f.w.text("t", s[start:end]))
 		}
 	}
 	for i, c := range s {
@@ -363,11 +363,6 @@ func (f *File) textXML(s string) string {
 	}
 	flush(len(s))
 	return b.String()
-}
-
-// text is a w:t or w:delText holding s, spaces kept.
-func (f *File) text(local, s string) string {
-	return fmt.Sprintf(`<%s xml:space="preserve">%s</%s>`, f.w.tag(local), escape(s), f.w.tag(local))
 }
 
 // rPrOrder is the order a run's properties are written in (ECMA-376,
@@ -547,13 +542,14 @@ func (p *Para) reach(pe pending) (int, int, bool) {
 // run holding the unit before it, or before the first run, or, in an empty
 // paragraph, before its end tag.
 func (p *Para) boundary(a int, f *File) int {
-	switch {
+	switch r := p.hostRun(a); {
+	case r == nil:
+		return p.el.end - len("</"+f.w.tag("p")+">")
 	case a > 0:
-		return p.runs[p.units[a-1]].el.end
-	case len(p.units) > 0:
-		return p.runs[p.units[0]].el.start
+		return r.el.end
+	default:
+		return r.el.start
 	}
-	return p.el.end - len("</"+f.w.tag("p")+">")
 }
 
 // rewrite is runs first to last with the changes made: text kept as it
@@ -639,7 +635,7 @@ func (f *File) partial(r *run, from, to int, last, deleted bool) string {
 				if deleted || k.deleted {
 					name = "delText"
 				}
-				b.WriteString(f.text(name, k.text[doc.UTF16ToByte(k.text, int64(lo)):doc.UTF16ToByte(k.text, int64(hi))]))
+				b.WriteString(f.w.text(name, k.text[doc.UTF16ToByte(k.text, int64(lo)):doc.UTF16ToByte(k.text, int64(hi))]))
 			}
 		}
 		pos += k.n

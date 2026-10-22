@@ -47,9 +47,8 @@ type Para struct {
 	// unlisted that it sets numId 0, out of the list its style gives.
 	ilvlSet, unlisted bool
 	// section says the paragraph ends a section, which deleting it would
-	// remove; last that it is the last of a table cell, which a cell may
-	// not be without.
-	section, last bool
+	// remove.
+	section bool
 	// cell is the start of the table cell holding it, or -1.
 	cell int
 	runs []*run
@@ -142,9 +141,6 @@ func (f *File) parse() error {
 				p.cells = p.cells[:len(p.cells)-1]
 			}
 		}
-	}
-	for i, para := range f.Paras {
-		para.last = para.cell >= 0 && (i+1 == len(f.Paras) || f.Paras[i+1].cell != para.cell)
 	}
 	return nil
 }

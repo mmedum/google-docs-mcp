@@ -111,6 +111,26 @@ func TestCompileFragmentListLevels(t *testing.T) {
 			want: "nobullets[10,16) indent[10,16) bullets[10,16) BULLET_DISC_CIRCLE_SQUARE",
 		},
 		{
+			// Written inside a paragraph that is no list item, the first item
+			// is that paragraph and keeps its style, so it takes no tabs and
+			// no bullet; the list starts after it.
+			name: "inside a plain paragraph, at a level",
+			src:  "- one\n- two",
+			o:    FragmentOptions{Inline: true, ListLevel: new(2)},
+			text: "one\n\t\ttwo",
+			want: `indent[14,19) ins@14 "\n" bullets[14,20) BULLET_DISC_CIRCLE_SQUARE del[14,15)`,
+		},
+		{
+			// A checklist is no list a bulleted one joins, but the content is
+			// placed at the item's level all the same: a list of its own, as
+			// deep as the level-2 item it follows.
+			name: "after a checklist's level-2 item",
+			src:  "- x",
+			o:    FragmentOptions{Suffix: true, List: ListContext{Anchor: &ListItem{Level: 2}, Preceding: []ListItem{{Level: 2, Start: 6}}}},
+			text: "\t\tx\n",
+			want: `indent[10,13) ins@10 "\n" bullets[10,14) BULLET_DISC_CIRCLE_SQUARE del[10,11)`,
+		},
+		{
 			// A checklist is no list the server's presets join, so the
 			// nested item before is left alone, never rebuilt as a bullet:
 			// the new item starts a list of its own at the top.
@@ -274,6 +294,20 @@ func TestPlanReplaceTextInListItem(t *testing.T) {
 	}
 	if got := kinds(t, res); got != "del[32,35) ins@32 updateTextStyle[32,35) updateTextStyle[32,35)" {
 		t.Fatalf("requests = %s", got)
+	}
+}
+
+// Removing bullets clears the indent Google leaves behind, and gives an
+// item indented by hand its own back, as a rebuilt item gets them.
+func TestPlanBulletsNoneKeepsHandIndents(t *testing.T) {
+	op := Op{Kind: OpBullets, Seg: seg(), Target: &Rng{Start: 10, End: 30}, Params: Params{Bullets: "none"},
+		Items: []ListItem{{Level: 0, Preset: BulletPreset, Start: 10, IndentStart: 36, IndentFirstLine: 18}, {Level: 1, Preset: BulletPreset, Start: 20, IndentStart: 90, IndentFirstLine: 80}}}
+	res, err := Plan([]Op{op}, Options{Mode: ModeDirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := listView(t, res.Requests), "nobullets[10,30) indent[10,30) setindent[20,21) 90/80"; got != want {
+		t.Errorf("requests:\n got %s\nwant %s", got, want)
 	}
 }
 

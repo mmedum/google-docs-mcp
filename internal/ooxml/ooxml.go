@@ -269,6 +269,11 @@ func (w prefix) el(local, inner string) string {
 // empty is an element holding nothing.
 func (w prefix) empty(local string) string { return "<" + w.tag(local) + "/>" }
 
+// text is a w:t or w:delText holding s, spaces kept.
+func (w prefix) text(local, s string) string {
+	return fmt.Sprintf(`<%s xml:space="preserve">%s</%s>`, w.tag(local), escape(s), w.tag(local))
+}
+
 // val is an empty element whose w:val is v.
 func (w prefix) val(local, v string) string {
 	return fmt.Sprintf(`<%s %s="%s"/>`, w.tag(local), w.tag("val"), escape(v))

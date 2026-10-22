@@ -27,9 +27,9 @@ import (
 // (architecture §7.5).
 
 const (
-	// mdMaxWrite is the largest file written: Drive's ceiling for a
+	// maxUpload is the largest file written: Drive's ceiling for a
 	// simple upload is 5 MB.
-	mdMaxWrite = 5 << 20
+	maxUpload = 5 << 20
 	// mdMaxRead is the largest file read.
 	mdMaxRead = 20 << 20
 )
@@ -42,7 +42,7 @@ const IsMarkdownMessage = "this is a Markdown file, which Docs opens in place an
 const markupRefused = "the content holds Docs' comment markup (a gdoc_comment marker, or a line starting gdoc_comments:), which would forge or end a comment"
 
 func tooLarge(n int) error {
-	return Errorf("unsupported", "%d bytes is over the %d this server uploads, Drive's ceiling for a simple upload", n, mdMaxWrite)
+	return Errorf("unsupported", "%d bytes is over the %d this server uploads, Drive's ceiling for a simple upload", n, maxUpload)
 }
 
 // mdFile is a Markdown file as one read saw it.
@@ -283,7 +283,7 @@ func mdWritable(m *mdFile) error {
 			return Errorf("forbidden", "%s", msg)
 		}
 	}
-	if n := len(m.md.Source()); n > mdMaxWrite {
+	if n := len(m.md.Source()); n > maxUpload {
 		return tooLarge(n)
 	}
 	return nil
@@ -500,9 +500,10 @@ type mdPlanned struct {
 
 type opSpan struct{ op, start, end int }
 
-// mdOpKinds are the ops a Markdown file takes: the ones that change
-// text. Any other is refused, whichever tool sent it.
-var mdOpKinds = map[plan.OpKind]bool{plan.OpInsert: true, plan.OpAppend: true, plan.OpReplace: true, plan.OpDelete: true, plan.OpReplaceAll: true}
+// textOpKinds are the ops a Markdown or Word file takes, written into the
+// file itself: the ones that change text. Any other is refused, whichever
+// tool sent it.
+var textOpKinds = map[plan.OpKind]bool{plan.OpInsert: true, plan.OpAppend: true, plan.OpReplace: true, plan.OpDelete: true, plan.OpReplaceAll: true}
 
 // mdPlan resolves every op against one read and turns it into edits of
 // the visible text, then runs the guard over them.
@@ -510,7 +511,7 @@ func mdPlan(f *mdfile.File, ops []EditOp, force bool) (*mdPlanned, error) {
 	p := &mdPlanned{}
 	text := f.Text()
 	for _, op := range ops {
-		if !mdOpKinds[op.Kind] {
+		if !textOpKinds[op.Kind] {
 			return nil, mdUnsupported(fmt.Sprintf("op %d (%s) needs the Docs API", op.Seq, op.Kind),
 				"write the change as markdown with insert, append, replace, delete or replace_all")
 		}

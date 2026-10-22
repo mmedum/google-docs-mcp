@@ -59,6 +59,17 @@ func (it ListItem) handIndented() bool {
 	return (it.IndentStart != 0 || it.IndentFirstLine != 0) && (it.IndentStart != level || it.IndentFirstLine != level-18)
 }
 
+// ownIndents puts back the indents of an item set by hand, at its start
+// in the segment r is in; nil when its indents are its level's.
+func (it ListItem) ownIndents(r Rng) json.RawMessage {
+	if !it.handIndented() {
+		return nil
+	}
+	in, first := it.IndentStart, it.IndentFirstLine
+	r.Start, r.End = it.Start, it.Start+1
+	return UpdateParagraphStyle(r, ParagraphStyleSpec{IndentStartPt: &in, IndentFirstLine: &first})
+}
+
 // ListContext is the list around an insertion, from the document as the
 // service read it.
 type ListContext struct {
@@ -211,17 +222,21 @@ func leadingWindows(group []*piece, o FragmentOptions) []*listWindow {
 	}
 	windows := make([]*listWindow, 0, len(spans))
 	for _, s := range spans {
-		for _, p := range group[s.lo:s.hi] {
+		s.pieces = group[s.lo:s.hi]
+		for _, p := range s.pieces {
 			p.item = made(p)
 		}
-		windows = append(windows, &listWindow{pieces: group[s.lo:s.hi], existing: s.existing, base: s.base})
+		windows = append(windows, &s.listWindow)
 	}
 	return windows
 }
 
 // markKept gives each item of the leading list its level, and says which
 // keep the bullet they inherited because it is already right: of the same
-// kind and level, whatever list it is (a checklist item stays one).
+// kind and level, whatever list it is (a checklist item stays one). A
+// first item merged into the paragraph at the insertion point is that
+// paragraph, which keeps its style: a list item stays as it is, and so
+// does any other paragraph, the list starting after it.
 func markKept(group []*piece, o FragmentOptions, ordered bool) []bool {
 	inh := o.Inherited
 	lead := 0
@@ -234,13 +249,12 @@ func markKept(group []*piece, o FragmentOptions, ordered bool) []bool {
 	kept := make([]bool, len(group))
 	for i, p := range group {
 		p.level = lead + p.block.Nesting
-		if i == 0 && o.mergesFirst() {
-			// The existing paragraph itself: a list item stays as it is.
-			kept[i] = inh != nil
-		} else {
-			kept[i] = inh != nil && inh.Ordered == ordered && inh.Level == p.level
-		}
-		if kept[i] {
+		merged := i == 0 && o.mergesFirst()
+		switch {
+		case merged && inh == nil:
+			kept[i] = true
+		case merged || inh != nil && inh.Ordered == ordered && inh.Level == p.level:
+			kept[i] = true
 			p.level = inh.Level
 			p.item = &ListItem{Level: inh.Level, Ordered: inh.Ordered, Preset: inh.Preset}
 		}
@@ -251,9 +265,8 @@ func markKept(group []*piece, o FragmentOptions, ordered bool) []bool {
 // span is a window of the leading list as group indices [lo, hi), with
 // the existing items before the content it rebuilds, nearest first.
 type span struct {
-	lo, hi   int
-	existing []ListItem
-	base     int
+	lo, hi int
+	listWindow
 }
 
 // widen sets w's base, first taking in what comes before it while that is
@@ -341,9 +354,8 @@ func listRequests(windows []*listWindow, o FragmentOptions, at Loc, rng func(int
 		}
 		// A rebuilt item set apart by hand gets its own indents back.
 		for _, e := range w.existing {
-			if e.handIndented() {
-				in, first := e.IndentStart, e.IndentFirstLine
-				reqs = append(reqs, UpdateParagraphStyle(rng(e.Start, e.Start+1), ParagraphStyleSpec{IndentStartPt: &in, IndentFirstLine: &first}))
+			if r := e.ownIndents(rng(start, end)); r != nil {
+				reqs = append(reqs, r)
 			}
 		}
 	}

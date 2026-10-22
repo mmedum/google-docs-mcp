@@ -223,7 +223,9 @@ word_file`, reads work as on a Google Doc, handles included, and an edit
 is made in the file's XML and uploaded whole through Drive.
 
 - `edit_document` takes `insert`, `append`, `replace`, `delete` and
-  `replace_all` on the body's text, addressed as on a Google Doc. Text
+  `replace_all` on the body's text, addressed as on a Google Doc;
+  `replace_all` leaves a match in a header, footer or footnote, with a
+  warning. Text
   replaced inside a paragraph changes by its minimal difference and keeps
   its look; content of several paragraphs goes between paragraphs or
   replaces whole ones. Headings take the file's own heading styles, and

@@ -43,12 +43,9 @@ type EditOp struct {
 	plan.Params
 	// Regex makes Find an RE2 pattern; such a replace_all is expanded
 	// here into one replace per match and never reaches the planner.
-	Regex bool
-	// eachMatch expands a plain replace_all the same way, for a file the
-	// Docs API does not write and so has no replaceAllText (a Word file).
-	eachMatch bool
-	Table     *TableOp
-	Object    *plan.ObjectParams
+	Regex  bool
+	Table  *TableOp
+	Object *plan.ObjectParams
 	// Layout carries the page, section and named-style specs, and the
 	// section type a section_break starts.
 	Layout *LayoutOp
@@ -156,6 +153,8 @@ func (r *EditResult) text() string {
 type resolvedOps struct {
 	ops     []plan.Op
 	threads []CommentThread
+	// warnings say what resolving left undone, for the result.
+	warnings []string
 	// planned and env are set once the ops are planned and applied, for
 	// the follow-ups.
 	planned *plan.Result
@@ -617,6 +616,9 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	p.TargetAligned = r.Aligned
 	p.Description = r.Description
 	p.List = targetList(r)
+	if op.Kind == plan.OpBullets {
+		p.Items = itemsIn(r)
+	}
 	if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
 		p.Anchors = f.anchorsIn(r.Segment, r.Start, r.End, out.threads)
 	}
@@ -706,7 +708,7 @@ func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op
 	switch {
 	case op.Kind == plan.OpSetCells:
 		ops, err = s.expandSetCells(f, op.Seq, op, out)
-	case op.Kind == plan.OpReplaceAll && (op.Regex || op.eachMatch):
+	case op.Kind == plan.OpReplaceAll && (op.Regex || f.Word):
 		ops, err = s.expandReplaceAll(f, op, out)
 	default:
 		return nil, false, nil
@@ -714,9 +716,9 @@ func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op
 	return ops, true, err
 }
 
-// expandReplaceAll turns a regex replace_all, or a plain one marked
-// eachMatch, into one replace per match, or a delete where the
-// replacement expands to nothing. The matches are found here, with
+// expandReplaceAll turns a regex replace_all, or any one on a Word file,
+// which has no replaceAllText, into one replace per match, or a delete
+// where the replacement expands to nothing. The matches are found here, with
 // find_in_document's matcher over each paragraph's index-aligned text,
 // rather than by Google's searchByRegex: Google does not document its
 // regex flavor, and the guard has to see exactly the ranges that change.
@@ -727,7 +729,9 @@ func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op
 // which Google maintains. A pattern decides case: a write that ignored it
 // by default would turn [A-Z] into every letter. Plain text matches
 // itself, its case as match_case says, and is replaced by the text as
-// given.
+// given. On a Word file, whose text ops write the body only, a match in
+// a header, footer or footnote is left with a warning, and a find
+// matching only there is refused.
 func (s *Service) expandReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]plan.Op, error) {
 	if op.Find == "" {
 		return nil, Errorf("invalid", "replace_all needs find")
@@ -748,6 +752,7 @@ func (s *Service) expandReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]p
 		return nil, err
 	}
 	var ops []plan.Op
+	elsewhere := 0
 	for _, seg := range tab.Segments() {
 		bounds := SegmentBounds(tab, seg)
 		toc := tocBlocks(seg)
@@ -756,6 +761,10 @@ func (s *Service) expandReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]p
 				continue
 			}
 			aligned := paragraphText(b)
+			if f.Word && seg.ID != "" {
+				elsewhere += len(re.FindAllStringIndex(aligned, -1))
+				continue
+			}
 			for _, m := range re.FindAllStringSubmatchIndex(aligned, -1) {
 				switch {
 				case m[0] == m[1]:
@@ -778,8 +787,13 @@ func (s *Service) expandReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]p
 			}
 		}
 	}
-	if len(ops) == 0 {
+	switch {
+	case len(ops) == 0 && elsewhere > 0:
+		return nil, Errorf("unsupported", "%q matches only outside the body (%d match(es) in headers, footers or footnotes); on a Word file only the body's text is written", op.Find, elsewhere)
+	case len(ops) == 0:
 		return nil, Errorf("not_found", "%q matches nothing in tab %d; find_in_document shows what a find matches, and a chip's text is not matched", op.Find, tab.Number)
+	case elsewhere > 0:
+		out.warnings = append(out.warnings, fmt.Sprintf("op %d: %d match(es) of %q outside the body, in headers, footers or footnotes, were left as they are; on a Word file only the body's text is written", op.Seq, elsewhere, op.Find))
 	}
 	// One caller op, so one line in the summary, as set_cells does.
 	desc := fmt.Sprintf("%d match(es) of %q in tab %d", len(ops), op.Find, tab.Number)
@@ -1050,6 +1064,19 @@ func listItem(tab *doc.Tab, b *doc.Block) *plan.ListItem {
 		IndentStart: b.Paragraph.IndentStartPt, IndentFirstLine: b.Paragraph.IndentFirstLinePt}
 }
 
+// itemsIn are the list items a target reaches, whole or in part.
+func itemsIn(r *TargetRange) []plan.ListItem {
+	var out []plan.ListItem
+	for _, b := range r.Segment.AllBlocks() {
+		if b.Start < r.End && r.Start < b.End {
+			if it := listItem(r.Tab, b); it != nil {
+				out = append(out, *it)
+			}
+		}
+	}
+	return out
+}
+
 // siblings is the run of blocks b sits in: those of the table cell
 // holding it, or the segment's own.
 func siblings(seg *doc.Segment, b *doc.Block) []*doc.Block {
@@ -1080,8 +1107,8 @@ func listFrom(tab *doc.Tab, blocks []*doc.Block, i int) []plan.ListItem {
 // listAround is the list for content placed against b that lands at its
 // start, or in it.
 func listAround(tab *doc.Tab, seg *doc.Segment, b *doc.Block) plan.ListContext {
-	bs := siblings(seg, b)
-	return plan.ListContext{At: listItem(tab, b), Anchor: listItem(tab, b), Preceding: listFrom(tab, bs, slices.Index(bs, b)-1)}
+	bs, it := siblings(seg, b), listItem(tab, b)
+	return plan.ListContext{At: it, Anchor: it, Preceding: listFrom(tab, bs, slices.Index(bs, b)-1)}
 }
 
 // listAfter is the list for content that lands after anchor's text, in

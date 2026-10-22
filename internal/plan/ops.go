@@ -119,6 +119,9 @@ type Op struct {
 	ClearTo int64
 	// List is the list around the insertion point or the target.
 	List ListContext
+	// Items are the list items a bullets op's target reaches, whose
+	// indents set by hand bullets none puts back.
+	Items []ListItem
 
 	Fragment *markdown.Fragment
 	// Slots are where the fragment's tables and images wait, set when
@@ -453,8 +456,8 @@ func validateParams(op *Op, info KindInfo) error {
 	return nil
 }
 
-// maxListLevel is the deepest level a Google Docs list has.
-const maxListLevel = 8
+// MaxListLevel is the deepest level a Google Docs list has.
+const MaxListLevel = 8
 
 // validateListLevel holds list_level to the ops that write content, to
 // content that starts with a list, and to the levels a list has.
@@ -465,8 +468,8 @@ func validateListLevel(op *Op) error {
 	switch {
 	case op.Kind != OpInsert && op.Kind != OpAppend && op.Kind != OpReplace:
 		return fmt.Errorf("op %d: list_level applies to insert, append and replace", op.Seq)
-	case *op.ListLevel < 0 || *op.ListLevel > maxListLevel:
-		return fmt.Errorf("op %d: list_level must be 0 (the top) to %d", op.Seq, maxListLevel)
+	case *op.ListLevel < 0 || *op.ListLevel > MaxListLevel:
+		return fmt.Errorf("op %d: list_level must be 0 (the top) to %d", op.Seq, MaxListLevel)
 	case op.Fragment == nil || len(op.Fragment.Blocks) == 0 || op.Fragment.Blocks[0].Kind != markdown.KindListItem:
 		return fmt.Errorf("op %d: list_level sets the level of a list the content starts with, and this content does not start with one", op.Seq)
 	}
@@ -734,8 +737,15 @@ func formatRequests(op *Op) []json.RawMessage {
 	case OpBullets:
 		switch op.Bullets {
 		case "none":
-			// The bullet's indent outlives it.
-			return []json.RawMessage{DeleteBullets(r), ClearIndent(r)}
+			// The bullet's indent outlives it; an item's own, set by hand,
+			// is put back.
+			reqs := []json.RawMessage{DeleteBullets(r), ClearIndent(r)}
+			for _, it := range op.Items {
+				if own := it.ownIndents(r); own != nil {
+					reqs = append(reqs, own)
+				}
+			}
+			return reqs
 		case "numbered":
 			return []json.RawMessage{CreateBullets(r, NumberedPreset)}
 		case "checkbox":

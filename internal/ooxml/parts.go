@@ -123,7 +123,7 @@ func (f *File) addComment(id string, c NewComment) error {
 	fmt.Fprintf(&b, `<%s %s="%s" %s="%s" %s="%s" %s="%s">`, w.tag("comment"), w.tag("id"), id, w.tag("author"), escape(c.Author),
 		w.tag("date"), escape(c.Date), w.tag("initials"), escape(c.Initials))
 	for _, line := range strings.Split(c.Text, "\n") {
-		b.WriteString(w.el("p", w.el("r", fmt.Sprintf(`<%s xml:space="preserve">%s</%s>`, w.tag("t"), escape(line), w.tag("t")))))
+		b.WriteString(w.el("p", w.el("r", w.text("t", line))))
 	}
 	b.WriteString("</" + w.tag("comment") + ">")
 	out, err := insertBefore(partComments, body, "</"+w.tag("comments")+">", b.String())
@@ -400,19 +400,23 @@ func (f *File) NewList(ordered bool) (string, error) {
 			w.val("start", "1"), w.val("numFmt", numFmt), w.val("lvlText", text), w.val("lvlJc", "left"), w.el("pPr", ind), w.tag("lvl"))
 	}
 	a.WriteString("</" + w.tag("abstractNum") + ">")
-	// Every abstract definition comes before the first list that uses one.
-	at := bytes.Index(body, []byte("<"+w.tag("num")+" "))
-	if at < 0 {
-		at = bytes.LastIndex(body, []byte("</"+w.tag("numbering")+">"))
-	}
-	if at < 0 {
+	// The part's order (CT_Numbering): the abstract definitions, the lists
+	// using them, then the cleanup mark Word for Mac may end it with.
+	list, cleanup, end := "<"+w.tag("num")+" ", "<"+w.tag("numIdMacAtCleanup"), "</"+w.tag("numbering")+">"
+	if !bytes.Contains(body, []byte(end)) {
 		return "", fmt.Errorf("%s has no end tag", partNumbering)
 	}
-	out := slices.Insert(slices.Clone(body), at, []byte(a.String())...)
-	num := fmt.Sprintf(`<%s %s="%s">%s</%s>`, w.tag("num"), w.tag("numId"), numID, w.val("abstractNumId", absID), w.tag("num"))
-	if out, err = insertBefore(partNumbering, out, "</"+w.tag("numbering")+">", num); err != nil {
-		return "", err
+	before := func(b []byte, marks ...string) int {
+		for _, m := range marks {
+			if i := bytes.Index(b, []byte(m)); i >= 0 {
+				return i
+			}
+		}
+		return bytes.LastIndex(b, []byte(end))
 	}
+	out := slices.Insert(slices.Clone(body), before(body, list, cleanup), []byte(a.String())...)
+	num := fmt.Sprintf(`<%s %s="%s">%s</%s>`, w.tag("num"), w.tag("numId"), numID, w.val("abstractNumId", absID), w.tag("num"))
+	out = slices.Insert(out, before(out, cleanup), []byte(num)...)
 	if err := f.save(partNumbering, out, fresh, typeNumbering, relNumbering); err != nil {
 		return "", err
 	}

@@ -208,13 +208,7 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 		if strings.TrimSpace(req.Assignee) != "" && !res.Anchored {
 			res.Warnings = append(res.Warnings, "assignee needs a comment pinned to a passage; the comment would be posted without one")
 		}
-		res.Text = "dry run: would post a comment"
-		if res.Handle != "" {
-			res.Text += fmt.Sprintf(" on %s (%q)", res.Handle, doc.Clip(res.Quote, 60))
-		}
-		for _, w := range res.Warnings {
-			res.Text += "\nwarning: " + w
-		}
+		res.say("dry run: would post a comment", "")
 		return res, nil
 	}
 	if anchored {
@@ -225,17 +219,25 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	if err != nil {
 		return nil, err
 	}
-	res.Text = fmt.Sprintf("comment %s posted", res.ID)
-	if res.Handle != "" {
-		res.Text += fmt.Sprintf(" on %s (%q)", res.Handle, doc.Clip(res.Quote, 60))
-	}
+	tail := ""
 	if !res.Anchored {
-		res.Text += " (unanchored)"
+		tail = " (unanchored)"
 	}
-	for _, w := range res.Warnings {
-		res.Text += "\nwarning: " + w
-	}
+	res.say(fmt.Sprintf("comment %s posted", res.ID), tail)
 	return res, nil
+}
+
+// say is the result as text: head, the passage the comment is on, tail,
+// and the warnings.
+func (r *AddCommentResult) say(head, tail string) {
+	r.Text = head
+	if r.Handle != "" {
+		r.Text += fmt.Sprintf(" on %s (%q)", r.Handle, doc.Clip(r.Quote, 60))
+	}
+	r.Text += tail
+	for _, w := range r.Warnings {
+		r.Text += "\nwarning: " + w
+	}
 }
 
 // commentText validates a comment or reply body against the API limit.

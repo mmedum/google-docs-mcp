@@ -631,7 +631,7 @@ func TestMarkdownFileTakesTwoAppends(t *testing.T) {
 }
 
 func TestMarkdownFileRefusesGrowingPastTheUploadCeiling(t *testing.T) {
-	text := strings.Repeat("x", mdMaxWrite-10) + "\n"
+	text := strings.Repeat("x", maxUpload-10) + "\n"
 	api := &fakeAPI{md: &text}
 	svc := New(api, Options{DefaultWriteMode: config.WriteDirect, Sleep: noSleep})
 	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpAppend, Content: strings.Repeat("y", 100)}}})
@@ -720,7 +720,7 @@ func TestMarkdownFileWaitsForTheEditor(t *testing.T) {
 			waits := 0
 			svc.opts.Sleep = func(context.Context, time.Duration) error { waits++; return nil }
 			_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: op})
-			if classOf(err) != "conflict" || len(api.uploads) != 0 || waits != mdWriteAttempts-1 {
+			if classOf(err) != "conflict" || len(api.uploads) != 0 || waits != writeAttempts-1 {
 				t.Errorf("while the editor holds unsaved work: %v, %d upload(s), %d wait(s)", err, len(api.uploads), waits)
 			}
 			// The editor saves, and the write goes ahead.

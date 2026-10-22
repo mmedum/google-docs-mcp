@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +15,6 @@ import (
 	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
 	"github.com/mmedum/google-docs-mcp/v2/internal/ooxml"
 	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
 )
 
 // Word files (.docx). The Docs API reads one, its tracked changes as
@@ -28,9 +26,6 @@ import (
 // the file's XML (internal/ooxml), a suggestion as a tracked change and a
 // comment as a Word comment, and uploaded through Drive as one revision,
 // which Docs reads again within seconds (spike H).
-
-// docxOpKinds are the ops a Word file takes: they write text.
-var docxOpKinds = map[plan.OpKind]bool{plan.OpInsert: true, plan.OpAppend: true, plan.OpReplace: true, plan.OpDelete: true, plan.OpReplaceAll: true}
 
 // wordElsewhere is where the rest of the tools' work goes.
 const wordElsewhere = "formatting, tables, images, layout and tabs need the file saved as a Google Doc (File > Save as Google Docs)"
@@ -60,7 +55,7 @@ type wordMap struct {
 func newWordMap(f *Fetched, file *ooxml.File) (*wordMap, error) {
 	w := &wordMap{f: f, file: file}
 	if len(f.Doc.Tabs) > 0 {
-		for _, b := range doc.Flatten(f.Doc.Tabs[0].Body.Blocks) {
+		for _, b := range f.Doc.Tabs[0].Body.AllBlocks() {
 			switch b.Kind {
 			case doc.KindParagraph:
 				if spanned(b) {
@@ -159,9 +154,24 @@ func (w *wordMap) point(x int64) (int, int, error) {
 	return 0, 0, Errorf("unsupported", "the passage is not in the body")
 }
 
+// inBody says op is in the body, the one part of a Word file its text ops
+// write.
+func (w *wordMap) inBody(op *plan.Op) bool {
+	return op.Seg.ID == "" && (op.Seg.TabID == "" || len(w.f.Doc.Tabs) == 0 || op.Seg.TabID == w.f.Doc.Tabs[0].ID)
+}
+
+// passage is where a Docs range starts and ends in the file, each
+// paragraph checked: paragraph i at offset a to paragraph j at offset b.
+func (w *wordMap) passage(r plan.Rng) (i, a, j, b int, err error) {
+	if i, a, err = w.para(r.Start); err == nil {
+		j, b, err = w.point(r.End)
+	}
+	return i, a, j, b, err
+}
+
 // apply makes one op in the file.
 func (w *wordMap) apply(op *plan.Op, tr *ooxml.Track) error {
-	if op.Seg.ID != "" || (op.Seg.TabID != "" && len(w.f.Doc.Tabs) > 0 && op.Seg.TabID != w.f.Doc.Tabs[0].ID) {
+	if !w.inBody(op) {
 		return Errorf("unsupported", "op %d: on a Word file only the body's text is written", op.Seq)
 	}
 	switch op.Kind {
@@ -176,11 +186,7 @@ func (w *wordMap) apply(op *plan.Op, tr *ooxml.Track) error {
 			}
 			return w.replaceParas(op, i, j, tr)
 		}
-		i, a, err := w.para(op.Target.Start)
-		if err != nil {
-			return err
-		}
-		j, b, err := w.point(op.Target.End)
+		i, a, j, b, err := w.passage(*op.Target)
 		if err != nil {
 			return err
 		}
@@ -294,7 +300,7 @@ func (w *wordMap) newParas(op *plan.Op) ([]ooxml.NewPara, error) {
 		case markdown.KindParagraph:
 			out = append(out, ooxml.NewPara{Runs: inlineRuns(b.Inlines)})
 		case markdown.KindHeading:
-			out = append(out, ooxml.NewPara{Heading: min(max(b.Level, 1), 6), Runs: inlineRuns(b.Inlines)})
+			out = append(out, ooxml.NewPara{Heading: b.HeadingLevel(), Runs: inlineRuns(b.Inlines)})
 		case markdown.KindCode:
 			for _, line := range b.Lines {
 				out = append(out, ooxml.NewPara{Runs: []ooxml.Run{{Text: line, Styled: true, Code: true}}})
@@ -306,7 +312,7 @@ func (w *wordMap) newParas(op *plan.Op) ([]ooxml.NewPara, error) {
 					return nil, err
 				}
 			}
-			out = append(out, ooxml.NewPara{NumID: numID, Ilvl: min(lead+b.Nesting, 8), Runs: inlineRuns(b.Inlines)})
+			out = append(out, ooxml.NewPara{NumID: numID, Ilvl: min(lead+b.Nesting, plan.MaxListLevel), Runs: inlineRuns(b.Inlines)})
 		default:
 			return nil, Errorf("unsupported", "op %d: content with a %s is not written into a Word file; %s", op.Seq, b.Kind, wordElsewhere)
 		}
@@ -371,27 +377,29 @@ func (w *wordMap) fileComments(ops []plan.Op) {
 
 // comment pins a proposal or a comment to the passage a Docs range covers.
 func (w *wordMap) comment(r plan.Rng, c ooxml.NewComment) error {
-	i, a, err := w.para(r.Start)
-	if err != nil {
-		return err
-	}
-	j, b, err := w.point(r.End)
+	i, a, j, b, err := w.passage(r)
 	if err != nil {
 		return err
 	}
 	_, err = w.file.Comment(i, a, j, b, c)
-	return err
+	return wordError(err)
 }
 
-func docxError(op *plan.Op, err error) error {
+// wordError classes an error from internal/ooxml: an edit it will not
+// make is unsupported, any other failure invalid.
+func wordError(err error) error {
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, ooxml.ErrUnsupported):
-		return Errorf("unsupported", "op %d: %s", op.Seq, strings.TrimPrefix(err.Error(), ooxml.ErrUnsupported.Error()+": "))
+		return Errorf("unsupported", "%s", strings.TrimPrefix(err.Error(), ooxml.ErrUnsupported.Error()+": "))
 	}
-	return Errorf("invalid", "op %d: %v", op.Seq, err)
+	return Errorf("invalid", "%v", err)
 }
+
+// docxError is an error from making op in the file, classed and naming
+// the op.
+func docxError(op *plan.Op, err error) error { return opError(op.Seq, wordError(err)) }
 
 // docxChange makes a write's change in a Word file beside its Docs model,
 // and says what it did and what it forces.
@@ -448,7 +456,7 @@ func (s *Service) readWord(ctx context.Context, id string) (*wordRead, error) {
 			ch <- file{err: Errorf("unsupported", "the file is %s now, not a Word file; read it again", meta.MimeType)}
 			return
 		}
-		if size, _ := strconv.ParseInt(meta.Size, 10, 64); size > mdMaxWrite {
+		if size, _ := strconv.ParseInt(meta.Size, 10, 64); size > maxUpload {
 			ch <- file{err: tooLarge(int(size))}
 			return
 		}
@@ -465,7 +473,7 @@ func (s *Service) readWord(ctx context.Context, id string) (*wordRead, error) {
 		return nil, err
 	case rd.err != nil:
 		return nil, rd.err
-	case len(rd.data) > mdMaxWrite:
+	case len(rd.data) > maxUpload:
 		return nil, tooLarge(len(rd.data))
 	}
 	return &wordRead{meta: rd.meta, data: rd.data, f: f}, nil
@@ -492,9 +500,9 @@ func (s *Service) docxWriteOnce(ctx context.Context, id string, o docxOpts, chan
 	}
 	var stale *staleError
 	if errors.As(err, &stale) {
-		if attempt < mdWriteAttempts {
+		if attempt < writeAttempts {
 			s.log.InfoContext(ctx, "the Word file and Docs disagree; waiting", "why", stale.why)
-			return nil, true, s.sleep(ctx, mdWait)
+			return nil, true, s.sleep(ctx, saveWait)
 		}
 		return nil, false, Errorf("conflict", "Docs and the file disagree (%s): the file may be open in the Docs editor with changes not saved to it yet, "+
 			"or hold something Docs reads differently there; try again in a moment", stale.why)
@@ -504,14 +512,17 @@ func (s *Service) docxWriteOnce(ctx context.Context, id string, o docxOpts, chan
 	}
 	res.RevisionID, res.DryRun = f.Doc.RevisionID, o.dryRun
 	if !file.Changed() {
-		res.Warnings = append(res.Warnings, "the change leaves the file as it is, so nothing was uploaded")
+		res.Warnings = append(res.Warnings, unchangedWarning)
 		return res, false, nil
 	}
 	out, after, err := file.Bytes()
 	if err != nil {
 		return nil, false, Errorf("invalid", "the edit could not be written into the file: %v; nothing was uploaded", err)
 	}
-	res.Preview = render.UnifiedDiff(file.Text(), after.Text(), 2, 6000).Text
+	if len(out) > maxUpload {
+		return nil, false, tooLarge(len(out))
+	}
+	res.Preview = filePreview(file.Text(), after.Text())
 	if o.dryRun {
 		return res, false, nil
 	}
@@ -541,13 +552,8 @@ func (s *Service) docxWriteOnce(ctx context.Context, id string, o docxOpts, chan
 // one the change was made on, somebody's save landed in between: it is
 // put back, and the write is not applied.
 func (s *Service) docxRepair(ctx context.Context, id, planned string, up *gapi.File, res *EditResult) error {
-	revs, err := s.api.ListRevisions(ctx, id)
-	if err != nil {
-		res.Warnings = append(res.Warnings, "could not read the file's history to confirm nothing was saved in between: "+messageOf(wrapAPI(err, "revisions")))
-		return nil
-	}
-	prev := revisionBefore(revs, up.HeadRevisionID)
-	if prev == "" || prev == planned {
+	prev := s.savedBetween(ctx, id, planned, up, res)
+	if prev == "" {
 		return nil
 	}
 	data, err := s.api.DownloadRevision(ctx, id, prev)
@@ -564,7 +570,7 @@ func (s *Service) docxRepair(ctx context.Context, id, planned string, up *gapi.F
 // awaitDocs waits for Docs to read the revision just uploaded, and
 // returns the Docs revision the next read will start from.
 func (s *Service) awaitDocs(ctx context.Context, id, before string, res *EditResult) string {
-	wait := mdWait
+	wait := saveWait
 	for range docxReads {
 		if s.sleep(ctx, wait) != nil {
 			break
@@ -584,16 +590,14 @@ func (s *Service) docxEdit(ctx context.Context, req EditRequest) (*EditResult, e
 	if err != nil {
 		return nil, err
 	}
-	ops := slices.Clone(req.Ops)
-	for i, op := range ops {
-		if !docxOpKinds[op.Kind] {
+	for _, op := range req.Ops {
+		if !textOpKinds[op.Kind] {
 			return nil, Errorf("unsupported", "op %d (%s): on a Word file, edit_document writes text with insert, append, replace, delete and replace_all; %s", op.Seq, op.Kind, wordElsewhere)
 		}
-		ops[i].eachMatch = op.Kind == plan.OpReplaceAll
 	}
 	author, date := s.account(ctx), s.wordTime()
 	return s.docxWrite(ctx, docxOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun}, func(w *wordMap) (*EditResult, []plan.Forced, error) {
-		ro, err := s.resolveOps(ctx, w.f, ops, mode)
+		ro, err := s.resolveOps(ctx, w.f, req.Ops, mode)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -602,10 +606,10 @@ func (s *Service) docxEdit(ctx context.Context, req EditRequest) (*EditResult, e
 		if err != nil {
 			return nil, nil, planError(err)
 		}
-		res := &EditResult{Mode: string(mode), Applied: len(req.Ops), Changes: planned.Summary, Warnings: planned.Warnings}
+		res := &EditResult{Mode: string(mode), Applied: len(req.Ops), Changes: planned.Summary, Warnings: append(planned.Warnings, ro.warnings...)}
 		if mode == plan.ModeComment {
 			for _, p := range planned.Proposals {
-				if err := w.comment(p.Range, ooxml.NewComment{Author: author, Initials: initials(author), Date: date, Text: p.Content}); err != nil {
+				if err := w.comment(p.Range, wordComment(author, date, p.Content)); err != nil {
 					return nil, nil, opError(p.Seq, err)
 				}
 				res.Proposals = append(res.Proposals, p)
@@ -635,8 +639,7 @@ func (s *Service) docxAddComment(ctx context.Context, req AddCommentRequest, con
 		if err != nil {
 			return nil, nil, err
 		}
-		c := ooxml.NewComment{Author: author, Initials: initials(author), Date: s.wordTime(), Text: content}
-		return &EditResult{}, nil, w.comment(r.Rng(), c)
+		return &EditResult{}, nil, w.comment(r.Rng(), wordComment(author, s.wordTime(), content))
 	})
 	if err != nil {
 		return nil, err
@@ -649,14 +652,13 @@ func (s *Service) docxAddComment(ctx context.Context, req AddCommentRequest, con
 	if req.DryRun {
 		verb = "would be posted"
 	}
-	res.Text = fmt.Sprintf("a Word comment %s", verb)
-	if res.Handle != "" {
-		res.Text += fmt.Sprintf(" on %s (%q)", res.Handle, doc.Clip(res.Quote, 60))
-	}
-	for _, w := range res.Warnings {
-		res.Text += "\nwarning: " + w
-	}
+	res.say("a Word comment "+verb, "")
 	return res, nil
+}
+
+// wordComment is a Word comment by author, with their initials.
+func wordComment(author, date, text string) ooxml.NewComment {
+	return ooxml.NewComment{Author: author, Initials: initials(author), Date: date, Text: text}
 }
 
 // initials are a name's, for a Word comment.

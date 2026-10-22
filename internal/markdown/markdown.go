@@ -70,6 +70,9 @@ type Image struct {
 	Alt string
 }
 
+// HeadingLevel is a heading's level, held to the 1 to 6 a document has.
+func (b *Block) HeadingLevel() int { return min(max(b.Level, 1), 6) }
+
 // Text returns the block's plain text.
 func (b *Block) Text() string {
 	switch b.Kind {

@@ -86,9 +86,9 @@ func TestOpenBrief(t *testing.T) {
 		t.Fatalf("paragraphs:\n got %s\nwant %s", got, want)
 	}
 	p := f.Paras[4]
-	// Each table cell holds one paragraph, the last of its cell.
-	if p.NumID != "2" || p.Ilvl != 1 || f.Paras[0].Style != "Heading1" || f.Paras[9].cell < 0 || !f.Paras[9].last || p.last || p.cell >= 0 {
-		t.Fatalf("nested point %+v, heading %q, cells %d/%v %d/%v", p, f.Paras[0].Style, f.Paras[9].cell, f.Paras[9].last, f.Paras[10].cell, f.Paras[10].last)
+	// Each table cell holds one paragraph.
+	if p.NumID != "2" || p.Ilvl != 1 || f.Paras[0].Style != "Heading1" || f.Paras[9].cell < 0 || f.Paras[10].cell == f.Paras[9].cell || p.cell >= 0 {
+		t.Fatalf("nested point %+v, heading %q, cells %d %d", p, f.Paras[0].Style, f.Paras[9].cell, f.Paras[10].cell)
 	}
 	if f.w != "w" || f.r != "r" {
 		t.Fatalf("prefixes %q %q", f.w, f.r)
@@ -363,6 +363,26 @@ func TestLists(t *testing.T) {
 	body, _ := f.part(partNumbering)
 	if a, n := strings.Index(string(body), `w:abstractNumId="3"`), strings.Index(string(body), `<w:num w:numId="1"`); a < 0 || a > n {
 		t.Fatal("the new definition is not before the first list")
+	}
+}
+
+// Word for Mac can end the numbering part with numIdMacAtCleanup, which
+// the schema puts after every list (CT_Numbering): a new list and its
+// definition go before it.
+func TestNewListBeforeMacCleanup(t *testing.T) {
+	numbering := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum>` +
+		`<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num><w:numIdMacAtCleanup w:val="1"/></w:numbering>`
+	f := open(t, docxWith(t, `<w:p/>`, map[string]string{partNumbering: numbering}))
+	if _, err := f.NewList(false); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := f.part(partNumbering)
+	s := string(body)
+	if !strings.HasSuffix(s, `</w:num><w:numIdMacAtCleanup w:val="1"/></w:numbering>`) ||
+		strings.Index(s, `<w:num w:numId="2">`) > strings.Index(s, `<w:numIdMacAtCleanup`) ||
+		strings.Index(s, `w:abstractNumId="1">`) > strings.Index(s, `<w:num w:numId="1">`) {
+		t.Fatalf("numbering part out of order:\n%s", s)
 	}
 }
 

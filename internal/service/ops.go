@@ -156,7 +156,7 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 	}
 	d := f.Doc
 	info := &Info{ID: d.ID, Title: d.Title, Kind: KindDocument, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities(f)}
-	if mime == gapi.WordMimeType {
+	if f.Word {
 		info.Kind = KindWordFile
 		info.Warnings = append(info.Warnings, wordFileNote)
 	}

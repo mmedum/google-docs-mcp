@@ -213,6 +213,41 @@ that text, uploaded once per call:
   `any`; its default is Google Docs only. `create_document` with `kind:
   markdown_file` makes a new one.
 
+### Word files
+
+Docs opens a Word file stored in Drive (`.docx`) and edits it in place,
+leaving it a Word file. The Docs API reads one, its tracked changes as
+suggestions and its comments as comments, and refuses every write to it.
+So this server writes the file itself: `get_document` says `kind:
+word_file`, reads work as on a Google Doc, handles included, and an edit
+is made in the file's XML and uploaded whole through Drive.
+
+- `edit_document` takes `insert`, `append`, `replace`, `delete` and
+  `replace_all` on the body's text, addressed as on a Google Doc;
+  `replace_all` leaves a match in a header, footer or footnote, with a
+  warning. Text
+  replaced inside a paragraph changes by its minimal difference and keeps
+  its look; content of several paragraphs goes between paragraphs or
+  replaces whole ones. Headings take the file's own heading styles, and
+  lists continue the list they are placed against, at a level
+  `list_level` can set.
+- `mode: suggest` writes Word tracked changes under your account's name,
+  which Docs shows as suggestions and Word as tracked changes.
+  `mode: direct` changes the text. `mode: comment` and `add_comment`
+  write Word comments. `list_comments` lists them; replying to, resolving
+  or deleting one is done in the Docs editor.
+- Formatting, tables, images, layout, tabs and reviewing suggestions are
+  refused, saying so: save the file as a Google Doc (File > Save as Google
+  Docs) for those.
+- The guard is a Google Doc's: a direct edit that deletes commented text,
+  a suggestion, an image or a footnote reference is refused unless forced.
+- **Writing while someone has the file open.** Each write checks that
+  Docs and the file still agree on every paragraph it reaches, waits and
+  then refuses when they do not, checks again just before the upload, and
+  afterwards checks the file's history: a save that landed in between is
+  put back and the write not applied. An editor that has the file open
+  reloads it. The write then waits until Docs has read the new revision.
+
 ## Connect a client
 
 Claude Code:
@@ -254,7 +289,7 @@ for the defaults.
 | `search_documents` | Locate documents by title or content, owner, or modification date; `kind` adds Markdown files. |
 | `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
 | `create_document` | New document, optionally with markdown content; `kind: markdown_file` makes a `.md` file, `from_file` a working copy of one. |
-| `edit_document` | One batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all` (text or RE2 regex), `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. Markdown content may hold tables and images; later batches place them once the text has landed. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
+| `edit_document` | One batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all` (text or RE2 regex), `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. Markdown content may hold tables and images; later batches place them once the text has landed, and a list in it continues the list item it is placed against unless `list_level` sets its level. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. A link goes to a URL, to a heading in the same tab (`#h.…`, from `get_outline`) or to a tab (`#tab=t.…`); markdown content takes the same forms. |
 | `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing, and the replies on each one's thread. |
 | `review_suggestion` | Accept, reject or discard suggestions by id or all. |

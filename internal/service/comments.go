@@ -40,9 +40,11 @@ func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*C
 	if err != nil {
 		return nil, err
 	}
-	if s.isMarkdown(ctx, id) {
+	mime, _ := s.kind(ctx, id)
+	if gapi.IsMarkdownMimeType(mime) {
 		return s.mdListComments(ctx, req)
 	}
+	word := mime == gapi.WordMimeType
 	type listed struct {
 		list []*gapi.DriveComment
 		err  error
@@ -61,7 +63,19 @@ func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*C
 	if l.err != nil {
 		return nil, wrapAPI(l.err, "comments")
 	}
-	return tallyThreads(locateComments(f, driveThreads(l.list)), f.Doc.RevisionID, req.HideResolved), nil
+	threads := driveThreads(l.list)
+	if word && f.Wire != nil {
+		// A Word file's own comments are in the file, which Drive cannot
+		// see and the Docs comments view lists; the two sets are disjoint
+		// (spike G).
+		threads = append(threads, viewThreads(f.Wire)...)
+	}
+	res := tallyThreads(locateComments(f, threads), f.Doc.RevisionID, req.HideResolved)
+	if word {
+		res.Text += "\nOn a Word file, comments live in the file itself: they are read here, and add_comment writes new ones; " +
+			"replying to, resolving or deleting one is done in the Docs editor."
+	}
+	return res, nil
 }
 
 // tallyThreads is a listing's result: the threads counted, the resolved
@@ -135,6 +149,28 @@ type AddCommentResult struct {
 	Text       string   `json:"-"`
 }
 
+// commentTarget is the passage a comment is pinned to, which must hold
+// text; res gets its quote and its block's handle.
+func (s *Service) commentTarget(f *Fetched, t Target, res *AddCommentResult) (*TargetRange, error) {
+	r, err := s.ResolveTarget(f, t)
+	if err != nil {
+		return nil, err
+	}
+	if r.Start == r.End {
+		return nil, Errorf("invalid", "%s is empty; a comment needs text to attach to", r.Description)
+	}
+	res.Quote = r.Text
+	if r.Block != nil {
+		res.Handle = r.Block.Handle
+	} else if len(r.Blocks) > 0 {
+		res.Handle = r.Blocks[0].Handle
+	}
+	return r, nil
+}
+
+// pinned says the comment names a passage to be pinned to.
+func (r AddCommentRequest) pinned() bool { return r.Target != nil && r.Target.selectorCount() > 0 }
+
 // AddComment posts a comment on a target. When the read had the comments
 // view it is pinned to the target's range; otherwise it goes through the
 // Drive API quoting the text, which the editor shows unanchored.
@@ -149,6 +185,9 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	if s.isMarkdown(ctx, req.Document) {
 		return s.mdAddComment(ctx, req, content)
 	}
+	if req.pinned() && s.isWord(ctx, req.Document) {
+		return s.docxAddComment(ctx, req, content)
+	}
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
 		return nil, err
@@ -158,18 +197,9 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	}
 	res := &AddCommentResult{RevisionID: f.Doc.RevisionID}
 	var r *TargetRange
-	if req.Target != nil && req.Target.selectorCount() > 0 {
-		if r, err = s.ResolveTarget(f, *req.Target); err != nil {
+	if req.pinned() {
+		if r, err = s.commentTarget(f, *req.Target, res); err != nil {
 			return nil, err
-		}
-		if r.Start == r.End {
-			return nil, Errorf("invalid", "%s is empty; a comment needs text to attach to", r.Description)
-		}
-		res.Quote = r.Text
-		if r.Block != nil {
-			res.Handle = r.Block.Handle
-		} else if len(r.Blocks) > 0 {
-			res.Handle = r.Blocks[0].Handle
 		}
 	}
 	anchored := f.CommentsView && r != nil
@@ -178,13 +208,7 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 		if strings.TrimSpace(req.Assignee) != "" && !res.Anchored {
 			res.Warnings = append(res.Warnings, "assignee needs a comment pinned to a passage; the comment would be posted without one")
 		}
-		res.Text = "dry run: would post a comment"
-		if res.Handle != "" {
-			res.Text += fmt.Sprintf(" on %s (%q)", res.Handle, doc.Clip(res.Quote, 60))
-		}
-		for _, w := range res.Warnings {
-			res.Text += "\nwarning: " + w
-		}
+		res.say("dry run: would post a comment", "")
 		return res, nil
 	}
 	if anchored {
@@ -195,17 +219,25 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	if err != nil {
 		return nil, err
 	}
-	res.Text = fmt.Sprintf("comment %s posted", res.ID)
-	if res.Handle != "" {
-		res.Text += fmt.Sprintf(" on %s (%q)", res.Handle, doc.Clip(res.Quote, 60))
-	}
+	tail := ""
 	if !res.Anchored {
-		res.Text += " (unanchored)"
+		tail = " (unanchored)"
 	}
-	for _, w := range res.Warnings {
-		res.Text += "\nwarning: " + w
-	}
+	res.say(fmt.Sprintf("comment %s posted", res.ID), tail)
 	return res, nil
+}
+
+// say is the result as text: head, the passage the comment is on, tail,
+// and the warnings.
+func (r *AddCommentResult) say(head, tail string) {
+	r.Text = head
+	if r.Handle != "" {
+		r.Text += fmt.Sprintf(" on %s (%q)", r.Handle, doc.Clip(r.Quote, 60))
+	}
+	r.Text += tail
+	for _, w := range r.Warnings {
+		r.Text += "\nwarning: " + w
+	}
 }
 
 // commentText validates a comment or reply body against the API limit.
@@ -360,6 +392,9 @@ func replyAction(req ReplyRequest) (string, string, error) {
 // comments do not include these threads, so the reply goes through the
 // Docs API and needs the comments view.
 func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, content string) (*ReplyResult, error) {
+	if err := s.wordUnsupported(ctx, ref, "a reply on a suggestion's thread"); err != nil {
+		return nil, err
+	}
 	f, err := s.FetchFresh(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -422,9 +457,13 @@ func (s *Service) commentRef(ctx context.Context, docRef, commentID string) (str
 	}
 	thread, err := s.api.GetComment(ctx, id, commentID)
 	if errors.Is(err, gapi.ErrNotFound) {
-		if s.isMarkdown(ctx, id) {
+		switch mime, _ := s.kind(ctx, id); {
+		case gapi.IsMarkdownMimeType(mime):
 			return "", "", nil, mdUnsupported("Drive has no comment "+commentID+"; a comment the Docs editor keeps in the file is not Drive's to delete",
 				"the person can delete it in the Docs editor")
+		case mime == gapi.WordMimeType:
+			return "", "", nil, Errorf("unsupported", "Drive has no comment %s: a comment a Word file holds lives in the file itself, "+
+				"and replying to, resolving or deleting one is done in the Docs editor", commentID)
 		}
 	}
 	if err != nil {

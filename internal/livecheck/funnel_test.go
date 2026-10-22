@@ -244,7 +244,7 @@ func TestEveryPlaceAPersonIsWrittenIsKnown(t *testing.T) {
 	root := moduleRoot(t)
 	const (
 		wantUserLabel = 7  // service: ops.go x2, history.go, search.go x2, comments.go x2 (delete_comment's question)
-		wantPerson    = 45 // every read of a person field in the three packages; a Markdown file's comment authors (anchors.go postAuthor, markdown_read.go entryThread) and the account name a comment is written under (markdown_write.go account) reach output only after " by "
+		wantPerson    = 46 // every read of a person field in the three packages; a Markdown file's comment authors (anchors.go postAuthor, markdown_read.go entryThread) and the account name a comment is written under (markdown_write.go account) reach output only after " by "; docx.go reads an add_comment's assignee only to say a Word comment takes none
 	)
 
 	dirs := []string{"internal/service", "internal/render", "internal/plan"}

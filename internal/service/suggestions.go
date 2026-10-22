@@ -251,6 +251,9 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	if s.isMarkdown(ctx, req.Document) {
 		return nil, mdUnsupported("it has no suggestions to review", "")
 	}
+	if err := s.wordUnsupported(ctx, req.Document, "reviewing suggestions"); err != nil {
+		return nil, err
+	}
 	if len(req.IDs) == 0 && !req.All {
 		return nil, Errorf("invalid", "pass ids or all: true")
 	}

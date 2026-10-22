@@ -153,6 +153,8 @@ func (r *EditResult) text() string {
 type resolvedOps struct {
 	ops     []plan.Op
 	threads []CommentThread
+	// warnings say what resolving left undone, for the result.
+	warnings []string
 	// planned and env are set once the ops are planned and applied, for
 	// the follow-ups.
 	planned *plan.Result
@@ -178,9 +180,17 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 	req.Ops = numbered(req.Ops)
 	var res *EditResult
 	var err error
-	if s.isMarkdown(ctx, req.Document) {
+	switch mime, _ := s.kind(ctx, req.Document); {
+	case gapi.IsMarkdownMimeType(mime):
+		for _, op := range req.Ops {
+			if op.ListLevel != nil {
+				return nil, Errorf("invalid", "op %d: list_level sets a list's level in a Google Doc; in a Markdown file, indent the content's list instead", op.Seq)
+			}
+		}
 		res, err = s.mdEdit(ctx, req)
-	} else {
+	case mime == gapi.WordMimeType:
+		res, err = s.docxEdit(ctx, req)
+	default:
 		var f *Fetched
 		if f, err = s.FetchFresh(ctx, req.Document); err != nil {
 			return nil, err
@@ -191,6 +201,18 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (*EditResult, error
 		res.Text = res.text()
 	}
 	return res, err
+}
+
+// planError is a planner's refusal as the error a caller sees.
+func planError(err error) error {
+	var unsupported *markdown.UnsupportedError
+	switch {
+	case errors.Is(err, plan.ErrBlocked):
+		return &Error{Class: "blocked", Message: strings.TrimPrefix(err.Error(), "blocked: "), Err: err}
+	case errors.As(err, &unsupported):
+		return &Error{Class: "unsupported", Message: err.Error(), Err: err}
+	}
+	return Errorf("invalid", "%v", err)
 }
 
 // numbered stamps each op with its place in the call.
@@ -354,14 +376,7 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 	}
 	planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})
 	if err != nil {
-		var unsupported *markdown.UnsupportedError
-		switch {
-		case errors.Is(err, plan.ErrBlocked):
-			return nil, nil, &Error{Class: "blocked", Message: strings.TrimPrefix(err.Error(), "blocked: "), Err: err}
-		case errors.As(err, &unsupported):
-			return nil, nil, &Error{Class: "unsupported", Message: err.Error(), Err: err}
-		}
-		return nil, nil, Errorf("invalid", "%v", err)
+		return nil, nil, planError(err)
 	}
 	ro.planned = planned
 	result := &EditResult{RevisionID: f.Doc.RevisionID, Mode: string(mode), DryRun: req.DryRun, Changes: planned.Summary, Warnings: planned.Warnings, Proposals: planned.Proposals}
@@ -600,7 +615,10 @@ func (s *Service) resolveTargetOp(f *Fetched, op EditOp, p *plan.Op, out *resolv
 	p.TargetText = r.Text
 	p.TargetAligned = r.Aligned
 	p.Description = r.Description
-	p.NearBullet = hasBullet(r.Block)
+	p.List = targetList(r)
+	if op.Kind == plan.OpBullets {
+		p.Items = itemsIn(r)
+	}
 	if op.Kind == plan.OpDelete || op.Kind == plan.OpReplace {
 		p.Anchors = f.anchorsIn(r.Segment, r.Start, r.End, out.threads)
 	}
@@ -690,35 +708,43 @@ func (s *Service) expand(f *Fetched, op EditOp, out *resolvedOps) (ops []plan.Op
 	switch {
 	case op.Kind == plan.OpSetCells:
 		ops, err = s.expandSetCells(f, op.Seq, op, out)
-	case op.Kind == plan.OpReplaceAll && op.Regex:
-		ops, err = s.expandRegexReplaceAll(f, op, out)
+	case op.Kind == plan.OpReplaceAll && (op.Regex || f.Word):
+		ops, err = s.expandReplaceAll(f, op, out)
 	default:
 		return nil, false, nil
 	}
 	return ops, true, err
 }
 
-// expandRegexReplaceAll turns a regex replace_all into one replace per
-// match, or a delete where the replacement expands to nothing. The
-// matches are found here, with find_in_document's matcher over each
-// paragraph's index-aligned text, rather than by Google's searchByRegex:
-// Google does not document its regex flavor, and the guard has to see
-// exactly the ranges that change.
+// expandReplaceAll turns a regex replace_all, or any one on a Word file,
+// which has no replaceAllText, into one replace per match, or a delete
+// where the replacement expands to nothing. The matches are found here, with
+// find_in_document's matcher over each paragraph's index-aligned text,
+// rather than by Google's searchByRegex: Google does not document its
+// regex flavor, and the guard has to see exactly the ranges that change.
 //
 // A match never crosses a paragraph, never covers anything but text (a
 // chip, a break or an element this server does not model is a
 // placeholder the guard cannot judge), and skips a table of contents,
-// which Google maintains. The pattern decides case: a write that ignored
-// it by default would turn [A-Z] into every letter.
-func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]plan.Op, error) {
+// which Google maintains. A pattern decides case: a write that ignored it
+// by default would turn [A-Z] into every letter. Plain text matches
+// itself, its case as match_case says, and is replaced by the text as
+// given. On a Word file, whose text ops write the body only, a match in
+// a header, footer or footnote is left with a warning, and a find
+// matching only there is refused.
+func (s *Service) expandReplaceAll(f *Fetched, op EditOp, out *resolvedOps) ([]plan.Op, error) {
 	if op.Find == "" {
 		return nil, Errorf("invalid", "replace_all needs find")
 	}
-	re, err := compileFind(op.Find, true)
+	pattern, tmpl, matchCase := op.Find, op.Replace, true
+	if !op.Regex {
+		pattern, tmpl, matchCase = regexp.QuoteMeta(op.Find), strings.ReplaceAll(op.Replace, "$", "$$"), op.MatchCase
+	}
+	re, err := compileFind(pattern, matchCase)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkTemplate(re, op.Replace); err != nil {
+	if err := checkTemplate(re, tmpl); err != nil {
 		return nil, err
 	}
 	tab, err := tabOf(f.Doc, targetTab(op.Target))
@@ -726,6 +752,7 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 		return nil, err
 	}
 	var ops []plan.Op
+	elsewhere := 0
 	for _, seg := range tab.Segments() {
 		bounds := SegmentBounds(tab, seg)
 		toc := tocBlocks(seg)
@@ -734,6 +761,10 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 				continue
 			}
 			aligned := paragraphText(b)
+			if f.Word && seg.ID != "" {
+				elsewhere += len(re.FindAllStringIndex(aligned, -1))
+				continue
+			}
 			for _, m := range re.FindAllStringSubmatchIndex(aligned, -1) {
 				switch {
 				case m[0] == m[1]:
@@ -747,8 +778,8 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 				end := b.Start + doc.UTF16Len(aligned[:m[1]])
 				rng := plan.Rng{Start: start, End: end, SegmentID: seg.ID, TabID: tab.ID}
 				p := plan.Op{Seq: op.Seq, Kind: plan.OpDelete, Seg: bounds, Target: &rng, TargetText: aligned[m[0]:m[1]],
-					TargetAligned: aligned[m[0]:m[1]], NearBullet: hasBullet(b), Anchors: f.anchorsIn(seg, start, end, out.threads)}
-				if repl := string(re.ExpandString(nil, op.Replace, aligned, m)); repl != "" {
+					TargetAligned: aligned[m[0]:m[1]], List: plan.ListContext{At: listItem(tab, b)}, Anchors: f.anchorsIn(seg, start, end, out.threads)}
+				if repl := string(re.ExpandString(nil, tmpl, aligned, m)); repl != "" {
 					p.Kind, p.Fragment = plan.OpReplace, markdown.Plain(repl)
 				}
 				ops = append(ops, p)
@@ -756,8 +787,13 @@ func (s *Service) expandRegexReplaceAll(f *Fetched, op EditOp, out *resolvedOps)
 			}
 		}
 	}
-	if len(ops) == 0 {
-		return nil, Errorf("not_found", "%q matches nothing in tab %d; find_in_document with regex shows what a pattern matches, and a chip's text is not matched", op.Find, tab.Number)
+	switch {
+	case len(ops) == 0 && elsewhere > 0:
+		return nil, Errorf("unsupported", "%q matches only outside the body (%d match(es) in headers, footers or footnotes); on a Word file only the body's text is written", op.Find, elsewhere)
+	case len(ops) == 0:
+		return nil, Errorf("not_found", "%q matches nothing in tab %d; find_in_document shows what a find matches, and a chip's text is not matched", op.Find, tab.Number)
+	case elsewhere > 0:
+		out.warnings = append(out.warnings, fmt.Sprintf("op %d: %d match(es) of %q outside the body, in headers, footers or footnotes, were left as they are; on a Word file only the body's text is written", op.Seq, elsewhere, op.Find))
 	}
 	// One caller op, so one line in the summary, as set_cells does.
 	desc := fmt.Sprintf("%d match(es) of %q in tab %d", len(ops), op.Find, tab.Number)
@@ -864,7 +900,7 @@ type insertPoint struct {
 	inline      bool
 	fills       bool  // the paragraph is blank, so the content styles it
 	clearTo     int64 // whitespace in that paragraph the content replaces
-	nearBullet  bool
+	list        plan.ListContext
 	description string
 	anchor      *plan.Rng
 }
@@ -882,7 +918,7 @@ func (ip *insertPoint) atBlank(b *doc.Block) {
 func (ip *insertPoint) fill(p *plan.Op, out *resolvedOps) {
 	p.Seg = ip.bounds()
 	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
-	p.AtEnd, p.Inline, p.Fill, p.ClearTo, p.NearBullet = ip.atEnd, ip.inline, ip.fills, ip.clearTo, ip.nearBullet
+	p.AtEnd, p.Inline, p.Fill, p.ClearTo, p.List = ip.atEnd, ip.inline, ip.fills, ip.clearTo, ip.list
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
 	out.note(ip.tab.ID, ip.segment.ID, ip.index)
@@ -931,19 +967,19 @@ func (s *Service) segmentEdge(f *Fetched, t Target, at string) (*insertPoint, er
 		if first.Kind == doc.KindTable {
 			return nil, Errorf("invalid", "%s starts with a table; insert after it or before the first paragraph", segmentName(tab, seg))
 		}
-		ip.index, ip.nearBullet, ip.description, ip.anchor = first.Start, hasBullet(first), "start of "+segmentName(tab, seg), blockRng(tab, seg, first)
+		ip.index, ip.list, ip.description, ip.anchor = first.Start, listAround(tab, seg, first), "start of "+segmentName(tab, seg), blockRng(tab, seg, first)
 		if first.IsBlankParagraph() {
 			ip.atBlank(first)
 		}
 	case "end":
 		last := content[len(content)-1]
 		ip.description, ip.anchor = "end of "+segmentName(tab, seg), blockRng(tab, seg, last)
-		ip.nearBullet = hasBullet(last)
 		if last.IsBlankParagraph() {
 			// Fill the blank paragraph instead of leaving it above the content.
 			ip.atBlank(last)
+			ip.list = listAround(tab, seg, last)
 		} else {
-			ip.index, ip.atEnd = last.End-1, true
+			ip.index, ip.atEnd, ip.list = last.End-1, true, listAfter(tab, seg, last, last)
 		}
 	default:
 		return nil, Errorf("invalid", "location %q needs a target (of) to be before or after", at)
@@ -964,9 +1000,9 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 			if prev == nil {
 				return nil, Errorf("invalid", "cannot insert before %s: the table is the first block; insert after it instead", first.Handle)
 			}
-			ip.index, ip.atEnd, ip.nearBullet, ip.anchor = prev.End-1, true, hasBullet(prev), blockRng(tab, seg, prev)
+			ip.index, ip.atEnd, ip.list, ip.anchor = prev.End-1, true, listAfter(tab, seg, prev, prev), blockRng(tab, seg, prev)
 		} else {
-			ip.index, ip.nearBullet, ip.anchor = first.Start, hasBullet(first), blockRng(tab, seg, first)
+			ip.index, ip.list, ip.anchor = first.Start, listAround(tab, seg, first), blockRng(tab, seg, first)
 		}
 		ip.description = "before " + r.Description
 	case "after", "end":
@@ -978,16 +1014,16 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 			if last.Kind == doc.KindTable {
 				return nil, Errorf("invalid", "cannot insert after %s: a table with no paragraph after it; insert before the next paragraph instead", last.Handle)
 			}
-			ip.index, ip.atEnd, ip.nearBullet = last.End-1, true, hasBullet(last)
+			ip.index, ip.atEnd, ip.list = last.End-1, true, listAfter(tab, seg, last, last)
 		default:
-			ip.index, ip.nearBullet = last.End, hasBullet(next)
+			ip.index, ip.list = last.End, listAfter(tab, seg, last, next)
 		}
 		ip.anchor, ip.description = blockRng(tab, seg, last), "after "+r.Description
 	case "start":
 		if first.Kind != doc.KindParagraph {
 			return nil, Errorf("invalid", "start of %s is not a paragraph", first.Handle)
 		}
-		ip.index, ip.inline, ip.nearBullet, ip.anchor, ip.description = first.Start, true, hasBullet(first), blockRng(tab, seg, first), "start of "+r.Description
+		ip.index, ip.inline, ip.list, ip.anchor, ip.description = first.Start, true, listAround(tab, seg, first), blockRng(tab, seg, first), "start of "+r.Description
 		if first.IsBlankParagraph() {
 			ip.atBlank(first)
 		}
@@ -999,7 +1035,7 @@ func blockRelative(r *TargetRange, at string) (*insertPoint, error) {
 
 // textRelative positions inline next to a text match or cell content.
 func textRelative(r *TargetRange, at string) (*insertPoint, error) {
-	ip := &insertPoint{tab: r.Tab, segment: r.Segment, inline: true, nearBullet: hasBullet(r.Block)}
+	ip := &insertPoint{tab: r.Tab, segment: r.Segment, inline: true, list: listAround(r.Tab, r.Segment, r.Block)}
 	switch at {
 	case "before", "start":
 		ip.index = r.Start
@@ -1018,8 +1054,86 @@ func textRelative(r *TargetRange, at string) (*insertPoint, error) {
 	return ip, nil
 }
 
-func hasBullet(b *doc.Block) bool {
-	return b != nil && b.Paragraph != nil && b.Paragraph.Bullet != nil
+// listItem is b as the planner sees a list item, nil when it is none.
+func listItem(tab *doc.Tab, b *doc.Block) *plan.ListItem {
+	if b == nil || b.Paragraph == nil || b.Paragraph.Bullet == nil {
+		return nil
+	}
+	bl := b.Paragraph.Bullet
+	return &plan.ListItem{Level: bl.Nesting, Ordered: bl.Ordered, Preset: plan.PresetOf(tab.Lists[bl.ListID]), Start: b.Start,
+		IndentStart: b.Paragraph.IndentStartPt, IndentFirstLine: b.Paragraph.IndentFirstLinePt}
+}
+
+// itemsIn are the list items a target reaches, whole or in part.
+func itemsIn(r *TargetRange) []plan.ListItem {
+	var out []plan.ListItem
+	for _, b := range r.Segment.AllBlocks() {
+		if b.Start < r.End && r.Start < b.End {
+			if it := listItem(r.Tab, b); it != nil {
+				out = append(out, *it)
+			}
+		}
+	}
+	return out
+}
+
+// siblings is the run of blocks b sits in: those of the table cell
+// holding it, or the segment's own.
+func siblings(seg *doc.Segment, b *doc.Block) []*doc.Block {
+	if b != nil && b.Cell != nil {
+		return b.Cell.Blocks
+	}
+	return seg.Blocks
+}
+
+// listFrom is blocks[i] and the list items before it, nearest first, back
+// to a top-level one or to the first block that is no list item: as far
+// back as the planner can need to rebuild.
+func listFrom(tab *doc.Tab, blocks []*doc.Block, i int) []plan.ListItem {
+	var out []plan.ListItem
+	for ; i >= 0; i-- {
+		it := listItem(tab, blocks[i])
+		if it == nil {
+			break
+		}
+		out = append(out, *it)
+		if it.Level == 0 {
+			break
+		}
+	}
+	return out
+}
+
+// listAround is the list for content placed against b that lands at its
+// start, or in it.
+func listAround(tab *doc.Tab, seg *doc.Segment, b *doc.Block) plan.ListContext {
+	bs, it := siblings(seg, b), listItem(tab, b)
+	return plan.ListContext{At: it, Anchor: it, Preceding: listFrom(tab, bs, slices.Index(bs, b)-1)}
+}
+
+// listAfter is the list for content that lands after anchor's text, in
+// at: anchor itself when the content borrows its newline, else the
+// block after it.
+func listAfter(tab *doc.Tab, seg *doc.Segment, anchor, at *doc.Block) plan.ListContext {
+	bs := siblings(seg, anchor)
+	return plan.ListContext{At: listItem(tab, at), Anchor: listItem(tab, anchor), Preceding: listFrom(tab, bs, slices.Index(bs, anchor))}
+}
+
+// targetList is the list around a target a replacement writes over: its
+// first block is what the content is placed against and first lands in.
+func targetList(r *TargetRange) plan.ListContext {
+	first, last := r.Block, r.Block
+	if len(r.Blocks) > 0 {
+		first, last = r.Blocks[0], r.Blocks[len(r.Blocks)-1]
+	}
+	lc := listAround(r.Tab, r.Segment, first)
+	if r.IsBlock {
+		bs := siblings(r.Segment, last)
+		if i := slices.Index(bs, last); i >= 0 && i+1 < len(bs) {
+			lc.After = listItem(r.Tab, bs[i+1])
+		}
+	}
+	return lc
 }
 
 func blockRng(tab *doc.Tab, seg *doc.Segment, b *doc.Block) *plan.Rng {

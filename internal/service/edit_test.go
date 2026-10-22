@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -268,8 +270,10 @@ func TestResolveLocation(t *testing.T) {
 		})
 	}
 	ip, _ := svc.resolveLocation(f, Location{At: "after", Of: &Target{Handle: "p5"}})
-	if !ip.nearBullet {
-		t.Fatal("after a bullet should be near a bullet")
+	// After a list item: placed against it, and the first new paragraph
+	// follows it.
+	if ip.list.At == nil || ip.list.Anchor == nil || len(ip.list.Preceding) == 0 || ip.list.Preceding[0] != *ip.list.Anchor {
+		t.Fatalf("after a bullet, the list around it is %+v", ip.list)
 	}
 }
 
@@ -294,7 +298,7 @@ func TestEditDirect(t *testing.T) {
 	}
 	got := kindsOf(t, b.Requests)
 	// Descending: append (225), delete p13 (192..213), replace at 101, insert at 29.
-	for _, want := range []string{"insertText@225 updateTextStyle[226,235) updateParagraphStyle[226,235) createParagraphBullets[226,235) deleteContentRange[192,213) deleteContentRange[101,106) insertText@101 insertText@29 "} {
+	for _, want := range []string{"insertText@225 updateTextStyle[226,235) updateParagraphStyle[226,235) updateParagraphStyle[226,235) createParagraphBullets[226,235) deleteContentRange[192,213) deleteContentRange[101,106) insertText@101 insertText@29 "} {
 		if !strings.HasPrefix(got, want) {
 			t.Fatalf("requests:\n got  %s\n want prefix %s", got, want)
 		}
@@ -541,11 +545,44 @@ func TestFormatOps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kindsOf(t, api.batches[0].Requests); got != "updateTextStyle[29,36) updateParagraphStyle[158,184) updateTextStyle[213,226) deleteParagraphBullets[115,133)" {
+	if got := kindsOf(t, api.batches[0].Requests); got != "updateTextStyle[29,36) updateParagraphStyle[158,184) updateTextStyle[213,226) deleteParagraphBullets[115,133) updateParagraphStyle[115,133)" {
 		t.Fatalf("format requests: %s", got)
 	}
 	if res.Applied != 4 {
 		t.Fatalf("applied = %d", res.Applied)
+	}
+}
+
+// Removing bullets puts back the indents of an item set apart by hand,
+// which clearing the indent Google leaves behind would take with it.
+func TestBulletsNoneKeepsHandIndents(t *testing.T) {
+	svc, api := writable(t, false)
+	var d map[string]any
+	if err := json.Unmarshal(api.raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	pt := func(v float64) map[string]any { return map[string]any{"magnitude": v, "unit": "PT"} }
+	body := d["tabs"].([]any)[0].(map[string]any)["documentTab"].(map[string]any)["body"]
+	for _, e := range body.(map[string]any)["content"].([]any) {
+		if e := e.(map[string]any); e["startIndex"] == 115.0 {
+			ps := e["paragraph"].(map[string]any)["paragraphStyle"].(map[string]any)
+			ps["indentStart"], ps["indentFirstLine"] = pt(90), pt(80)
+		}
+	}
+	var err error
+	if api.raw, err = json.Marshal(d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: []EditOp{
+		{Kind: plan.OpBullets, Target: &Target{From: "p9", To: "p10"}, Params: plan.Params{Bullets: "none"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	reqs := api.batches[0].Requests
+	if got := kindsOf(t, reqs); got != "deleteParagraphBullets[115,133) updateParagraphStyle[115,133) updateParagraphStyle[115,116)" {
+		t.Fatalf("requests: %s", got)
+	}
+	if last := string(reqs[len(reqs)-1]); !strings.Contains(last, `"indentStart":{"magnitude":90,"unit":"PT"}`) || !strings.Contains(last, `"indentFirstLine":{"magnitude":80,"unit":"PT"}`) {
+		t.Fatalf("the hand-set indents put back: %s", last)
 	}
 }
 
@@ -1138,4 +1175,45 @@ func TestReadTableCellsParseBack(t *testing.T) {
 	if got, _, _ := f.Blocks[0].Table.Grid(); !slices.EqualFunc(got, cells, slices.Equal) {
 		t.Fatalf("cells %q read as %q, parsed back as %q", cells, md, got)
 	}
+}
+
+// A list item in a table cell has the cell's paragraphs around it, not
+// the segment's: the items before it are the cell's, and so is the one
+// after a replaced item.
+func TestListContextInCell(t *testing.T) {
+	disc := []doc.ListLevel{{Glyph: "●"}, {Glyph: "○"}, {Glyph: "■"}}
+	tab := &doc.Tab{Lists: map[string]*doc.ListInfo{"l": {ID: "l", Levels: disc}}}
+	item := func(level int, start int64) *doc.Block {
+		return &doc.Block{Kind: doc.KindParagraph, Start: start, End: start + 3,
+			Paragraph: &doc.Paragraph{Bullet: &doc.BulletInfo{ListID: "l", Nesting: level}}}
+	}
+	before := item(0, 2) // a list item outside the table, which must not count
+	cell := &doc.Cell{}
+	c1, c2, c3 := item(0, 10), item(1, 13), item(0, 16)
+	cell.Blocks = []*doc.Block{c1, c2, c3}
+	for _, b := range cell.Blocks {
+		b.Cell = cell
+	}
+	seg := &doc.Segment{Blocks: []*doc.Block{before, {Kind: doc.KindTable, Start: 8, End: 20, Table: &doc.Table{Cells: [][]*doc.Cell{{cell}}}}}}
+
+	lc := targetList(&TargetRange{Tab: tab, Segment: seg, IsBlock: true, Blocks: []*doc.Block{c2}})
+	want := plan.ListContext{
+		At:        &plan.ListItem{Level: 1, Preset: plan.BulletPreset, Start: 13},
+		After:     &plan.ListItem{Level: 0, Preset: plan.BulletPreset, Start: 16},
+		Anchor:    &plan.ListItem{Level: 1, Preset: plan.BulletPreset, Start: 13},
+		Preceding: []plan.ListItem{{Level: 0, Preset: plan.BulletPreset, Start: 10}},
+	}
+	if !reflect.DeepEqual(lc, want) {
+		t.Fatalf("list context:\n got %s\nwant %s", listContextString(lc), listContextString(want))
+	}
+}
+
+func listContextString(lc plan.ListContext) string {
+	item := func(it *plan.ListItem) string {
+		if it == nil {
+			return "nil"
+		}
+		return fmt.Sprintf("%+v", *it)
+	}
+	return fmt.Sprintf("at %s after %s anchor %s preceding %+v", item(lc.At), item(lc.After), item(lc.Anchor), lc.Preceding)
 }

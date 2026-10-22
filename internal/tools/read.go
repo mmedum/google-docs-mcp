@@ -60,8 +60,9 @@ func registerRead(s *mcp.Server, d Deps) {
 			"read of the text shows: page setup, floating images, named ranges, and the named style definitions the " +
 			"tab's paragraphs carry (the font, size, color and spacing every heading or body paragraph inherits, with " +
 			"how many paragraphs of that tab carry each, headers and footnotes included; layout_document's named_style " +
-			"op redefines those definitions). kind says whether it is a Google Doc or a Markdown file (.md) that Docs " +
-			"opens in place, which is read and written as its own text. " +
+			"op redefines those definitions). kind says whether it is a Google Doc, a Markdown file (.md) that Docs " +
+			"opens in place, which is read and written as its own text, or a Word file (.docx), read like a Google Doc " +
+			"and written into the file itself. " +
 			"Cheap; call it first when handed a " +
 			"document id or URL. Then use get_outline for the heading tree and read_document for content.",
 		Annotations: readOnly,

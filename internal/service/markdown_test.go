@@ -631,7 +631,7 @@ func TestMarkdownFileTakesTwoAppends(t *testing.T) {
 }
 
 func TestMarkdownFileRefusesGrowingPastTheUploadCeiling(t *testing.T) {
-	text := strings.Repeat("x", mdMaxWrite-10) + "\n"
+	text := strings.Repeat("x", maxUpload-10) + "\n"
 	api := &fakeAPI{md: &text}
 	svc := New(api, Options{DefaultWriteMode: config.WriteDirect, Sleep: noSleep})
 	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpAppend, Content: strings.Repeat("y", 100)}}})
@@ -720,7 +720,7 @@ func TestMarkdownFileWaitsForTheEditor(t *testing.T) {
 			waits := 0
 			svc.opts.Sleep = func(context.Context, time.Duration) error { waits++; return nil }
 			_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: op})
-			if classOf(err) != "conflict" || len(api.uploads) != 0 || waits != mdWriteAttempts-1 {
+			if classOf(err) != "conflict" || len(api.uploads) != 0 || waits != writeAttempts-1 {
 				t.Errorf("while the editor holds unsaved work: %v, %d upload(s), %d wait(s)", err, len(api.uploads), waits)
 			}
 			// The editor saves, and the write goes ahead.
@@ -978,5 +978,21 @@ func TestInfoNamesAWorkingCopy(t *testing.T) {
 	if err != nil || info.WorkingCopyOf != "1SyntheticMarkdownSourceXXXXXXXXXXXXXXXXXXXXX" ||
 		!strings.Contains(info.Text, "working copy of the Markdown file https://drive.google.com/file/d/1SyntheticMarkdownSourceXXXXXXXXXXXXXXXXXXXXX/view: write_markdown_file") {
 		t.Errorf("Info of a working copy: %v\n%s", err, info.Text)
+	}
+}
+
+// A Markdown file's lists nest by their own indentation; list_level, a
+// Google Doc's, is refused rather than ignored.
+func TestMarkdownRefusesListLevel(t *testing.T) {
+	svc, api := mdService(t, config.WriteDirect)
+	level := 1
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpAppend, Content: "- item", Params: plan.Params{ListLevel: &level}}}})
+	var se *Error
+	if !errors.As(err, &se) || se.Class != "invalid" {
+		t.Fatalf("got %v, want invalid", err)
+	}
+	if len(api.uploads) != 0 {
+		t.Fatalf("%d uploads", len(api.uploads))
 	}
 }

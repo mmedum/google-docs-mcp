@@ -54,7 +54,7 @@ func (s *Service) createWorkingCopy(ctx context.Context, req CreateRequest) (*Cr
 	if err != nil {
 		return nil, wrapAPI(err, "working copy")
 	}
-	s.rememberKind(f.ID, false)
+	s.rememberKind(f.ID, gapi.DocumentMimeType)
 	res := &CreateResult{ID: f.ID, Title: f.Name, Kind: KindDocument, URL: doc.DocumentURL(f.ID)}
 	if f.Name == "" {
 		res.Title = title

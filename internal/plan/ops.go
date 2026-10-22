@@ -76,6 +76,9 @@ type Params struct {
 	Text      TextStyleSpec
 	Para      ParagraphStyleSpec
 	Bullets   string // bullet, numbered, checkbox, none
+	// ListLevel is the level a list starting the content takes, in place
+	// of the level of the list item it is placed against.
+	ListLevel *int
 }
 
 // Op is one resolved operation. The service fills in ranges, text and
@@ -114,13 +117,19 @@ type Op struct {
 	// than the insertion point, is the whitespace the fill replaces.
 	Fill    bool
 	ClearTo int64
-	// NearBullet says the paragraph at the insertion point is a list item.
-	NearBullet bool
+	// List is the list around the insertion point or the target.
+	List ListContext
+	// Items are the list items a bullets op's target reaches, whose
+	// indents set by hand bullets none puts back.
+	Items []ListItem
 
 	Fragment *markdown.Fragment
 	// Slots are where the fragment's tables and images wait, set when
 	// the op is compiled.
 	Slots []Slot
+	// Rebuilt counts the existing list items the op rebuilds, set when
+	// the op is compiled.
+	Rebuilt int
 
 	// CommentAnchor is where a comment-mode proposal attaches. Defaults to Target.
 	CommentAnchor *Rng
@@ -204,7 +213,15 @@ var ErrBlocked = errors.New("blocked")
 // Plan compiles ops for the mode. Formatting requests come first (they
 // shift nothing), then content ops in descending index order, then
 // replace_all.
-func Plan(ops []Op, o Options) (*Result, error) {
+func Plan(ops []Op, o Options) (*Result, error) { return planOps(ops, o, true) }
+
+// Check is Plan without the requests: the ops validated, the guard and the
+// overlaps checked, comment mode's proposals made and each op summarized.
+// A write made other than through the Docs API, into a Word file, is
+// checked with it.
+func Check(ops []Op, o Options) (*Result, error) { return planOps(ops, o, false) }
+
+func planOps(ops []Op, o Options, requests bool) (*Result, error) {
 	if o.Mode == "" {
 		o.Mode = ModeDirect
 	}
@@ -250,12 +267,24 @@ func Plan(ops []Op, o Options) (*Result, error) {
 	if err := checkOverlaps(ops); err != nil {
 		return nil, err
 	}
+	if !requests {
+		for i := range ops {
+			add(&ops[i], nil, false)
+		}
+		return finish(), nil
+	}
 	if err := compile(ops, o.Mode, res, add); err != nil {
 		return nil, err
 	}
 	if o.Mode == ModeSuggest {
 		if err := suggestable(ops, res.Requests); err != nil {
 			return nil, err
+		}
+		for _, op := range ops {
+			if op.Rebuilt > 0 {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("op %d: %d list item(s) before the content are rebuilt at their own level so its list can start above them; "+
+					"as a suggestion each shows a bullet change that changes nothing, to accept with the rest", op.Seq, op.Rebuilt))
+			}
 		}
 	}
 	return finish(), nil
@@ -379,6 +408,9 @@ func validateShape(op *Op, info KindInfo) error {
 }
 
 func validateParams(op *Op, info KindInfo) error {
+	if err := validateListLevel(op); err != nil {
+		return err
+	}
 	switch op.Kind {
 	case OpTextStyle:
 		if op.Text.IsZero() {
@@ -420,6 +452,26 @@ func validateParams(op *Op, info KindInfo) error {
 	}
 	if info.Tool == ToolTable {
 		return validateTableOp(op)
+	}
+	return nil
+}
+
+// MaxListLevel is the deepest level a Google Docs list has.
+const MaxListLevel = 8
+
+// validateListLevel holds list_level to the ops that write content, to
+// content that starts with a list, and to the levels a list has.
+func validateListLevel(op *Op) error {
+	if op.ListLevel == nil {
+		return nil
+	}
+	switch {
+	case op.Kind != OpInsert && op.Kind != OpAppend && op.Kind != OpReplace:
+		return fmt.Errorf("op %d: list_level applies to insert, append and replace", op.Seq)
+	case *op.ListLevel < 0 || *op.ListLevel > MaxListLevel:
+		return fmt.Errorf("op %d: list_level must be 0 (the top) to %d", op.Seq, MaxListLevel)
+	case op.Fragment == nil || len(op.Fragment.Blocks) == 0 || op.Fragment.Blocks[0].Kind != markdown.KindListItem:
+		return fmt.Errorf("op %d: list_level sets the level of a list the content starts with, and this content does not start with one", op.Seq)
 	}
 	return nil
 }
@@ -685,7 +737,15 @@ func formatRequests(op *Op) []json.RawMessage {
 	case OpBullets:
 		switch op.Bullets {
 		case "none":
-			return []json.RawMessage{DeleteBullets(r)}
+			// The bullet's indent outlives it; an item's own, set by hand,
+			// is put back.
+			reqs := []json.RawMessage{DeleteBullets(r), ClearIndent(r)}
+			for _, it := range op.Items {
+				if own := it.ownIndents(r); own != nil {
+					reqs = append(reqs, own)
+				}
+			}
+			return reqs
 		case "numbered":
 			return []json.RawMessage{CreateBullets(r, NumberedPreset)}
 		case "checkbox":
@@ -701,12 +761,12 @@ func contentRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
 		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline,
-			Inline: op.Inline, Fill: op.Fill, NearBullet: op.NearBullet, Slots: inBody(op),
+			Inline: op.Inline, Fill: op.Fill, Inherited: op.List.At, List: op.List, ListLevel: op.ListLevel, Slots: inBody(op),
 			Isolate: mode == ModeSuggest && op.ClearTo > op.Insert.Index})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 		}
-		op.Slots = c.Slots
+		op.Slots, op.Rebuilt = c.Slots, c.Rebuilt
 		if op.ClearTo > op.Insert.Index {
 			// The paragraph being filled holds whitespace; clear it first
 			// so the later requests see the indices they were built for.
@@ -794,25 +854,39 @@ func replaceRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	if del.End > del.Start {
 		reqs = append(reqs, DeleteRange(del))
 	}
-	opts := FragmentOptions{NearBullet: op.NearBullet, Slots: inBody(op) && op.TargetIsBlock}
+	// The new paragraphs take the style of the paragraph the text lands
+	// in (spike F): the target's own while its deletion is a suggestion
+	// or it is the segment's only block, the one after it once it is
+	// gone, and the one before a last block, whose newline it lost.
+	opts := FragmentOptions{Inherited: op.List.At, List: op.List, ListLevel: op.ListLevel, Slots: inBody(op) && op.TargetIsBlock}
 	at := Loc{Index: del.Start, SegmentID: seg.ID, TabID: seg.TabID}
 	switch {
 	case !op.TargetIsBlock:
-		// Inside a paragraph: the first fragment paragraph merges with it.
+		// Inside a paragraph: the first fragment paragraph merges with it
+		// and keeps its style, as an insertion inside one does. A list
+		// item keeps its bullet, a heading its level.
+		opts.Inline = true
 	case op.Target.End >= seg.End && op.Target.Start > seg.Start:
 		// Last block: we deleted the newline before it; re-add it in front.
 		opts.Prefix = true
+		opts.Inherited = nil
+		if len(op.List.Preceding) > 0 {
+			opts.Inherited = &op.List.Preceding[0]
+		}
 	case op.Target.End >= seg.End:
 		// Only block in the segment: text sits before the final newline.
 		opts.Isolate = mode == ModeSuggest
 	default:
 		opts.Suffix = true
+		if mode != ModeSuggest {
+			opts.Inherited = op.List.After
+		}
 	}
 	c, err := CompileFragment(op.Fragment, at, opts)
 	if err != nil {
 		return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 	}
-	op.Slots = c.Slots
+	op.Slots, op.Rebuilt = c.Slots, c.Rebuilt
 	return append(reqs, c.Requests...), false, nil
 }
 

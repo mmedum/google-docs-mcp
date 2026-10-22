@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-22
+
 ### Added
 
 - Word files (.docx). The Docs API reads one and refuses every write to it, so the server now writes the file itself: `edit_document`'s text ops are made in the file's XML, addressed by exact text, `heading_id` or handle as on a Google Doc, and the file is uploaded whole through Drive. `mode: suggest` writes Word tracked changes, which Docs shows as suggestions; `mode: comment` and `add_comment` write Word comments, which `list_comments` lists. Headings take the file's heading styles and lists continue the list they are placed against. `replace_all` replaces the matches in the body and warns of any in headers, footers or footnotes, which are not written. A write checks Docs and the file agree, puts back a save that lands in between, and waits for Docs to read the new revision. `get_document` says `kind: word_file`. Formatting, tables, images, layout, tabs and reviewing suggestions are refused, saying to save the file as a Google Doc. See "Word files" in the README.

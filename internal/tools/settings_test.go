@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"encoding/json"
 	"flag"
 	"go/ast"
 	"go/parser"
@@ -38,15 +37,7 @@ func TestNoToolTakesAServerSetting(t *testing.T) {
 		t.Fatalf("read %d tools; the check is not looking at the surface", len(tools))
 	}
 	for _, tool := range tools {
-		raw, err := json.Marshal(tool.InputSchema)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var schema any
-		if err := json.Unmarshal(raw, &schema); err != nil {
-			t.Fatal(err)
-		}
-		for _, input := range inputNames(schema) {
+		for _, input := range inputNames(tool.InputSchema) {
 			if settings[input] {
 				t.Errorf("%s takes %s, which is the operator's setting", tool.Name, input)
 			}

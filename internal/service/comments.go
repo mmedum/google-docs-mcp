@@ -479,7 +479,7 @@ func (s *Service) commentRef(ctx context.Context, docRef, commentID string) (str
 // liveReply is the thread's reply of that id that is not deleted, or nil.
 func liveReply(thread *gapi.DriveComment, id string) *gapi.DriveReply {
 	for _, r := range thread.Replies {
-		if id != "" && r != nil && !r.Deleted && r.ID == id {
+		if r != nil && !r.Deleted && r.ID == id {
 			return r
 		}
 	}
@@ -559,23 +559,18 @@ func (s *Service) DeleteComment(ctx context.Context, req DeleteCommentRequest) (
 	}
 	if req.DryRun {
 		res.DryRun = true
-		res.Text = fmt.Sprintf("dry run: would delete comment %s", commentID)
-		if res.ReplyID != "" {
-			res.Text = fmt.Sprintf("dry run: would delete reply %s of comment %s", res.ReplyID, commentID)
-		}
+		res.Text = "dry run: would delete " + what
 		return res, nil
 	}
 	if res.ReplyID != "" {
-		if err := s.api.DeleteReply(ctx, id, commentID, res.ReplyID); err != nil {
-			return nil, wrapWriteError(err)
-		}
-		res.Text = fmt.Sprintf("deleted reply %s of comment %s", res.ReplyID, commentID)
+		err = s.api.DeleteReply(ctx, id, commentID, res.ReplyID)
 	} else {
-		if err := s.api.DeleteComment(ctx, id, commentID); err != nil {
-			return nil, wrapWriteError(err)
-		}
-		res.Text = fmt.Sprintf("deleted comment %s", commentID)
+		err = s.api.DeleteComment(ctx, id, commentID)
 	}
+	if err != nil {
+		return nil, wrapWriteError(err)
+	}
+	res.Text = "deleted " + what
 	s.Invalidate(id)
 	return res, nil
 }

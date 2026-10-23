@@ -166,7 +166,7 @@ func (s *Service) mdWriteOnce(ctx context.Context, id string, o mdWriteOpts, cha
 	if o.comment && res.Preview == "" {
 		res.Preview = "(the text does not change; the comment is written into the file)"
 	}
-	again, err := s.awaitEditor(ctx, o, m, view, attempt)
+	again, err := s.awaitEditor(ctx, o.dryRun, m, view, attempt)
 	if again || err != nil || o.dryRun {
 		return res, again, err
 	}
@@ -180,12 +180,12 @@ func (s *Service) mdWriteOnce(ctx context.Context, id string, o mdWriteOpts, cha
 // file does not show yet: it waits and tries again, then refuses. Force
 // does not write past it: that work is in no Drive revision yet, so
 // nothing could bring it back.
-func (s *Service) awaitEditor(ctx context.Context, o mdWriteOpts, m *mdFile, view liveView, attempt int) (bool, error) {
+func (s *Service) awaitEditor(ctx context.Context, dryRun bool, m *mdFile, view liveView, attempt int) (bool, error) {
 	what := editorPending(m.md, view)
 	switch {
 	case what == "":
 		return false, nil
-	case attempt < writeAttempts && !o.dryRun:
+	case attempt < writeAttempts && !dryRun:
 		s.log.InfoContext(ctx, "the Markdown file has changes in the Docs editor not saved yet; waiting", "what", what)
 		return true, s.sleep(ctx, saveWait)
 	}

@@ -178,10 +178,8 @@ func permissionProblems(readme string, registered []string) []string {
 		return []string{`README gives no Claude Code permission rule ("mcp__google-docs__<tool>")`}
 	}
 	var problems []string
-	for _, name := range rules {
-		if !slices.Contains(registered, name) {
-			problems = append(problems, "README gives a permission rule for "+name+", which the server does not register")
-		}
+	for _, name := range difference(rules, registered) {
+		problems = append(problems, "README gives a permission rule for "+name+", which the server does not register")
 	}
 	return problems
 }

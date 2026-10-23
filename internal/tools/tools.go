@@ -5,7 +5,6 @@ package tools
 
 import (
 	"errors"
-	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -17,7 +16,6 @@ import (
 type Deps struct {
 	Service *service.Service
 	Config  config.Config
-	Logger  *slog.Logger
 }
 
 // FullSurface is the configuration under which every tool registers.
@@ -44,9 +42,6 @@ func FullSurface(cfg config.Config) config.Config {
 
 // Register adds every tool the configuration allows.
 func Register(s *mcp.Server, d Deps) {
-	if d.Logger == nil {
-		d.Logger = slog.New(slog.DiscardHandler)
-	}
 	registerRead(s, d)
 	registerMoreRead(s, d)
 	registerCommentsRead(s, d)

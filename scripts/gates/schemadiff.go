@@ -74,7 +74,9 @@ func schemaDiff(w io.Writer, args []string) error {
 	return nil
 }
 
-// A version heading as Keep a Changelog writes it, a prerelease included.
+// A version heading as Keep a Changelog writes it, a prerelease included,
+// unlike staleness's versionHeading: a prerelease that keeps the major
+// may not break the surface either.
 var changelogHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+[^\]]*)\]`)
 
 // undeclaredBreaks is each breaking change that the unreleased part of

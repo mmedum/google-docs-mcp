@@ -107,8 +107,8 @@ type Settings struct {
 	removed map[string]string
 }
 
-// removedSettings are the settings a release took out, each with what to
-// do instead. Off, the old default, is still accepted. On, or a value
+// removedSettings are the removed settings that made the server ask the
+// person, each with what to do instead. Off, the old default, is still accepted. On, or a value
 // that is not a boolean, is refused at start: ignored, it would quietly
 // allow what its owner set it to stop.
 var removedSettings = []struct{ key, instead string }{

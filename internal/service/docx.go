@@ -10,11 +10,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
-	"github.com/mmedum/google-docs-mcp/v2/internal/ooxml"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v3/internal/ooxml"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // Word files (.docx). The Docs API reads one, its tracked changes as

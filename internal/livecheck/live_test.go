@@ -17,7 +17,7 @@ package livecheck
 
 import (
 	"context"
-	"github.com/mmedum/google-docs-mcp/v2/internal/redact"
+	"github.com/mmedum/google-docs-mcp/v3/internal/redact"
 	"os"
 	"os/exec"
 	"path/filepath"

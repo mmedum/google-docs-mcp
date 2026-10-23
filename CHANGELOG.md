@@ -8,6 +8,10 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the Go module path is now `github.com/mmedum/google-docs-mcp/v3`, as Go requires from v3 on; install with `go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest`.
+
 ## [2.4.0] - 2026-10-22
 
 ### Added

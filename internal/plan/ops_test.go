@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
 )
 
 func seg() Segment { return Segment{ID: "", TabID: "t.0", Start: 1, End: 100} }

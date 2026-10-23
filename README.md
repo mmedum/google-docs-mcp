@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mmedum/google-docs-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mmedum/google-docs-mcp/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/mmedum/google-docs-mcp?sort=semver)](https://github.com/mmedum/google-docs-mcp/releases/latest)
-[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-docs-mcp/v2.svg)](https://pkg.go.dev/github.com/mmedum/google-docs-mcp/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-docs-mcp/v3.svg)](https://pkg.go.dev/github.com/mmedum/google-docs-mcp/v3)
 [![License: Apache 2.0](https://img.shields.io/github/license/mmedum/google-docs-mcp)](./LICENSE)
 
 Google Docs as MCP tools. Read, edit, suggest and comment on documents from Claude or any MCP client.
@@ -40,7 +40,7 @@ which they deliberately do not.
 ## Install
 
 ```bash
-go install github.com/mmedum/google-docs-mcp/v2/cmd/google-docs-mcp@latest
+go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest
 ```
 
 That puts `google-docs-mcp` in `$(go env GOPATH)/bin`, which is the path

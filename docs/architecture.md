@@ -1014,7 +1014,7 @@ accounts. That sets these requirements:
 
 - **Artifacts.** goreleaser builds for linux, macOS and Windows on amd64
   and arm64, with checksums; `go install
-  github.com/mmedum/google-docs-mcp/v2/cmd/google-docs-mcp@latest` as the
+  github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest` as the
   second path. A Docker image is not a v1 target: the loopback OAuth flow
   and the keyring both assume the user's desktop. Homebrew tap later.
 - **Client configuration** documented for Claude Code (`claude mcp add

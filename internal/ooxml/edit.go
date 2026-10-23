@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
 )
 
 // Track makes edits tracked changes, which Docs reads as suggestions: what

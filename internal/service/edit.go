@@ -11,12 +11,11 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // Location says where an insertion goes.
@@ -70,8 +69,8 @@ type EditRequest struct {
 	Force          bool
 	ExpectRevision string
 	// round marks a later batch of a call, run after an earlier one has
-	// been written: too late to ask the person anything, and the call's
-	// first batch, not this one, warns when handles shift.
+	// been written: no dry run planned it, so it may not be forced, and
+	// the call's first batch, not this one, warns when handles shift.
 	round bool
 	// own are the suggestions the call's earlier batches made. A later
 	// batch works over them, and the guard does not report them.
@@ -393,17 +392,11 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 		result.Preview = regionPreview(f.Doc, ro)
 		return result, ro, nil
 	}
-	if len(planned.Forced) > 0 && asks(ctx) {
-		if req.round {
-			// The person is asked before anything is written, and this
-			// batch runs after an earlier one was: its forced ops were
-			// never put to them.
-			return nil, nil, Errorf("blocked", "op %d is forced and runs in a later batch, after a grid change was "+
-				"written, so the person could not be asked about it first; run it as a call of its own", planned.Forced[0].Seq)
-		}
-		if err := ask(ctx, forcedQuestion(f, planned.Forced)); err != nil {
-			return nil, nil, err
-		}
+	if req.round && len(planned.Forced) > 0 {
+		// A dry run never plans a later batch, since the grid it names
+		// does not exist yet, so nothing showed what this op destroys.
+		return nil, nil, Errorf("blocked", "op %d is forced and runs in a later batch, after a grid change was written, "+
+			"where no dry run could show what it destroys; run it as a call of its own, after a dry run", planned.Forced[0])
 	}
 	env, err := s.apply(ctx, f, planned, mode, result)
 	if err != nil {
@@ -411,15 +404,6 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 	}
 	ro.env = env
 	return result, ro, nil
-}
-
-// forcedQuestion is the question before a forced edit runs.
-func forcedQuestion(f *Fetched, forced []plan.Forced) render.Question {
-	shown := make([]render.Forced, len(forced))
-	for i, fo := range forced {
-		shown[i] = render.Forced{Seq: fo.Seq, Kind: string(fo.Kind), Description: fo.Description, Destroys: fo.Destroys}
-	}
-	return render.AskForced(f.Doc.ID, f.Doc.Title, shown)
 }
 
 func (s *Service) mode(m string) (plan.Mode, error) {

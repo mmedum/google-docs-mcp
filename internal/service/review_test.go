@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // p11 holds an inline image and a footnote reference: "See " [img] " chart" [fn] " and the site".
@@ -199,7 +199,7 @@ func TestDeleteOnlyRootTabRefused(t *testing.T) {
 	if classOf(err) != "invalid" || !strings.Contains(messageOf(err), "top-level tab") {
 		t.Fatalf("only root tab: %v", err)
 	}
-	res, err := svc.DeleteTab(accepting(context.Background()), TabRequest{Document: fixtureID, Tab: "Notes"})
+	res, err := svc.DeleteTab(context.Background(), TabRequest{Document: fixtureID, Tab: "Notes"})
 	if err != nil || res.TabID != "t.1" {
 		t.Fatalf("child tab: %+v %v", res, err)
 	}
@@ -239,5 +239,21 @@ func TestBlockShiftWarning(t *testing.T) {
 	res, err = svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Handle: "p1"}}, Content: "Middle"}}})
 	if err != nil || !strings.Contains(strings.Join(res.Warnings, "\n"), "handles after the edited region now name different blocks") {
 		t.Fatalf("shift warning: %v %+v", err, res.Warnings)
+	}
+}
+
+// A suggestion named twice is reviewed once: Google refuses a second
+// review of the same suggestion, which would fail the whole batch, and
+// what remains pending is counted once.
+func TestAReviewNamesASuggestionOnce(t *testing.T) {
+	svc, api := writable(t, true)
+	for _, dryRun := range []bool{true, false} {
+		res, err := svc.Review(context.Background(), ReviewRequest{Document: fixtureID, Action: "reject", IDs: []string{"s1", "s1"}, DryRun: dryRun})
+		if err != nil || len(res.IDs) != 1 || res.Remaining != 0 {
+			t.Errorf("dry run %t: %+v, %v", dryRun, res, err)
+		}
+	}
+	if len(api.batches) != 1 || kindsOf(t, api.batches[0].Requests) != "rejectSuggestion" {
+		t.Errorf("%d batch(es) written; want one with one rejectSuggestion", len(api.batches))
 	}
 }

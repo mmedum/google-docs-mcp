@@ -18,7 +18,7 @@ func TestGithubRepoStripsTheMajorVersion(t *testing.T) {
 		// Go requires the /vN from v2 onwards and it is not part of the
 		// repository name. Refusing it would fail the release at the
 		// tag, in public, the day this module goes to v2.
-		{module: "github.com/mmedum/google-docs-mcp/v2", owner: "mmedum", repo: "google-docs-mcp"},
+		{module: "github.com/mmedum/google-docs-mcp/v3", owner: "mmedum", repo: "google-docs-mcp"},
 		{module: "github.com/mmedum/google-docs-mcp/v17", owner: "mmedum", repo: "google-docs-mcp"},
 		// /v1 is not a thing a module path carries, so it is a path
 		// segment like any other and the shape is wrong.

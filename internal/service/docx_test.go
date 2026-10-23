@@ -15,10 +15,10 @@ import (
 	"testing"
 	"unicode/utf16"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/ooxml"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/ooxml"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // wordService serves internal/ooxml/testdata/brief.docx, a Google Doc
@@ -250,7 +250,7 @@ func TestWordRefusesDocsOnly(t *testing.T) {
 			return err
 		},
 		"review": func() error {
-			_, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", All: true})
+			_, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", IDs: []string{"s1"}})
 			return err
 		},
 		"tabs": func() error {
@@ -425,7 +425,7 @@ func TestWordGuardsFileComments(t *testing.T) {
 		t.Fatalf("got %v with %d uploads, want blocked and none", err, len(api.uploads))
 	}
 	del.Force = true
-	if _, err := svc.Edit(accepting(context.Background()), del); err != nil {
+	if _, err := svc.Edit(context.Background(), del); err != nil {
 		t.Fatal(err)
 	}
 	if text, _ := uploaded(t, api, "word/document.xml"); strings.Contains(text, "\nTwo\n") {

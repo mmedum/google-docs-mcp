@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/ooxml"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/ooxml"
 )
 
 const docxCorpus = `# Brief

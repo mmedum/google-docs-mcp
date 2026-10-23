@@ -8,6 +8,26 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** the server no longer asks you before a write; your MCP client approves each call. In Claude Code, list the writes you want to approve under `permissions.ask`, as the README shows. `delete_comment` and `delete_tab` no longer carry the `requiresUserInteraction` mark, so Claude Code asks for them by your rules, and headless it no longer refuses them.
+- **Breaking:** `review_suggestion` takes `ids`, each suggestion `list_suggestions` showed, and no longer takes `all`. Name every suggestion to review, so one proposed after the list was read is never reviewed unseen; one named twice is reviewed once.
+- **Breaking:** `delete_comment` takes `text_start`, how the text it deletes begins as `list_comments` shows it: at least 20 characters, or all of a shorter text, and empty for a reply with no text. The comment is read first, and a delete whose `text_start` does not match is refused `[stale]`, a dry run too. Your client's prompt now shows which comment goes, as the server's question used to.
+- **Breaking:** `force` no longer writes a Markdown file past changes made in the Docs editor and not saved yet. `edit_document` and `write_markdown_file` refuse `[conflict]` until the editor saves, since no revision holds that work.
+- **Breaking:** a forced op that runs in a later batch of an `edit_table` or `edit_document` call, after a grid change, is refused on every client, not only one that could be asked: no dry run shows what it destroys. Run it as a call of its own, after a dry run.
+- **Breaking:** the Go module path is now `github.com/mmedum/google-docs-mcp/v3`, as Go requires from v3 on; install with `go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest`.
+
+### Removed
+
+- **Breaking:** `GDOCS_REQUIRE_PROMPT` and `--require-prompt`. Set to anything but `false`, the server refuses to start; unset it, and drop the flag from your client's arguments.
+
+### Fixed
+
+- `export_document` no longer overwrites a file in `GDOCS_EXPORT_DIR`, nor writes through a symbolic link there. A second export of a document replaced the first without a word, and a link at the export's name was followed to wherever it pointed. A name already taken now gains a counter, as in `Report-1AbCdE-2.pdf`.
+- The live driver's transcript no longer carries the signed-in account's numeric id. Drive's link to a Word file names it (`ouid=`), and `get_document` prints that link.
+
 ## [2.4.0] - 2026-10-22
 
 ### Added

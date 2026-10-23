@@ -13,9 +13,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/service"
-	"github.com/mmedum/google-docs-mcp/v2/internal/tools"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/service"
+	"github.com/mmedum/google-docs-mcp/v3/internal/tools"
 )
 
 // Name is the MCP server name.
@@ -91,7 +91,7 @@ func New(d Deps) *mcp.Server {
 	if d.Logger != nil {
 		s.AddReceivingMiddleware(logCalls(d.Logger))
 	}
-	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config, Logger: d.Logger})
+	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config})
 	return s
 }
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
 )
 
 // Layout ops change how a document is laid out rather than what it says:

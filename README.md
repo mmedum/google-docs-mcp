@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mmedum/google-docs-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mmedum/google-docs-mcp/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/mmedum/google-docs-mcp?sort=semver)](https://github.com/mmedum/google-docs-mcp/releases/latest)
-[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-docs-mcp/v2.svg)](https://pkg.go.dev/github.com/mmedum/google-docs-mcp/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-docs-mcp/v3.svg)](https://pkg.go.dev/github.com/mmedum/google-docs-mcp/v3)
 [![License: Apache 2.0](https://img.shields.io/github/license/mmedum/google-docs-mcp)](./LICENSE)
 
 Google Docs as MCP tools. Read, edit, suggest and comment on documents from Claude or any MCP client.
@@ -40,7 +40,7 @@ which they deliberately do not.
 ## Install
 
 ```bash
-go install github.com/mmedum/google-docs-mcp/v2/cmd/google-docs-mcp@latest
+go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest
 ```
 
 That puts `google-docs-mcp` in `$(go env GOPATH)/bin`, which is the path
@@ -201,7 +201,8 @@ that text, uploaded once per call:
   an upload conditional, and an open editor holds work the file does not
   show yet. Before writing, the server compares the editor's live
   session with the file: if a comment, reply or resolve has not reached
-  the file, it waits a moment, then refuses. Just before the upload it
+  the file, it waits a moment, then refuses, `force` or not: that work
+  is in no revision yet. Just before the upload it
   checks again. After it, it checks the file's history: if someone's
   save landed in between, the save is kept and the change made again on
   top of it.
@@ -287,12 +288,12 @@ for the defaults.
 | `read_document` | Scoped, budgeted read as markdown, plain text, or raw Docs JSON. Scope by `heading_id`, heading text, handle range, tab, or header/footer/footnote. Block handles come with the text unless `with_handles` is false; options add styles, pending suggestions as `{++inserted++}` / `{--deleted--}` / `{==restyled==}`, and comment markers `{>>c:id<<}`. |
 | `find_in_document` | Text or regex search returning handles, offsets and context. |
 | `search_documents` | Locate documents by title or content, owner, or modification date; `kind` adds Markdown files. |
-| `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as files under `GDOCS_EXPORT_DIR`. |
+| `export_document` | Google's own md, txt, html inline; pdf, docx, odt, rtf, epub as new files under `GDOCS_EXPORT_DIR`, never over one already there. |
 | `create_document` | New document, optionally with markdown content; `kind: markdown_file` makes a `.md` file, `from_file` a working copy of one. |
 | `edit_document` | One batch of `insert`, `append`, `replace` (minimal diff), `delete`, `replace_all` (text or RE2 regex), `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`. Targets are exact text, `heading_id`, handles, cells, or a named range that survives later edits. Markdown content may hold tables and images; later batches place them once the text has landed, and a list in it continues the list item it is placed against unless `list_level` sets its level. `mode: suggest`, `direct` or `comment`; `dry_run`; `expect_revision`; `force`. |
 | `format_document` | `text_style`, `paragraph_style`, `bullets`, `clear_formatting` on the same targets, same modes. A link goes to a URL, to a heading in the same tab (`#h.…`, from `get_outline`) or to a tab (`#tab=t.…`); markdown content takes the same forms. |
 | `list_suggestions` | Pending suggested edits with ids, text and handles, including the formatting-only ones that add and remove nothing, and the replies on each one's thread. |
-| `review_suggestion` | Accept, reject or discard suggestions by id or all. |
+| `review_suggestion` | Accept, reject or discard suggestions, each by the id `list_suggestions` shows. |
 | `list_comments` | Comment threads with every reply, resolved and deleted state, who each is assigned to, quoted text and the block they sit on. |
 | `add_comment` | Comment on a passage (pinned to it) or on the document; on a Markdown file, written into the file. |
 | `reply_comment` | Reply to, resolve, reopen a thread, or rewrite a comment or reply of your own. Also replies on a suggested edit's thread. |
@@ -302,18 +303,15 @@ for the defaults.
 | `insert_object` | Insert an inline image from a public URL, a person chip, a rich-link chip or a date chip at a location; replace an image's source in place; or delete an object, including a floating image no text range covers. |
 | `layout_document` | `page` (size, margins, background, landscape, page numbering, first/even-page headers, pageless), `section` (the same for one section, plus 1–3 columns), `section_break`, and `named_style` to redefine `NORMAL_TEXT`, `TITLE`, `SUBTITLE` or `HEADING_1` … `HEADING_6` for a whole tab. |
 | `manage_tabs` | Add (with content), rename, move or nest tabs. Always direct: the API cannot suggest tab changes. |
-| `write_markdown_file` | Write a working copy back into its Markdown file, carrying only what changed in the copy; conflicts with changes made in the file since are refused unless forced; `dry_run`. |
+| `write_markdown_file` | Write a working copy back into its Markdown file, carrying only what changed in the copy; conflicts with changes made in the file since are refused unless forced, and changes in the Docs editor not saved yet are never written past; `dry_run`. |
 
 Two more tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:
 `delete_comment` (a thread or one reply) and `delete_tab` (a tab with its
-content and child tabs). Both carry the destructive annotation.
-
-Before those two deletes, before a forced edit that destroys comments,
-suggestions, images or footnotes, and before reviewing every pending
-suggestion at once, the server asks the person through the client when it
-can, and names what would go. A call they did not confirm comes back
-`[blocked]`. `GDOCS_REQUIRE_PROMPT=true` refuses those writes when the
-client cannot ask.
+content and child tabs). Both carry the destructive annotation, and each
+call must repeat its target in `confirm_comment_id` or `confirm_tab`.
+`delete_comment` also takes `text_start`, how the text it deletes begins
+as `list_comments` shows it, so your client's prompt shows which comment
+goes; the server reads the comment and refuses `[stale]` when it differs.
 
 Documents are identified by id, any `docs.google.com` URL, or a Markdown
 file's `drive.google.com/file/d/…` URL.
@@ -362,6 +360,29 @@ read and diffed through Google's export, so they have no handles.
 - Destructive tools (deleting comments or tabs) are not registered unless
   `GDOCS_ENABLE_DESTRUCTIVE=true`. `GDOCS_READ_ONLY=true` registers only
   read tools and requests read-only scopes.
+- **Your MCP client approves each call; the server asks you nothing.**
+  claude.ai and Codex prompt for the two deletes, which are marked
+  destructive. VS Code prompts for every tool that is not read-only:
+  every write, and `export_document`, which writes a local file. In
+  Claude Code, list the calls you want to approve one by one under
+  `permissions.ask` in your settings, with the name you gave the server
+  in place of `google-docs`. For example, the deletes, reviewing other
+  people's suggestions, and writing a Markdown file back:
+
+  ```json
+  {
+    "permissions": {
+      "ask": [
+        "mcp__google-docs__delete_comment", "mcp__google-docs__delete_tab",
+        "mcp__google-docs__review_suggestion", "mcp__google-docs__write_markdown_file"
+      ]
+    }
+  }
+  ```
+
+  `GDOCS_REQUIRE_PROMPT` is gone: set to anything but `false`, the server
+  will not start. Leave `GDOCS_ENABLE_DESTRUCTIVE` off for a client that
+  runs with nobody watching.
 - The server talks only to Google (`googleapis.com`, and `docs.google.com`
   for the revision export links Google's API returns). No telemetry. Logs
   (stderr) never contain document text.

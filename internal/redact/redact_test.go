@@ -92,6 +92,13 @@ func TestTranscriptKeepsPeopleAndDocumentsOut(t *testing.T) {
 			"https://drive.google.com/file/d/<scratch>/view\n",
 		},
 		{
+			// get_document on a Word file prints the link Drive gives,
+			// and that link carries the account's numeric id.
+			"a Word file's link and the account it names",
+			"https://docs.google.com/document/d/1SyntheticDocumentIdXXXXXXXXXXXX/edit?usp=drivesdk&ouid=12345678901234567890&rtpof=true&sd=true\n",
+			"https://docs.google.com/document/d/<scratch>/edit?usp=drivesdk&ouid=<person>&rtpof=true&sd=true\n",
+		},
+		{
 			"a gdocs resource uri",
 			"gdocs://1SyntheticDocumentIdXXXXXXXXXXXX/outline\n",
 			"gdocs://<scratch>/outline\n",

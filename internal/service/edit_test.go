@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // writable builds a service whose handle memory holds the fixture, as it
@@ -351,7 +351,7 @@ func TestEditSuggestAndModes(t *testing.T) {
 
 func TestGuardBlocksDirect(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := accepting(context.Background())
+	ctx := context.Background()
 	api.comments = []*gapi.DriveComment{{ID: "dc1", Content: "hmm", QuotedFileContent: &gapi.QuotedText{Value: "Second point"}}}
 	var se *Error
 	_, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpDelete, Target: &Target{Handle: "p7"}}}})
@@ -588,7 +588,7 @@ func TestBulletsNoneKeepsHandIndents(t *testing.T) {
 
 func TestFindSearchCreateExportSuggestions(t *testing.T) {
 	svc, api := writable(t, true)
-	ctx := accepting(context.Background())
+	ctx := context.Background()
 	fr, err := svc.Find(ctx, FindRequest{Document: fixtureID, Query: "point"})
 	if err != nil || fr.Total != 3 || fr.Matches[0].Handle != "p5" || fr.Matches[1].Handle != "p6" || !strings.Contains(fr.Matches[2].Context, "«point»") {
 		t.Fatalf("find: %+v %v", fr, err)
@@ -661,7 +661,7 @@ func TestFindSearchCreateExportSuggestions(t *testing.T) {
 		t.Fatalf("suggestions: %+v %v", ls, err)
 	}
 	api.batches = nil
-	rv, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "reject", All: true})
+	rv, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "reject", IDs: []string{"s1"}})
 	if err != nil || len(api.batches) != 1 || kindsOf(t, api.batches[0].Requests) != "rejectSuggestion" || rv.Remaining != 0 || rv.RevisionID != "rev-0002" {
 		t.Fatalf("review: %+v %v", rv, err)
 	}
@@ -669,10 +669,10 @@ func TestFindSearchCreateExportSuggestions(t *testing.T) {
 		req   ReviewRequest
 		class string
 	}{
-		{ReviewRequest{Document: fixtureID, Action: "maybe", All: true}, "invalid"},
+		{ReviewRequest{Document: fixtureID, Action: "maybe", IDs: []string{"s1"}}, "invalid"},
 		{ReviewRequest{Document: fixtureID, Action: "accept"}, "invalid"},
 		{ReviewRequest{Document: fixtureID, Action: "accept", IDs: []string{"s9"}}, "not_found"},
-		{ReviewRequest{Document: fixtureID, Action: "accept", All: true, ExpectRevision: "old"}, "conflict"},
+		{ReviewRequest{Document: fixtureID, Action: "accept", IDs: []string{"s1"}, ExpectRevision: "old"}, "conflict"},
 	} {
 		if _, err := svc.Review(ctx, tc.req); !errors.As(err, &se) || se.Class != tc.class {
 			t.Errorf("%+v: got %v, want %s", tc.req, err, tc.class)
@@ -681,7 +681,7 @@ func TestFindSearchCreateExportSuggestions(t *testing.T) {
 	// Review is not gated on the comments view: a refusal from Google
 	// destroys nothing, so the request goes and Google answers it.
 	plain, plainAPI := writable(t, false)
-	if _, err := plain.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", All: true}); err != nil || len(plainAPI.batches) != 1 {
+	if _, err := plain.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", IDs: []string{"s1"}}); err != nil || len(plainAPI.batches) != 1 {
 		t.Fatalf("review with the comments view refused: err=%v batches=%d", err, len(plainAPI.batches))
 	}
 }

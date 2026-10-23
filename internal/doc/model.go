@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
 )
 
 // Document is a parsed documents.get response.

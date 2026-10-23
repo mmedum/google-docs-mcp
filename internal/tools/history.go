@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/service"
+	"github.com/mmedum/google-docs-mcp/v3/internal/service"
 )
 
 // RevisionsInput lists version history.

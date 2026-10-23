@@ -8,11 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/mdfile"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // No API writes through the editor's live session to a Markdown file,
@@ -103,8 +102,8 @@ func (s *Service) WriteBack(ctx context.Context, req WriteBackRequest) (*EditRes
 	}
 	warnings = append(warnings, more...)
 
-	res, err := s.mdWrite(ctx, mdWriteOpts{ref: target, dryRun: req.DryRun, force: req.Force},
-		func(m *mdFile) (*mdfile.File, *EditResult, []render.Forced, error) {
+	res, err := s.mdWrite(ctx, mdWriteOpts{ref: target, dryRun: req.DryRun},
+		func(m *mdFile) (*mdfile.File, *EditResult, error) {
 			cur := m.md.Text()
 			fmEnd := m.md.FrontMatter().End
 			body := cur[fmEnd:]
@@ -117,7 +116,7 @@ func (s *Service) WriteBack(ctx context.Context, req WriteBackRequest) (*EditRes
 				Changes: []plan.OpSummary{{Kind: "write_back", Description: "the working copy's changes", Minimal: true}}}
 			if len(conflicts) > 0 {
 				if !req.Force {
-					return nil, nil, nil, Errorf("conflict", "%d change(s) made in the copy are to blocks also changed in the file since the copy was made: %s; "+
+					return nil, nil, Errorf("conflict", "%d change(s) made in the copy are to blocks also changed in the file since the copy was made: %s; "+
 						"pass force: true to write the rest and keep the file's version of those", len(conflicts), describeConflicts(conflicts))
 				}
 				r.Warnings = append(r.Warnings, fmt.Sprintf("forced: %d change(s) made in the copy conflict with changes made in the file since, and the file's version was kept: %s", len(conflicts), describeConflicts(conflicts)))
@@ -125,14 +124,14 @@ func (s *Service) WriteBack(ctx context.Context, req WriteBackRequest) (*EditRes
 			p := &mdPlanned{edits: mdfile.MinimalEdits(cur, cur[:fmEnd]+merged, 0), summary: r.Changes}
 			p.opOf = make([]int, len(p.edits))
 			if err := p.guard(m.md, req.Force); err != nil {
-				return nil, nil, nil, err
+				return nil, nil, err
 			}
 			r.Warnings = append(r.Warnings, p.warnings...)
 			after, err := m.md.Apply(p.edits)
 			if err != nil {
-				return nil, nil, nil, Errorf("invalid", "%v; nothing was written", err)
+				return nil, nil, Errorf("invalid", "%v; nothing was written", err)
 			}
-			return after, r, p.forced, nil
+			return after, r, nil
 		})
 	if err != nil || req.DryRun {
 		return finish(res), err

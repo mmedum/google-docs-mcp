@@ -241,3 +241,19 @@ func TestBlockShiftWarning(t *testing.T) {
 		t.Fatalf("shift warning: %v %+v", err, res.Warnings)
 	}
 }
+
+// A suggestion named twice is reviewed once: Google refuses a second
+// review of the same suggestion, which would fail the whole batch, and
+// what remains pending is counted once.
+func TestAReviewNamesASuggestionOnce(t *testing.T) {
+	svc, api := writable(t, true)
+	for _, dryRun := range []bool{true, false} {
+		res, err := svc.Review(context.Background(), ReviewRequest{Document: fixtureID, Action: "reject", IDs: []string{"s1", "s1"}, DryRun: dryRun})
+		if err != nil || len(res.IDs) != 1 || res.Remaining != 0 {
+			t.Errorf("dry run %t: %+v, %v", dryRun, res, err)
+		}
+	}
+	if len(api.batches) != 1 || kindsOf(t, api.batches[0].Requests) != "rejectSuggestion" {
+		t.Errorf("%d batch(es) written; want one with one rejectSuggestion", len(api.batches))
+	}
+}

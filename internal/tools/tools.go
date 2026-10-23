@@ -103,8 +103,10 @@ var (
 	// beyond what the person asked and the guard allows.
 	writeSafe = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
 	// destructive marks the gated tools. No tool carries Claude Code's
-	// requiresUserInteraction mark: neither delete is unrecoverable, so
-	// the operator's own rules decide (§12a).
+	// requiresUserInteraction mark (§12a): version history keeps a
+	// deleted tab's text, and a deleted comment, which cannot be
+	// restored, is one item of many, deleted many in a row, where a
+	// prompt on every call goes unread. The operator's own rules decide.
 	destructive = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
 	// localWrite marks a tool that reads Google and writes only a local
 	// file, in the one directory the person configured.

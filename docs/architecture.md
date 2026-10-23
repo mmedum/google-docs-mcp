@@ -991,8 +991,10 @@ What stays is what holds on every client:
    without `readOnlyHint`, which only the nine reads carry. No tool
    carries Claude Code's `anthropic/requiresUserInteraction`, which is
    for an unrecoverable delete of a whole container, a permanent delete
-   past a trash, or a public share: version history keeps a deleted
-   tab's text, and a comment is one item of many, deleted many in a row.
+   past a trash, or a public share. Version history keeps a deleted
+   tab's text. A deleted comment cannot be restored, but it is one item
+   of many, deleted many in a row, where a prompt on every call goes
+   unread; the standard keeps the mark off such deletes.
    In Claude Code the operator decides with `permissions.allow` and
    `ask`; the README gives `ask` rules, and the staleness gate holds each
    name there to the registered tools.
@@ -1010,9 +1012,10 @@ work is in no Drive revision, so nothing could bring it back, and the
 write is `[conflict]` until the editor saves or the person closes the
 file. What `force` still writes past, a conflict, a missing base or the
 guard, the file's previous revision keeps. And a forced op in a later
-batch, after a grid change in the same call was written, now runs like
-any forced op; it was refused because the person could not be asked
-before the first batch.
+batch, after a grid change in the same call was written, is refused on
+every client, where it used to be refused only for a client that could
+ask: a dry run never plans a later batch, so nothing showed what the op
+destroys. It runs as a call of its own, after a dry run.
 
 `GDOCS_REQUIRE_PROMPT`, which refused the asking writes on a client that
 could not ask, went with the question. A configuration that still turns
@@ -1149,7 +1152,7 @@ accounts. That sets these requirements:
 | A Markdown file in Drive is a document too, edited as the text it is (2026-10-14). Bet 6 forbade round-tripping a Doc through markdown, which loses what markdown cannot say; minimal edits to a Markdown file's own bytes are no round trip, and are bet 1 applied to text | §7.5: reads from the bytes, the content ops by minimal diff with the comment markup guarded, one Drive upload per call; the server's first Drive content write |
 | Working on a Markdown file together goes through a working copy (2026-10-14): no API writes through an open editor's session, and every upload makes the editor reload | §7.5: `create_document from_file` and `write_markdown_file`, a block merge that keeps the file's own text where the copy did not change it; direct writes check, write, verify and repair |
 | The server asks the person nothing; per-call approval is the client's; `GDOCS_REQUIRE_PROMPT` removed and refused unless off (the maintainer, 2026-10-22 for the family; this port approved 2026-10-23) | §12a; a major release, 3.0.0: a client that could not make the asking writes before can, and `review_suggestion` takes a new required input |
-| No tool carries `requiresUserInteraction` (2026-10-23) | §12a: neither delete is unrecoverable; the README's `permissions.ask` rules are how Claude Code asks |
+| No tool carries `requiresUserInteraction` (2026-10-23) | §12a: version history keeps a deleted tab's text; a deleted comment cannot be restored, but it is one item of many, deleted many in a row, which the standard keeps the mark off. The README's `permissions.ask` rules are how Claude Code asks |
 | `force` never writes past unsaved Docs-editor work on a Markdown file (2026-10-23) | §7.5, §12a: `[conflict]` until the editor saves; what else `force` writes past, the file's previous revision keeps |
 | `review_suggestion` takes the ids `list_suggestions` shows; `all` is gone (2026-10-23) | §12a: the argument carries what the question showed |
 | `force` stays a boolean; the retyped `confirm_tab` and `confirm_comment_id` stay (2026-10-23) | §12a, §17b |

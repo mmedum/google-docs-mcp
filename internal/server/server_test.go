@@ -287,8 +287,7 @@ func TestListToolsAndSchemas(t *testing.T) {
 		t.Fatal("destructive tools must not register by default")
 	}
 	// Destructive tools register only with the flag, marked destructive.
-	// No tool carries Claude Code's requiresUserInteraction: neither
-	// delete is unrecoverable, so the operator's own rules decide (§12a).
+	// No tool carries Claude Code's requiresUserInteraction (§12a).
 	ds := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{EnableDestructive: true, DefaultWriteMode: config.WriteDirect})
 	dres, err := ds.ListTools(context.Background(), nil)
 	if err != nil {
@@ -749,9 +748,10 @@ func TestStructureToolsEndToEnd(t *testing.T) {
 }
 
 // A forced op in a later batch, after a grid change in the same call was
-// written, runs like any forced op. It was refused while the server asked
-// the person before a forced write, since by then something was written.
-func TestAForcedOpInALaterBatchRuns(t *testing.T) {
+// written, is refused: a dry run never plans a later batch, so nothing
+// showed what the op destroys. The grid change before it stays written,
+// and the reply says the op after it failed.
+func TestAForcedOpInALaterBatchIsRefused(t *testing.T) {
 	api := &fakeAPI{raw: doctest.RawFixture(t), comments: []*gapi.DriveComment{
 		{ID: "c1", Content: "check the figures", QuotedFileContent: &gapi.QuotedText{Value: "Alpha"}},
 	}}
@@ -760,7 +760,8 @@ func TestAForcedOpInALaterBatchRuns(t *testing.T) {
 		map[string]any{"op": "insert_rows", "table": "tbl1", "row": 1, "count": 1},
 		// The fake applies nothing, so the commented row is still row 2.
 		map[string]any{"op": "delete_rows", "table": "tbl1", "row_numbers": []any{2}}}})
-	if out := textOf(res); res.IsError || len(api.batches) != 2 || !strings.Contains(out, "forced; 1 comment (c1) will be lost") {
+	if out := textOf(res); len(api.batches) != 1 ||
+		!strings.Contains(out, "the earlier ops were applied but op 1 failed: op 1 is forced and runs in a later batch") {
 		t.Errorf("%d batches: %s", len(api.batches), out)
 	}
 }

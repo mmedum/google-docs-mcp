@@ -69,8 +69,8 @@ type EditRequest struct {
 	Force          bool
 	ExpectRevision string
 	// round marks a later batch of a call, run after an earlier one has
-	// been written: the call's first batch, not this one, warns when
-	// handles shift.
+	// been written: no dry run planned it, so it may not be forced, and
+	// the call's first batch, not this one, warns when handles shift.
 	round bool
 	// own are the suggestions the call's earlier batches made. A later
 	// batch works over them, and the guard does not report them.
@@ -391,6 +391,12 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 		}
 		result.Preview = regionPreview(f.Doc, ro)
 		return result, ro, nil
+	}
+	if req.round && len(planned.Forced) > 0 {
+		// A dry run never plans a later batch, since the grid it names
+		// does not exist yet, so nothing showed what this op destroys.
+		return nil, nil, Errorf("blocked", "op %d is forced and runs in a later batch, after a grid change was written, "+
+			"where no dry run could show what it destroys; run it as a call of its own, after a dry run", planned.Forced[0])
 	}
 	env, err := s.apply(ctx, f, planned, mode, result)
 	if err != nil {

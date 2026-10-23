@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
@@ -269,15 +270,18 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		return nil, err
 	}
 	pending := map[string]bool{}
-	var all []string
 	for _, sg := range list.Suggestions {
 		pending[sg.ID] = true
-		all = append(all, sg.ID)
 	}
-	ids := req.IDs
-	for _, id := range ids {
+	// An id named twice is reviewed once: Google refuses a second review
+	// of the same suggestion, which would fail the whole batch.
+	var ids []string
+	for _, id := range req.IDs {
 		if !pending[id] {
 			return nil, Errorf("not_found", "suggestion %q is not pending at this revision; call list_suggestions", id)
+		}
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
 		}
 	}
 	reqs := make([]json.RawMessage, 0, len(ids))
@@ -296,7 +300,7 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		verb = "discarded"
 	}
 	if req.DryRun {
-		out := &ReviewResult{Action: action, IDs: ids, RevisionID: list.RevisionID, Remaining: len(all) - len(ids), DryRun: true}
+		out := &ReviewResult{Action: action, IDs: ids, RevisionID: list.RevisionID, Remaining: len(list.Suggestions) - len(ids), DryRun: true}
 		out.Text = fmt.Sprintf("dry run: would have %s %d suggestion(s); %d would remain pending (revision %s)", verb, len(ids), out.Remaining, out.RevisionID)
 		return out, nil
 	}
@@ -311,7 +315,7 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		return nil, err
 	}
 	out := &ReviewResult{Action: action, IDs: ids, RevisionID: revision}
-	out.Remaining = len(all) - len(ids)
+	out.Remaining = len(list.Suggestions) - len(ids)
 	out.Text = fmt.Sprintf("%s %d suggestion(s); %d remain pending (revision %s)", verb, len(ids), out.Remaining, out.RevisionID)
 	return out, nil
 }

@@ -11,9 +11,9 @@ diff in CI flags them.
 ### Changed
 
 - **Breaking:** the server no longer asks you before a write; your MCP client approves each call. In Claude Code, list the writes you want to approve under `permissions.ask`, as the README shows. `delete_comment` and `delete_tab` no longer carry the `requiresUserInteraction` mark, so Claude Code asks for them by your rules, and headless it no longer refuses them.
-- **Breaking:** `review_suggestion` takes `ids`, each suggestion `list_suggestions` showed, and no longer takes `all`. Name every suggestion to review, so one proposed after the list was read is never reviewed unseen.
+- **Breaking:** `review_suggestion` takes `ids`, each suggestion `list_suggestions` showed, and no longer takes `all`. Name every suggestion to review, so one proposed after the list was read is never reviewed unseen; one named twice is reviewed once.
 - **Breaking:** `force` no longer writes a Markdown file past changes made in the Docs editor and not saved yet. `edit_document` and `write_markdown_file` refuse `[conflict]` until the editor saves, since no revision holds that work.
-- A forced op in a later batch of a call, after a grid change, runs like any forced op. It was refused while the server asked before a forced write.
+- **Breaking:** a forced op that runs in a later batch of an `edit_table` or `edit_document` call, after a grid change, is refused on every client, not only one that could be asked: no dry run shows what it destroys. Run it as a call of its own, after a dry run.
 - **Breaking:** the Go module path is now `github.com/mmedum/google-docs-mcp/v3`, as Go requires from v3 on; install with `go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest`.
 
 ### Removed

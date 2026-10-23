@@ -24,6 +24,7 @@ diff in CI flags them.
 ### Fixed
 
 - `export_document` no longer overwrites a file in `GDOCS_EXPORT_DIR`, nor writes through a symbolic link there. A second export of a document replaced the first without a word, and a link at the export's name was followed to wherever it pointed. A name already taken now gains a counter, as in `Report-1AbCdE-2.pdf`.
+- The live driver's transcript no longer carries the signed-in account's numeric id. Drive's link to a Word file names it (`ouid=`), and `get_document` prints that link.
 
 ## [2.4.0] - 2026-10-22
 

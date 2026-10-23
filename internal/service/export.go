@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -106,18 +108,53 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	if file, err := s.api.GetFile(ctx, id); err == nil && file.Name != "" {
 		title = file.Name
 	}
-	name := fileName(title)
 	dir := filepath.Clean(s.opts.ExportDir)
-	path := filepath.Join(dir, fmt.Sprintf("%s-%s.%s", name, gapi.ShortID(id), format))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, Errorf("unexpected", "create export dir: %v", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return nil, Errorf("unexpected", "write export: %v", err)
+	file, path, err := createExport(dir, fileName(title)+"-"+gapi.ShortID(id), format)
+	if err != nil {
+		return nil, err
+	}
+	_, werr := file.Write(data)
+	if cerr := file.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		_ = os.Remove(path)
+		return nil, Errorf("unexpected", "write export: %v", werr)
 	}
 	res.Path = path
 	res.Text = fmt.Sprintf("exported %q as %s to %s (%d bytes)", title, format, path, len(data))
 	return res, nil
+}
+
+// maxExportNames bounds the search for a free export file name.
+const maxExportNames = 100
+
+// createExport creates an export's file in dir, named stem.ext, and never
+// overwrites: a name already taken, by an earlier export of the same
+// document or by anything else, gains a counter (stem-2.ext). O_EXCL makes
+// the choice and the creation one step, and it refuses a symbolic link at
+// the name as it refuses a file, so nothing is written through a link to
+// a place outside the directory.
+func createExport(dir, stem, ext string) (*os.File, string, error) {
+	for n := 1; n <= maxExportNames; n++ {
+		name := stem + "." + ext
+		if n > 1 {
+			name = fmt.Sprintf("%s-%d.%s", stem, n, ext)
+		}
+		path := filepath.Join(dir, name)
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		switch {
+		case err == nil:
+			return file, path, nil
+		case !errors.Is(err, fs.ErrExist):
+			return nil, "", Errorf("unexpected", "write export: %v", err)
+		}
+	}
+	return nil, "", Errorf("blocked", "%d files in the export directory are already named like %s.%s, and an export never "+
+		"overwrites one; move or delete earlier exports, then export again", maxExportNames, stem, ext)
 }
 
 // fileName turns a document title into a name a person can recognize in

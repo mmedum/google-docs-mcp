@@ -928,8 +928,11 @@ preview included. Measured in the Phase 3 evals (§14).
   queries at `info`; at `debug` they are redacted to lengths and hashes.
   Request ids and revision ids are logged; document ids are logged
   truncated.
-- Exports are written only under `GDOCS_EXPORT_DIR`, path-cleaned, no
-  symlink following. Nothing else touches the filesystem except the
+- Exports are written only under `GDOCS_EXPORT_DIR`, path-cleaned, and
+  never over a file already there: each is created exclusively
+  (`O_EXCL`), so a name already taken, by an earlier export or by a
+  symbolic link, gains a counter (`-2`, up to 100, then `[blocked]`), and
+  nothing is written through a link. Nothing else touches the filesystem except the
   credential store and userconfig.
 - Destructive tools are not registered unless
   `GDOCS_ENABLE_DESTRUCTIVE=1`; annotations are hints the client may not
@@ -1347,6 +1350,7 @@ checked rather than assumed.
 | An empty form is a valid elicitation, and the SDK skips structured output for a result that asks (2026-09-30) | Adopted from the siblings that verified them: the specification's schema puts no minimum on `properties`; go-sdk v1.8.0 `mcp/server.go` does not marshal the output when `InputRequests` is set | `asked` returns the input request with a zero output. |
 | `blocked` is part of the error vocabulary (2026-09-30) | Refuted: the guard returned `[blocked]` through an `Error` literal the `classes` gate does not scan, so the class was emitted and documented nowhere | Listed in `service.Classes`, with what it asks the reader to do. |
 | `export_document` is read-only (2026-09-30) | Refuted: it writes a file under `GDOCS_EXPORT_DIR` | Annotated a non-destructive write; read-only mode still registers it, since it changes nothing in Google. |
+| An export is written as §12 says: under the directory, nothing overwritten, no symbolic link followed (§12, since Phase 1) | **Refuted 2026-10-23** by a survey of the code, not by an incident. `os.WriteFile` truncated the earlier export of the same document without a word, and followed a symbolic link at the export's name to wherever it pointed; cleaning the path kept the name inside the directory, never what the name pointed at | Each export is created with `O_EXCL`: a name already taken, a link included, gains a counter up to 100, then `[blocked]`. `TestAnExportNeverOverwrites` and `TestAnExportNeverWritesThroughALink` hold it. |
 | Exact-text targets (Anthropic text editor tool; Claude Code Edit; Notion MCP `update_content`; Aider: removing line numbers took GPT-4 Turbo from 20% to 61%; OpenAI `apply_patch`) | Confirmed | `text` is the primary target; normalization added (SWE-Edit brittleness). |
 | Google `headingId` is stable | Confirmed (Docs API reference) | Sections by `heading_id`. |
 | Inserted text inherits the preceding text's style; newline copies paragraph style incl. bullets | Confirmed (InsertTextRequest reference) | Minimal-diff replace is safe for formatting. |

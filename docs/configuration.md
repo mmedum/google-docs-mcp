@@ -18,7 +18,7 @@ given explicitly wins over the environment.
 | `GDOCS_READ_ONLY` | `false` | Register only read tools; `login` requests read-only scopes. |
 | `GDOCS_ENABLE_DESTRUCTIVE` | `false` | Register destructive tools (delete comment, delete tab). |
 | `GDOCS_REQUIRE_PROMPT` | `false` | Refuse the writes that ask the person when the client cannot ask them, rather than making them on the arguments alone. |
-| `GDOCS_EXPORT_DIR` | unset | Absolute directory binary exports may be written to. Unset disables them. |
+| `GDOCS_EXPORT_DIR` | unset | Absolute directory binary exports may be written to. Unset disables them. An export never overwrites: a name already taken gains a counter. |
 | `GDOCS_HTTP_TIMEOUT` | `60s` | Per-request timeout for Google API calls (1s–10m). |
 
 ## Profiles and files

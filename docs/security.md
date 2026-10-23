@@ -86,7 +86,7 @@
 | Document content in logs | Logs carry counts, durations, outcomes and method names. No ids — not even a prefix — no revisions, no titles, no text. `TestDebugLogsCarryNoDocumentData` drives every registered tool plus the conflict path and fails on any of them. |
 | A credential sent somewhere it should not go | Every request URL is checked against an allowlist of Google hosts before the token is attached, matched on `url.URL.Host`, so a host carrying a port matches nothing and is refused. This is not a formality: `ExportRevision` follows a download URL taken from a response body. |
 | A hung Google endpoint | Every API call carries `GDOCS_HTTP_TIMEOUT`, and so does the OAuth token refresh and the code exchange at login — the refresh happens inside the token source, on the client in its context, which is a separate place to put a deadline and was missing one. |
-| Arbitrary file writes | Exports are confined to `GDOCS_EXPORT_DIR`, and a format that writes a file is refused when it is unset. |
+| Arbitrary file writes | Exports are confined to `GDOCS_EXPORT_DIR`, and a format that writes a file is refused when it is unset. Each export is created exclusively, so it never overwrites a file already there and never writes through a symbolic link: a name already taken gains a counter. |
 
 ## Reporting
 

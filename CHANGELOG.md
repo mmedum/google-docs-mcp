@@ -12,6 +12,10 @@ diff in CI flags them.
 
 - **Breaking:** the Go module path is now `github.com/mmedum/google-docs-mcp/v3`, as Go requires from v3 on; install with `go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest`.
 
+### Fixed
+
+- `export_document` no longer overwrites a file in `GDOCS_EXPORT_DIR`, nor writes through a symbolic link there. A second export of a document replaced the first without a word, and a link at the export's name was followed to wherever it pointed. A name already taken now gains a counter, as in `Report-1AbCdE-2.pdf`.
+
 ## [2.4.0] - 2026-10-22
 
 ### Added

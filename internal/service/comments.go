@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
 	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
@@ -485,11 +486,42 @@ func liveReply(thread *gapi.DriveComment, id string) *gapi.DriveReply {
 	return nil
 }
 
+// minTextWitness is how much of a comment's text a delete repeats:
+// enough for the client's prompt to say which comment goes. A shorter
+// text is repeated whole.
+const minTextWitness = 20
+
+// checkTextStart refuses a delete whose text_start is not how the text it
+// deletes begins. The text is compared as list_comments shows it, with
+// every run of whitespace folded to one space, and case kept. An empty
+// text_start matches only an empty text, such as a reply that only
+// resolved its thread.
+func checkTextStart(what, text, witness string) error {
+	have, want := doc.OneLine(text), doc.OneLine(witness)
+	switch {
+	case want == "" && have == "":
+		return nil
+	case want == "":
+		return Errorf("invalid", "pass text_start: how the text of %s begins, as list_comments shows it", what)
+	case !strings.HasPrefix(have, want):
+		return Errorf("stale", "the text of %s does not begin with text_start, so it is not the one this call meant; "+
+			"nothing was deleted. List the comments again and pass how its text begins", what)
+	case utf8.RuneCountInString(want) < min(minTextWitness, utf8.RuneCountInString(have)):
+		return Errorf("invalid", "text_start has to carry at least the first %d characters of the text, or all of it "+
+			"when it is shorter, so the call shows which comment goes; nothing was deleted", minTextWitness)
+	}
+	return nil
+}
+
 // DeleteCommentRequest removes a thread or one reply.
 type DeleteCommentRequest struct {
 	Document  string
 	CommentID string
 	ReplyID   string
+	// TextStart is how the text the call deletes begins, as the caller
+	// read it in list_comments: the witness that this is the comment, or
+	// the reply, they mean.
+	TextStart string
 	DryRun    bool
 }
 
@@ -503,6 +535,8 @@ type DeleteCommentResult struct {
 
 // DeleteComment deletes a thread (or a single reply). Drive keeps deleted
 // threads listable with include_deleted. Only the author may delete.
+// The text is held to the caller's witness first, a dry run included,
+// so a preview is refused as the delete would be.
 func (s *Service) DeleteComment(ctx context.Context, req DeleteCommentRequest) (*DeleteCommentResult, error) {
 	if err := s.requireDestructive(); err != nil {
 		return nil, err
@@ -512,8 +546,16 @@ func (s *Service) DeleteComment(ctx context.Context, req DeleteCommentRequest) (
 		return nil, err
 	}
 	res := &DeleteCommentResult{CommentID: commentID, ReplyID: strings.TrimSpace(req.ReplyID)}
-	if res.ReplyID != "" && liveReply(thread, res.ReplyID) == nil {
-		return nil, Errorf("not_found", "comment %s has no reply %s; ids come from list_comments", commentID, res.ReplyID)
+	what, text := "comment "+commentID, thread.Content
+	if res.ReplyID != "" {
+		r := liveReply(thread, res.ReplyID)
+		if r == nil {
+			return nil, Errorf("not_found", "comment %s has no reply %s; ids come from list_comments", commentID, res.ReplyID)
+		}
+		what, text = fmt.Sprintf("reply %s of comment %s", res.ReplyID, commentID), r.Content
+	}
+	if err := checkTextStart(what, text, req.TextStart); err != nil {
+		return nil, err
 	}
 	if req.DryRun {
 		res.DryRun = true

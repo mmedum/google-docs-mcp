@@ -562,7 +562,7 @@ func TestCommentAndHistoryTools(t *testing.T) {
 	if !res.IsError || !strings.HasPrefix(textOf(res), "[invalid]") {
 		t.Fatalf("reply without content: %q", textOf(res))
 	}
-	res = call(t, cs, "delete_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c1", "reply_id": "r1"})
+	res = call(t, cs, "delete_comment", map[string]any{"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c1", "reply_id": "r1", "text_start": "ok"})
 	if res.IsError || textOf(res) != "deleted reply r1 of comment c1" || len(api.deleted) != 1 || api.deleted[0] != "c1/r1" {
 		t.Fatalf("delete_comment: %q %v", textOf(res), api.deleted)
 	}
@@ -837,7 +837,7 @@ func TestResources(t *testing.T) {
 var toolArgs = map[string]map[string]any{
 	"add_comment":         {"document": fixtureID, "content": "a note", "target": map[string]any{"text": "Revenue"}},
 	"create_document":     {"title": "scratch"},
-	"delete_comment":      {"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c1"},
+	"delete_comment":      {"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c1", "text_start": leakCanary},
 	"delete_tab":          {"document": fixtureID, "tab": "Tab 1", "confirm_tab": "Tab 1"},
 	"diff_revisions":      {"document": fixtureID, "from": "1"},
 	"edit_document":       {"document": fixtureID, "mode": "direct", "ops": []any{map[string]any{"op": "append", "content": leakCanary}}},
@@ -978,8 +978,8 @@ func TestDeletesNeedTheTargetRepeated(t *testing.T) {
 	}{
 		{"tab, no confirmation", map[string]any{"document": fixtureID, "tab": "Notes"}, "repeat the tab"},
 		{"tab, wrong confirmation", map[string]any{"document": fixtureID, "tab": "Notes", "confirm_tab": "notes"}, "they must match"},
-		{"comment, no confirmation", map[string]any{"document": fixtureID, "comment_id": "c1"}, "repeat the comment_id"},
-		{"comment, wrong confirmation", map[string]any{"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c2"}, "they must match"},
+		{"comment, no confirmation", map[string]any{"document": fixtureID, "comment_id": "c1", "text_start": "ok"}, "repeat the comment_id"},
+		{"comment, wrong confirmation", map[string]any{"document": fixtureID, "comment_id": "c1", "confirm_comment_id": "c2", "text_start": "ok"}, "they must match"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := &fakeAPI{raw: doctest.RawFixture(t)}

@@ -31,7 +31,8 @@ func dryRunArgs(doc, table, comment, tab, workingCopy string, suggestions []any)
 		args["write_markdown_file"] = map[string]any{"document": workingCopy, "dry_run": true}
 	}
 	if comment != "" {
-		args["delete_comment"] = map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment, "dry_run": true}
+		args["delete_comment"] = map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment,
+			"text_start": "Live test: the target of a dry-run delete.", "dry_run": true}
 	}
 	if tab != "" {
 		args["delete_tab"] = map[string]any{"document": doc, "tab": tab, "confirm_tab": tab, "dry_run": true}

@@ -309,6 +309,9 @@ Two more tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:
 `delete_comment` (a thread or one reply) and `delete_tab` (a tab with its
 content and child tabs). Both carry the destructive annotation, and each
 call must repeat its target in `confirm_comment_id` or `confirm_tab`.
+`delete_comment` also takes `text_start`, how the text it deletes begins
+as `list_comments` shows it, so your client's prompt shows which comment
+goes; the server reads the comment and refuses `[stale]` when it differs.
 
 Documents are identified by id, any `docs.google.com` URL, or a Markdown
 file's `drive.google.com/file/d/…` URL.

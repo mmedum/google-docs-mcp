@@ -772,7 +772,7 @@ registers only readOnly rows and requests readonly scopes.
 | `list_comments` | Full threads: replies, resolved, deleted, assignee, quoted text, handles | readOnly | 2 |
 | `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | — | 2, 2.0 |
 | `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only); `suggestion_id` replies on a suggestion's thread | — | 2, 4 |
-| `delete_comment` | Gated; a thread or one reply; `confirm_comment_id`; dry_run | destructive | 2, 2.0 |
+| `delete_comment` | Gated; a thread or one reply; `confirm_comment_id`; `text_start`, how the text it deletes begins, read and compared; dry_run | destructive | 2, 2.0, 3.0 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
 | `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | — | 2, 4 |
 | `insert_object` | `action: insert \| replace \| delete`; insert takes `kind: image \| person \| rich_link \| date` at a Location, replace swaps an image's source, delete removes an object by id (the only way to remove a floating one) | — | 2, 4 |
@@ -1002,7 +1002,13 @@ What stays is what holds on every client:
    arguments. Where the question said what an argument meant, the
    argument now carries it: `review_suggestion` takes each suggestion by
    the id `list_suggestions` showed, and `all` is gone, so a suggestion
-   proposed after the list was read is never reviewed unseen. `force`
+   proposed after the list was read is never reviewed unseen.
+   `delete_comment` takes `text_start`, how the text it deletes begins
+   as `list_comments` shows it: the thread's comment, or the reply's.
+   The question showed that text; the comment is read before the
+   delete, a dry run included, and a `text_start` that is not how the
+   text begins is `[stale]`. At least 20 characters, or the whole of a
+   shorter text, with whitespace folded as the listing folds it. `force`
    stays a boolean; its warnings name what each forced op destroys, and
    `dry_run` shows them first.
 
@@ -1151,10 +1157,11 @@ accounts. That sets these requirements:
 | One document, every capability; no folder/move/share/trash/copy | Tool table trimmed; `search_documents` is locate-only |
 | A Markdown file in Drive is a document too, edited as the text it is (2026-10-14). Bet 6 forbade round-tripping a Doc through markdown, which loses what markdown cannot say; minimal edits to a Markdown file's own bytes are no round trip, and are bet 1 applied to text | §7.5: reads from the bytes, the content ops by minimal diff with the comment markup guarded, one Drive upload per call; the server's first Drive content write |
 | Working on a Markdown file together goes through a working copy (2026-10-14): no API writes through an open editor's session, and every upload makes the editor reload | §7.5: `create_document from_file` and `write_markdown_file`, a block merge that keeps the file's own text where the copy did not change it; direct writes check, write, verify and repair |
-| The server asks the person nothing; per-call approval is the client's; `GDOCS_REQUIRE_PROMPT` removed and refused unless off (the maintainer, 2026-10-22 for the family; this port approved 2026-10-23) | §12a; a major release, 3.0.0: a client that could not make the asking writes before can, and `review_suggestion` takes a new required input |
+| The server asks the person nothing; per-call approval is the client's; `GDOCS_REQUIRE_PROMPT` removed and refused unless off (the maintainer, 2026-10-22 for the family; this port approved 2026-10-23) | §12a; a major release, 3.0.0: a client that could not make the asking writes before can, and `review_suggestion` and `delete_comment` take a new required input |
 | No tool carries `requiresUserInteraction` (2026-10-23) | §12a: version history keeps a deleted tab's text; a deleted comment cannot be restored, but it is one item of many, deleted many in a row, which the standard keeps the mark off. The README's `permissions.ask` rules are how Claude Code asks |
 | `force` never writes past unsaved Docs-editor work on a Markdown file (2026-10-23) | §7.5, §12a: `[conflict]` until the editor saves; what else `force` writes past, the file's previous revision keeps |
 | `review_suggestion` takes the ids `list_suggestions` shows; `all` is gone (2026-10-23) | §12a: the argument carries what the question showed |
+| `delete_comment` takes `text_start`, how the text it deletes begins (2026-10-23) | §12a: the argument carries the text the question showed, read and compared, `[stale]` when it differs |
 | `force` stays a boolean; the retyped `confirm_tab` and `confirm_comment_id` stay (2026-10-23) | §12a, §17b |
 | Stdio only | No HTTP auth design |
 | Nothing internal in the repo or in logs | §12 |
@@ -1297,7 +1304,8 @@ sibling that last fixed them.
 
 **3.0.0 — the client decides (unreleased).** §12a. The question goes,
 and with it `GDOCS_REQUIRE_PROMPT`, refused at start when on; the module
-path moves to `/v3`. `review_suggestion` takes ids only, `force` stops
+path moves to `/v3`. `review_suggestion` takes ids only,
+`delete_comment` takes the start of the text it deletes, `force` stops
 at unsaved editor work, and no tool carries `requiresUserInteraction`.
 An export no longer overwrites a file or follows a link (§12). The live
 run that must precede the release drives every tool through a client
@@ -1518,5 +1526,5 @@ checked rather than assumed.
 | Docs reads a revision of a Word file uploaded through Drive | Confirmed live (spike H): about four seconds after the upload, with Word tracked changes as suggestions, a new paragraph with `ilvl` 1 at level 1 of its list, and a Word comment anchored | A write waits for Docs to read the revision it uploaded, so the next read shows it. |
 | A Docs suggestion id names a Word tracked change | Refuted live (spike H): the ids are `suggestIdImport<uuid>_<n>`, the uuid new on every revision and `n` not the `w:id`; adjacent changes by one author at one time share one | Reviewing a Word file's suggestions would go by position; it is not offered, and refused saying so. |
 | A tracked insertion may wrap a link | Refuted live (spike H): with `w:hyperlink` inside `w:ins`, Docs read the paragraph without the link's text; with `w:ins` inside `w:hyperlink` it read it | A tracked insertion goes inside the link (`internal/ooxml`). |
-| The server should confirm a write with the person itself, through MCP form elicitation | **Refuted 2026-10-22** for the family on documents and source, rechecked 2026-10-23 against the most-used servers and clients. The specification (`server/tools`, 2025-06-18 to 2026-07-28) puts consent to each call on the host; `client/elicitation` lets the client answer "from the user or other sources". Claude Code documents that an `Elicitation` hook answers with no dialog, Codex in full access accepts a form with no fields by itself, open user reports have Claude Code's VS Code extension and Claude Desktop's Code tab decline it unseen and Cowork leave it hanging, and no client's permission rules match it | §12a: the server asks nobody. Registration, the retyped target, the guards, the witnesses and `dry_run` stay; `review_suggestion` carries the ids the question used to show. The rows above on asking and on the mark describe what this replaces. |
+| The server should confirm a write with the person itself, through MCP form elicitation | **Refuted 2026-10-22** for the family on documents and source, rechecked 2026-10-23 against the most-used servers and clients. The specification (`server/tools`, 2025-06-18 to 2026-07-28) puts consent to each call on the host; `client/elicitation` lets the client answer "from the user or other sources". Claude Code documents that an `Elicitation` hook answers with no dialog, Codex in full access accepts a form with no fields by itself, open user reports have Claude Code's VS Code extension and Claude Desktop's Code tab decline it unseen and Cowork leave it hanging, and no client's permission rules match it | §12a: the server asks nobody. Registration, the retyped target, the guards, the witnesses and `dry_run` stay; `review_suggestion` carries the ids the question used to show, and `delete_comment` the start of the text. The rows above on asking and on the mark describe what this replaces. |
 | claude.ai, Codex and VS Code all prompt by `destructiveHint` (the family's assumption until 2026-10-23) | **Refuted for VS Code 2026-10-23**, at source: VS Code ignores `destructiveHint` and prompts on every tool not marked `readOnlyHint: true`. Codex prompts by `destructiveHint` in its default `auto` mode, and claude.ai and ChatGPT document that it decides their prompts. Each remembers an approval per tool, never per argument | `readOnlyHint` only on the nine reads, which change nothing; `destructiveHint` on the two deletes. The README says what each client prompts for. |

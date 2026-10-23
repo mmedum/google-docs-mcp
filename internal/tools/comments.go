@@ -41,7 +41,8 @@ type DeleteCommentInput struct {
 	CommentID string `json:"comment_id" jsonschema:"thread id from list_comments"`
 	ReplyID   string `json:"reply_id,omitempty" jsonschema:"delete only this reply of the thread"`
 	Confirm   string `json:"confirm_comment_id,omitempty" jsonschema:"repeat comment_id exactly; the deletion is refused without it"`
-	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"look the comment up and stop before the write"`
+	TextStart string `json:"text_start" jsonschema:"how the text this deletes begins, as list_comments shows it: the thread's own comment, or the reply's when reply_id is set. At least its first 20 characters, or all of it when it is shorter, and empty for a reply with no text. The comment is read first, and a delete whose text_start does not match is refused [stale]"`
+	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"look the comment up, check text_start and stop before the write"`
 }
 
 func registerCommentsRead(s *mcp.Server, d Deps) {
@@ -107,15 +108,15 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 		Name: "delete_comment",
 		Description: "Delete a comment thread, or one reply of it, from a Google Doc. Only the author can delete; a " +
 			"resolved thread is usually the better outcome (reply_comment with action resolve). Pass " +
-			"confirm_comment_id repeating comment_id exactly, or the call is refused; dry_run looks the comment up " +
-			"and stops.",
+			"confirm_comment_id repeating comment_id exactly, and text_start, how the text it deletes begins as " +
+			"list_comments shows it; the call is refused otherwise. dry_run looks the comment up, checks both and stops.",
 		Annotations: destructive,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteCommentInput) (*mcp.CallToolResult, *service.DeleteCommentResult, error) {
 		if err := confirmTarget("comment_id", in.CommentID, in.Confirm); err != nil {
 			return nil, nil, fail(err)
 		}
 		res, err := d.Service.DeleteComment(ctx, service.DeleteCommentRequest{Document: in.Document, CommentID: in.CommentID,
-			ReplyID: in.ReplyID, DryRun: in.DryRun})
+			ReplyID: in.ReplyID, TextStart: in.TextStart, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

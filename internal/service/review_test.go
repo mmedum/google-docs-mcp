@@ -199,7 +199,7 @@ func TestDeleteOnlyRootTabRefused(t *testing.T) {
 	if classOf(err) != "invalid" || !strings.Contains(messageOf(err), "top-level tab") {
 		t.Fatalf("only root tab: %v", err)
 	}
-	res, err := svc.DeleteTab(accepting(context.Background()), TabRequest{Document: fixtureID, Tab: "Notes"})
+	res, err := svc.DeleteTab(context.Background(), TabRequest{Document: fixtureID, Tab: "Notes"})
 	if err != nil || res.TabID != "t.1" {
 		t.Fatalf("child tab: %+v %v", res, err)
 	}

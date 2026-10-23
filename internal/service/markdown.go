@@ -17,7 +17,6 @@ import (
 	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
 	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
 	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
 
 // A Markdown file that Docs opens in place stays a text/markdown blob:
@@ -494,7 +493,6 @@ type mdPlanned struct {
 	// summary has one entry per op, in op order, so summary[seq] is op
 	// seq's: the ops come numbered from 0.
 	summary  []plan.OpSummary
-	forced   []render.Forced
 	warnings []string
 }
 
@@ -658,7 +656,7 @@ func (p *mdPlanned) checkOverlaps() error {
 }
 
 // guard refuses a direct edit that would delete commented text, an
-// image or a footnote, unless forced; forced, it records what goes.
+// image or a footnote, unless forced; forced, it warns of what goes.
 func (p *mdPlanned) guard(f *mdfile.File, force bool) error {
 	hitsByOp := map[int][]mdfile.Hit{}
 	var order []int
@@ -679,7 +677,6 @@ func (p *mdPlanned) guard(f *mdfile.File, force bool) error {
 			return Errorf("blocked", "op %d (%s of %s) would change %s; narrow the target, or pass force: true if the person chose to", op, sum.Kind, sum.Description, what)
 		}
 		p.warnings = append(p.warnings, fmt.Sprintf("op %d: forced; it changes %s", op, what))
-		p.forced = append(p.forced, render.Forced{Seq: op, Kind: string(sum.Kind), Description: sum.Description, Destroys: what})
 	}
 	return nil
 }

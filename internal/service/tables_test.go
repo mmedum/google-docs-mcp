@@ -257,7 +257,7 @@ func TestInsertTablePositionsAndFills(t *testing.T) {
 
 func TestDeleteRowsGuardAndSegments(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := accepting(context.Background())
+	ctx := context.Background()
 	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x", QuotedFileContent: &gapi.QuotedText{Value: "Alpha"}}}
 	_, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{{Kind: plan.OpDeleteRows, Table: &TableOp{Table: "tbl1", RowList: []int{2}}}}})
 	if classOf(err) != "blocked" || !strings.Contains(messageOf(err), "1 comment (c1)") {

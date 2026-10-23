@@ -103,15 +103,14 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 	if !d.Config.EnableDestructive {
 		return
 	}
-	addAsking(s, d, &mcp.Tool{
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "delete_comment",
 		Description: "Delete a comment thread, or one reply of it, from a Google Doc. Only the author can delete; a " +
 			"resolved thread is usually the better outcome (reply_comment with action resolve). Pass " +
 			"confirm_comment_id repeating comment_id exactly, or the call is refused; dry_run looks the comment up " +
 			"and stops.",
 		Annotations: destructive,
-		Meta:        destructiveMeta,
-	}, "", func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteCommentInput) (*mcp.CallToolResult, *service.DeleteCommentResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteCommentInput) (*mcp.CallToolResult, *service.DeleteCommentResult, error) {
 		if err := confirmTarget("comment_id", in.CommentID, in.Confirm); err != nil {
 			return nil, nil, fail(err)
 		}

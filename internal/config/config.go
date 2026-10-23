@@ -78,11 +78,7 @@ type Config struct {
 	EnableDestructive bool
 	ExportDir         string
 	HTTPTimeout       time.Duration
-	// RequirePrompt refuses the writes that ask the person when the
-	// client cannot ask, rather than letting the call's own arguments
-	// stand in for the person.
-	RequirePrompt    bool
-	ClientSecretPath string
+	ClientSecretPath  string
 	// Warnings name settings that were accepted but no longer do
 	// anything, for the caller to log once at start.
 	Warnings []string
@@ -105,8 +101,28 @@ type Settings struct {
 	EnableDestructive string
 	ExportDir         string
 	HTTPTimeout       string
-	RequirePrompt     string
 	ClientSecretPath  string
+	// removed are the removed settings, as the environment gives them,
+	// read only to refuse one still set.
+	removed map[string]string
+}
+
+// removedSettings are the settings a release took out, each with what to
+// do instead. Off, the old default, is still accepted. On, or a value
+// that is not a boolean, is refused at start: ignored, it would quietly
+// allow what its owner set it to stop.
+var removedSettings = []struct{ key, instead string }{
+	{"REQUIRE_PROMPT", "leave " + EnvPrefix + "ENABLE_DESTRUCTIVE off for a client that runs with nobody watching"},
+}
+
+// RemovedVars are the variables a release removed that the server still
+// reads, only to refuse one set to anything but off.
+func RemovedVars() []string {
+	out := make([]string, 0, len(removedSettings))
+	for _, r := range removedSettings {
+		out = append(out, EnvPrefix+r.key)
+	}
+	return out
 }
 
 // Define registers one flag per setting on fs. Each flag defaults to the
@@ -114,7 +130,10 @@ type Settings struct {
 // the command line wins over the environment, and the environment wins
 // over the built-in default.
 func Define(fs *flag.FlagSet, env func(string) string) *Settings {
-	s := &Settings{}
+	s := &Settings{removed: map[string]string{}}
+	for _, r := range removedSettings {
+		s.removed[r.key] = env(EnvPrefix + r.key)
+	}
 	def := func(p *string, name, key, fallback, usage string) {
 		v := env(EnvPrefix + key)
 		if v == "" {
@@ -131,8 +150,6 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register destructive tools (delete comment, delete tab)")
 	def(&s.ExportDir, "export-dir", "EXPORT_DIR", "", "directory binary exports may be written to (unset disables them)")
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-request timeout for Google API calls")
-	def(&s.RequirePrompt, "require-prompt", "REQUIRE_PROMPT", "false",
-		"refuse the writes that ask the person when the client cannot ask them")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
 	return s
 }
@@ -179,8 +196,12 @@ func (s *Settings) Build() (Config, error) {
 	if c.EnableDestructive, err = parseBool("enable-destructive", s.EnableDestructive); err != nil {
 		errs = append(errs, err)
 	}
-	if c.RequirePrompt, err = parseBool("require-prompt", s.RequirePrompt); err != nil {
-		errs = append(errs, err)
+	for _, r := range removedSettings {
+		if on, err := parseBool(r.key, s.removed[r.key]); err == nil && !on {
+			continue
+		}
+		errs = append(errs, fmt.Errorf("%w: %s%s was removed: the server no longer asks the person, and the client's own "+
+			"approval decides each call. Unset it, and %s", ErrInvalid, EnvPrefix, r.key, r.instead))
 	}
 
 	mode := WriteMode(strings.ToLower(strings.TrimSpace(s.DefaultWriteMode)))

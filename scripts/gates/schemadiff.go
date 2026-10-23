@@ -6,6 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 // schemaDiff compares the current build's tool schemas with the last
@@ -47,10 +50,74 @@ func schemaDiff(w io.Writer, args []string) error {
 	if err != nil {
 		return err
 	}
-	if breaking := diff(w, oldDump, newDump); breaking {
-		return fmt.Errorf("the tool surface changed in a way that breaks a caller since %s", last)
+	breaking := diff(w, oldDump, newDump)
+	if len(breaking) == 0 {
+		return nil
 	}
+	changelog, err := os.ReadFile("CHANGELOG.md")
+	if err != nil {
+		return err
+	}
+	undeclared, err := undeclaredBreaks(breaking, string(changelog), last)
+	if err != nil {
+		return err
+	}
+	if len(undeclared) > 0 {
+		for _, b := range undeclared {
+			_, _ = fmt.Fprintln(w, "undeclared:", b)
+		}
+		return fmt.Errorf("the tool surface changed in a way that breaks a caller since %s, and the CHANGELOG does not declare it; "+
+			"a release that breaks a tool names it, in backticks, in a **Breaking:** entry above [%s], and raises the major version",
+			last, strings.TrimPrefix(last, "v"))
+	}
+	_, _ = fmt.Fprintf(w, "%d breaking change(s) since %s, each declared under **Breaking:** for a major release\n", len(breaking), last)
 	return nil
+}
+
+// A version heading as Keep a Changelog writes it, a prerelease included.
+var changelogHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+[^\]]*)\]`)
+
+// undeclaredBreaks is each breaking change that the unreleased part of
+// the CHANGELOG, everything above the tag's own heading, does not
+// declare: a **Breaking:** entry there names its tool in backticks. A
+// version heading there that does not raise the tag's major version is
+// one too, since only a major release may break the surface (README,
+// Versioning).
+func undeclaredBreaks(breaking []string, changelog, tag string) ([]string, error) {
+	version := strings.TrimPrefix(tag, "v")
+	unreleased, _, found := strings.Cut(changelog, "\n## ["+version+"]")
+	if !found {
+		// Without the tag's heading nothing tells unreleased from
+		// released, so no entry can declare a break.
+		return nil, fmt.Errorf("CHANGELOG.md has no ## [%s] heading for %s, so no break can be declared against it", version, tag)
+	}
+	named := map[string]bool{}
+	for line := range strings.Lines(unreleased) {
+		if !strings.Contains(line, "**Breaking:**") {
+			continue
+		}
+		for _, m := range readmeMention.FindAllStringSubmatch(line, -1) {
+			named[m[1]] = true
+		}
+	}
+	var out []string
+	for _, b := range breaking {
+		tool, _, _ := strings.Cut(strings.TrimPrefix(b, "tool removed: "), ":")
+		if !named[tool] {
+			out = append(out, b)
+		}
+	}
+	major := func(v string) int {
+		m, _, _ := strings.Cut(v, ".")
+		n, _ := strconv.Atoi(m)
+		return n
+	}
+	for _, m := range changelogHeading.FindAllStringSubmatch(unreleased, -1) {
+		if major(m[1]) <= major(version) {
+			out = append(out, fmt.Sprintf("release %s breaks the surface without raising the major version from %s", m[1], version))
+		}
+	}
+	return out, nil
 }
 
 // schemasAtTag builds the binary as it was at a tag and asks it for its

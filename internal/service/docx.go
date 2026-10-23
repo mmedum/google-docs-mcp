@@ -402,8 +402,8 @@ func wordError(err error) error {
 func docxError(op *plan.Op, err error) error { return opError(op.Seq, wordError(err)) }
 
 // docxChange makes a write's change in a Word file beside its Docs model,
-// and says what it did and what it forces.
-type docxChange func(w *wordMap) (*EditResult, []plan.Forced, error)
+// and says what it did.
+type docxChange func(w *wordMap) (*EditResult, error)
 
 type docxOpts struct {
 	ref            string
@@ -494,9 +494,8 @@ func (s *Service) docxWriteOnce(ctx context.Context, id string, o docxOpts, chan
 	}
 	w, err := newWordMap(f, file)
 	var res *EditResult
-	var forced []plan.Forced
 	if err == nil {
-		res, forced, err = change(w)
+		res, err = change(w)
 	}
 	var stale *staleError
 	if errors.As(err, &stale) {
@@ -525,11 +524,6 @@ func (s *Service) docxWriteOnce(ctx context.Context, id string, o docxOpts, chan
 	res.Preview = filePreview(file.Text(), after.Text())
 	if o.dryRun {
 		return res, false, nil
-	}
-	if len(forced) > 0 && asks(ctx) {
-		if err := ask(ctx, forcedQuestion(f, forced)); err != nil {
-			return nil, false, err
-		}
 	}
 	if again, err := s.stillWhereItWas(ctx, id, rd.meta, liveView{revision: f.Doc.RevisionID}, attempt); again || err != nil {
 		return nil, again, err
@@ -596,25 +590,25 @@ func (s *Service) docxEdit(ctx context.Context, req EditRequest) (*EditResult, e
 		}
 	}
 	author, date := s.account(ctx), s.wordTime()
-	return s.docxWrite(ctx, docxOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun}, func(w *wordMap) (*EditResult, []plan.Forced, error) {
+	return s.docxWrite(ctx, docxOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun}, func(w *wordMap) (*EditResult, error) {
 		ro, err := s.resolveOps(ctx, w.f, req.Ops, mode)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		w.fileComments(ro.ops)
 		planned, err := plan.Check(ro.ops, plan.Options{Mode: mode, Force: req.Force})
 		if err != nil {
-			return nil, nil, planError(err)
+			return nil, planError(err)
 		}
 		res := &EditResult{Mode: string(mode), Applied: len(req.Ops), Changes: planned.Summary, Warnings: append(planned.Warnings, ro.warnings...)}
 		if mode == plan.ModeComment {
 			for _, p := range planned.Proposals {
 				if err := w.comment(p.Range, wordComment(author, date, p.Content)); err != nil {
-					return nil, nil, opError(p.Seq, err)
+					return nil, opError(p.Seq, err)
 				}
 				res.Proposals = append(res.Proposals, p)
 			}
-			return res, nil, nil
+			return res, nil
 		}
 		var tr *ooxml.Track
 		if mode == plan.ModeSuggest {
@@ -622,10 +616,10 @@ func (s *Service) docxEdit(ctx context.Context, req EditRequest) (*EditResult, e
 		}
 		for i := range ro.ops {
 			if err := w.apply(&ro.ops[i], tr); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
-		return res, planned.Forced, nil
+		return res, nil
 	})
 }
 
@@ -634,12 +628,12 @@ func (s *Service) docxEdit(ctx context.Context, req EditRequest) (*EditResult, e
 func (s *Service) docxAddComment(ctx context.Context, req AddCommentRequest, content string) (*AddCommentResult, error) {
 	author := s.account(ctx)
 	res := &AddCommentResult{Anchored: true, DryRun: req.DryRun}
-	edit, err := s.docxWrite(ctx, docxOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun}, func(w *wordMap) (*EditResult, []plan.Forced, error) {
+	edit, err := s.docxWrite(ctx, docxOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun}, func(w *wordMap) (*EditResult, error) {
 		r, err := s.commentTarget(w.f, *req.Target, res)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return &EditResult{}, nil, w.comment(r.Rng(), wordComment(author, s.wordTime(), content))
+		return &EditResult{}, w.comment(r.Rng(), wordComment(author, s.wordTime(), content))
 	})
 	if err != nil {
 		return nil, err

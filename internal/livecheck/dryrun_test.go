@@ -13,7 +13,7 @@ import (
 // object, a page setup — because a dry run of nothing proves nothing.
 // comment and tab are a thread and a spare tab the sweep made for the
 // dry runs that delete; a suggestion is always pending.
-func dryRunArgs(doc, table, comment, tab, workingCopy string) map[string]map[string]any {
+func dryRunArgs(doc, table, comment, tab, workingCopy string, suggestions []any) map[string]map[string]any {
 	args := map[string]map[string]any{
 		"edit_document": {"document": doc, "mode": "direct", "dry_run": true, "ops": []any{
 			map[string]any{"op": "replace", "target": map[string]any{"text": "Closing line"}, "content": "Closing line, rewritten by a dry run"}}},
@@ -23,7 +23,7 @@ func dryRunArgs(doc, table, comment, tab, workingCopy string) map[string]map[str
 			"location": map[string]any{"at": "end", "of": map[string]any{"text": "Closing line"}}},
 		"layout_document": {"document": doc, "mode": "direct", "dry_run": true, "ops": []any{
 			map[string]any{"op": "page", "margin_top_pt": 72}}},
-		"review_suggestion": {"document": doc, "action": "accept", "all": true, "dry_run": true},
+		"review_suggestion": {"document": doc, "action": "accept", "ids": suggestions, "dry_run": true},
 	}
 	args["add_comment"] = map[string]any{"document": doc, "dry_run": true, "content": "written by a dry run",
 		"target": map[string]any{"text": "Closing line"}}
@@ -62,9 +62,7 @@ func dryRunTargets(d *driver, doc string) (comment, tab, workingCopy string) {
 		tab = "Dry run tab"
 		d.ok("a tab for the dry runs", "manage_tabs", map[string]any{"document": doc, "action": "add", "title": tab})
 		d.t.Cleanup(func() {
-			d.person.answer("accept")
 			d.ok("delete the dry-run tab", "delete_tab", map[string]any{"document": doc, "tab": tab, "confirm_tab": tab})
-			d.wasAsked("delete the dry-run tab", "delete_tab: delete the tab `Dry run tab`")
 		})
 	}
 	d.ok("a suggestion for the dry runs", "edit_document", map[string]any{"document": doc, "mode": "suggest", "ops": []any{
@@ -95,7 +93,8 @@ func liveDryRuns(t *testing.T, d *driver, doc, table string) {
 		t.Fatal("cannot read the revision from get_document; the wording changed")
 	}
 
-	args := dryRunArgs(doc, table, comment, tab, workingCopy)
+	suggestions := d.pendingIDs("the suggestions the review dry run names", doc)
+	args := dryRunArgs(doc, table, comment, tab, workingCopy, suggestions)
 	tools, err := d.cs.ListTools(d.ctx, nil)
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
@@ -144,8 +143,7 @@ func liveDryRuns(t *testing.T, d *driver, doc, table string) {
 	t.Logf("=== dry runs ===\n%d tools swept, revision unchanged", covered)
 
 	// The review the sweep previewed, made: every pending suggestion in
-	// the scratch document, which asks the person first.
-	d.person.answer("accept")
-	d.ok("accept every pending suggestion", "review_suggestion", map[string]any{"document": doc, "action": "accept", "all": true})
-	d.wasAsked("accept every pending suggestion", "review_suggestion: accept all")
+	// the scratch document, each named by the id list_suggestions shows.
+	d.ok("accept every pending suggestion", "review_suggestion", map[string]any{"document": doc, "action": "accept",
+		"ids": d.pendingIDs("list the suggestions to accept", doc)})
 }

@@ -236,11 +236,8 @@ func TestMarkdownFileGuard(t *testing.T) {
 	if len(api.uploads) != 0 {
 		t.Fatalf("a blocked edit uploaded")
 	}
-	// Forced, the person is asked and the markers stay around the new text.
-	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: inComment, Force: true}); err == nil {
-		t.Error("a forced edit with no way to ask went ahead")
-	}
-	res, err := svc.Edit(accepting(context.Background()), EditRequest{Document: fixtureID, Ops: inComment, Force: true})
+	// Forced, the markers stay around the new text.
+	res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: inComment, Force: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +274,7 @@ func TestMarkdownFileRefusesWhatItCannotTake(t *testing.T) {
 	ctx := context.Background()
 	for name, err := range map[string]error{
 		"review": func() error {
-			_, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", All: true})
+			_, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", IDs: []string{"s1"}})
 			return err
 		}(),
 		"tabs": func() error {
@@ -730,12 +727,15 @@ func TestMarkdownFileWaitsForTheEditor(t *testing.T) {
 			}
 		})
 	}
-	// Forced, the person is asked, and the write goes ahead saying what it discards.
+	// Forced, the write is refused all the same: work the editor has not
+	// saved is in no Drive revision, so nothing could bring it back.
 	svc, api := mdService(t, config.WriteDirect)
 	api.raw = viewWith(t, unsaved)
-	res, err := svc.Edit(accepting(context.Background()), EditRequest{Document: fixtureID, Ops: op, Force: true})
-	if err != nil || len(api.uploads) != 1 || !strings.Contains(strings.Join(res.Warnings, "\n"), "a comment made in the editor") {
-		t.Errorf("forced: %+v, %v", res, err)
+	waits := 0
+	svc.opts.Sleep = func(context.Context, time.Duration) error { waits++; return nil }
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: op, Force: true})
+	if classOf(err) != "conflict" || len(api.uploads) != 0 || waits != writeAttempts-1 {
+		t.Errorf("forced while the editor holds unsaved work: %v, %d upload(s), %d wait(s)", err, len(api.uploads), waits)
 	}
 }
 

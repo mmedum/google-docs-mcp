@@ -12,6 +12,17 @@ import (
 // registeredUnder is the set of tool names a configuration registers.
 func registeredUnder(t *testing.T, cfg config.Config) map[string]bool {
 	t.Helper()
+	out := map[string]bool{}
+	for _, tool := range listedUnder(t, cfg) {
+		out[tool.Name] = true
+	}
+	return out
+}
+
+// listedUnder is the tools a configuration registers, as a client lists
+// them.
+func listedUnder(t *testing.T, cfg config.Config) []*mcp.Tool {
+	t.Helper()
 	ctx := context.Background()
 	s := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0"}, nil)
 	Register(s, Deps{Config: cfg})
@@ -32,11 +43,7 @@ func registeredUnder(t *testing.T, cfg config.Config) map[string]bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := map[string]bool{}
-	for _, tool := range res.Tools {
-		out[tool.Name] = true
-	}
-	return out
+	return res.Tools
 }
 
 // TestFullSurfaceRegistersEverything holds the claim FullSurface's

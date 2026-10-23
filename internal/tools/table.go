@@ -80,7 +80,7 @@ func (o TableOpInput) tableOp() *service.TableOp {
 }
 
 func registerTable(s *mcp.Server, d Deps) {
-	addAsking(s, d, &mcp.Tool{
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "edit_table",
 		Description: "Create and change tables in a Google Doc. Ops: insert_table (rows, columns, optional data grid, at a " +
 			"location), set_cells (write cells by name or as a grid from start_cell; each cell is replaced by minimal " +
@@ -91,7 +91,7 @@ func registerTable(s *mcp.Server, d Deps) {
 			"styled with format_document. Same mode, dry_run, expect_revision and force semantics as edit_document; " +
 			"deleting rows or columns that hold comments or suggestions is refused in direct mode unless forced.",
 		Annotations: writeSafe,
-	}, "When force lets a direct edit destroy comments, suggestions, images or footnotes", func(ctx context.Context, _ *mcp.CallToolRequest, in TableInput) (*mcp.CallToolResult, *service.EditResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TableInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))

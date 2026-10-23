@@ -193,18 +193,6 @@ type Result struct {
 	Embedded []*Op
 	Warnings []string
 	Summary  []OpSummary
-	// Forced are the ops force lets destroy anchored content: what the
-	// person is asked about before the plan is applied.
-	Forced []Forced
-}
-
-// Forced is one op that force lets run over anchored content.
-type Forced struct {
-	Seq         int
-	Kind        OpKind
-	Description string
-	// Destroys is the anchored content it destroys, in words.
-	Destroys string
 }
 
 // ErrBlocked is returned when the guard refuses a direct edit.
@@ -642,7 +630,6 @@ func guard(ops []Op, o Options, res *Result) error {
 		}
 		if o.Force {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("op %d: forced; %s will be lost", op.Seq, describeAnchors(op.Anchors)))
-			res.Forced = append(res.Forced, Forced{Seq: op.Seq, Kind: op.Kind, Description: op.Description, Destroys: describeAnchors(op.Anchors)})
 			continue
 		}
 		return fmt.Errorf("%w: op %d (%s of %s) would destroy %s; use mode suggest or comment, narrow the target, or pass force: true", ErrBlocked, op.Seq, op.Kind, op.Description, describeAnchors(op.Anchors))

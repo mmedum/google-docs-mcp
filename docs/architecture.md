@@ -13,8 +13,9 @@ the older `text/x-markdown`. A Google Doc working copy carries a live
 session's work back to the file, block by block. Comments and
 suggestions are generally available and detected per read rather than
 gated on a flag (§18). Since v2.0.1 a write that may have landed is
-reported as `[ambiguous_outcome]` instead of being repeated. It asks the
-person before six writes (§12a).
+reported as `[ambiguous_outcome]` instead of being repeated. Unreleased,
+for 3.0.0: the server asks the person nothing, and the client approves
+each call (§12a).
 Phases 0 to 4 are done (§16): auth, raw
 client, model, renderer, reads, search, create, export, editing with
 minimal diffs in all three modes, formatting, suggestion review, comment
@@ -513,7 +514,7 @@ markup is refused, so no write can forge or end a comment.
 
 - **Guard.** A direct edit that would delete commented text, an image or
   a footnote reference is `[blocked]` unless forced, and a forced one
-  asks the person, as in a Google Doc (§7.3). The probe found a comment
+  warns of what it changes, as in a Google Doc (§7.3). The probe found a comment
   survives an edit inside its passage, but the person did not ask for
   their comment's text to change.
 - **Check, write, verify, repair** (`markdown_write.go`). Drive v3 has
@@ -528,8 +529,8 @@ markup is refused, so no write can forge or end a comment.
      holds on a passage and the file does not, a reply or a resolve the
      file does not show, is a person's work not saved yet: the write
      waits three seconds and tries again, twice, then is `[conflict]`.
-     `force` writes past it, asking the person and naming what it
-     discards;
+     `force` does not write past it: that work is in no Drive revision
+     yet, so nothing could bring it back (§12a);
   2. plans, then reads `headRevisionId`, `md5Checksum` and the live
      revision again just before the upload, and plans again if any moved;
      `expect_revision` names a `headRevisionId`;
@@ -727,7 +728,7 @@ API fills with every inherited property. Reads mark one as CriticMarkup
 `{==text==}{>>s:<id> suggests bold<<}`: a highlight, because nothing was
 added or removed. A direct formatting change over a property a pending
 suggestion already sets comes back with a warning (§18). `review_suggestion`
-(`action: accept | reject`, ids or `all`) goes to Google whatever the
+(`action: accept | reject`, each suggestion by id) goes to Google whatever the
 read said; `mode: suggest` needs the comments view (§7), except on a Word
 file, where a suggestion is a tracked change in the file (§7.6). In SUGGEST mode the API refuses `AddDocumentTab`,
 `CreateNamedRange`, `DeleteFooter`, `DeleteHeader`, `DeleteNamedRange`,
@@ -751,9 +752,8 @@ of the body from an export, never implicit.
 ## 9. Tool surface
 
 snake_case verb–noun, no dots. Claude Code prefixes `mcp__<server>__`.
-"Gated" = registered only with `GDOCS_ENABLE_DESTRUCTIVE=1`; gated tools
-also set `_meta["anthropic/requiresUserInteraction"]` for a client that
-cannot ask the person (§12a). `GDOCS_READ_ONLY=1`
+"Gated" = registered only with `GDOCS_ENABLE_DESTRUCTIVE=1`. No tool sets
+`_meta["anthropic/requiresUserInteraction"]` (§12a). `GDOCS_READ_ONLY=1`
 registers only readOnly rows and requests readonly scopes.
 
 | Tool | Purpose | Annotations | Phase |
@@ -768,18 +768,18 @@ registers only readOnly rows and requests readonly scopes.
 | `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2, 4 |
 | `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
 | `list_suggestions` | Pending suggestions with handles, authors and the replies on their threads | readOnly | 1 |
-| `review_suggestion` | accept / reject / discard (discard is author-only); `all` asks the person; dry_run | — | 1, 4, 2.0 |
+| `review_suggestion` | accept / reject / discard (discard is author-only), each suggestion named by the id `list_suggestions` shows; dry_run | — | 1, 4, 2.0, 3.0 |
 | `list_comments` | Full threads: replies, resolved, deleted, assignee, quoted text, handles | readOnly | 2 |
 | `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | — | 2, 2.0 |
 | `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only); `suggestion_id` replies on a suggestion's thread | — | 2, 4 |
-| `delete_comment` | Gated; a thread or one reply; asks the person; dry_run | destructive | 2, 2.0 |
+| `delete_comment` | Gated; a thread or one reply; `confirm_comment_id`; dry_run | destructive | 2, 2.0 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
 | `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | — | 2, 4 |
 | `insert_object` | `action: insert \| replace \| delete`; insert takes `kind: image \| person \| rich_link \| date` at a Location, replace swaps an image's source, delete removes an object by id (the only way to remove a floating one) | — | 2, 4 |
 | `layout_document` | ops: `page`, `section`, `section_break`, `named_style` | — | 4 |
 | `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | — | 2 |
-| `delete_tab` | Gated; child tabs go with it; asks the person; dry_run | destructive | 2, 2.0 |
-| `write_markdown_file` | Merge a working copy back into its Markdown file, block by block (§7.5); conflicts refused unless forced; asks when forced; dry_run | — | 2.3 |
+| `delete_tab` | Gated; child tabs go with it; `confirm_tab`; dry_run | destructive | 2, 2.0 |
+| `write_markdown_file` | Merge a working copy back into its Markdown file, block by block (§7.5); conflicts refused unless forced; unsaved editor work never written past; dry_run | — | 2.3, 3.0 |
 
 \* `edit_document` changes text by design; it is not gated. The layers
 this server controls are the write mode the person chose, the overwrite
@@ -787,10 +787,9 @@ guard, `dry_run`, read-only mode, and not registering the destructive
 tools at all. Client-side approval is **not** one of them: whether a call
 is put to the person is the client's decision and its permission mode, so
 a host running in an auto-approve mode may invoke any registered tool
-without asking. `_meta["anthropic/requiresUserInteraction"]` is a signal
-a client may act on, not a control — the spec says clients treat tool
-annotations as untrusted, and a server cannot make its own hint binding.
-Design as though every registered tool can be called unattended.
+without asking. The server asks nobody itself (§12a), and annotations are
+hints the spec says clients treat as untrusted. Design as though every
+registered tool can be called unattended.
 `replace_all` always carries explicit `tabsCriteria`. With `regex` it
 sends no `replaceAllText` at all: the server finds the matches itself,
 with `find_in_document`'s RE2 matcher over each paragraph, and plans
@@ -946,69 +945,94 @@ preview included. Measured in the Phase 3 evals (§14).
   `[class]` prefix is our convention; the actionable message is what the
   guidance asks for.
 
-## 12a. Asking the person
+## 12a. Per-call approval is the client's
 
-Six writes are put to the person through the client before they are
-made, as an MCP form elicitation with no fields: accepting is the
-confirmation. They are the ones this server cannot undo, or that destroy
-other people's work in a document:
+From 3.0.0 the server asks the person nothing. From 2.0.0 to 2.4.0 it
+put a form with no fields to the person, through MCP form elicitation,
+before seven writes: `delete_tab`, `delete_comment`,
+`review_suggestion` with `all`, a forced `edit_document`, `edit_table`
+or `insert_object`, and a forced `write_markdown_file`. This section
+said six; it missed `write_markdown_file`. The maintainer removed the
+question from every server of the family on 2026-10-22, and approved
+this server's port on 2026-10-23 (§15):
 
-- `delete_tab` and `delete_comment`, which are also gated and take a
-  retyped target. Version history keeps a deleted tab's text, but this
-  server cannot bring it back; a deleted comment keeps its thread with
-  the words removed.
-- `edit_document`, `edit_table` and `insert_object` when `force` lets a
-  direct edit destroy comment anchors, suggestions, images or footnotes.
-  The question lists each forced op and what it destroys, as the guard
-  found it. `force` on an edit that destroys nothing asks nothing.
-- `review_suggestion` with `all: true`, which applies or discards every
-  pending proposal at once, other people's included. The question counts
-  them and the answer is bound to their ids, so one proposed while the
-  person reads is not reviewed unseen.
+- The specification puts consent to each tool call on the host, and
+  never makes a server's elicitation a consent control: the client
+  gathers the answer "from the user or other sources".
+- Few widely used servers ask the person themselves, and those that do
+  each pick their own scope.
+- Clients answered the question with nobody there (a Claude Code
+  `Elicitation` hook once installed, Codex in full access), did not draw
+  it (by open user reports, Claude Code's VS Code extension and Claude
+  Desktop's Code tab), left it hanging (Cowork), or cut its message to
+  three lines. No client's permission rules match it.
+- People stop reading prompts they see often.
+- A client remembers approval per tool, never per argument, so a risky
+  variant carried as an argument rides along unseen once its tool is
+  always allowed.
 
-`add_comment` with an assignee does not ask: it works only on a pinned
-comment, and whether Google notifies the assignee is not established. `replace_all` does not ask either; it is bounded to one tab
-and the guard holds it like any other direct delete.
+What stays is what holds on every client:
 
-The mechanism is the one the sibling servers run, ported rather than
-depended on. A tool asks by being registered through `asked`, which puts
-a person on the context; the service asks after every read, guard and
-dry run, just before the write, and a dry run asks nothing. On protocol
-2026-07-28 the first call returns the question and a signed
-`requestState`, and the call comes back with the answer; before it, the
-SDK asks inside the call. The state is an HMAC over the tool, the
-arguments and what the question binds, with a key drawn per process, a
-nonce spent once, and a five-minute expiry when it travels through the
-client. Any answer but accept is refused before the call reads
-anything, and what the question showed is checked again on the
-answering round, so a comment edited in between is refused rather than
-deleted unseen.
+1. **Registration.** `delete_tab` and `delete_comment` exist only with
+   `GDOCS_ENABLE_DESTRUCTIVE`, and `GDOCS_READ_ONLY` registers the reads
+   alone. A client that runs with nobody watching gets neither delete.
+2. **The retyped target.** `confirm_tab` and `confirm_comment_id` repeat
+   what the call deletes, checked in the server. The model types it, so
+   it is a witness that the call meant this target, never the person's
+   approval; it is stricter than the standard's `confirm: true` (§17b).
+3. **Guards and witnesses.** The overwrite guard and `force` (§7.3), the
+   write mode the person chose, `expect_revision`, the revision a review
+   is pinned to, and a Markdown file's conflict check and editor check
+   (§7.5).
+4. **`dry_run`** on every write.
+5. **Annotations.** `destructiveHint` is true on the two deletes, so a
+   client that prompts by it, as claude.ai and Codex do, prompts for
+   them. VS Code ignores `destructiveHint` and prompts on every tool
+   without `readOnlyHint`, which only the nine reads carry. No tool
+   carries Claude Code's `anthropic/requiresUserInteraction`, which is
+   for an unrecoverable delete of a whole container, a permanent delete
+   past a trash, or a public share: version history keeps a deleted
+   tab's text, and a comment is one item of many, deleted many in a row.
+   In Claude Code the operator decides with `permissions.allow` and
+   `ask`; the README gives `ask` rules, and the staleness gate holds each
+   name there to the registered tools.
+6. **What a client's prompt shows.** A client's prompt shows the call's
+   arguments. Where the question said what an argument meant, the
+   argument now carries it: `review_suggestion` takes each suggestion by
+   the id `list_suggestions` showed, and `all` is gone, so a suggestion
+   proposed after the list was read is never reviewed unseen. `force`
+   stays a boolean; its warnings name what each forced op destroys, and
+   `dry_run` shows them first.
 
-The person is asked before anything is written, so a forced op in a
-later batch — one that waits for a grid change in the same call to land
-— is refused instead of asked about after the fact; it runs as a call of
-its own. An accepted answer covers its question as often as the call
-reaches it, so a write re-planned once after a revision conflict asks
-the same question and goes through, and a different question does not.
-The stage that makes a failed reply `[ambiguous_outcome]` is set only
-when an answer is matched, not when the call arrives with one.
+Two writes changed with the question. `force` no longer writes past
+work in the Docs editor that has not reached a Markdown file yet: that
+work is in no Drive revision, so nothing could bring it back, and the
+write is `[conflict]` until the editor saves or the person closes the
+file. What `force` still writes past, a conflict, a missing base or the
+guard, the file's previous revision keeps. And a forced op in a later
+batch, after a grid change in the same call was written, now runs like
+any forced op; it was refused because the person could not be asked
+before the first batch.
 
-Claude Code's `requiresUserInteraction` mark makes it prompt on every
-call, even under an allow rule. A tool that asks
-before every write carries the mark only for a client that cannot ask:
-`tools/list` drops it when the request's capabilities include form
-elicitation, so the person answers once, to the question that says what
-the write destroys, not also to a prompt showing raw arguments.
-`destructiveHint` stays either way; it is the client's allow-listable
-prompt.
+`GDOCS_REQUIRE_PROMPT`, which refused the asking writes on a client that
+could not ask, went with the question. A configuration that still turns
+it on, or sets it to anything but off, is refused at start: ignoring it
+would allow what its owner set it to stop. That makes 3.0.0 a major
+release.
 
-A client that cannot ask gets no question, and the arguments are the
-guard as before; the tool descriptions tell the model to ask the person
-itself in that case. `GDOCS_REQUIRE_PROMPT=true` refuses those writes
-instead. A refusal is `[blocked]`, which the guard already used for a
-direct edit it would not make without `force` and which is now in the
-documented vocabulary; a confirmed write whose result never came back is
-`[ambiguous_outcome]`.
+The model never widens its own reach: no tool takes one of the server's
+settings as an input, and no code a tool reaches imports the packages
+that write the profile, the token or the sign-in, or sets an environment
+variable (`TestNoToolTakesAServerSetting`,
+`TestNoToolCanWriteTheServersSettings`). The server tests call every
+tool through a client that can be asked and fail any call that asks, and
+`forbidigo` refuses the SDK's `Elicit` and the input requests a result
+can carry.
+
+`add_comment` with an assignee and comment mode post to named people,
+which are ordinary writes; whether Google notifies an assignee is not
+established. `replace_all` is bounded to one tab, and the guard holds it
+like any other direct delete.
 
 ## 13. Distribution and setup
 
@@ -1124,6 +1148,11 @@ accounts. That sets these requirements:
 | One document, every capability; no folder/move/share/trash/copy | Tool table trimmed; `search_documents` is locate-only |
 | A Markdown file in Drive is a document too, edited as the text it is (2026-10-14). Bet 6 forbade round-tripping a Doc through markdown, which loses what markdown cannot say; minimal edits to a Markdown file's own bytes are no round trip, and are bet 1 applied to text | §7.5: reads from the bytes, the content ops by minimal diff with the comment markup guarded, one Drive upload per call; the server's first Drive content write |
 | Working on a Markdown file together goes through a working copy (2026-10-14): no API writes through an open editor's session, and every upload makes the editor reload | §7.5: `create_document from_file` and `write_markdown_file`, a block merge that keeps the file's own text where the copy did not change it; direct writes check, write, verify and repair |
+| The server asks the person nothing; per-call approval is the client's; `GDOCS_REQUIRE_PROMPT` removed and refused unless off (the maintainer, 2026-10-22 for the family; this port approved 2026-10-23) | §12a; a major release, 3.0.0: a client that could not make the asking writes before can, and `review_suggestion` takes a new required input |
+| No tool carries `requiresUserInteraction` (2026-10-23) | §12a: neither delete is unrecoverable; the README's `permissions.ask` rules are how Claude Code asks |
+| `force` never writes past unsaved Docs-editor work on a Markdown file (2026-10-23) | §7.5, §12a: `[conflict]` until the editor saves; what else `force` writes past, the file's previous revision keeps |
+| `review_suggestion` takes the ids `list_suggestions` shows; `all` is gone (2026-10-23) | §12a: the argument carries what the question showed |
+| `force` stays a boolean; the retyped `confirm_tab` and `confirm_comment_id` stay (2026-10-23) | §12a, §17b |
 | Stdio only | No HTTP auth design |
 | Nothing internal in the repo or in logs | §12 |
 
@@ -1263,6 +1292,14 @@ gain `dry_run`, and `export_document` is annotated as the local write it
 is. The questions, the signed state and `quoted()` are ported from the
 sibling that last fixed them.
 
+**3.0.0 — the client decides (unreleased).** §12a. The question goes,
+and with it `GDOCS_REQUIRE_PROMPT`, refused at start when on; the module
+path moves to `/v3`. `review_suggestion` takes ids only, `force` stops
+at unsaved editor work, and no tool carries `requiresUserInteraction`.
+An export no longer overwrites a file or follows a link (§12). The live
+run that must precede the release drives every tool through a client
+that can be asked and fails on any question.
+
 ## 17. Open decisions
 
 **When exactly does Google drop a direct formatting change?** A direct
@@ -1324,6 +1361,15 @@ v0.3.0, and nothing is left open:
   the gap docs/development.md describes. Embedding keeps `p.Alignment`
   and the rest reading as before at every call site.
 
+## 17b. Deviations from the shared standard
+
+Recorded with the port of the standard's §3, 2026-10-23. The rest of
+§3 is held as written.
+
+| The standard says | Here | Why |
+|---|---|---|
+| Deletes take `confirm: true` | `delete_tab` takes `confirm_tab` and `delete_comment` takes `confirm_comment_id`, each repeating the target, refused when it does not match | A stricter witness than a boolean: the call names what it deletes twice. The model sets either, so neither is approval (§12a). Kept rather than changed, since a required boolean would be a second breaking input for nothing gained |
+
 ## 18. Evidence log: conventions checked, changed, or rejected
 
 Verified 2026-09-02/03 against primary sources. "Inherited" means the
@@ -1346,8 +1392,8 @@ checked rather than assumed.
 | Old revisions of a blob download only when kept forever (Drive revisions guide) | Refuted live for the owner: all eleven unpinned revisions downloaded through `revisions.get?alt=media` and `files.download`. Pinning a non-head revision could not be undone (400 `illegalKeepForeverModification`), and the limit is 200 per file | Old revisions of a Markdown file are read through `revisions.get`; nothing is pinned. |
 | Markup written through Drive makes a comment (spike D) | Confirmed live: markers and a block entry without a token made an anchored thread in the Docs view, `fromImportedDocument: true`, its author the name the bytes gave, a new id on every re-parse, gone when the bytes no longer held it | Content may not hold the markup. Whether the editor shows such a comment, and keeps it on a save, needs a person. |
 | Docs can suggest on a Markdown file (Docs Help 18289341, Workspace Updates 2026-10-05) | No source says so; both list open, edit, comment and collaborate, and the API refuses a `SUGGEST` batch | `suggest` is `[unavailable]` on a Markdown file. |
-| Asking the person works against Google (2026-09-30) | Confirmed live: the live driver, now a client that can be asked, declined a `delete_comment` (refused, the comment still listed), then accepted it (deleted); a forced `delete_rows` over a pending suggestion, two `delete_tab` calls and `review_suggestion` with `all` each asked once and went through on accept; the four new dry runs left the revision where it was | The driver answers every question and fails a step that should have asked and did not. |
-| An empty form is a valid elicitation, and the SDK skips structured output for a result that asks (2026-09-30) | Adopted from the siblings that verified them: the specification's schema puts no minimum on `properties`; go-sdk v1.8.0 `mcp/server.go` does not marshal the output when `InputRequests` is set | `asked` returns the input request with a zero output. |
+| Asking the person works against Google (2026-09-30; **superseded 2026-10-22**, the server asks nobody, §12a) | Confirmed live: the live driver, now a client that can be asked, declined a `delete_comment` (refused, the comment still listed), then accepted it (deleted); a forced `delete_rows` over a pending suggestion, two `delete_tab` calls and `review_suggestion` with `all` each asked once and went through on accept; the four new dry runs left the revision where it was | The driver answers every question and fails a step that should have asked and did not. |
+| An empty form is a valid elicitation, and the SDK skips structured output for a result that asks (2026-09-30; moot since 2026-10-22, §12a) | Adopted from the siblings that verified them: the specification's schema puts no minimum on `properties`; go-sdk v1.8.0 `mcp/server.go` does not marshal the output when `InputRequests` is set | `asked` returns the input request with a zero output. |
 | `blocked` is part of the error vocabulary (2026-09-30) | Refuted: the guard returned `[blocked]` through an `Error` literal the `classes` gate does not scan, so the class was emitted and documented nowhere | Listed in `service.Classes`, with what it asks the reader to do. |
 | `export_document` is read-only (2026-09-30) | Refuted: it writes a file under `GDOCS_EXPORT_DIR` | Annotated a non-destructive write; read-only mode still registers it, since it changes nothing in Google. |
 | An export is written as §12 says: under the directory, nothing overwritten, no symbolic link followed (§12, since Phase 1) | **Refuted 2026-10-23** by a survey of the code, not by an incident. `os.WriteFile` truncated the earlier export of the same document without a word, and followed a symbolic link at the export's name to wherever it pointed; cleaning the path kept the name inside the directory, never what the name pointed at | Each export is created with `O_EXCL`: a name already taken, a link included, gains a counter up to 100, then `[blocked]`. `TestAnExportNeverOverwrites` and `TestAnExportNeverWritesThroughALink` hold it. |
@@ -1364,8 +1410,8 @@ checked rather than assumed.
 | Loopback + PKCE OAuth (inherited) | Confirmed (Google native-app guide; OOB blocked since 2023-01-31) | Kept. |
 | 7-day refresh tokens only for sensitive scopes (my claim) | Refuted: any External app in Testing | Internal consent screen. |
 | Env-only configuration (inherited) | Mixed: all three clients pass only `env`; github-mcp-server binds flags and env | Env source of truth plus bound flags. |
-| Server-side read-only mode and destructive gating (inherited) | Confirmed (github-mcp-server; spec: annotations untrusted) | Kept; `requiresUserInteraction` on gated tools. |
-| `requiresUserInteraction` makes a client prompt before running a gated tool, so it counts as a safety layer (implied by listing "per-call approval" among the layers) | Refuted: the hint is advisory. The spec already says clients treat tool annotations as untrusted, and a host in an auto-approve permission mode runs a registered tool without prompting — which is the only way the hint could have been load-bearing | §9 no longer lists client approval as a layer. What the server controls is what it registers and what it refuses, so a tool that must not run unattended must be unregistered, not annotated. |
+| Server-side read-only mode and destructive gating (inherited) | Confirmed (github-mcp-server; spec: annotations untrusted) | Kept. `requiresUserInteraction` was on the gated tools until 2026-10-23, when it came off (§12a). |
+| `requiresUserInteraction` makes a client prompt before running a gated tool, so it counts as a safety layer (implied by listing "per-call approval" among the layers) | Refuted: the hint is advisory. The spec already says clients treat tool annotations as untrusted. **Corrected 2026-10-23** (code.claude.com/docs/en/mcp, re-read): the reason given here, that an auto-approve mode runs a marked tool without prompting, is wrong for Claude Code from v2.1.199, which prompts for a marked tool in every interactive mode, auto and bypassPermissions included, and denies it where no prompt can be drawn. No other client reads the mark, so the verdict stands | §9 no longer lists client approval as a layer. What the server controls is what it registers and what it refuses, so a tool that must not run unattended must be unregistered, not annotated. |
 | snake_case verb_noun names (inherited) | Mixed: spec allows more; GitHub mixes styles; Anthropic says measure. Measured in the Phase 3 evals: 13 tasks, 15 tool lookups by name, no call to a tool that does not exist | Kept. |
 | Per-block handle prefix opt-in (§7.2) | Evals: the model asked for `with_handles` on three of four reads and targeted by handle as often as by text | Flipped to default on (the owner's call, 2026-09-03): the flag is a per-read cost of about 15%, the round trip it saves is a whole read, and an edit targets handles. `with_handles: false` drops them. |
 | A blank paragraph is one whose text is empty (my first fill rule) | Refuted in review: a paragraph holding only an image, a footnote reference or a page-number field also renders as no text, and filling it would delete that content with no guard (an insertion never populates anchors) | Blank means every run is text and the text is whitespace. |
@@ -1445,8 +1491,8 @@ checked rather than assumed.
 | A 200 from an `insertComment` batch means the comment exists | Refuted 2026-10-08 against Docs discovery revision 20261006, not observed live: `BatchUpdateDocumentResponse.commentUpdateState` can be `ALL_FAILED_UNKNOWN_REASON`, "All requested comment updates failed". The response was decoded and the field never read, so `add_comment` reported `comment  posted` with an empty id, and comment mode reported its ops applied with no comment ids | `batchUpdate` refuses that state as `[server]`: every batch carrying a comment carries nothing else, so nothing was written and asking again is safe. A reply that names no comment thread is `[ambiguous_outcome]`, pointing at `list_comments` before a second post. |
 | A regex replace should use the API's `searchByRegex` | Declined 2026-10-09. `SubstringMatchCriteria.searchByRegex` is published (Docs discovery 20261006), but nothing says which regex flavor Google runs, whether `replaceText` expands groups, or how a match treats a chip or an image. The overwrite guard has to know every range a replace touches, and it could only guess Google's matches | `replace_all` with `regex` is expanded by the server into one replace per match, found with Go's RE2 over each paragraph's index-aligned text, the matcher `find_in_document` already uses. A match is confined to a paragraph, an empty match and a replacement that would copy an object as text are refused, and the guard, suggest mode and the minimal diff apply to each match as to any replace. |
 | Index-aligned text needs only the runs the parser builds | Refuted 2026-10-09 by a schema Google added. `ParagraphElement.dropdown` arrived between the 2026-09-26 and 2026-10-06 discovery documents; the parser had no case for it, returned nothing, and `alignedSlice` concatenated the runs it had, so every offset after a dropdown in that paragraph moved one place. A regex `find_in_document` reported the wrong offset, and the regex `replace_all` written that day computed its ranges from the same text, so it would have replaced one character early (`TestARegexReplaceAfterAChipHitsItsOwnRange` shows `[10,14)` against Google's `[11,15)`). Exact-text targets were safe: `appendUnits` places each character at its run's own index | A dropdown is a chip run showing its selected option. `alignedSlice` fills any index gap between runs with placeholders, so an element Google adds later costs a missing label, not a shifted range. |
-| A destructive tool should carry both `requiresUserInteraction` and the server's own question | Refuted 2026-10-09, after the owner was asked twice for one delete. No source recommends two hard gates for one call. The MCP spec puts confirmation on the client ("Clients SHOULD prompt for user confirmation on sensitive operations"); GitHub's `delete_repository` (PR #3076) and Supabase's destructive SQL confirm with `destructiveHint` plus a form elicitation, and neither sets the mark; Claude Code's documentation scopes the mark to "tools whose permission prompt is itself the point, such as a consent or access-grant step" | The mark is sent per client: present when the request's capabilities show no form elicitation, absent otherwise, on a tool that asks before every write. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to refuse the call before it reached the server. Not chosen: a typed confirmation, which would stop Codex in full-access mode accepting an empty form unseen, at the cost of a slower answer in every other client. |
-| Sending the mark per client leaves every client either the mark or a question | Refuted 2026-10-09 by a review of the same change in google-mail-mcp. On protocol 2026-07-28 capabilities travel per request, so a client can declare form elicitation to `tools/list` and none to `tools/call`, and get neither the mark nor a question. The same review found no test that the mark is dropped from a copy of the tool, not from the server's own | Recorded as a known limit. It gives a misbehaving client nothing it lacked, since such a client answers the server's question itself and can accept without a person. `GDOCS_REQUIRE_PROMPT=true` still refuses that call. `TestTheMarkIsForAClientThatCannotAsk` now lists on one server, for a client that can ask and then for two that cannot, on every protocol. |
+| A destructive tool should carry both `requiresUserInteraction` and the server's own question | Refuted 2026-10-09, after the owner was asked twice for one delete. No source recommends two hard gates for one call. The MCP spec puts confirmation on the client ("Clients SHOULD prompt for user confirmation on sensitive operations"); GitHub's `delete_repository` (PR #3076) and Supabase's destructive SQL confirm with `destructiveHint` plus a form elicitation, and neither sets the mark; Claude Code's documentation scopes the mark to "tools whose permission prompt is itself the point, such as a consent or access-grant step" | The mark is sent per client: present when the request's capabilities show no form elicitation, absent otherwise, on a tool that asks before every write. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to refuse the call before it reached the server. Not chosen: a typed confirmation, which would stop Codex in full-access mode accepting an empty form unseen, at the cost of a slower answer in every other client. **Superseded 2026-10-22:** the server asks nobody and no tool carries the mark (§12a). |
+| Sending the mark per client leaves every client either the mark or a question | Refuted 2026-10-09 by a review of the same change in google-mail-mcp. On protocol 2026-07-28 capabilities travel per request, so a client can declare form elicitation to `tools/list` and none to `tools/call`, and get neither the mark nor a question. The same review found no test that the mark is dropped from a copy of the tool, not from the server's own | Recorded as a known limit. It gives a misbehaving client nothing it lacked, since such a client answers the server's question itself and can accept without a person. **Moot since 2026-10-22:** no question and no mark (§12a); `GDOCS_REQUIRE_PROMPT` and the test went with them. |
 | `assigneeEmailAddress` is a field of Drive's `Comment`, so any call that returns a comment can ask for it | **Refuted live 2026-10-09**, on the first live run after `list_comments` started reading it. `comments.get` and `comments.list` serve it; `comments.create` and `comments.update` answer 400 "Invalid field selection assignee_email_address" when the `fields` mask names it, so `add_comment` without the comments view and `reply_comment` `edit` failed outright. The discovery document gives no hint of the split | Reads ask for `CommentFields`; create and update ask for `commentWriteFields`, the same set without the assignee. `TestOnlyACommentReadAsksForTheAssignee` holds the split with a fake that answers as Drive did. |
 | Tables and images in content should be placed by index arithmetic in one batch | Declined 2026-10-09 after spike E, live (`internal/gapi/rawtable_integration_test.go`). The arithmetic exists: an empty table is 2 + rows×(1+2×cols) long and cell (r,c) starts at table + 3 + r×(1+2×cols) + 2c, checked at 2×2, 1×2 and 1×1 only. Placement: `insertTable` at a paragraph's newline starts the table one past it and leaves the old newline as an empty paragraph after the table; at a paragraph's start it leaves an empty paragraph before the table; at `endOfSegmentLocation` one after. `deleteContentRange` over the empty paragraph after a table is accepted when text follows. An inline image at the start of an empty paragraph sits alone in it. In `SUGGEST` mode `insertTable`, text into a cell and `insertInlineImage` are accepted as suggestions | Rounds instead (§7.3), each against a fresh read, so nothing rests on a formula checked at three sizes. Partial results are reported, not rolled back. |
 | A `batchUpdate` reply's revision is the revision the next read reports | Confirmed live 2026-10-09: across the content rounds of one live run, every read after a write carried the revision that write's reply gave, and no round saw another | A round runs only on a read at the revision the previous batch's reply gave; any other means somebody else wrote in between (§7.3). |
@@ -1469,3 +1515,5 @@ checked rather than assumed.
 | Docs reads a revision of a Word file uploaded through Drive | Confirmed live (spike H): about four seconds after the upload, with Word tracked changes as suggestions, a new paragraph with `ilvl` 1 at level 1 of its list, and a Word comment anchored | A write waits for Docs to read the revision it uploaded, so the next read shows it. |
 | A Docs suggestion id names a Word tracked change | Refuted live (spike H): the ids are `suggestIdImport<uuid>_<n>`, the uuid new on every revision and `n` not the `w:id`; adjacent changes by one author at one time share one | Reviewing a Word file's suggestions would go by position; it is not offered, and refused saying so. |
 | A tracked insertion may wrap a link | Refuted live (spike H): with `w:hyperlink` inside `w:ins`, Docs read the paragraph without the link's text; with `w:ins` inside `w:hyperlink` it read it | A tracked insertion goes inside the link (`internal/ooxml`). |
+| The server should confirm a write with the person itself, through MCP form elicitation | **Refuted 2026-10-22** for the family on documents and source, rechecked 2026-10-23 against the most-used servers and clients. The specification (`server/tools`, 2025-06-18 to 2026-07-28) puts consent to each call on the host; `client/elicitation` lets the client answer "from the user or other sources". Claude Code documents that an `Elicitation` hook answers with no dialog, Codex in full access accepts a form with no fields by itself, open user reports have Claude Code's VS Code extension and Claude Desktop's Code tab decline it unseen and Cowork leave it hanging, and no client's permission rules match it | §12a: the server asks nobody. Registration, the retyped target, the guards, the witnesses and `dry_run` stay; `review_suggestion` carries the ids the question used to show. The rows above on asking and on the mark describe what this replaces. |
+| claude.ai, Codex and VS Code all prompt by `destructiveHint` (the family's assumption until 2026-10-23) | **Refuted for VS Code 2026-10-23**, at source: VS Code ignores `destructiveHint` and prompts on every tool not marked `readOnlyHint: true`. Codex prompts by `destructiveHint` in its default `auto` mode, and claude.ai and ChatGPT document that it decides their prompts. Each remembers an approval per tool, never per argument | `readOnlyHint` only on the nine reads, which change nothing; `destructiveHint` on the two deletes. The README says what each client prompts for. |

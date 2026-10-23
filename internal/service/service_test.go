@@ -736,12 +736,3 @@ func TestReadWholeBudget(t *testing.T) {
 		t.Fatal("expected an error for a bad reference")
 	}
 }
-
-// accepting is ctx with a person who accepts every question, for the
-// tests of what a write does rather than of asking.
-func accepting(ctx context.Context) context.Context { return WithAsker(ctx, yes{}) }
-
-type yes struct{}
-
-func (yes) Ask(context.Context, render.Question) error { return nil }
-func (yes) Asks() bool                                 { return true }

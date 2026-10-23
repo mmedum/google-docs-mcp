@@ -131,7 +131,7 @@ func Errorf(class, format string, args ...any) *Error {
 //	rate_limited       a quota; the message says whether waiting helps
 //	server             Google failed after retries; try again shortly
 //	network            Google could not be reached
-//	blocked            a guard or the person refused the write; nothing changed
+//	blocked            a guard refused the write; nothing changed
 //	ambiguous_outcome  a write whose result is unknown; go and look
 //	unexpected         a failure this server did not anticipate
 //

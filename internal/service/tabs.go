@@ -8,7 +8,6 @@ import (
 
 	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
 	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
 
 // TabRequest manages tabs. Tab operations are always direct edits: the
@@ -103,12 +102,6 @@ func (s *Service) tabChange(ctx context.Context, req TabRequest, action string, 
 		res.DryRun = true
 		res.Text = tabText(res)
 		return res, nil
-	}
-	if action == "delete" && asks(ctx) {
-		q := render.AskDeleteTab(f.Doc.ID, f.Doc.Title, res.TabID, res.Title, f.Doc.Descendants(res.TabID))
-		if err := ask(ctx, q); err != nil {
-			return nil, err
-		}
 	}
 	env, revision, err := s.batchUpdate(ctx, f, []json.RawMessage{request}, "")
 	if err != nil {

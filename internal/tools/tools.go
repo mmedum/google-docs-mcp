@@ -18,10 +18,6 @@ type Deps struct {
 	Service *service.Service
 	Config  config.Config
 	Logger  *slog.Logger
-
-	// asking is how the tools that ask put their question to the person;
-	// Register makes it.
-	asking *asking
 }
 
 // FullSurface is the configuration under which every tool registers.
@@ -51,8 +47,6 @@ func Register(s *mcp.Server, d Deps) {
 	if d.Logger == nil {
 		d.Logger = slog.New(slog.DiscardHandler)
 	}
-	d.asking = newAsking(d.Logger)
-	s.AddReceivingMiddleware(askFailures(d.asking), interactionHint(d.asking))
 	registerRead(s, d)
 	registerMoreRead(s, d)
 	registerCommentsRead(s, d)
@@ -89,6 +83,8 @@ func fail(err error) error {
 // lives here rather than in the schema on purpose: a required field
 // would be a breaking schema change, while a server-side refusal is the
 // half a client cannot skip. §12 makes the same point about annotations.
+// It is a witness that the caller meant this target, never approval: the
+// model types it, and approving the call is the client's (§12a).
 func confirmTarget(what, target, confirm string) error {
 	switch {
 	case confirm == "":
@@ -106,10 +102,10 @@ var (
 	// writeSafe marks tools that change the document but never delete
 	// beyond what the person asked and the guard allows.
 	writeSafe = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
-	// destructive marks gated tools; the meta asks a client that cannot
-	// elicit to involve the person (interactionHint drops it otherwise).
-	destructive     = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
-	destructiveMeta = mcp.Meta{interactionKey: true}
+	// destructive marks the gated tools. No tool carries Claude Code's
+	// requiresUserInteraction mark: neither delete is unrecoverable, so
+	// the operator's own rules decide (§12a).
+	destructive = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
 	// localWrite marks a tool that reads Google and writes only a local
 	// file, in the one directory the person configured.
 	localWrite = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}

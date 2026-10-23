@@ -81,6 +81,35 @@ func TestPreviewIsDeprecated(t *testing.T) {
 	}
 }
 
+// The removed GDOCS_REQUIRE_PROMPT starts when off and is refused
+// otherwise, saying what to do instead: ignored, it would quietly allow
+// what its owner set it to stop. Its flag is gone.
+func TestTheRemovedRequirePromptIsRefusedUnlessOff(t *testing.T) {
+	for _, v := range []string{"", "false", " FALSE ", "0", "off"} {
+		if _, err := build(t, map[string]string{"GDOCS_REQUIRE_PROMPT": v}); err != nil {
+			t.Errorf("GDOCS_REQUIRE_PROMPT=%q: %v", v, err)
+		}
+	}
+	for _, v := range []string{"true", "1", "maybe"} {
+		_, err := build(t, map[string]string{"GDOCS_REQUIRE_PROMPT": v})
+		if err == nil || !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "GDOCS_REQUIRE_PROMPT was removed") ||
+			!strings.Contains(err.Error(), "leave GDOCS_ENABLE_DESTRUCTIVE off") {
+			t.Errorf("GDOCS_REQUIRE_PROMPT=%q: err = %v", v, err)
+		}
+		if err != nil && strings.Contains(err.Error(), v) {
+			t.Errorf("GDOCS_REQUIRE_PROMPT=%q: the refusal echoes the value: %v", v, err)
+		}
+	}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	Define(fs, func(string) string { return "" })
+	if fs.Lookup("require-prompt") != nil {
+		t.Error("--require-prompt is still a flag")
+	}
+	if got := RemovedVars(); len(got) != 1 || got[0] != "GDOCS_REQUIRE_PROMPT" {
+		t.Errorf("RemovedVars() = %v", got)
+	}
+}
+
 func TestValidation(t *testing.T) {
 	cases := []struct {
 		name string

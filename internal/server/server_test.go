@@ -201,29 +201,17 @@ func connect(t *testing.T, api *fakeAPI) *mcp.ClientSession {
 	return connectWith(t, api, config.Config{DefaultWriteMode: config.WriteDirect})
 }
 
+// connectWith connects a client to a server over api, with its handle
+// memory seeded as a read would, so tools may target handles.
+//
+// The client can ask the person, and the server asks nobody (§12a): every
+// tool in these tests is called through such a client, so a question from
+// any of them fails the test that made the call.
 func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSession {
 	t.Helper()
-	return connectClient(t, api, cfg, "", nil)
-}
-
-// connectClient is connectWith with the client's options and the
-// protocol it offers; an empty protocol is the SDK's own choice.
-func connectClient(t *testing.T, api *fakeAPI, cfg config.Config, protocol string, o *mcp.ClientOptions) *mcp.ClientSession {
-	t.Helper()
-	return connectTo(t, newServer(api, cfg), protocol, o)
-}
-
-// newServer is a server over api, with its handle memory seeded as a
-// read would, so tools may target handles.
-func newServer(api *fakeAPI, cfg config.Config) *mcp.Server {
 	svc := service.New(api, service.Options{ReadOnly: cfg.ReadOnly, Destructive: cfg.EnableDestructive, DefaultWriteMode: cfg.DefaultWriteMode, ExportDir: cfg.ExportDir})
 	_, _ = svc.Fetch(context.Background(), fixtureID)
-	return server.New(server.Deps{Service: svc, Config: cfg, Version: "test"})
-}
-
-// connectTo connects one more client to srv, as connectClient does.
-func connectTo(t *testing.T, srv *mcp.Server, protocol string, o *mcp.ClientOptions) *mcp.ClientSession {
-	t.Helper()
+	srv := server.New(server.Deps{Service: svc, Config: cfg, Version: "test"})
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()
 	ss, err := srv.Connect(ctx, st, nil)
@@ -231,8 +219,11 @@ func connectTo(t *testing.T, srv *mcp.Server, protocol string, o *mcp.ClientOpti
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ss.Close() })
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, o).
-		Connect(ctx, ct, &mcp.ClientSessionOptions{ProtocolVersion: protocol})
+	o := &mcp.ClientOptions{ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		t.Errorf("the server asked the person: %q", req.Params.Message)
+		return &mcp.ElicitResult{Action: "decline"}, nil
+	}}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, o).Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +286,9 @@ func TestListToolsAndSchemas(t *testing.T) {
 	if strings.Contains(want, "delete_") {
 		t.Fatal("destructive tools must not register by default")
 	}
-	// Destructive tools register only with the flag, carrying the interaction hint.
+	// Destructive tools register only with the flag, marked destructive.
+	// No tool carries Claude Code's requiresUserInteraction: neither
+	// delete is unrecoverable, so the operator's own rules decide (§12a).
 	ds := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{EnableDestructive: true, DefaultWriteMode: config.WriteDirect})
 	dres, err := ds.ListTools(context.Background(), nil)
 	if err != nil {
@@ -303,10 +296,13 @@ func TestListToolsAndSchemas(t *testing.T) {
 	}
 	found := map[string]bool{}
 	for _, tool := range dres.Tools {
+		if _, marked := tool.Meta["anthropic/requiresUserInteraction"]; marked {
+			t.Errorf("%s carries requiresUserInteraction", tool.Name)
+		}
 		if tool.Name == "delete_comment" || tool.Name == "delete_tab" {
 			found[tool.Name] = true
-			if tool.Annotations == nil || tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint || tool.Meta["anthropic/requiresUserInteraction"] != true {
-				t.Errorf("%s annotations = %+v meta = %v", tool.Name, tool.Annotations, tool.Meta)
+			if tool.Annotations == nil || tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint {
+				t.Errorf("%s annotations = %+v", tool.Name, tool.Annotations)
 			}
 		}
 	}
@@ -396,7 +392,7 @@ func TestWriteToolsEndToEnd(t *testing.T) {
 	if res.IsError || !strings.Contains(textOf(res), "s1 [p3] replace") {
 		t.Fatalf("suggestions: %s", textOf(res))
 	}
-	res = call(t, cs, "review_suggestion", map[string]any{"document": fixtureID, "action": "accept", "all": true})
+	res = call(t, cs, "review_suggestion", map[string]any{"document": fixtureID, "action": "accept", "ids": []any{"s1"}})
 	if res.IsError || !strings.Contains(textOf(res), "accepted 1 suggestion(s)") {
 		t.Fatalf("review: %s", textOf(res))
 	}
@@ -678,13 +674,34 @@ func TestCommentEditAndSuggestionDiscard(t *testing.T) {
 		t.Fatalf("edit unknown reply: %s", textOf(res))
 	}
 	pv := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{DefaultWriteMode: config.WriteDirect})
-	res = call(t, pv, "review_suggestion", map[string]any{"document": fixtureID, "action": "discard", "all": true})
+	res = call(t, pv, "review_suggestion", map[string]any{"document": fixtureID, "action": "discard", "ids": []any{"s1"}})
 	if res.IsError || !strings.Contains(textOf(res), "discarded 1 suggestion(s)") {
 		t.Fatalf("discard: %s", textOf(res))
 	}
-	res = call(t, pv, "review_suggestion", map[string]any{"document": fixtureID, "action": "shred", "all": true})
+	res = call(t, pv, "review_suggestion", map[string]any{"document": fixtureID, "action": "shred", "ids": []any{"s1"}})
 	if !res.IsError || !strings.Contains(textOf(res), "accept, reject or discard") {
 		t.Fatalf("unknown review action: %s", textOf(res))
+	}
+}
+
+// review_suggestion names each suggestion it reviews, by the id
+// list_suggestions showed, so a client's prompt shows which ones. There
+// is no "every pending suggestion": one proposed after the list was read
+// would be accepted unseen.
+func TestReviewNamesEverySuggestion(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t)}
+	cs := connectWith(t, api, config.Config{DefaultWriteMode: config.WriteDirect})
+	for _, args := range []map[string]any{
+		{"document": fixtureID, "action": "accept", "all": true},
+		{"document": fixtureID, "action": "accept", "ids": []any{}},
+	} {
+		res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "review_suggestion", Arguments: args})
+		if err == nil && !res.IsError {
+			t.Errorf("%v: accepted: %s", args, textOf(res))
+		}
+	}
+	if len(api.batches) != 0 {
+		t.Errorf("a review that named no suggestion wrote %d batch(es)", len(api.batches))
 	}
 }
 
@@ -728,6 +745,23 @@ func TestStructureToolsEndToEnd(t *testing.T) {
 	res = call(t, cs, "edit_document", map[string]any{"document": fixtureID, "dry_run": true, "ops": []map[string]any{{"op": "delete_header", "target": map[string]any{"segment": "header"}}}})
 	if res.IsError || !strings.Contains(textOf(res), "requests: deleteHeader") {
 		t.Fatalf("delete_header: %q", textOf(res))
+	}
+}
+
+// A forced op in a later batch, after a grid change in the same call was
+// written, runs like any forced op. It was refused while the server asked
+// the person before a forced write, since by then something was written.
+func TestAForcedOpInALaterBatchRuns(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t), comments: []*gapi.DriveComment{
+		{ID: "c1", Content: "check the figures", QuotedFileContent: &gapi.QuotedText{Value: "Alpha"}},
+	}}
+	cs := connectWith(t, api, config.Config{DefaultWriteMode: config.WriteDirect})
+	res := call(t, cs, "edit_table", map[string]any{"document": fixtureID, "mode": "direct", "force": true, "ops": []any{
+		map[string]any{"op": "insert_rows", "table": "tbl1", "row": 1, "count": 1},
+		// The fake applies nothing, so the commented row is still row 2.
+		map[string]any{"op": "delete_rows", "table": "tbl1", "row_numbers": []any{2}}}})
+	if out := textOf(res); res.IsError || len(api.batches) != 2 || !strings.Contains(out, "forced; 1 comment (c1) will be lost") {
+		t.Errorf("%d batches: %s", len(api.batches), out)
 	}
 }
 

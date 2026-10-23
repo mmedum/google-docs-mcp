@@ -475,27 +475,6 @@ func (s *Service) commentRef(ctx context.Context, docRef, commentID string) (str
 	return id, commentID, thread, nil
 }
 
-// askDeleteComment puts the deletion of a thread, or of one reply in it,
-// to the person, with what they wrote.
-// The document's title comes from Drive rather than a fetch of the
-// document, which this tool otherwise never reads.
-func (s *Service) askDeleteComment(ctx context.Context, id string, thread *gapi.DriveComment, replyID string) error {
-	file, err := s.api.GetFile(ctx, id)
-	if err != nil {
-		return wrapAPI(err, "document")
-	}
-	if r := liveReply(thread, replyID); r != nil {
-		return ask(ctx, render.AskDeleteComment(id, file.Name, thread.ID, true, userLabel(r.Author), r.Content, nil))
-	}
-	var replies []string
-	for _, r := range thread.Replies {
-		if r != nil && !r.Deleted {
-			replies = append(replies, r.Content)
-		}
-	}
-	return ask(ctx, render.AskDeleteComment(id, file.Name, thread.ID, false, userLabel(thread.Author), thread.Content, replies))
-}
-
 // liveReply is the thread's reply of that id that is not deleted, or nil.
 func liveReply(thread *gapi.DriveComment, id string) *gapi.DriveReply {
 	for _, r := range thread.Replies {
@@ -543,11 +522,6 @@ func (s *Service) DeleteComment(ctx context.Context, req DeleteCommentRequest) (
 			res.Text = fmt.Sprintf("dry run: would delete reply %s of comment %s", res.ReplyID, commentID)
 		}
 		return res, nil
-	}
-	if asks(ctx) {
-		if err := s.askDeleteComment(ctx, id, thread, res.ReplyID); err != nil {
-			return nil, err
-		}
 	}
 	if res.ReplyID != "" {
 		if err := s.api.DeleteReply(ctx, id, commentID, res.ReplyID); err != nil {

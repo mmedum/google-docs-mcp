@@ -222,7 +222,6 @@ type ReviewRequest struct {
 	Document       string
 	Action         string // accept, reject, discard
 	IDs            []string
-	All            bool
 	ExpectRevision string
 	DryRun         bool
 }
@@ -254,8 +253,8 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	if err := s.wordUnsupported(ctx, req.Document, "reviewing suggestions"); err != nil {
 		return nil, err
 	}
-	if len(req.IDs) == 0 && !req.All {
-		return nil, Errorf("invalid", "pass ids or all: true")
+	if len(req.IDs) == 0 {
+		return nil, Errorf("invalid", "pass the ids of the suggestions to review, from list_suggestions")
 	}
 	id, err := parseRef(req.Document)
 	if err != nil {
@@ -276,12 +275,6 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		all = append(all, sg.ID)
 	}
 	ids := req.IDs
-	if req.All {
-		ids = all
-	}
-	if len(ids) == 0 {
-		return nil, Errorf("not_found", "no pending suggestions")
-	}
 	for _, id := range ids {
 		if !pending[id] {
 			return nil, Errorf("not_found", "suggestion %q is not pending at this revision; call list_suggestions", id)
@@ -310,11 +303,6 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	f, err := s.Fetch(ctx, req.Document)
 	if err != nil {
 		return nil, err
-	}
-	if req.All && asks(ctx) {
-		if err := ask(ctx, render.AskReviewAll(f.Doc.ID, f.Doc.Title, action, ids)); err != nil {
-			return nil, err
-		}
 	}
 	f.Doc.RevisionID = list.RevisionID // guard against the revision the list came from
 	_, revision, err := s.batchUpdate(ctx, f, reqs, "")

@@ -248,7 +248,7 @@ func TestListSuggestionsShowsTheThreadsReplies(t *testing.T) {
 
 func TestReplyAndDeleteComment(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := accepting(context.Background())
+	ctx := context.Background()
 	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x"}, {ID: "c2", Content: "y", Resolved: true,
 		Replies: []*gapi.DriveReply{{ID: "r7", Content: "done"}}}, {ID: "c3", Deleted: true}}
 	res, err := svc.Reply(ctx, ReplyRequest{Document: fixtureID, CommentID: "c1", Content: "thanks"})

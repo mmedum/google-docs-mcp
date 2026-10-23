@@ -111,7 +111,8 @@ func TestLiveLists(t *testing.T) {
 		edit("back to the top after a nested item by list_level", map[string]any{"op": "insert", "content": "- X2", "list_level": 0,
 			"location": map[string]any{"at": "after", "of": map[string]any{"handle": handle("x1")}}})
 		if mode == "suggest" {
-			d.ok("suggest: accept them all", "review_suggestion", map[string]any{"document": doc, "action": "accept", "all": true})
+			d.ok("suggest: accept them all", "review_suggestion", map[string]any{"document": doc, "action": "accept",
+				"ids": d.pendingIDs("suggest: list them", doc)})
 		}
 		checkLists(t, mode, d.ok(mode+": read the lists", "read_document", map[string]any{"document": doc, "format": "raw", "max_chars": 100000}))
 	}

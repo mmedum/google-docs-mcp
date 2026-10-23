@@ -36,51 +36,35 @@ type driver struct {
 	cs          *mcp.ClientSession
 	ctx         context.Context
 	destructive bool
-	// person answers the questions the server asks: accept, unless a
-	// step says otherwise.
-	person *person
 }
 
-// person is the client's answer to every question the server puts,
-// and the questions it was asked since a step last looked.
-type person struct {
-	mu        sync.Mutex
-	action    string
-	questions []string
-}
-
-func (p *person) handle(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.questions = append(p.questions, req.Params.Message)
-	return &mcp.ElicitResult{Action: p.action}, nil
-}
-
-// answer sets the next answer and forgets what was asked.
-func (p *person) answer(action string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.action, p.questions = action, nil
-}
-
-// asked is what was asked since the last answer was set.
-func (p *person) asked() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.Clone(p.questions)
-}
-
-// wasAsked fails the step unless exactly one question was put since the
-// answer was last set, saying want. The question is not logged: it
-// quotes the document.
-func (d *driver) wasAsked(label, want string) {
-	d.t.Helper()
-	qs := d.person.asked()
-	if len(qs) != 1 || !strings.Contains(qs[0], want) {
-		d.t.Errorf("%s: %d questions, the first %q", label, len(qs), shown(strings.Join(qs, " | "), 300))
+// asksNobody is the client's answer to a question from the server, which
+// asks nobody (docs/architecture.md §12a): the driver is a client that
+// can be asked, so a question from any step fails the run. The question
+// is not logged, since it would quote the document; its length is.
+func asksNobody(t *testing.T) func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+	return func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		t.Errorf("the server asked the person a question of %d characters; it asks nobody", len(req.Params.Message))
+		return &mcp.ElicitResult{Action: "decline"}, nil
 	}
-	d.person.answer("accept")
 }
+
+// pendingIDs is the id of every suggestion list_suggestions shows as
+// pending, which is what review_suggestion takes.
+func (d *driver) pendingIDs(label, doc string) []any {
+	d.t.Helper()
+	var ids []any
+	for _, m := range pendingID.FindAllStringSubmatch(d.ok(label, "list_suggestions", map[string]any{"document": doc}), -1) {
+		ids = append(ids, m[1])
+	}
+	if len(ids) == 0 {
+		d.t.Errorf("%s: no pending suggestion listed", label)
+	}
+	return ids
+}
+
+// pendingID is a suggestion's line in list_suggestions: "- <id> [<handle>] <kind>".
+var pendingID = regexp.MustCompile(`(?m)^- (\S+) \[`)
 
 // start builds nothing and assumes `make build`: the point is to drive
 // the binary a person would run.
@@ -98,8 +82,7 @@ func start(t *testing.T) *driver {
 	cmd.Env = env
 	cmd.Stderr = os.Stderr
 	ctx := context.Background()
-	p := &person{action: "accept"}
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "livecheck", Version: "0"}, &mcp.ClientOptions{ElicitationHandler: p.handle}).
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "livecheck", Version: "0"}, &mcp.ClientOptions{ElicitationHandler: asksNobody(t)}).
 		Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -107,7 +90,6 @@ func start(t *testing.T) *driver {
 	t.Cleanup(func() { _ = cs.Close() })
 	d := &driver{t: t, cs: cs, ctx: ctx,
 		destructive: truthy(os.Getenv("GDOCS_ENABLE_DESTRUCTIVE")),
-		person:      p,
 	}
 	return d
 }

@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-23
+
 ### Changed
 
 - **Breaking:** the server no longer asks you before a write; your MCP client approves each call. In Claude Code, list the writes you want to approve under `permissions.ask`, as the README shows. `delete_comment` and `delete_tab` no longer carry the `requiresUserInteraction` mark, so Claude Code asks for them by your rules, and headless it no longer refuses them.

@@ -1,6 +1,10 @@
 # Architecture — google-docs-mcp
 
-**Status:** v2.4.0 (released 2026-10-22, live run green). A Word file
+**Status:** v3.0.0 (released 2026-10-23, live run green). The server
+asks the person nothing, and the client approves each call (§12a).
+`review_suggestion` names each suggestion it reviews, `delete_comment`
+takes the start of the text it deletes, and `force` never writes past
+unsaved editor work. A Word file
 (.docx) is edited by writing the file itself, since the Docs API reads
 one and refuses every write to it: text, tracked changes and comments
 go into its XML and up through Drive (§7.6). Nested list items written
@@ -13,9 +17,7 @@ the older `text/x-markdown`. A Google Doc working copy carries a live
 session's work back to the file, block by block. Comments and
 suggestions are generally available and detected per read rather than
 gated on a flag (§18). Since v2.0.1 a write that may have landed is
-reported as `[ambiguous_outcome]` instead of being repeated. Unreleased,
-for 3.0.0: the server asks the person nothing, and the client approves
-each call (§12a).
+reported as `[ambiguous_outcome]` instead of being repeated.
 Phases 0 to 4 are done (§16): auth, raw
 client, model, renderer, reads, search, create, export, editing with
 minimal diffs in all three modes, formatting, suggestion review, comment
@@ -1302,14 +1304,14 @@ gain `dry_run`, and `export_document` is annotated as the local write it
 is. The questions, the signed state and `quoted()` are ported from the
 sibling that last fixed them.
 
-**3.0.0 — the client decides (unreleased).** §12a. The question goes,
+**3.0.0 — the client decides (2026-10-23).** §12a. The question goes,
 and with it `GDOCS_REQUIRE_PROMPT`, refused at start when on; the module
 path moves to `/v3`. `review_suggestion` takes ids only,
 `delete_comment` takes the start of the text it deletes, `force` stops
 at unsaved editor work, and no tool carries `requiresUserInteraction`.
 An export no longer overwrites a file or follows a link (§12). The live
-run that must precede the release drives every tool through a client
-that can be asked and fails on any question.
+run before the release drove every tool through a client that can be
+asked and fails on any question; none was put.
 
 ## 17. Open decisions
 

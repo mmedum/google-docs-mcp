@@ -1,6 +1,10 @@
 # Architecture — google-docs-mcp
 
-**Status:** v3.0.0 (released 2026-10-23, live run green). The server
+**Status:** v3.1.0 (2026-10-24). The Claude Desktop bundle has the
+shape the sibling servers' bundles share: every setting another client
+sets, each off or empty by default as the server is, the shared file
+names, LICENSE and the README, and Google's privacy policy; the server
+is unchanged. v3.0.0 (released 2026-10-23, live run green). The server
 asks the person nothing, and the client approves each call (§12a).
 `review_suggestion` names each suggestion it reviews, `delete_comment`
 takes the start of the text it deletes, and `force` never writes past

@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-24
+
 ### Added
 
 - The Claude Desktop bundle asks for the OAuth client file, `enable_destructive` and the export folder as well as the profile, read-only and the default write mode, each off or empty unless you set it, and names Google's privacy policy.

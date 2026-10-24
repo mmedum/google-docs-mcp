@@ -7,11 +7,13 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
 func TestPathsAndRoundTrip(t *testing.T) {
 	base := t.TempDir()
-	t.Setenv(EnvDir, base)
+	t.Setenv(config.EnvConfigDir, base)
 
 	if d, _ := ProfileDir(""); d != base {
 		t.Fatalf("default profile dir = %s", d)
@@ -65,7 +67,7 @@ func TestPathsAndRoundTrip(t *testing.T) {
 }
 
 func TestBaseDirFallsBackToUserConfigDir(t *testing.T) {
-	t.Setenv(EnvDir, "")
+	t.Setenv(config.EnvConfigDir, "")
 	d, err := BaseDir()
 	if err != nil {
 		t.Skip("no user config dir on this system")
@@ -82,7 +84,7 @@ func TestBaseDirFallsBackToUserConfigDir(t *testing.T) {
 // "userconfig" in the message would waste someone's afternoon.
 func TestErrorPaths(t *testing.T) {
 	base := t.TempDir()
-	t.Setenv(EnvDir, base)
+	t.Setenv(config.EnvConfigDir, base)
 
 	t.Run("unparsable config", func(t *testing.T) {
 		p, err := Path("bad")
@@ -141,7 +143,7 @@ func TestErrorPaths(t *testing.T) {
 // to put a config, and every path helper has to say so rather than
 // returning a path relative to nothing.
 func TestNoConfigDirectory(t *testing.T) {
-	t.Setenv(EnvDir, "")
+	t.Setenv(config.EnvConfigDir, "")
 	if runtime.GOOS == "windows" {
 		// os.UserConfigDir reads %AppData% on Windows and errors when it
 		// is empty, which is the same experiment as clearing HOME

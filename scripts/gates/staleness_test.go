@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
 // The changelog rule is the one with a scar: it used to fail on every
@@ -76,18 +78,47 @@ func TestDifference(t *testing.T) {
 	}
 }
 
-// The two patterns that turn hand-written lists into derived ones. If
-// either stops matching, the gate silently checks nothing — so the gate
-// asserts a floor on what it found, and these pin the shapes.
-func TestPatternsMatchTheRealShapes(t *testing.T) {
-	const config = `	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level")
-	sw(&s.ReadOnly, "read-only", "READ_ONLY", "register only read tools")
-	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-request timeout")`
-	keys := configKey.FindAllStringSubmatch(config, -1)
-	if len(keys) != 3 || keys[0][1] != "LOG_LEVEL" || keys[1][1] != "READ_ONLY" || keys[2][1] != "HTTP_TIMEOUT" {
-		t.Errorf("config keys = %v", keys)
+// The configuration page names every variable the server reads as a
+// whole word, the removed one and the two read outside Define included,
+// names no other, and says what a profile name is.
+func TestConfigDocProblems(t *testing.T) {
+	doc := string(repoFile(t, configDocPath))
+	if got := configDocProblems(config.Vars(), doc); len(got) != 0 {
+		t.Errorf("the committed page: %q", got)
 	}
+	for _, tc := range []struct {
+		name, old, new string
+		want           []string
+	}{
+		{"a variable left out", "`GDOCS_HTTP_TIMEOUT`", "`the timeout`",
+			[]string{"docs/configuration.md does not document GDOCS_HTTP_TIMEOUT"}},
+		{"a removed variable left out", "`GDOCS_REQUIRE_PROMPT`", "`the prompt setting`",
+			[]string{"docs/configuration.md does not document GDOCS_REQUIRE_PROMPT"}},
+		{"a variable read outside Define left out", "`GDOCS_REFRESH_TOKEN`", "`the refresh token`",
+			[]string{"docs/configuration.md does not document GDOCS_REFRESH_TOKEN"}},
+		{"a name kept only inside a longer one", "`GDOCS_CONFIG_DIR`", "`GDOCS_CONFIG_DIRECTORY`", []string{
+			"docs/configuration.md does not document GDOCS_CONFIG_DIR",
+			"docs/configuration.md documents GDOCS_CONFIG_DIRECTORY, which the code does not read",
+		}},
+		{"a variable the code does not read", "`GDOCS_HTTP_TIMEOUT`", "`GDOCS_HTTP_TIMEOUT` and `GDOCS_RETRIES`",
+			[]string{"docs/configuration.md documents GDOCS_RETRIES, which the code does not read"}},
+		{"the profile rule in other words", "- and _, starting", "`-` and `_`, starting",
+			[]string{`docs/configuration.md does not say a profile name is "up to 64 characters from a to z, ` +
+				`0 to 9, - and _, starting with a letter or digit"`}},
+	} {
+		if !strings.Contains(doc, tc.old) {
+			t.Fatalf("%s: the page does not say %q", tc.name, tc.old)
+		}
+		if got := configDocProblems(config.Vars(), strings.ReplaceAll(doc, tc.old, tc.new)); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
 
+// The pattern that turns the README's hand-written table into a derived
+// list. If it stops matching, the gate silently checks nothing, so this
+// pins the shape.
+func TestPatternsMatchTheRealShapes(t *testing.T) {
 	const readme = "| `get_document` | metadata |\n| `read_document` | text |\nnot a row\n"
 	tools := readmeTool.FindAllStringSubmatch(readme, -1)
 	if len(tools) != 2 || tools[0][1] != "get_document" || tools[1][1] != "read_document" {

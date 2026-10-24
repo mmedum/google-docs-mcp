@@ -106,11 +106,11 @@ type Settings struct {
 	// removed are the removed settings, as the environment gives them,
 	// read only to refuse one still set.
 	removed map[string]string
-	// vars is every setting Define binds to a flag, in order.
+	// vars is every variable Define reads, in order.
 	vars []Var
 }
 
-// Var is one setting Define binds to a flag.
+// Var is one variable the server reads.
 type Var struct {
 	// Name is the environment variable.
 	Name string
@@ -121,6 +121,29 @@ type Var struct {
 	Default string
 	// Switch marks a setting that is on or off.
 	Switch bool
+	// Removed marks a setting a release took out, read only to refuse it.
+	Removed bool
+}
+
+// The variables read outside Define. internal/userconfig reads the
+// profile directory before any flag is parsed, and internal/credentials
+// the refresh token; each takes its name from here, so config imports
+// neither, and the bundle gate imports no keyring.
+const (
+	EnvConfigDir    = EnvPrefix + "CONFIG_DIR"
+	EnvRefreshToken = EnvPrefix + "REFRESH_TOKEN"
+)
+
+// envOnly is every variable read outside Define, for Vars.
+var envOnly = []string{EnvConfigDir, EnvRefreshToken}
+
+// Lookup is the variable name as env gives it, without the spaces around
+// it. Spaces alone are "", unset as an empty variable is, so a form field
+// cleared to a space means the default rather than a value the server
+// refuses. Define reads every setting through it, and so does each
+// reader of a variable outside Define.
+func Lookup(env func(string) string, name string) string {
+	return strings.TrimSpace(env(name))
 }
 
 // removedSettings are the removed settings that made the server ask the
@@ -131,27 +154,21 @@ var removedSettings = []struct{ key, instead string }{
 	{"REQUIRE_PROMPT", "leave " + EnvPrefix + "ENABLE_DESTRUCTIVE off for a client that runs with nobody watching"},
 }
 
-// RemovedVars are the variables a release removed that the server still
-// reads, only to refuse one set to anything but off.
-func RemovedVars() []string {
-	out := make([]string, 0, len(removedSettings))
-	for _, r := range removedSettings {
-		out = append(out, EnvPrefix+r.key)
-	}
-	return out
-}
-
 // Define registers one flag per setting on fs. Each flag defaults to the
 // matching GDOCS_* variable (read through env) so that a flag passed on
 // the command line wins over the environment, and the environment wins
 // over the built-in default.
+//
+// Each variable it reads is recorded for Vars, which the staleness and
+// bundle gates read, so neither can fall behind a setting added here.
 func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	s := &Settings{removed: map[string]string{}}
 	for _, r := range removedSettings {
-		s.removed[r.key] = env(EnvPrefix + r.key)
+		s.removed[r.key] = Lookup(env, EnvPrefix+r.key)
+		s.vars = append(s.vars, Var{Name: EnvPrefix + r.key, Removed: true})
 	}
 	bind := func(p *string, name, key, fallback, usage string, isSwitch bool) {
-		v := env(EnvPrefix + key)
+		v := Lookup(env, EnvPrefix+key)
 		if v == "" {
 			v = fallback
 		}
@@ -165,7 +182,7 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
 	def(&s.Preview, "preview", "PREVIEW", "", "deprecated and ignored: comments and suggestions are generally available")
-	def(&s.DefaultWriteMode, "default-write-mode", "DEFAULT_WRITE_MODE", "", "default write mode: suggest, direct, comment")
+	def(&s.DefaultWriteMode, "default-write-mode", "DEFAULT_WRITE_MODE", "", "default write mode: "+WriteModeRule())
 	sw(&s.ReadOnly, "read-only", "READ_ONLY", "register only read tools and request read-only scopes")
 	sw(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "register destructive tools (delete comment, delete tab)")
 	def(&s.ExportDir, "export-dir", "EXPORT_DIR", "", "directory binary exports may be written to (unset disables them)")
@@ -174,27 +191,74 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	return s
 }
 
-// Vars is every setting Define binds to a flag, in the order it binds
-// them. The bundle gate reads each switch's default here.
+// Vars is every variable the server reads, sorted by name: Define's,
+// the removed ones included, and the ones read outside it. Define's are
+// recorded rather than listed, so they cannot fall behind. The bundle
+// and staleness gates derive what they hold from these.
 func Vars() []Var {
+	vars := defined()
+	for _, name := range envOnly {
+		vars = append(vars, Var{Name: name})
+	}
+	slices.SortFunc(vars, func(a, b Var) int { return strings.Compare(a.Name, b.Name) })
+	return vars
+}
+
+// defined is every variable Define reads, in the order it reads them.
+func defined() []Var {
 	fs := flag.NewFlagSet("vars", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	return Define(fs, func(string) string { return "" }).vars
 }
 
-// EnvVars is every variable Define reads, the removed ones included,
-// sorted. It is recorded from the lookups rather than listed, so it
-// cannot fall behind.
+// EnvVars is the names of Vars, sorted. A name listed twice is a
+// variable read under two rules, which a test refuses, so it is not
+// compacted.
 func EnvVars() []string {
-	var seen []string
-	fs := flag.NewFlagSet("envvars", flag.ContinueOnError)
+	vars := Vars()
+	names := make([]string, 0, len(vars))
+	for _, v := range vars {
+		names = append(names, v.Name)
+	}
+	return names
+}
+
+// Load is Define, Parse and Build for a caller with no flags of its own.
+func Load(args []string, env func(string) string) (Config, error) {
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	Define(fs, func(name string) string {
-		seen = append(seen, name)
-		return ""
-	})
-	slices.Sort(seen)
-	return slices.Compact(seen)
+	s := Define(fs, env)
+	if err := fs.Parse(args); err != nil {
+		return Config{}, err
+	}
+	return s.Build()
+}
+
+// ProfileRule is profilePattern in words, which Build's refusal and the
+// bundle's profile field both give.
+const ProfileRule = "up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit"
+
+// WriteModeRule is WriteModes in words, "suggest, direct or comment",
+// which Build's refusal and the bundle's default write mode field both
+// give.
+func WriteModeRule() string {
+	modes := WriteModes()
+	words := make([]string, len(modes))
+	for i, m := range modes {
+		words[i] = string(m)
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
+}
+
+// asciiLower lowers A to Z alone, so a character Unicode folds into a
+// to z, such as the Kelvin sign, is refused rather than renamed.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
 }
 
 var (
@@ -212,9 +276,9 @@ func (s *Settings) Build() (Config, error) {
 	var c Config
 	var errs []error
 
-	c.Profile = strings.ToLower(strings.TrimSpace(s.Profile))
+	c.Profile = asciiLower(strings.TrimSpace(s.Profile))
 	if !profilePattern.MatchString(c.Profile) {
-		errs = append(errs, fmt.Errorf("%w: profile %q must match %s", ErrInvalid, s.Profile, profilePattern))
+		errs = append(errs, fmt.Errorf("%w: profile %q must be %s", ErrInvalid, s.Profile, ProfileRule))
 	}
 
 	c.LogLevel = LogLevel(strings.ToLower(strings.TrimSpace(s.LogLevel)))
@@ -252,7 +316,7 @@ func (s *Settings) Build() (Config, error) {
 	case mode == "":
 		c.DefaultWriteMode = WriteSuggest
 	case !writeModes[mode]:
-		errs = append(errs, fmt.Errorf("%w: default write mode %q (want suggest, direct, comment)", ErrInvalid, s.DefaultWriteMode))
+		errs = append(errs, fmt.Errorf("%w: default write mode %q (want %s)", ErrInvalid, s.DefaultWriteMode, WriteModeRule()))
 	default:
 		c.DefaultWriteMode = mode
 	}

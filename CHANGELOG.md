@@ -8,6 +8,16 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+
+- The Claude Desktop bundle says that its OAuth client field may be left empty to use the client `google-docs-mcp login` recorded for the profile, as before, and that a file picked there must be that same client, since the refresh token belongs to it.
+- The Claude Desktop bundle's profile field says what a profile name may be: up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit, with capitals read as lowercase. The server's refusal of another name states the same rule.
+
+### Fixed
+
+- A profile name with a character that Unicode lowercases into a to z, such as the Kelvin sign (U+212A), is refused rather than read as another profile's name.
+- A variable set to spaces alone is unset, as an empty one is, `GDOCS_CONFIG_DIR` and `GDOCS_REFRESH_TOKEN` included, and the spaces around a value are dropped; a bundle field cleared to a space no longer stops the server.
+
 ## [3.1.0] - 2026-10-24
 
 ### Added

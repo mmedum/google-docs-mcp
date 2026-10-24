@@ -12,13 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
 // AppDir is the directory name under the user's config directory.
 const AppDir = "google-docs-mcp"
-
-// EnvDir overrides the base directory (tests, unusual setups).
-const EnvDir = "GDOCS_CONFIG_DIR"
 
 // DefaultProfile is the profile used when none is named.
 const DefaultProfile = "default"
@@ -35,9 +34,11 @@ type Config struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// BaseDir returns the application config directory.
+// BaseDir returns the application config directory: config.EnvConfigDir,
+// read through config.Lookup as every setting is, or the user's config
+// directory.
 func BaseDir() (string, error) {
-	if v := os.Getenv(EnvDir); v != "" {
+	if v := config.Lookup(os.Getenv, config.EnvConfigDir); v != "" {
 		return v, nil
 	}
 	d, err := os.UserConfigDir()

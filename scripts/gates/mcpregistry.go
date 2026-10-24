@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -88,9 +89,10 @@ func githubRepo(module string) (owner, name string, err error) {
 	return parts[1], parts[2], nil
 }
 
-// modulePath reads the module this repository is, from go.mod.
-func modulePath() (string, error) {
-	data, err := os.ReadFile("go.mod")
+// modulePath reads the module the repository under root is, from its
+// go.mod, under Windows line endings too.
+func modulePath(root string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(root, "go.mod")) //nolint:gosec // a repository path
 	if err != nil {
 		return "", err
 	}
@@ -139,7 +141,7 @@ func bundleRow(checksums string) (name, sum string, err error) {
 
 // serverJSON writes the registry entry for one release.
 func serverJSON(version, checksums string, stdout io.Writer) error {
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		return err
 	}

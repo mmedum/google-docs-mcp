@@ -3,17 +3,22 @@
 Everything is an environment variable, because MCP clients pass `command`,
 `args` and `env` to a stdio server and nothing else. Each variable also
 has a flag with the same name (`GDOCS_LOG_LEVEL` ↔ `--log-level`); a flag
-given explicitly wins over the environment.
+given explicitly wins over the environment. A variable set to spaces
+alone is unset, as an empty one is, and the spaces around a value are
+dropped.
 
 The Claude Desktop bundle asks for `GDOCS_CLIENT_SECRET`, `GDOCS_PROFILE`,
 `GDOCS_READ_ONLY`, `GDOCS_ENABLE_DESTRUCTIVE`, `GDOCS_DEFAULT_WRITE_MODE`
 and `GDOCS_EXPORT_DIR`, each under its name without `GDOCS_`, lowercased.
-A field left empty or off does what the variable left unset does.
+A field left empty or off does what the variable left unset does. Leave
+the OAuth client field empty to use the client `login` recorded for the
+profile; a file picked there must be that same client, since the refresh
+token belongs to it.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `GDOCS_PROFILE` | `default` | Named profile. Profiles keep separate client secrets, tokens and account. Use one per Google account. |
-| `GDOCS_CLIENT_SECRET` | profile setting, else `<config dir>/client_secret.json` | Path to the Desktop-app OAuth client JSON. |
+| `GDOCS_PROFILE` | `default` | Named profile. Profiles keep separate client secrets, tokens and account. Use one per Google account. A name is up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit; capitals are read as lowercase, and any other name stops the server at start. |
+| `GDOCS_CLIENT_SECRET` | profile setting, else `<config dir>/client_secret.json` | Path to the Desktop-app OAuth client JSON. Unset or empty, the server uses the client `login` recorded for the profile. |
 | `GDOCS_REFRESH_TOKEN` | unset | Overrides the stored token (CI, automation). |
 | `GDOCS_CONFIG_DIR` | OS config dir + `google-docs-mcp` | Where profiles live. |
 | `GDOCS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr. |

@@ -277,8 +277,9 @@ moment before expecting the tools in a chat.
 
 Claude Desktop can instead open the `.mcpb` bundle from a release, with
 no config file to edit. It asks for the same settings: the OAuth client
-JSON, the profile, read-only, the default write mode, deleting comments
-and tabs (`enable_destructive`) and the export folder (`export_dir`).
+JSON, which may be left empty to use the one `login` recorded, the
+profile, read-only, the default write mode, deleting comments and tabs
+(`enable_destructive`) and the export folder (`export_dir`).
 Deleting stays off unless you turn it on, and binary exports stay off
 until you pick a folder. This server asks nobody before a call. Claude
 Desktop approves each tool, with Allow once or Always allow, and a tool

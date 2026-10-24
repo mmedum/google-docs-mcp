@@ -1,7 +1,7 @@
 // Package credentials stores and resolves the OAuth refresh token.
 //
 // Resolution order, the same one gh uses:
-//  1. GDOCS_REFRESH_TOKEN in the environment (CI, automation).
+//  1. config.EnvRefreshToken in the environment (CI, automation).
 //  2. The OS keyring (Secret Service on Linux, Keychain on macOS,
 //     Credential Manager on Windows), account = profile name.
 //  3. A 0600 file under the profile directory, written only when the
@@ -22,13 +22,12 @@ import (
 	"time"
 
 	"github.com/zalando/go-keyring"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
 // ServiceName is the keyring service identifier.
 const ServiceName = "google-docs-mcp"
-
-// EnvVar is the environment override.
-const EnvVar = "GDOCS_REFRESH_TOKEN"
 
 // Source identifies where a token came from.
 type Source string
@@ -92,9 +91,10 @@ func (s *Store) env(k string) string {
 	return os.Getenv(k)
 }
 
-// Resolve returns the refresh token and where it came from.
+// Resolve returns the refresh token and where it came from. The
+// environment's is read through config.Lookup, as every setting is.
 func (s *Store) Resolve() (string, Source, error) {
-	if v := s.env(EnvVar); v != "" {
+	if v := config.Lookup(s.env, config.EnvRefreshToken); v != "" {
 		return v, SourceEnv, nil
 	}
 	return s.ResolveStored()

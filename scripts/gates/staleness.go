@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"regexp"
@@ -15,13 +16,6 @@ import (
 )
 
 var (
-	// def(&s.Field, "flag-name", "ENV_KEY", default, usage) is how every
-	// setting is registered, and sw(&s.Field, "flag-name", "ENV_KEY",
-	// usage) every switch, so the list of settings is derivable rather
-	// than typed. The shell version this replaces carried a hand-written
-	// case list of eleven names, which is the same shape as the coverage
-	// floor's hand-written package list: silent when it falls behind.
-	configKey  = regexp.MustCompile(`(?:def|sw)\(&s\.\w+,\s*"[a-z-]+",\s*"([A-Z_]+)"`)
 	readmeTool = regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z_]+)` + "`" + ` \|`)
 	// A tool named anywhere in the prose, for the tools that register
 	// only behind a flag and so are described rather than tabulated.
@@ -107,32 +101,18 @@ func staleness(bin string) error {
 	}
 	problems = append(problems, permissionProblems(string(readme), registered)...)
 
-	// Every setting config.go registers, mentioned in the configuration
-	// document under its full environment name.
-	cfg, err := os.ReadFile("internal/config/config.go")
+	// Every variable the server reads, named on the configuration page,
+	// and no other. The list is config.Vars, recorded from the reads
+	// rather than typed, so it cannot fall behind.
+	conf, err := os.ReadFile(configDocPath)
 	if err != nil {
 		return err
 	}
-	conf, err := os.ReadFile("docs/configuration.md")
-	if err != nil {
-		return err
+	vars := config.Vars()
+	if len(vars) < 10 {
+		return fmt.Errorf("config.Vars lists %d variables; the check is not looking at the registry", len(vars))
 	}
-	keys := configKey.FindAllStringSubmatch(string(cfg), -1)
-	if len(keys) < 5 {
-		return fmt.Errorf("found %d settings in config.go; the def() pattern has probably changed", len(keys))
-	}
-	for _, m := range keys {
-		if !strings.Contains(string(conf), "GDOCS_"+m[1]) {
-			problems = append(problems, "docs/configuration.md does not document GDOCS_"+m[1])
-		}
-	}
-	// A removed setting the server still reads, to refuse it set, is
-	// named too, so a person whose server will not start can find why.
-	for _, name := range config.RemovedVars() {
-		if !strings.Contains(string(conf), name) {
-			problems = append(problems, "docs/configuration.md does not say "+name+" was removed")
-		}
-	}
+	problems = append(problems, configDocProblems(vars, string(conf))...)
 
 	arch, err := os.ReadFile("docs/architecture.md")
 	if err != nil {
@@ -153,6 +133,43 @@ func staleness(bin string) error {
 	}
 	return nil
 }
+
+// configDocPath is the page every setting is documented on.
+const configDocPath = "docs/configuration.md"
+
+// configDocProblems holds the configuration page, text, to the variables
+// the server reads, vars, both ways. It names every one as a whole word,
+// a removed one it refuses and the two read outside Define included, so
+// a person whose server will not start can find why, names no other, and
+// says what a profile name is in the words the server refuses one with.
+func configDocProblems(vars []config.Var, text string) []string {
+	var problems []string
+	documented := map[string]bool{}
+	for _, m := range settingWord.FindAllStringSubmatch(text, -1) {
+		documented[m[2]] = true
+	}
+	known := map[string]bool{}
+	for _, v := range vars {
+		known[v.Name] = true
+		if !documented[v.Name] {
+			problems = append(problems, fmt.Sprintf("%s does not document %s", configDocPath, v.Name))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(documented)) {
+		if !known[name] {
+			problems = append(problems, fmt.Sprintf("%s documents %s, which the code does not read", configDocPath, name))
+		}
+	}
+	if !strings.Contains(text, config.ProfileRule) {
+		problems = append(problems, fmt.Sprintf("%s does not say a profile name is %q", configDocPath, config.ProfileRule))
+	}
+	return problems
+}
+
+// settingWord is a setting's name standing as a word of its own, all of
+// it: a longer name that contains one, such as GDOCS_READ_ONLY_X, is that
+// longer name and not GDOCS_READ_ONLY.
+var settingWord = regexp.MustCompile(`(^|[^A-Z0-9_])(` + config.EnvPrefix + `[A-Z0-9_]+)`)
 
 // permissionRule is a Claude Code permission rule for one of this
 // server's tools, under the server name the README's install line gives.

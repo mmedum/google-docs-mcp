@@ -27,6 +27,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -77,7 +78,8 @@ func start(t *testing.T) *driver {
 	if _, err := os.Stat(bin); err != nil {
 		t.Fatalf("build the binary first (make build): %v", err)
 	}
-	env := append(os.Environ(), "GDOCS_LOG_LEVEL=warn")
+	cfg := serverConfig(t)
+	env := append(os.Environ(), config.EnvPrefix+"LOG_LEVEL=warn")
 	cmd := exec.Command(bin)
 	cmd.Env = env
 	cmd.Stderr = os.Stderr
@@ -88,18 +90,21 @@ func start(t *testing.T) *driver {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(func() { _ = cs.Close() })
-	d := &driver{t: t, cs: cs, ctx: ctx,
-		destructive: truthy(os.Getenv("GDOCS_ENABLE_DESTRUCTIVE")),
-	}
+	d := &driver{t: t, cs: cs, ctx: ctx, destructive: cfg.EnableDestructive}
 	return d
 }
 
-func truthy(s string) bool {
-	switch strings.ToLower(s) {
-	case "1", "true", "yes", "on":
-		return true
+// serverConfig is the configuration the server the driver starts reads
+// from this environment, through config as the server reads it, so the
+// driver runs the deletion steps and opens the profile exactly when the
+// server does.
+func serverConfig(t *testing.T) config.Config {
+	t.Helper()
+	cfg, err := config.Load(nil, os.Getenv)
+	if err != nil {
+		t.Fatal(shown("the server would refuse this environment: "+err.Error(), 300))
 	}
-	return false
+	return cfg
 }
 
 // call runs one tool and logs a scrubbed transcript line. It returns the

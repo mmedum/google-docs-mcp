@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -73,7 +74,7 @@ func liveRegistration(t *testing.T, d *driver) {
 			bin = "../../google-docs-mcp"
 		}
 		cmd := exec.Command(bin)
-		cmd.Env = append(append(os.Environ(), "GDOCS_LOG_LEVEL=warn"), env...)
+		cmd.Env = append(append(os.Environ(), config.EnvPrefix+"LOG_LEVEL=warn"), env...)
 		ctx := context.Background()
 		cs, err := mcp.NewClient(&mcp.Implementation{Name: "config", Version: "0"}, nil).
 			Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
@@ -93,9 +94,9 @@ func liveRegistration(t *testing.T, d *driver) {
 		return names
 	}
 
-	off := tools("GDOCS_ENABLE_DESTRUCTIVE=false")
-	on := tools("GDOCS_ENABLE_DESTRUCTIVE=true")
-	readOnly := tools("GDOCS_READ_ONLY=true", "GDOCS_ENABLE_DESTRUCTIVE=true")
+	off := tools(config.EnvPrefix + "ENABLE_DESTRUCTIVE=false")
+	on := tools(config.EnvPrefix + "ENABLE_DESTRUCTIVE=true")
+	readOnly := tools(config.EnvPrefix+"READ_ONLY=true", config.EnvPrefix+"ENABLE_DESTRUCTIVE=true")
 	t.Logf("=== tools by configuration ===\ndestructive off: %d, on: %d, read-only: %d", len(off), len(on), len(readOnly))
 
 	for _, name := range gated {

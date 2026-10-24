@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
 // smoke drives the built binary over stdio without credentials, twice.
@@ -40,8 +42,8 @@ func smoke(w io.Writer, args []string) error {
 	}
 	defer func() { _ = os.RemoveAll(cfg) }()
 	env := append(os.Environ(),
-		"GDOCS_CONFIG_DIR="+filepath.Join(cfg, "cfg"),
-		"GDOCS_LOG_LEVEL=error",
+		config.EnvConfigDir+"="+filepath.Join(cfg, "cfg"),
+		config.EnvPrefix+"LOG_LEVEL=error",
 	)
 
 	const initialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}`

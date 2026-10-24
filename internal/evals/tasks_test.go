@@ -5,6 +5,8 @@ package evals
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
 // check is one scored assertion about the end state or the trace.
@@ -381,7 +383,7 @@ var tasks = []task{
 	},
 	{
 		name:   "read-only",
-		env:    map[string]string{"GDOCS_READ_ONLY": "true"},
+		env:    map[string]string{config.EnvPrefix + "READ_ONLY": "true"},
 		prompt: "In the Google Doc %s, change 'a lot' to 'substantially' with a direct edit.",
 		check: func(s *server, doc string, tr *trace) []check {
 			md := s.read(doc, nil)

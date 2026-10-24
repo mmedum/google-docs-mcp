@@ -153,3 +153,26 @@ func TestTheVersionMayCarryItsVOrNot(t *testing.T) {
 		t.Fatalf("v2.3.4 and 2.3.4 produced different entries:\n%s\n%s", withV.String(), without.String())
 	}
 }
+
+// The entry reads the manifest the bundle gate vets, through the same
+// start: a key repeated in it is refused, rather than decoded into a
+// description the host would not read.
+func TestTheRegistryEntryReadsTheVettedManifest(t *testing.T) {
+	root := copiedRoot(t)
+	body := string(repoFile(t, manifestPath))
+	const at = `  "user_config": {`
+	if !strings.Contains(body, at) {
+		t.Fatalf("the manifest does not say %q", at)
+	}
+	put(t, root, manifestPath, strings.Replace(body, at, `  "description": "Another description.",`+"\n"+at, 1))
+	path := checksums(t, oneBundle)
+	t.Chdir(root)
+	var out bytes.Buffer
+	err := serverJSON("v1.2.0", path, &out)
+	if want := "the manifest has description more than once"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("serverJSON = %v, want it refused, naming %q", err, want)
+	}
+	if out.Len() > 0 {
+		t.Errorf("a refused entry was written:\n%s", out.String())
+	}
+}

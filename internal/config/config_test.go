@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -106,9 +107,6 @@ func TestTheRemovedRequirePromptIsRefusedUnlessOff(t *testing.T) {
 	Define(fs, func(string) string { return "" })
 	if fs.Lookup("require-prompt") != nil {
 		t.Error("--require-prompt is still a flag")
-	}
-	if got := RemovedVars(); len(got) != 1 || got[0] != "GDOCS_REQUIRE_PROMPT" {
-		t.Errorf("RemovedVars() = %v", got)
 	}
 }
 
@@ -214,22 +212,19 @@ func TestTheDirectoryMustExistAndBeADirectory(t *testing.T) {
 	}
 }
 
-// Vars is what the bundle gate reads a switch's default from, so each
+// Vars is what the bundle gate reads a setting's kind from, so each
 // claim it makes is held to what Build does. A switch takes true and
-// false and refuses anything else, and nothing else does that. Its
-// default, and an empty value, each configure what setting nothing does,
-// which is what lets a bundle leave a field blank.
+// false and refuses anything else, and nothing else does that. A
+// removed setting takes false and refuses true. An empty value
+// configures what setting nothing does, which is what lets a bundle
+// leave a field blank.
 func TestVarsDescribeWhatBuildDoes(t *testing.T) {
-	vars := Vars()
-	if len(vars) != 10 {
-		t.Fatalf("Vars has %d settings; Define binds 10 flags", len(vars))
-	}
 	unset, err := build(t, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var switches []string
-	for _, v := range vars {
+	var switches, removed []string
+	for _, v := range registry(t) {
 		accepts := func(value string) bool {
 			_, err := build(t, map[string]string{v.Name: value})
 			return err == nil
@@ -237,38 +232,126 @@ func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 		if boolean := accepts("true") && accepts("false") && !accepts("maybe"); boolean != v.Switch {
 			t.Errorf("%s: Switch is %t, and Build reads it as a boolean: %t", v.Name, v.Switch, boolean)
 		}
+		if gone := accepts("false") && !accepts("true") && !accepts("maybe"); gone != v.Removed {
+			t.Errorf("%s: Removed is %t, and Build refuses it on: %t", v.Name, v.Removed, gone)
+		}
 		if v.Switch {
 			switches = append(switches, v.Name)
 		}
-		for _, value := range []string{v.Default, ""} {
-			c, err := build(t, map[string]string{v.Name: value})
-			if err != nil {
-				t.Errorf("%s=%q is refused: %v", v.Name, value, err)
-				continue
-			}
-			if !reflect.DeepEqual(c, unset) {
-				t.Errorf("%s=%q configures something:\n got %+v\nwant %+v", v.Name, value, c, unset)
-			}
+		if v.Removed {
+			removed = append(removed, v.Name)
+		}
+		c, err := build(t, map[string]string{v.Name: ""})
+		if err != nil {
+			t.Errorf("%s=\"\" is refused: %v", v.Name, err)
+			continue
+		}
+		if !reflect.DeepEqual(c, unset) {
+			t.Errorf("%s=\"\" configures something:\n got %+v\nwant %+v", v.Name, c, unset)
 		}
 	}
-	if want := []string{"GDOCS_READ_ONLY", "GDOCS_ENABLE_DESTRUCTIVE"}; !slices.Equal(switches, want) {
+	if want := []string{"GDOCS_ENABLE_DESTRUCTIVE", "GDOCS_READ_ONLY"}; !slices.Equal(switches, want) {
 		t.Errorf("switches %v, want %v", switches, want)
+	}
+	if want := []string{"GDOCS_REQUIRE_PROMPT"}; !slices.Equal(removed, want) {
+		t.Errorf("Vars marks %v removed, want %v", removed, want)
 	}
 }
 
-// EnvVars is recorded from the lookups Define makes, so it holds the
-// removed setting that no flag binds as well as every one that does.
-func TestEnvVarsIsEveryLookup(t *testing.T) {
-	got := EnvVars()
-	for _, v := range Vars() {
-		if !slices.Contains(got, v.Name) {
-			t.Errorf("EnvVars lacks %s, which Define binds", v.Name)
+// EnvVars is every variable the server reads, the removed one and the
+// two read outside Define included, sorted.
+func TestEnvVars(t *testing.T) {
+	want := []string{
+		"GDOCS_CLIENT_SECRET", "GDOCS_CONFIG_DIR", "GDOCS_DEFAULT_WRITE_MODE", "GDOCS_ENABLE_DESTRUCTIVE",
+		"GDOCS_EXPORT_DIR", "GDOCS_HTTP_TIMEOUT", "GDOCS_LOG_FORMAT", "GDOCS_LOG_LEVEL", "GDOCS_PREVIEW",
+		"GDOCS_PROFILE", "GDOCS_READ_ONLY", "GDOCS_REFRESH_TOKEN", "GDOCS_REQUIRE_PROMPT",
+	}
+	if got := EnvVars(); !slices.Equal(got, want) {
+		t.Errorf("EnvVars =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// registry is Vars, refused below VarsFloor.
+func registry(t *testing.T) []Var {
+	t.Helper()
+	vars := Vars()
+	if len(vars) < VarsFloor {
+		t.Fatalf("Vars has %d variables, want at least %d", len(vars), VarsFloor)
+	}
+	return vars
+}
+
+// Define reads each variable once, and records each once for Vars. Two
+// settings on one variable would leave it to whichever Build reads
+// last. A variable Define reads and something outside it reads too
+// would be read under two rules; EnvVars lists it twice, so this sees
+// it.
+func TestDefineReadsEachVariableOnce(t *testing.T) {
+	registry(t)
+	reads := map[string]int{}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	Define(fs, func(name string) string { reads[name]++; return "" })
+	var listed []string
+	for _, v := range defined() {
+		listed = append(listed, v.Name)
+	}
+	slices.Sort(listed)
+	if read := slices.Sorted(maps.Keys(reads)); !slices.Equal(listed, read) {
+		t.Errorf("Define records %v\nDefine reads %v", listed, read)
+	}
+	for name, n := range reads {
+		if n != 1 {
+			t.Errorf("Define reads %s %d times", name, n)
 		}
 	}
-	if !slices.Contains(got, "GDOCS_REQUIRE_PROMPT") {
-		t.Errorf("EnvVars lacks GDOCS_REQUIRE_PROMPT, which Define reads to refuse it set: %v", got)
+	if names := EnvVars(); !slices.Equal(names, slices.Compact(slices.Clone(names))) {
+		t.Errorf("EnvVars names a variable twice: %v", names)
 	}
-	if len(got) != 11 || !slices.IsSorted(got) {
-		t.Errorf("EnvVars is %v; want the 10 settings and the removed one, sorted", got)
+}
+
+// A profile name is held to ProfileRule, and the refusal says it. Only A
+// to Z are lowered: a character Unicode folds into a to z, such as the
+// Kelvin sign, is refused rather than renamed to another profile.
+func TestProfileRule(t *testing.T) {
+	if ProfileRule != "up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit" {
+		t.Errorf("ProfileRule = %q", ProfileRule)
+	}
+	for _, tc := range []struct{ name, want string }{
+		{"Work", "work"}, {" work ", "work"}, {"a", "a"}, {"9-", "9-"}, {"a-b_c", "a-b_c"},
+		{strings.Repeat("a", 64), strings.Repeat("a", 64)},
+	} {
+		if c, err := build(t, map[string]string{"GDOCS_PROFILE": tc.name}); err != nil || c.Profile != tc.want {
+			t.Errorf("GDOCS_PROFILE=%q: profile %q, %v; want %q", tc.name, c.Profile, err, tc.want)
+		}
+	}
+	for _, name := range []string{strings.Repeat("a", 65), "-a", "_a", "a.b", "a b", "caf\u00e9", "\u212aey"} {
+		_, err := build(t, map[string]string{"GDOCS_PROFILE": name})
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "must be "+ProfileRule) {
+			t.Errorf("GDOCS_PROFILE=%q: %v; want it refused, naming the rule", name, err)
+		}
+	}
+}
+
+// The write modes in words are the whole list, in order, and the
+// refusal of another mode gives them.
+func TestWriteModeRule(t *testing.T) {
+	if got := WriteModeRule(); got != "suggest, direct or comment" {
+		t.Errorf("WriteModeRule() = %q", got)
+	}
+	_, err := build(t, map[string]string{"GDOCS_DEFAULT_WRITE_MODE": "yolo"})
+	if err == nil || !strings.Contains(err.Error(), `default write mode "yolo" (want suggest, direct or comment)`) {
+		t.Errorf("an unknown write mode gave %v", err)
+	}
+}
+
+// Load is Define, Parse and Build: a flag is read, and an unknown one
+// refused.
+func TestLoad(t *testing.T) {
+	c, err := Load([]string{"--read-only=true"}, func(string) string { return "" })
+	if err != nil || !c.ReadOnly {
+		t.Errorf("Load = %+v, %v; want read-only", c, err)
+	}
+	if _, err := Load([]string{"--unknown"}, func(string) string { return "" }); err == nil {
+		t.Error("an unknown flag was accepted")
 	}
 }

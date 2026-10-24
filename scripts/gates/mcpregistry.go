@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -88,15 +90,23 @@ func githubRepo(module string) (owner, name string, err error) {
 	return parts[1], parts[2], nil
 }
 
-// modulePath reads the module this repository is, from go.mod.
-func modulePath() (string, error) {
-	data, err := os.ReadFile("go.mod")
+// modulePath reads the module the repository under root is, from its
+// go.mod: the module directive, its keyword followed by spaces or a tab,
+// less a trailing // comment, and the path unquoted if it is quoted,
+// under Windows line endings too. Every gate that needs the module path
+// reads it here.
+func modulePath(root string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(root, "go.mod")) //nolint:gosec // a repository path
 	if err != nil {
 		return "", err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "module "); ok {
-			return strings.TrimSpace(rest), nil
+		line, _, _ = strings.Cut(line, "//")
+		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "module" {
+			if unquoted, err := strconv.Unquote(fields[1]); err == nil {
+				return unquoted, nil
+			}
+			return fields[1], nil
 		}
 	}
 	return "", fmt.Errorf("go.mod names no module")
@@ -139,7 +149,7 @@ func bundleRow(checksums string) (name, sum string, err error) {
 
 // serverJSON writes the registry entry for one release.
 func serverJSON(version, checksums string, stdout io.Writer) error {
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		return err
 	}
@@ -157,9 +167,16 @@ func serverJSON(version, checksums string, stdout io.Writer) error {
 		return fmt.Errorf("empty version")
 	}
 
-	m, err := readManifest(manifestPath)
+	// The manifest the bundle gate and the packer vet, through the same
+	// start, so a key repeated in it is refused here too rather than
+	// decoded into a description the host would not read.
+	_, m, problems, err := committedManifest(".")
 	if err != nil {
 		return err
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("the manifest does not describe the bundle the entry names:\n  %s",
+			strings.Join(problems, "\n  "))
 	}
 	if m.Description == "" {
 		return fmt.Errorf("%s has no description for the registry entry to carry", manifestPath)

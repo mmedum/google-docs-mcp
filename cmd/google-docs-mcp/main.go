@@ -314,7 +314,7 @@ func cmdLogin(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg := p.cfg
 	if _, err := os.Stat(p.clientSecretPath); err != nil {
-		return fail(stderr, "OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", p.clientSecretPath)
+		return fail(stderr, "OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH ("+config.EnvPrefix+"CLIENT_SECRET).", p.clientSecretPath)
 	}
 	scopes := auth.Scopes(cfg.ReadOnly)
 	oc, err := auth.LoadClientSecret(p.clientSecretPath, scopes)
@@ -376,8 +376,8 @@ func cmdLogout(args []string, stdout, stderr io.Writer) int {
 			warnStderr(stderr, fmt.Sprintf("could not revoke the token at Google (%v); it is still deleted locally", err))
 		}
 	}
-	if os.Getenv(credentials.EnvVar) != "" {
-		warnStderr(stderr, credentials.EnvVar+" is set; logout cannot remove or revoke it")
+	if config.Lookup(os.Getenv, config.EnvRefreshToken) != "" {
+		warnStderr(stderr, config.EnvRefreshToken+" is set; logout cannot remove or revoke it")
 	}
 	if err := p.store.Delete(); err != nil {
 		return fail(stderr, "%v", err)

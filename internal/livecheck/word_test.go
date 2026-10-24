@@ -19,11 +19,12 @@ import (
 	"github.com/mmedum/google-docs-mcp/v3/internal/userconfig"
 )
 
-// driveClient is a client of the signed-in account, for what no tool
-// does: uploading a Word file to work on.
+// driveClient is a client of the account the server is signed in to,
+// the profile's, for what no tool does: uploading a Word file to work on.
 func driveClient(t *testing.T) *gapi.Client {
 	t.Helper()
-	uc, err := userconfig.Load("default")
+	profile := serverConfig(t).Profile
+	uc, err := userconfig.Load(profile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,8 +32,8 @@ func driveClient(t *testing.T) *gapi.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenFile, _ := userconfig.TokenFilePath("default")
-	store := &credentials.Store{Profile: "default", Keyring: credentials.OSKeyring(), FilePath: tokenFile}
+	tokenFile, _ := userconfig.TokenFilePath(profile)
+	store := &credentials.Store{Profile: profile, Keyring: credentials.OSKeyring(), FilePath: tokenFile}
 	rt, _, err := store.Resolve()
 	if err != nil {
 		t.Fatal(err)

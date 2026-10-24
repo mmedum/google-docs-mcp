@@ -1,6 +1,15 @@
 # Architecture — google-docs-mcp
 
-**Status:** v3.1.0 (2026-10-24). The Claude Desktop bundle has the
+**Status:** v3.1.1 (2026-10-24). 3.1.0's bundle work reviewed after its
+release by `/simplify`, `/code-review medium` and `/security-review`, with
+the family's bundle rules ported (§17a): the gate derives its settings
+from the server's registry, starts the server from the bundle's
+defaults, refuses `args` and overrides, holds each platform to its own
+file and the identity, and refuses a repeated key. The OAuth client
+file's text is the family's, a profile name is lowered A to Z alone,
+a variable of spaces alone is unset, and a relative `GDOCS_CONFIG_DIR`
+is refused. The live driver passed, its transcript read. v3.1.0
+(2026-10-24): the Claude Desktop bundle has the
 shape the sibling servers' bundles share: every setting another client
 sets, each off or empty by default as the server is, the shared file
 names, LICENSE and the README, and Google's privacy policy; the server
@@ -1066,25 +1075,53 @@ accounts. That sets these requirements:
   env-first.
 - **Claude Desktop bundle.** Each release carries a `.mcpb` with the
   family's layout: `server/google-docs-mcp-darwin` (universal),
-  `server/google-docs-mcp.exe`, `server/google-docs-mcp-linux-amd64`,
+  `server/google-docs-mcp.exe` (amd64, which Windows on arm64 runs under
+  emulation), `server/google-docs-mcp-linux-amd64`,
   `server/google-docs-mcp-linux-arm64` and `server/launch-linux.sh`, with
   `LICENSE` and `README.md` at the root. It asks for what a person sets
   in another client's configuration: the OAuth client file, the profile,
   read-only, the destructive switch, the default write mode and the
   export folder, each under its variable's name without `GDOCS_`,
-  lowercased. Logging, the timeout, the deprecated preview switch, the
-  removed prompt setting, the config directory and the refresh token are
-  left out, each with its reason in `gates mcpb`, which fails on a
-  variable with no verdict. Each switch defaults to the server's own
-  default, off, and every other key to `""`, which the server reads as
-  unset. Claude Desktop approves each tool, and a person can set a tool
-  to always allow, so a switch left off is the one guard a bundle install
-  keeps (§18). No combination of the fields is refused: read-only leaves
-  the destructive switch nothing to register and the default write mode
-  nothing to apply to, so those fields say so. The manifest names
-  Google's privacy policy and declares no `tools` list, which would be
-  display only and wrong for most installs, since two settings change
-  what registers.
+  lowercased. The OAuth client file is optional: left empty, the server
+  uses the client `login` recorded for the profile, and a file picked
+  there must be that same client, since the refresh token belongs to it.
+  `gates mcpb` derives what the bundle asks for from `config.Vars`, every
+  variable the server reads: logging, the timeout, the deprecated preview
+  switch, the config directory and the refresh token are left out, each
+  with its reason, the removed prompt setting is left out because config
+  marks it removed, and the gate fails on a variable with no verdict, on
+  a reason for one the server does not read, and on an `env` key that is
+  no setting. Each switch is a boolean whose default is the JSON
+  boolean the server defaults to, false, and every other key defaults to
+  `""`, which the server reads as unset, as it reads spaces alone. No
+  default holds a `${...}` reference, which the host expands and the
+  gate would not. The gate starts the server's
+  own `config.Load` from the environment the defaults give it and refuses
+  any field that differs from an unconfigured start, naming it. Claude
+  Desktop approves each tool, and a person can set a tool to always
+  allow, so a switch left off is the one guard a bundle install keeps
+  (§18). Every setting passes by `env`: `mcp_config.args` is `[]`, and a
+  platform override carries neither `env` nor `args`, since the host
+  replaces the base's with an override's (§18). No combination of the
+  switches is refused: read-only leaves the destructive switch nothing to
+  register and the default write mode nothing to apply to, so those
+  fields say so. The gate starts every set of the switches and holds the
+  refused ones to a declared list, which is empty, both ways. The profile
+  field gives `config.ProfileRule` and the default write mode field
+  `config.WriteModeRule`, the words the server refuses another value
+  with. Every command starts with `${__dirname}/` and names a staged
+  program, never the license or the README, each platform runs the file
+  staged for it, `entry_point` is the file the default command runs, and
+  the platforms, the server's name and `binary` are held to the staged
+  table and the code. The gate, the packer and the registry entry start
+  from one function, which reads the manifest once and refuses a key
+  repeated in one object, two that differ in case alone included, since
+  the gate's decode merges those and the host does not; the packer
+  refuses a version that is not semver, holds the manifest it stamps to
+  the vendored schema, and fails a bundle that does not close. The
+  manifest names Google's privacy policy and declares no `tools` list,
+  which would be display only and wrong for most installs, since two
+  settings change what registers.
 - **Setup guide** in the README, per-deployer, in the order `doctor`
   checks it: Cloud project → APIs → consent screen (Internal vs Testing)
   → Desktop OAuth client → `login` → `doctor`.
@@ -1399,6 +1436,50 @@ v0.3.0, and nothing is left open:
   the gap docs/development.md describes. Embedding keeps `p.Alignment`
   and the rest reading as before at every call site.
 
+**The family-rules review, 2026-10-24.** `/simplify` (one agent over
+reuse, simplification, efficiency and altitude), `/code-review medium`
+and `/security-review` ran over `v3.0.0..family-rules`. Each fix has a
+test that failed on the code before it.
+
+- **Code review.** The live driver read `GDOCS_ENABLE_DESTRUCTIVE` with
+  its own `os.Getenv` and parse, so ` true` registered the deletes and
+  the driver skipped them. It now reads `config.Load`, the profile
+  included, and a scan refuses any `os.Getenv` or `os.LookupEnv` of a
+  server variable. The README said the bundle covered both
+  architectures everywhere; Windows carries amd64, which arm64 runs
+  under emulation. A relative `GDOCS_CONFIG_DIR` is refused at start.
+  `writeEntries` packs the entries it is given, not the global list.
+  One floor, `config.VarsFloor`, holds every walk over `Vars`, and one
+  pattern, `config.NamePattern`, is what a name is to the scan and the
+  staleness gate.
+- **The family's fixes from the sibling reviews of the same day.**
+  `fieldDiff` reports a differing unexported field beside named ones,
+  and compares a pointer by what it holds. `repeatedKeys` takes two keys
+  that differ in case alone as one, quotes a key a dot or a bracket
+  would make ambiguous, and refuses a document it cannot walk. A run of
+  a `+` chain that another operand follows ends in a prefix, not a
+  name. Outside `internal/config` a name is spelled from config's
+  constants, and `config.DefaultProfile` is the one default profile. A
+  default holding `${` is refused. `modulePath` reads a tab, a trailing
+  comment and a quoted path. The registry entry reads the manifest
+  through `committedManifest`.
+- **Simplify.** The packer refuses a version that is not semver.
+  `Var.Default`, which only a test read, is gone. Two tests that
+  repeated the gate's rows are deleted, and the packer's keeps one row.
+- **Security review.** No finding at confidence 8 or above. One note
+  was acted on: a switch defaulting to the text `"false"` passed, since
+  it reaches the server as false. A switch's default is now a JSON
+  boolean.
+
+Kept, each with its reason:
+
+- `docs/configuration.md` and the README type the settings the bundle
+  asks for by hand. Low; a check for it belongs to the family.
+- `auth` honors `token_uri` from the OAuth client JSON. It predates the
+  range, and hardening it is family work, not this release's.
+- The empty `bundleRefused`, `Load` and `EnvVars` stay as the family
+  decided them.
+
 ## 17b. Deviations from the shared standard
 
 Recorded with the port of the standard's §3, 2026-10-23. The rest of
@@ -1555,6 +1636,8 @@ checked rather than assumed.
 | A tracked insertion may wrap a link | Refuted live (spike H): with `w:hyperlink` inside `w:ins`, Docs read the paragraph without the link's text; with `w:ins` inside `w:hyperlink` it read it | A tracked insertion goes inside the link (`internal/ooxml`). |
 | The server should confirm a write with the person itself, through MCP form elicitation | **Refuted 2026-10-22** for the family on documents and source, rechecked 2026-10-23 against the most-used servers and clients. The specification (`server/tools`, 2025-06-18 to 2026-07-28) puts consent to each call on the host; `client/elicitation` lets the client answer "from the user or other sources". Claude Code documents that an `Elicitation` hook answers with no dialog, Codex in full access accepts a form with no fields by itself, open user reports have Claude Code's VS Code extension and Claude Desktop's Code tab decline it unseen and Cowork leave it hanging, and no client's permission rules match it | §12a: the server asks nobody. Registration, the retyped target, the guards, the witnesses and `dry_run` stay; `review_suggestion` carries the ids the question used to show, and `delete_comment` the start of the text. The rows above on asking and on the mark describe what this replaces. |
 | claude.ai, Codex and VS Code all prompt by `destructiveHint` (the family's assumption until 2026-10-23) | **Refuted for VS Code 2026-10-23**, at source: VS Code ignores `destructiveHint` and prompts on every tool not marked `readOnlyHint: true`. Codex prompts by `destructiveHint` in its default `auto` mode, and claude.ai and ChatGPT document that it decides their prompts. Each remembers an approval per tool, never per argument | `readOnlyHint` only on the nine reads, which change nothing; `destructiveHint` on the two deletes. The README says what each client prompts for. |
-| A bundle install has a second approval behind the server, as Claude Code's ask rules are | **Refuted 2026-10-24** on the docs and the reference host, for the family's §10b; Claude Desktop itself not probed, and no page names desktop extensions. anthropics/mcpb v2.1.2 and `70fe3b34` declare `tools` for display, and `src/` reads it only in `init`; v2.1.2 `src/shared/config.ts` passes a boolean to `env` as "true" or "false". claude.com/docs/connectors/getting-started: "Select Allow once to continue, or Always allow to skip the prompt for that tool from now on". claude.com/docs/connectors/building/review-criteria: readOnlyHint and destructiveHint "determine auto-permissions in Claude" | Every switch the bundle asks for defaults to the server's own default, off, and `gates mcpb` refuses one that does not, compared as JSON. The bundle declares no `tools` list (§13). |
-| A bundle's optional setting the person leaves blank reaches the server empty | **Refuted 2026-10-24** on the reference host: anthropics/mcpb v2.1.2 `src/shared/config.ts` builds its variables from the defaults and the person's values, and leaves one it does not have as written, so an optional key with no default reaches `env` as the text `${user_config.x}`. The 3.0.0 bundle gave each of its three keys a default, so it was not affected; without one, the export folder would reach the server as that text, which it refuses as not an absolute path | Every optional key has a default, and `gates mcpb` refuses one without. The environment the defaults give the server must configure it as no environment does, which `TestVarsDescribeWhatBuildDoes` holds for each setting's default and for `""`. |
+| A bundle install has a second approval behind the server, as Claude Code's ask rules are | **Refuted 2026-10-24** on the docs and the reference host, for the family's §10b; Claude Desktop itself not probed, and no page names desktop extensions. anthropics/mcpb v2.1.2 and `70fe3b34` declare `tools` for display, and `src/` reads it only in `init`; v2.1.2 `src/shared/config.ts` passes a boolean to `env` as "true" or "false". claude.com/docs/connectors/getting-started: "Select Allow once to continue, or Always allow to skip the prompt for that tool from now on". claude.com/docs/connectors/building/review-criteria: readOnlyHint and destructiveHint "determine auto-permissions in Claude" | Every switch the bundle asks for is a boolean defaulting to the server's own default, off. `gates mcpb` starts the server's `config.Load` from the environment the defaults give it and refuses any field that differs from an unconfigured start, naming it. The bundle declares no `tools` list (§13). |
+| A bundle's optional setting the person leaves blank reaches the server empty | **Refuted 2026-10-24** on the reference host: anthropics/mcpb v2.1.2 `src/shared/config.ts` builds its variables from the defaults and the person's values, and leaves one it does not have as written, so an optional key with no default reaches `env` as the text `${user_config.x}`. The 3.0.0 bundle gave each of its three keys a default, so it was not affected; without one, the export folder would reach the server as that text, which it refuses as not an absolute path | Every optional key has a default, and `gates mcpb` refuses one without. The environment the defaults give the server must configure it as no environment does, which `TestVarsDescribeWhatBuildDoes` holds for each setting's default and for `""`, and `TestASettingOfSpacesIsUnset` for spaces alone, the two variables read outside Define included. |
 | `privacy_policies` is optional for a bundle | **Refuted 2026-10-24** on the specification: anthropics/mcpb `MANIFEST.md`, "Required when the extension connects to external services (first- or third-party) that process user data"; added in manifest_version 0.2, and enforced by neither the schema nor `mcpb validate` | The manifest names https://policies.google.com/privacy, which answered 200 on 2026-10-24, and `gates mcpb` refuses an empty list. |
+| Any `command` the specification shows runs from the bundle | **Refined 2026-10-24** on the specification and the reference host, for the family's §10b; Claude Desktop not probed. anthropics/mcpb v2.1.2 `MANIFEST.md` gives a binary the relative command `server/my-server` and says `${__dirname}` "is replaced with the absolute path to the extension's directory"; `src/shared/config.ts` substitutes variables in `command` and resolves no path. The specification never says what a relative command is resolved against | `gates mcpb` requires every command to start with `${__dirname}/` and name a staged program, as the committed manifest's do, and refuses a relative or absolute one; 3.1.0's gate stripped a leading `/` and passed `/server/x`. |
+| A platform override's `env` and `args` are merged into `mcp_config`'s | **Refuted 2026-10-24** on the reference host, for the family's §10b; Claude Desktop not probed. anthropics/mcpb v2.1.2 `src/shared/config.ts` L118-120: `result.args = platformConfig.args \|\| result.args` and `result.env = platformConfig.env \|\| result.env`, and it substitutes `${user_config.x}` into the whole configuration, `args` included | An override's `env` or `args`, an empty one included, replaces the base's, so the settings would not reach that platform, and an argument such as `--enable-destructive=true` would reach the server past every check on `env`. `gates mcpb` refuses any `env` or `args` on an override and an argument in `mcp_config.args`, and keeps the base's `"args": []`, refusing it missing or null. |

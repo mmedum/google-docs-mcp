@@ -322,7 +322,7 @@ func memory(d *doc.Document, at time.Time) HandleMemory {
 // registered in that mode; this guards direct callers as well.
 func (s *Service) requireWritable() error {
 	if s.opts.ReadOnly {
-		return Errorf("forbidden", "this server runs read-only (GDOCS_READ_ONLY=true)")
+		return Errorf("forbidden", "this server runs read-only ("+config.EnvPrefix+"READ_ONLY=true)")
 	}
 	return nil
 }
@@ -335,7 +335,7 @@ func (s *Service) requireDestructive() error {
 		return err
 	}
 	if !s.opts.Destructive {
-		return Errorf("forbidden", "destructive operations are disabled (set GDOCS_ENABLE_DESTRUCTIVE=true to allow them)")
+		return Errorf("forbidden", "destructive operations are disabled (set "+config.EnvPrefix+"ENABLE_DESTRUCTIVE=true to allow them)")
 	}
 	return nil
 }

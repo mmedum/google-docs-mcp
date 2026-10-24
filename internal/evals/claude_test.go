@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
 // trace is what the model did: the tool calls it made, what came back,
@@ -71,7 +73,7 @@ func (tr *trace) toolNames() []string {
 func runClaude(t *testing.T, prompt string, extraEnv map[string]string) *trace {
 	t.Helper()
 	dir := t.TempDir()
-	serverEnv := map[string]string{"GDOCS_LOG_LEVEL": "warn"}
+	serverEnv := map[string]string{config.EnvPrefix + "LOG_LEVEL": "warn"}
 	for k, v := range extraEnv {
 		serverEnv[k] = v
 	}

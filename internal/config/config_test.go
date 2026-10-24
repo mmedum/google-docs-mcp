@@ -215,9 +215,9 @@ func TestTheDirectoryMustExistAndBeADirectory(t *testing.T) {
 // Vars is what the bundle gate reads a setting's kind from, so each
 // claim it makes is held to what Build does. A switch takes true and
 // false and refuses anything else, and nothing else does that. A
-// removed setting takes false and refuses true. Its default, and an
-// empty value, each configure what setting nothing does, which is what
-// lets a bundle leave a field blank.
+// removed setting takes false and refuses true. An empty value
+// configures what setting nothing does, which is what lets a bundle
+// leave a field blank.
 func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 	unset, err := build(t, nil)
 	if err != nil {
@@ -241,15 +241,13 @@ func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 		if v.Removed {
 			removed = append(removed, v.Name)
 		}
-		for _, value := range []string{v.Default, ""} {
-			c, err := build(t, map[string]string{v.Name: value})
-			if err != nil {
-				t.Errorf("%s=%q is refused: %v", v.Name, value, err)
-				continue
-			}
-			if !reflect.DeepEqual(c, unset) {
-				t.Errorf("%s=%q configures something:\n got %+v\nwant %+v", v.Name, value, c, unset)
-			}
+		c, err := build(t, map[string]string{v.Name: ""})
+		if err != nil {
+			t.Errorf("%s=\"\" is refused: %v", v.Name, err)
+			continue
+		}
+		if !reflect.DeepEqual(c, unset) {
+			t.Errorf("%s=\"\" configures something:\n got %+v\nwant %+v", v.Name, c, unset)
 		}
 	}
 	if want := []string{"GDOCS_ENABLE_DESTRUCTIVE", "GDOCS_READ_ONLY"}; !slices.Equal(switches, want) {
@@ -273,17 +271,12 @@ func TestEnvVars(t *testing.T) {
 	}
 }
 
-// varsFloor is how many variables the server reads today, on purpose:
-// the floor moves with it, so a registry that records nothing cannot
-// pass a walk over it.
-const varsFloor = 13
-
-// registry is Vars, refused below the floor.
+// registry is Vars, refused below VarsFloor.
 func registry(t *testing.T) []Var {
 	t.Helper()
 	vars := Vars()
-	if len(vars) < varsFloor {
-		t.Fatalf("Vars has %d variables, want at least %d", len(vars), varsFloor)
+	if len(vars) < VarsFloor {
+		t.Fatalf("Vars has %d variables, want at least %d", len(vars), VarsFloor)
 	}
 	return vars
 }

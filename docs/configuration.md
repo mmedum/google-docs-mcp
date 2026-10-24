@@ -20,7 +20,7 @@ token belongs to it.
 | `GDOCS_PROFILE` | `default` | Named profile. Profiles keep separate client secrets, tokens and account. Use one per Google account. A name is up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit; capitals are read as lowercase, and any other name stops the server at start. |
 | `GDOCS_CLIENT_SECRET` | profile setting, else `<config dir>/client_secret.json` | Path to the Desktop-app OAuth client JSON. Unset or empty, the server uses the client `login` recorded for the profile. |
 | `GDOCS_REFRESH_TOKEN` | unset | Overrides the stored token (CI, automation). |
-| `GDOCS_CONFIG_DIR` | OS config dir + `google-docs-mcp` | Where profiles live. |
+| `GDOCS_CONFIG_DIR` | OS config dir + `google-docs-mcp` | Absolute directory profiles live in. A relative one stops the server at start. |
 | `GDOCS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr. |
 | `GDOCS_LOG_FORMAT` | `text` | `text` or `json`. |
 | `GDOCS_PREVIEW` | unset | Deprecated and ignored; setting it logs a warning. Comments and suggestions are generally available. |

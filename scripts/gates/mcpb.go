@@ -169,10 +169,12 @@ func mcpbGate() error {
 // and holds what it stamps to the vendored schema too.
 //
 // A key repeated in one object is refused before anything else is
-// checked. The decode into manifest merges a repeated object into the
-// first, while the schema validator, the packer's encode and the host
-// each keep the last, so every other check would read a document that
-// is not the one shipped.
+// checked, and so are two keys that differ in case alone. The decode
+// into manifest merges a repeated object into the first, and matches a
+// struct field's key whatever its case, while the schema validator, the
+// packer's encode and the host each keep the last of a repeat and keep
+// "command" and "Command" apart, so every other check would read a
+// document that is not the one shipped.
 func committedManifest(root string) (raw []byte, m manifest, problems []string, err error) {
 	raw, err = os.ReadFile(filepath.Join(root, manifestPath)) //nolint:gosec // a repository path from a constant
 	if err != nil {
@@ -181,11 +183,15 @@ func committedManifest(root string) (raw []byte, m manifest, problems []string, 
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return raw, manifest{}, []string{fmt.Sprintf("the manifest does not decode: %v", err)}, nil
 	}
-	if repeated := repeatedKeys(raw); len(repeated) > 0 {
+	repeated, err := repeatedKeys(raw)
+	if err != nil {
+		return raw, manifest{}, []string{fmt.Sprintf("the manifest's keys cannot be read one by one: %v", err)}, nil
+	}
+	if len(repeated) > 0 {
 		for _, at := range repeated {
-			problems = append(problems, fmt.Sprintf("the manifest has %s more than once; the gate's decode merges "+
-				"a repeated key, and the schema, the packer and the host keep the last, so they would read "+
-				"different documents", at))
+			problems = append(problems, fmt.Sprintf("the manifest has %s more than once, case aside; the gate's "+
+				"decode reads both into one field, and the schema, the packer and the host read one of them, "+
+				"so they would read different documents", at))
 		}
 		return raw, manifest{}, problems, nil
 	}
@@ -193,11 +199,14 @@ func committedManifest(root string) (raw []byte, m manifest, problems []string, 
 }
 
 // repeatedKeys is the path of every key an object in raw has more than
-// once, each once, in document order: "server" at the top level,
-// "server.mcp_config.env.GDOCS_PROFILE" inside, and [i] for an element
-// of a list. A document that is not JSON has none here, since the
-// decode reports it.
-func repeatedKeys(raw []byte) []string {
+// once, each once, in document order. Two keys are one when they are
+// equal under Unicode case folding, as strings.EqualFold has it, since
+// that is how the decode into a struct matches them. A path is "server"
+// at the top level, "server.mcp_config.env.GDOCS_PROFILE" inside, [i]
+// for an element of a list, and env["a.b"] for a key a dot or a bracket
+// would make ambiguous. A document the token walk cannot read is an
+// error, never a pass.
+func repeatedKeys(raw []byte) ([]string, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	var repeated []string
 	var walk func(path string) error
@@ -208,20 +217,20 @@ func repeatedKeys(raw []byte) []string {
 		}
 		switch tok {
 		case json.Delim('{'):
-			seen := map[string]int{}
+			var seen, reported []string
 			for dec.More() {
 				keyTok, err := dec.Token()
 				if err != nil {
 					return err
 				}
 				key, _ := keyTok.(string)
-				at := key
-				if path != "" {
-					at = path + "." + key
-				}
-				if seen[key]++; seen[key] == 2 {
+				at := keyPath(path, key)
+				same := func(k string) bool { return strings.EqualFold(k, key) }
+				if slices.ContainsFunc(seen, same) && !slices.ContainsFunc(reported, same) {
 					repeated = append(repeated, at)
+					reported = append(reported, key)
 				}
+				seen = append(seen, key)
 				if err := walk(at); err != nil {
 					return err
 				}
@@ -238,10 +247,23 @@ func repeatedKeys(raw []byte) []string {
 		_, err = dec.Token() // the closing brace or bracket
 		return err
 	}
-	if walk("") != nil {
-		return nil
+	if err := walk(""); err != nil {
+		return nil, err
 	}
-	return repeated
+	return repeated, nil
+}
+
+// keyPath is the path of key inside the object at path: joined by a dot,
+// or quoted in brackets when the key is empty or holds a character a
+// path is read by.
+func keyPath(path, key string) string {
+	switch {
+	case key == "" || strings.ContainsAny(key, `.[]"`):
+		return path + "[" + strconv.Quote(key) + "]"
+	case path == "":
+		return key
+	}
+	return path + "." + key
 }
 
 // manifestProblems is every check the gate and the packer both run, so
@@ -490,19 +512,6 @@ func launcherProblems(files []staged, root string) []string {
 		return append(problems, err.Error())
 	}
 	return append(problems, installHintProblems(string(script), module)...)
-}
-
-// readManifest decodes a manifest file, for the registry entry.
-func readManifest(path string) (manifest, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // a repository path from a constant
-	if err != nil {
-		return manifest{}, err
-	}
-	var m manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return manifest{}, fmt.Errorf("%s is not valid JSON: %w", path, err)
-	}
-	return m, nil
 }
 
 // licenseOf reads the SPDX identifier the LICENSE file under root
@@ -826,9 +835,15 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 	problems = append(problems, argsProblems(m)...)
 
 	for _, key := range slices.Sorted(maps.Keys(m.UserConfig)) {
-		if opt := m.UserConfig[key]; !opt.Required && opt.Default == nil {
+		opt := m.UserConfig[key]
+		if !opt.Required && opt.Default == nil {
 			problems = append(problems, fmt.Sprintf("user_config.%s is optional with no default; the reference host "+
 				"passes ${user_config.%s} to the server as written when the field is left blank", key, key))
+		}
+		if text, ok := opt.value.(string); ok && strings.Contains(text, "${") {
+			problems = append(problems, fmt.Sprintf("user_config.%s defaults to %q, which holds a ${...} reference; "+
+				"the host expands ${HOME}, ${__dirname} and the rest in a default, and the defaults check does not, "+
+				"so a default is written out", key, text))
 		}
 	}
 
@@ -850,6 +865,13 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 			if opt.Type != "boolean" {
 				problems = append(problems, fmt.Sprintf("user_config.%s is a %s; %s is a switch, so ask for a boolean",
 					key, cmp.Or(opt.Type, "field with no type"), v.Name))
+			}
+			// The text "false" passes the defaults check, since it reaches
+			// the server as false; the field is a boolean, so its default
+			// is one too.
+			if _, ok := opt.value.(bool); !ok {
+				problems = append(problems, fmt.Sprintf("user_config.%s defaults to %s; %s is a switch, so give it "+
+					"the default false or true", key, cmp.Or(string(opt.Default), "nothing"), v.Name))
 			}
 		}
 		if rule, ok := fieldRules[v.Name]; ok && !strings.Contains(opt.Description, rule.words) {
@@ -1005,8 +1027,9 @@ func defaultsProblems(m manifest) (problems []string, defaultsErr error) {
 
 // fieldDiff names the fields of two values of one struct type that
 // differ. An unexported field cannot be read out through Interface, so
-// it is compared with Value.Equal where its type compares; one that does
-// not, and differs, is reported unnamed.
+// it is compared with Value.Equal where that compares what it holds;
+// one that does not is compared by sameValue and, whenever it differs,
+// reported unnamed, once, beside any named ones.
 func fieldDiff(a, b any) []string {
 	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
 	var fields []string
@@ -1023,21 +1046,22 @@ func fieldDiff(a, b any) []string {
 				fields = append(fields, f.Name)
 			}
 		default:
-			unnamed = true
+			unnamed = unnamed || !sameValue(va.Field(i), vb.Field(i))
 		}
 	}
-	if unnamed && len(fields) == 0 && !reflect.DeepEqual(a, b) {
+	if unnamed {
 		fields = append(fields, "an unexported field")
 	}
 	return fields
 }
 
-// strictlyComparable reports whether every value of t compares with
-// Value.Equal. An interface type compares as a type, but Equal panics on
-// a dynamic value that does not, so one anywhere inside t rules it out.
+// strictlyComparable reports whether Value.Equal compares every value of
+// t by what it holds. An interface type compares as a type, but Equal
+// panics on a dynamic value that does not; a pointer, a channel and a
+// func compare by address. One anywhere inside t rules it out.
 func strictlyComparable(t reflect.Type) bool {
 	switch t.Kind() {
-	case reflect.Interface:
+	case reflect.Interface, reflect.Pointer, reflect.Chan, reflect.UnsafePointer, reflect.Func:
 		return false
 	case reflect.Struct:
 		for i := range t.NumField() {
@@ -1050,6 +1074,56 @@ func strictlyComparable(t reflect.Type) bool {
 		return strictlyComparable(t.Elem())
 	}
 	return t.Comparable()
+}
+
+// sameValue is reflect.DeepEqual for two values of one type that may be
+// unexported fields, which DeepEqual cannot be handed. A configuration
+// holds no cycle, so none is followed.
+func sameValue(x, y reflect.Value) bool {
+	switch x.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if x.IsNil() || y.IsNil() {
+			return x.IsNil() == y.IsNil()
+		}
+		if x.Elem().Type() != y.Elem().Type() {
+			return false
+		}
+		return sameValue(x.Elem(), y.Elem())
+	case reflect.Slice:
+		if x.IsNil() != y.IsNil() || x.Len() != y.Len() {
+			return false
+		}
+		fallthrough
+	case reflect.Array:
+		for i := range x.Len() {
+			if !sameValue(x.Index(i), y.Index(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if x.IsNil() != y.IsNil() || x.Len() != y.Len() {
+			return false
+		}
+		for _, key := range x.MapKeys() {
+			if v := y.MapIndex(key); !v.IsValid() || !sameValue(x.MapIndex(key), v) {
+				return false
+			}
+		}
+		return true
+	case reflect.Struct:
+		for i := range x.NumField() {
+			if !sameValue(x.Field(i), y.Field(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Func:
+		return x.IsNil() && y.IsNil()
+	case reflect.Chan, reflect.UnsafePointer:
+		return x.Pointer() == y.Pointer()
+	}
+	return x.Equal(y)
 }
 
 // bundleRefused are the sets of the bundle's switches the server refuses

@@ -1066,7 +1066,8 @@ accounts. That sets these requirements:
   env-first.
 - **Claude Desktop bundle.** Each release carries a `.mcpb` with the
   family's layout: `server/google-docs-mcp-darwin` (universal),
-  `server/google-docs-mcp.exe`, `server/google-docs-mcp-linux-amd64`,
+  `server/google-docs-mcp.exe` (amd64, which Windows on arm64 runs under
+  emulation), `server/google-docs-mcp-linux-amd64`,
   `server/google-docs-mcp-linux-arm64` and `server/launch-linux.sh`, with
   `LICENSE` and `README.md` at the root. It asks for what a person sets
   in another client's configuration: the OAuth client file, the profile,
@@ -1081,9 +1082,11 @@ accounts. That sets these requirements:
   with its reason, the removed prompt setting is left out because config
   marks it removed, and the gate fails on a variable with no verdict, on
   a reason for one the server does not read, and on an `env` key that is
-  no setting. Each switch is a boolean defaulting to the server's own
-  default, off, and every other key defaults to `""`, which the server
-  reads as unset, as it reads spaces alone. The gate starts the server's
+  no setting. Each switch is a boolean whose default is the JSON
+  boolean the server defaults to, false, and every other key defaults to
+  `""`, which the server reads as unset, as it reads spaces alone. No
+  default holds a `${...}` reference, which the host expands and the
+  gate would not. The gate starts the server's
   own `config.Load` from the environment the defaults give it and refuses
   any field that differs from an unconfigured start, naming it. Claude
   Desktop approves each tool, and a person can set a tool to always
@@ -1101,13 +1104,15 @@ accounts. That sets these requirements:
   program, never the license or the README, each platform runs the file
   staged for it, `entry_point` is the file the default command runs, and
   the platforms, the server's name and `binary` are held to the staged
-  table and the code. The gate and the packer start from one function,
-  which reads the manifest once and refuses a key repeated in one
-  object; the packer holds the manifest it stamps to the vendored schema,
-  and a bundle that does not close fails the pack. The manifest names
-  Google's privacy policy and declares no `tools` list, which would be
-  display only and wrong for most installs, since two settings change
-  what registers.
+  table and the code. The gate, the packer and the registry entry start
+  from one function, which reads the manifest once and refuses a key
+  repeated in one object, two that differ in case alone included, since
+  the gate's decode merges those and the host does not; the packer
+  refuses a version that is not semver, holds the manifest it stamps to
+  the vendored schema, and fails a bundle that does not close. The
+  manifest names Google's privacy policy and declares no `tools` list,
+  which would be display only and wrong for most installs, since two
+  settings change what registers.
 - **Setup guide** in the README, per-deployer, in the order `doctor`
   checks it: Cloud project → APIs → consent screen (Internal vs Testing)
   → Desktop OAuth client → `login` → `doctor`.
@@ -1421,6 +1426,50 @@ v0.3.0, and nothing is left open:
   answering "does this run deviate from its named style?" will need —
   the gap docs/development.md describes. Embedding keeps `p.Alignment`
   and the rest reading as before at every call site.
+
+**The family-rules review, 2026-10-24.** `/simplify` (one agent over
+reuse, simplification, efficiency and altitude), `/code-review medium`
+and `/security-review` ran over `v3.0.0..family-rules`. Each fix has a
+test that failed on the code before it.
+
+- **Code review.** The live driver read `GDOCS_ENABLE_DESTRUCTIVE` with
+  its own `os.Getenv` and parse, so ` true` registered the deletes and
+  the driver skipped them. It now reads `config.Load`, the profile
+  included, and a scan refuses any `os.Getenv` or `os.LookupEnv` of a
+  server variable. The README said the bundle covered both
+  architectures everywhere; Windows carries amd64, which arm64 runs
+  under emulation. A relative `GDOCS_CONFIG_DIR` is refused at start.
+  `writeEntries` packs the entries it is given, not the global list.
+  One floor, `config.VarsFloor`, holds every walk over `Vars`, and one
+  pattern, `config.NamePattern`, is what a name is to the scan and the
+  staleness gate.
+- **The family's fixes from the sibling reviews of the same day.**
+  `fieldDiff` reports a differing unexported field beside named ones,
+  and compares a pointer by what it holds. `repeatedKeys` takes two keys
+  that differ in case alone as one, quotes a key a dot or a bracket
+  would make ambiguous, and refuses a document it cannot walk. A run of
+  a `+` chain that another operand follows ends in a prefix, not a
+  name. Outside `internal/config` a name is spelled from config's
+  constants, and `config.DefaultProfile` is the one default profile. A
+  default holding `${` is refused. `modulePath` reads a tab, a trailing
+  comment and a quoted path. The registry entry reads the manifest
+  through `committedManifest`.
+- **Simplify.** The packer refuses a version that is not semver.
+  `Var.Default`, which only a test read, is gone. Two tests that
+  repeated the gate's rows are deleted, and the packer's keeps one row.
+- **Security review.** No finding at confidence 8 or above. One note
+  was acted on: a switch defaulting to the text `"false"` passed, since
+  it reaches the server as false. A switch's default is now a JSON
+  boolean.
+
+Kept, each with its reason:
+
+- `docs/configuration.md` and the README type the settings the bundle
+  asks for by hand. Low; a check for it belongs to the family.
+- `auth` honors `token_uri` from the OAuth client JSON. It predates the
+  range, and hardening it is family work, not this release's.
+- The empty `bundleRefused`, `Load` and `EnvVars` stay as the family
+  decided them.
 
 ## 17b. Deviations from the shared standard
 

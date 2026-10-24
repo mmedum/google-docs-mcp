@@ -17,6 +17,7 @@ diff in CI flags them.
 
 - A profile name with a character that Unicode lowercases into a to z, such as the Kelvin sign (U+212A), is refused rather than read as another profile's name.
 - A variable set to spaces alone is unset, as an empty one is, `GDOCS_CONFIG_DIR` and `GDOCS_REFRESH_TOKEN` included, and the spaces around a value are dropped; a bundle field cleared to a space no longer stops the server.
+- `GDOCS_CONFIG_DIR` set to a relative path stops the server at start, as `GDOCS_EXPORT_DIR` does, rather than naming a directory under wherever the client started it.
 
 ## [3.1.0] - 2026-10-24
 

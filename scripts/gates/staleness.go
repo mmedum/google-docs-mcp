@@ -109,8 +109,9 @@ func staleness(bin string) error {
 		return err
 	}
 	vars := config.Vars()
-	if len(vars) < 10 {
-		return fmt.Errorf("config.Vars lists %d variables; the check is not looking at the registry", len(vars))
+	if len(vars) < config.VarsFloor {
+		return fmt.Errorf("config.Vars lists %d variables, below the floor of %d; the check is not looking at the registry",
+			len(vars), config.VarsFloor)
 	}
 	problems = append(problems, configDocProblems(vars, string(conf))...)
 
@@ -166,10 +167,10 @@ func configDocProblems(vars []config.Var, text string) []string {
 	return problems
 }
 
-// settingWord is a setting's name standing as a word of its own, all of
-// it: a longer name that contains one, such as GDOCS_READ_ONLY_X, is that
-// longer name and not GDOCS_READ_ONLY.
-var settingWord = regexp.MustCompile(`(^|[^A-Z0-9_])(` + config.EnvPrefix + `[A-Z0-9_]+)`)
+// settingWord is a setting's name, by config.NamePattern, standing as a
+// word of its own, all of it: a longer name that contains one, such as
+// GDOCS_READ_ONLY_X, is that longer name and not GDOCS_READ_ONLY.
+var settingWord = regexp.MustCompile(`(^|[^A-Z0-9_])(` + config.NamePattern + `)`)
 
 // permissionRule is a Claude Code permission rule for one of this
 // server's tools, under the server name the README's install line gives.

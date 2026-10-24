@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -84,7 +85,7 @@ func binPath(t *testing.T) string {
 func connect(t *testing.T) *server {
 	t.Helper()
 	cmd := exec.Command(binPath(t))
-	cmd.Env = append(os.Environ(), "GDOCS_LOG_LEVEL=warn")
+	cmd.Env = append(os.Environ(), config.EnvPrefix+"LOG_LEVEL=warn")
 	ctx := context.Background()
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "evals", Version: "0"}, nil).
 		Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)

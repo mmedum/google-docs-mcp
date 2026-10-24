@@ -284,8 +284,9 @@ Deleting stays off unless you turn it on, and binary exports stay off
 until you pick a folder. This server asks nobody before a call. Claude
 Desktop approves each tool, with Allow once or Always allow, and a tool
 you always allow then runs unasked, so leave `enable_destructive` off
-unless you need its tools. The bundle covers macOS, Windows and Linux on
-both architectures. It does **not** log you in: install the binary as
+unless you need its tools. The bundle covers macOS and Linux on both
+architectures, and Windows with its amd64 binary, which Windows on arm64
+runs under emulation. It does **not** log you in: install the binary as
 well, run `google-docs-mcp login` once, and the bundle picks up the same
 credentials.
 

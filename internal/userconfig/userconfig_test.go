@@ -2,6 +2,7 @@ package userconfig
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -171,5 +172,21 @@ func TestNoConfigDirectory(t *testing.T) {
 	}
 	if err := Remove("default"); err == nil {
 		t.Error("Remove should fail with no config directory")
+	}
+}
+
+// A relative config directory is refused, by BaseDir and so by every
+// path the server opens a profile with at start: it would name a
+// directory under wherever a client started the server.
+func TestARelativeConfigDirectoryIsRefused(t *testing.T) {
+	for _, dir := range []string{"profiles", filepath.Join(".", "cfg"), filepath.Join("..", "cfg")} {
+		t.Setenv(config.EnvConfigDir, dir)
+		want := fmt.Sprintf("userconfig: GDOCS_CONFIG_DIR %q must be an absolute path", dir)
+		if got, err := BaseDir(); err == nil || err.Error() != want {
+			t.Errorf("GDOCS_CONFIG_DIR=%q: BaseDir = %q, %v; want %q", dir, got, err, want)
+		}
+		if _, err := ProfileDir("work"); err == nil || err.Error() != want {
+			t.Errorf("GDOCS_CONFIG_DIR=%q: ProfileDir = %v; want %q", dir, err, want)
+		}
 	}
 }

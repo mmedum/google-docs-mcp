@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
 )
 
@@ -87,7 +88,7 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 		return s.mdExport(ctx, req, format)
 	}
 	if !inlineFormats[format] && s.opts.ExportDir == "" {
-		return nil, Errorf("unavailable", "binary exports need GDOCS_EXPORT_DIR to be set to a directory; md, txt and html are returned inline")
+		return nil, Errorf("unavailable", "binary exports need "+config.EnvPrefix+"EXPORT_DIR to be set to a directory; md, txt and html are returned inline")
 	}
 	data, err := s.api.Export(ctx, id, mime)
 	if err != nil {

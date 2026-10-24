@@ -314,7 +314,7 @@ func cmdLogin(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg := p.cfg
 	if _, err := os.Stat(p.clientSecretPath); err != nil {
-		return fail(stderr, "OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH (GDOCS_CLIENT_SECRET).", p.clientSecretPath)
+		return fail(stderr, "OAuth client JSON not found at %s\nCreate a Desktop-app OAuth client in the Google Cloud console, download its JSON, and either place it there or pass --client-secret PATH ("+config.EnvPrefix+"CLIENT_SECRET).", p.clientSecretPath)
 	}
 	scopes := auth.Scopes(cfg.ReadOnly)
 	oc, err := auth.LoadClientSecret(p.clientSecretPath, scopes)

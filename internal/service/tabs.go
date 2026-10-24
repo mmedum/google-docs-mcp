@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
 	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
@@ -51,7 +52,7 @@ func (s *Service) ManageTabs(ctx context.Context, req TabRequest) (*TabResult, e
 	case "move":
 		build = moveTabRequest
 	case "delete":
-		return nil, Errorf("invalid", "deleting a tab is the delete_tab tool, registered only with GDOCS_ENABLE_DESTRUCTIVE=true")
+		return nil, Errorf("invalid", "deleting a tab is the delete_tab tool, registered only with "+config.EnvPrefix+"ENABLE_DESTRUCTIVE=true")
 	default:
 		return nil, Errorf("invalid", "action %q; use add, rename or move", req.Action)
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -30,10 +31,22 @@ import (
 // impossible 1980-00-00.
 var zipTime = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 
+// releaseVersion is a Semantic Versioning 2.0.0 version, by the
+// expression semver.org gives: what goreleaser passes for a tag, the tag
+// without its v, and for a snapshot, with a pre-release after it. The
+// vendored schema takes any string as the version, so a hook passing
+// {{ .Tag }} or a stray space would otherwise ship.
+var releaseVersion = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)` +
+	`(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?` +
+	`(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
+
 // packMCPB writes the bundle for one version.
 func packMCPB(dist, version, out string) error {
 	if version == "" || version == placeholderVersion {
 		return fmt.Errorf("pack needs the real version; %q is the committed placeholder", version)
+	}
+	if !releaseVersion.MatchString(version) {
+		return fmt.Errorf("pack needs a version such as 1.2.3, with no v and no spaces; %q is not one", version)
 	}
 
 	// The gate's own start, read once. The placeholder version is among
@@ -53,24 +66,30 @@ func packMCPB(dist, version, out string) error {
 		return err
 	}
 
-	sources := map[string]string{}
+	entries := make([]entry, 0, len(bundleFiles))
 	for _, f := range bundleFiles {
-		path, ferr := sourceFor(dist, f)
+		from, ferr := sourceFor(dist, f)
 		if ferr != nil {
 			return ferr
 		}
-		sources[f.path] = path
+		entries = append(entries, entry{staged: f, from: from})
 	}
 
 	if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil {
 		return err
 	}
-	if err := writeFile(out, func(w io.Writer) error { return writeEntries(w, stamped, sources) }); err != nil {
+	if err := writeFile(out, func(w io.Writer) error { return writeEntries(w, stamped, entries) }); err != nil {
 		return err
 	}
 
-	fmt.Printf("  %s: %d files, version %s\n", out, len(sources)+1, version)
+	fmt.Printf("  %s: %d files, version %s\n", out, len(entries)+1, version)
 	return nil
+}
+
+// entry is one staged file and the file the packer reads it from.
+type entry struct {
+	staged
+	from string
 }
 
 // writeFile creates path and has write fill it. The file's Close is the
@@ -88,17 +107,17 @@ func writeFile(path string, write func(io.Writer) error) error {
 	return file.Close()
 }
 
-// writeEntries writes the bundle to w: the stamped manifest, then every
-// staged file from its source. The zip's Close is its error, since that
+// writeEntries writes the bundle to w: the stamped manifest, then each
+// of entries from its source. The zip's Close is its error, since that
 // writes the directory an installer reads first.
-func writeEntries(w io.Writer, stamped []byte, sources map[string]string) error {
+func writeEntries(w io.Writer, stamped []byte, entries []entry) error {
 	zw := zip.NewWriter(w)
 	if err := addEntry(zw, "manifest.json", stamped, 0o644); err != nil {
 		return err
 	}
 	// Sorted, so two packs of the same inputs write the same bytes.
-	files := slices.Clone(bundleFiles)
-	slices.SortFunc(files, func(a, b staged) int { return strings.Compare(a.path, b.path) })
+	files := slices.Clone(entries)
+	slices.SortFunc(files, func(a, b entry) int { return strings.Compare(a.path, b.path) })
 	for _, f := range files {
 		// 0755 on every staged binary and the launcher. The packer forces
 		// the execute bit on the entry point alone and copies the
@@ -108,7 +127,7 @@ func writeEntries(w io.Writer, stamped []byte, sources map[string]string) error 
 		// Streamed rather than read whole: the macOS slot is a universal
 		// binary, so holding one in memory to deflate it is tens of
 		// megabytes for no reason.
-		if err := addFile(zw, f.path, sources[f.path], f.mode()); err != nil {
+		if err := addFile(zw, f.path, f.from, f.mode()); err != nil {
 			return err
 		}
 	}

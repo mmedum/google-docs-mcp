@@ -1,6 +1,15 @@
 # Architecture — google-docs-mcp
 
-**Status:** v3.1.0 (2026-10-24). The Claude Desktop bundle has the
+**Status:** v3.1.1 (2026-10-24). 3.1.0's bundle work reviewed after its
+release by `/simplify`, `/code-review medium` and `/security-review`, with
+the family's bundle rules ported (§17a): the gate derives its settings
+from the server's registry, starts the server from the bundle's
+defaults, refuses `args` and overrides, holds each platform to its own
+file and the identity, and refuses a repeated key. The OAuth client
+file's text is the family's, a profile name is lowered A to Z alone,
+a variable of spaces alone is unset, and a relative `GDOCS_CONFIG_DIR`
+is refused. The live driver passed, its transcript read. v3.1.0
+(2026-10-24): the Claude Desktop bundle has the
 shape the sibling servers' bundles share: every setting another client
 sets, each off or empty by default as the server is, the shared file
 names, LICENSE and the README, and Google's privacy policy; the server

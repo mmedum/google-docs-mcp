@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-10-24
+
 ### Changed
 
 - The Claude Desktop bundle says that its OAuth client field may be left empty to use the client `google-docs-mcp login` recorded for the profile, as before, and that a file picked there must be that same client, since the refresh token belongs to it.

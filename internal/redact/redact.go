@@ -45,7 +45,10 @@ var (
 	// (drive.google.com/file/d/<id>): one rule for both, as revAny is one
 	// rule for every prefix of a revision id.
 	docURL = regexp.MustCompile(`(/(?:document|file)/d/)[A-Za-z0-9_-]+`)
-	gdocs  = regexp.MustCompile(`gdocs://[A-Za-z0-9_-]{20,}`)
+	// Drive's link to a Word file names the account that holds it:
+	// `ouid=` and Google's numeric id for that person.
+	ouid  = regexp.MustCompile(`([?&]ouid=)[0-9]+`)
+	gdocs = regexp.MustCompile(`gdocs://[A-Za-z0-9_-]{20,}`)
 	// Every prefix that precedes a revision id, in one rule. There were
 	// three, and the third existed only because the second had been
 	// missed — `diff_revisions` renders `revision A → B` and nothing
@@ -66,6 +69,7 @@ var (
 // shape.
 func Transcript(s string) string {
 	s = docURL.ReplaceAllString(s, "${1}<scratch>")
+	s = ouid.ReplaceAllString(s, "${1}<person>")
 	s = gdocs.ReplaceAllString(s, "gdocs://<scratch>")
 	s = revAny.ReplaceAllString(s, "${1}<rev>")
 	s = Address.ReplaceAllString(s, "<address>")

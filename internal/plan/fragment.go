@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
 )
 
 // CodeFont is the font used for code blocks and inline code.
@@ -20,10 +20,17 @@ type FragmentOptions struct {
 	// Suffix puts a newline after the fragment: used when inserting at a
 	// block boundary so the following block stays separate.
 	Suffix bool
-	// NearBullet says the paragraph at the insertion point is a list
-	// item; inserted non-list paragraphs then explicitly drop the bullet
-	// they would inherit.
-	NearBullet bool
+	// Inherited is the list item whose bullet every inserted paragraph
+	// takes, nil when that paragraph is no list item: inserted non-list
+	// paragraphs then drop it, and list items keep it only where it is
+	// right.
+	Inherited *ListItem
+	// List is the list around the insertion, which the list the content
+	// starts with lands in.
+	List ListContext
+	// ListLevel, when set, is the level that list takes, in place of the
+	// level of the list item the content is placed against.
+	ListLevel *int
 	// Inline says the insertion point is inside an existing paragraph:
 	// the first fragment paragraph merges into it and keeps its style.
 	Inline bool
@@ -39,6 +46,10 @@ type FragmentOptions struct {
 	// deletes: as a suggestion that text stays, inside the slot.
 	Isolate bool
 }
+
+// mergesFirst says the first paragraph of the content merges into the
+// existing paragraph at the insertion point, which keeps its own style.
+func (o FragmentOptions) mergesFirst() bool { return o.Inline && !o.Fill }
 
 // Slot is the empty paragraph a table or image of the content waits in.
 // Index is where it starts once the batch has been applied.
@@ -58,6 +69,8 @@ type Compiled struct {
 	End   int64
 	// Slots are where the tables and images go, in order.
 	Slots []Slot
+	// Rebuilt counts the existing list items the lists rebuild.
+	Rebuilt int
 }
 
 type piece struct {
@@ -67,6 +80,10 @@ type piece struct {
 	end      int64
 	listItem bool
 	slot     bool
+	// level is a list item's level in the document, tabs the leading tabs
+	// that make it, and item the bullet it ends with.
+	level, tabs int
+	item        *ListItem
 }
 
 // CompileFragment lays a fragment out at `at` and returns the requests:
@@ -82,6 +99,7 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 	if err != nil {
 		return nil, err
 	}
+	windows := planLists(pieces, o)
 	var sb strings.Builder
 	cursor := at.Index
 	if o.Prefix {
@@ -118,10 +136,16 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 	}
 
 	c := &Compiled{Text: text, Length: doc.UTF16Len(text), Start: contentStart, End: cursor}
+	for _, w := range windows {
+		c.Rebuilt += len(w.existing)
+	}
+	// A slot moves back by the tabs the lists before it consume.
+	var consumed int64
 	for _, p := range pieces {
 		if p.slot {
-			c.Slots = append(c.Slots, Slot{Index: p.start, Block: p.block})
+			c.Slots = append(c.Slots, Slot{Index: p.start - consumed, Block: p.block})
 		}
+		consumed += int64(p.tabs)
 	}
 	// A lone slot filling a blank paragraph is that paragraph, and an
 	// insertText needs text.
@@ -133,9 +157,9 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 		c.Requests = append(c.Requests, ClearTextStyle(rng(contentStart, cursor)))
 	}
 	for i, p := range pieces {
-		c.Requests = append(c.Requests, pieceRequests(p, o, i == 0 && o.Inline && !o.Fill, rng, paraRange)...)
+		c.Requests = append(c.Requests, pieceRequests(p, o, i == 0 && o.mergesFirst(), rng, paraRange)...)
 	}
-	c.Requests = append(c.Requests, listRequests(pieces, rng)...)
+	c.Requests = append(c.Requests, listRequests(windows, o, at, rng)...)
 	return c, nil
 }
 
@@ -148,7 +172,7 @@ func fragmentPieces(f *markdown.Fragment, o FragmentOptions) ([]*piece, error) {
 		case markdown.KindTable, markdown.KindImage:
 			// An insertion inside a paragraph merges the first and last
 			// pieces into its text, so neither could be an empty slot.
-			if !o.Slots || o.Inline && !o.Fill {
+			if !o.Slots || o.mergesFirst() {
 				return nil, &markdown.UnsupportedError{Construct: string(b.Kind), Line: b.Line, Hint: "a table or image in content " +
 					"goes in an insert, append or replace in the body, between blocks; edit_table and insert_object reach the rest"}
 			}
@@ -161,7 +185,7 @@ func fragmentPieces(f *markdown.Fragment, o FragmentOptions) ([]*piece, error) {
 				pieces = append(pieces, &piece{block: b, text: line})
 			}
 		case markdown.KindListItem:
-			pieces = append(pieces, &piece{block: b, text: strings.Repeat("\t", b.Nesting) + b.Text(), listItem: true})
+			pieces = append(pieces, &piece{block: b, text: b.Text(), listItem: true})
 		default:
 			pieces = append(pieces, &piece{block: b, text: b.Text()})
 		}
@@ -195,11 +219,12 @@ func pieceRequests(p *piece, o FragmentOptions, merged bool, rng func(int64, int
 	if !merged {
 		ps := ParagraphStyleSpec{NamedStyle: "NORMAL_TEXT"}
 		if p.block.Kind == markdown.KindHeading {
-			ps.NamedStyle = fmt.Sprintf("HEADING_%d", min(max(p.block.Level, 1), 6))
+			ps.NamedStyle = fmt.Sprintf("HEADING_%d", p.block.HeadingLevel())
 		}
 		reqs = append(reqs, UpdateParagraphStyle(paraRange(p), ps))
-		if o.NearBullet && !p.listItem {
-			reqs = append(reqs, DeleteBullets(paraRange(p)))
+		if o.Inherited != nil && !p.listItem {
+			// The bullet's indent outlives it.
+			reqs = append(reqs, DeleteBullets(paraRange(p)), ClearIndent(paraRange(p)))
 		}
 	}
 	if p.block.Kind == markdown.KindCode {
@@ -208,52 +233,13 @@ func pieceRequests(p *piece, o FragmentOptions, merged bool, rng func(int64, int
 		}
 		return reqs
 	}
-	pos := p.start
-	if p.listItem {
-		pos += int64(p.block.Nesting) // leading tabs
-	}
+	pos := p.start + int64(p.tabs) // leading tabs
 	for _, in := range p.block.Inlines {
 		n := doc.UTF16Len(in.Text)
 		if spec := inlineSpec(in); !spec.IsZero() && n > 0 {
 			reqs = append(reqs, UpdateTextStyle(rng(pos, pos+n), spec))
 		}
 		pos += n
-	}
-	return reqs
-}
-
-// listRequests creates lists last, in descending order, because
-// createParagraphBullets consumes the nesting tabs and shifts what follows.
-func listRequests(pieces []*piece, rng func(int64, int64) Rng) []json.RawMessage {
-	type group struct {
-		start, end int64
-		ordered    bool
-	}
-	var groups []group
-	for i := 0; i < len(pieces); i++ {
-		p := pieces[i]
-		if !p.listItem {
-			continue
-		}
-		g := group{start: p.start, end: p.end, ordered: p.block.Ordered}
-		for i+1 < len(pieces) && pieces[i+1].listItem && pieces[i+1].block.ListID == p.block.ListID {
-			i++
-			g.end = pieces[i].end
-		}
-		groups = append(groups, g)
-	}
-	reqs := make([]json.RawMessage, 0, len(groups))
-	for i := len(groups) - 1; i >= 0; i-- {
-		g := groups[i]
-		preset := BulletPreset
-		if g.ordered {
-			preset = NumberedPreset
-		}
-		end := g.end
-		if end == g.start {
-			end++
-		}
-		reqs = append(reqs, CreateBullets(rng(g.start, end), preset))
 	}
 	return reqs
 }

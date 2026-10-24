@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/mdfile"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // CreateRequest makes a new document.
@@ -88,7 +88,7 @@ func (s *Service) createMarkdown(ctx context.Context, title, content string) (*C
 	if mdfile.ContainsMarkup(content) {
 		return nil, Errorf("invalid", "%s", markupRefused)
 	}
-	if len(content) > mdMaxWrite {
+	if len(content) > maxUpload {
 		return nil, tooLarge(len(content))
 	}
 	name := title
@@ -99,7 +99,7 @@ func (s *Service) createMarkdown(ctx context.Context, title, content string) (*C
 	if err != nil {
 		return nil, wrapAPI(err, "file")
 	}
-	s.rememberKind(f.ID, true)
+	s.rememberKind(f.ID, gapi.MarkdownMimeType)
 	res := &CreateResult{ID: f.ID, Title: f.Name, Kind: KindMarkdownFile, URL: f.WebViewLink, RevisionID: f.HeadRevisionID}
 	if res.URL == "" {
 		res.URL = doc.FileURL(f.ID)

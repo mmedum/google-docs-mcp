@@ -39,17 +39,20 @@ func liveComments(t *testing.T, d *driver, doc string) {
 		"document": doc, "with_handles": true, "include_comments": true, "heading": "Background"})
 
 	if d.destructive && comment != "" {
-		del := map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment}
+		// The comment was rewritten above, so the text it was posted with
+		// is a witness that no longer matches.
+		const text = "Rewritten by the live test."
+		del := map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment, "text_start": text}
 		d.ok("delete comment, dry run", "delete_comment", map[string]any{"document": doc, "comment_id": comment,
-			"confirm_comment_id": comment, "dry_run": true})
-		d.person.answer("decline")
-		d.refused("delete comment, declined", "delete_comment", del, "not confirmed by the person")
-		d.wasAsked("delete comment, declined", "delete_comment: delete a comment thread on")
-		if listed := d.ok("the declined comment is still there", "list_comments", map[string]any{"document": doc}); !strings.Contains(listed, comment) {
-			t.Error("a declined delete_comment deleted the comment")
+			"confirm_comment_id": comment, "text_start": text, "dry_run": true})
+		d.refused("delete comment, the id not repeated", "delete_comment", map[string]any{"document": doc, "comment_id": comment,
+			"confirm_comment_id": comment + "x", "text_start": text}, "they must match")
+		d.refused("delete comment, the text it had before", "delete_comment", map[string]any{"document": doc, "comment_id": comment,
+			"confirm_comment_id": comment, "text_start": "Live test: comment on the nested bullet."}, "[stale]")
+		if listed := d.ok("the comment is still there", "list_comments", map[string]any{"document": doc}); !strings.Contains(listed, comment) {
+			t.Error("a refused delete_comment deleted the comment")
 		}
 		d.ok("delete comment", "delete_comment", del)
-		d.wasAsked("delete comment", "`Rewritten by the live test.`")
 	}
 }
 

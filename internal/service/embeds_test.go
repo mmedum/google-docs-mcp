@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // simService is a service over a simulated body, read once so handles

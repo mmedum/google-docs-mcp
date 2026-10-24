@@ -5,7 +5,7 @@
   "display_name": "Google Docs",
   "version": "0.0.0-dev",
   "description": "Google Docs as MCP tools: read, edit, suggest and comment on documents.",
-  "long_description": "Read, edit, suggest and comment on Google Docs from your own account. Target content by quoting exact text, by heading id or by a stable handle \u2014 never by position, which is what makes an edit survive a document that changed under you. Every write takes a mode: suggest, direct or comment, and dry_run shows what would change before anything does.\n\nTHIS BUNDLE DOES NOT LOG YOU IN, and cannot. Google requires each user to bring their own OAuth Desktop client, so before the tools work you need to create one in a Google Cloud project, enable the Docs and Drive APIs, and run `google-docs-mcp login` once in a terminal. Installing this without that step produces a server that starts, lists its tools, and answers every call with \"not signed in\".",
+  "long_description": "Read, edit, suggest and comment on Google Docs from your own account. Target content by quoting exact text, by heading id or by a stable handle \u2014 never by position, which is what makes an edit survive a document that changed under you. Every write takes a mode: suggest, direct or comment, and dry_run shows what would change before anything does.\n\nTHIS BUNDLE DOES NOT LOG YOU IN, and cannot. Google requires each user to bring their own OAuth Desktop client, so before the tools work you need to create one in a Google Cloud project, enable the Docs and Drive APIs, and run `google-docs-mcp login` once in a terminal. Installing this without that step produces a server that starts, lists its tools, and answers every call with \"not signed in\".\n\nThe bundle asks for the same settings as a client's configuration file, and each one left as it is does what an unconfigured server does. The tools that delete a comment or a tab are registered only once you turn on their switch, and binary exports are written only once you pick a folder. This server asks nobody before a call, so Claude Desktop's approval of each tool is then the only check.",
   "author": {
     "name": "Mark Medum Bundgaard"
   },
@@ -23,6 +23,9 @@
     "editing",
     "comments"
   ],
+  "privacy_policies": [
+    "https://policies.google.com/privacy"
+  ],
   "server": {
     "type": "binary",
     "entry_point": "server/google-docs-mcp-darwin",
@@ -30,9 +33,12 @@
       "command": "${__dirname}/server/google-docs-mcp-darwin",
       "args": [],
       "env": {
+        "GDOCS_CLIENT_SECRET": "${user_config.client_secret}",
         "GDOCS_PROFILE": "${user_config.profile}",
         "GDOCS_READ_ONLY": "${user_config.read_only}",
-        "GDOCS_DEFAULT_WRITE_MODE": "${user_config.default_write_mode}"
+        "GDOCS_ENABLE_DESTRUCTIVE": "${user_config.enable_destructive}",
+        "GDOCS_DEFAULT_WRITE_MODE": "${user_config.default_write_mode}",
+        "GDOCS_EXPORT_DIR": "${user_config.export_dir}"
       },
       "platform_overrides": {
         "win32": {
@@ -45,25 +51,46 @@
     }
   },
   "user_config": {
+    "client_secret": {
+      "type": "file",
+      "title": "OAuth client JSON",
+      "description": "The client_secret JSON you downloaded when you created the Desktop OAuth client, the same file `google-docs-mcp login` used. Leave it empty to use the one that login stored for the profile. The bundle cannot log you in, so run `google-docs-mcp login` once in a terminal first.",
+      "default": "",
+      "required": false
+    },
     "profile": {
       "type": "string",
       "title": "Profile",
-      "description": "Which stored login to use. Separate profiles keep separate tokens.",
-      "default": "default",
+      "description": "Which stored login to use. Each profile keeps its own client JSON, token and account, so one machine can hold several Google accounts, each logged in to with `google-docs-mcp login --profile <name>`. Letters, digits, - and _. Leave it empty for the default profile.",
+      "default": "",
       "required": false
     },
     "read_only": {
       "type": "boolean",
       "title": "Read-only",
-      "description": "Register only the read tools, and ask Google for read-only scopes so the API itself refuses a write.",
+      "description": "Register only the read tools. For Google to refuse a write as well, log in with `google-docs-mcp login --read-only=true`, which asks for read-only scopes. While it is on, the destructive switch registers nothing and the default write mode has no write to apply to. Off by default.",
+      "default": false,
+      "required": false
+    },
+    "enable_destructive": {
+      "type": "boolean",
+      "title": "Deleting comments and tabs",
+      "description": "Register delete_comment and delete_tab, which delete a comment thread or a reply, and a tab with its content and child tabs. Each call also has to repeat what it deletes. Off by default. This server asks nobody before a call, so Claude Desktop's approval of each tool is then the only check. It registers nothing while read-only is on.",
       "default": false,
       "required": false
     },
     "default_write_mode": {
       "type": "string",
       "title": "Default write mode",
-      "description": "\"suggest\", \"direct\" or \"comment\". What a write does when the call does not say.",
-      "default": "suggest",
+      "description": "\"suggest\", \"direct\" or \"comment\": what a write does when the call does not say. Leave it empty for suggest, which proposes each change as a suggestion for a person to accept.",
+      "default": "",
+      "required": false
+    },
+    "export_dir": {
+      "type": "directory",
+      "title": "Export folder",
+      "description": "The folder export_document writes pdf, docx, odt, rtf and epub files into, never over a file already there. Leave it empty and export_document returns md, txt and html inline only.",
+      "default": "",
       "required": false
     }
   },

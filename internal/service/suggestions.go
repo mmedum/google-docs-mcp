@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
 
 // Suggestion is one pending suggested edit.
@@ -222,7 +223,6 @@ type ReviewRequest struct {
 	Document       string
 	Action         string // accept, reject, discard
 	IDs            []string
-	All            bool
 	ExpectRevision string
 	DryRun         bool
 }
@@ -251,8 +251,11 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	if s.isMarkdown(ctx, req.Document) {
 		return nil, mdUnsupported("it has no suggestions to review", "")
 	}
-	if len(req.IDs) == 0 && !req.All {
-		return nil, Errorf("invalid", "pass ids or all: true")
+	if err := s.wordUnsupported(ctx, req.Document, "reviewing suggestions"); err != nil {
+		return nil, err
+	}
+	if len(req.IDs) == 0 {
+		return nil, Errorf("invalid", "pass the ids of the suggestions to review, from list_suggestions")
 	}
 	id, err := parseRef(req.Document)
 	if err != nil {
@@ -267,21 +270,18 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		return nil, err
 	}
 	pending := map[string]bool{}
-	var all []string
 	for _, sg := range list.Suggestions {
 		pending[sg.ID] = true
-		all = append(all, sg.ID)
 	}
-	ids := req.IDs
-	if req.All {
-		ids = all
-	}
-	if len(ids) == 0 {
-		return nil, Errorf("not_found", "no pending suggestions")
-	}
-	for _, id := range ids {
+	// An id named twice is reviewed once: Google refuses a second review
+	// of the same suggestion, which would fail the whole batch.
+	var ids []string
+	for _, id := range req.IDs {
 		if !pending[id] {
 			return nil, Errorf("not_found", "suggestion %q is not pending at this revision; call list_suggestions", id)
+		}
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
 		}
 	}
 	reqs := make([]json.RawMessage, 0, len(ids))
@@ -300,18 +300,13 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		verb = "discarded"
 	}
 	if req.DryRun {
-		out := &ReviewResult{Action: action, IDs: ids, RevisionID: list.RevisionID, Remaining: len(all) - len(ids), DryRun: true}
+		out := &ReviewResult{Action: action, IDs: ids, RevisionID: list.RevisionID, Remaining: len(list.Suggestions) - len(ids), DryRun: true}
 		out.Text = fmt.Sprintf("dry run: would have %s %d suggestion(s); %d would remain pending (revision %s)", verb, len(ids), out.Remaining, out.RevisionID)
 		return out, nil
 	}
 	f, err := s.Fetch(ctx, req.Document)
 	if err != nil {
 		return nil, err
-	}
-	if req.All && asks(ctx) {
-		if err := ask(ctx, render.AskReviewAll(f.Doc.ID, f.Doc.Title, action, ids)); err != nil {
-			return nil, err
-		}
 	}
 	f.Doc.RevisionID = list.RevisionID // guard against the revision the list came from
 	_, revision, err := s.batchUpdate(ctx, f, reqs, "")
@@ -320,7 +315,7 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 		return nil, err
 	}
 	out := &ReviewResult{Action: action, IDs: ids, RevisionID: revision}
-	out.Remaining = len(all) - len(ids)
+	out.Remaining = len(list.Suggestions) - len(ids)
 	out.Text = fmt.Sprintf("%s %d suggestion(s); %d remain pending (revision %s)", verb, len(ids), out.Remaining, out.RevisionID)
 	return out, nil
 }

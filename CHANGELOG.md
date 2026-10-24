@@ -8,6 +8,57 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-24
+
+### Added
+
+- The Claude Desktop bundle asks for the OAuth client file, `enable_destructive` and the export folder as well as the profile, read-only and the default write mode, each off or empty unless you set it, and names Google's privacy policy.
+
+### Changed
+
+- The bundle's profile and default write mode start empty, which the server reads as the default profile and `suggest`.
+- The bundle stages its Linux binaries as `server/google-docs-mcp-linux-amd64` and `server/google-docs-mcp-linux-arm64`, and carries `LICENSE` and `README.md` at its root. On an architecture it does not carry, its Linux launcher names the `go install` command for `/v3`.
+
+## [3.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** the server no longer asks you before a write; your MCP client approves each call. In Claude Code, list the writes you want to approve under `permissions.ask`, as the README shows. `delete_comment` and `delete_tab` no longer carry the `requiresUserInteraction` mark, so Claude Code asks for them by your rules, and headless it no longer refuses them.
+- **Breaking:** `review_suggestion` takes `ids`, each suggestion `list_suggestions` showed, and no longer takes `all`. Name every suggestion to review, so one proposed after the list was read is never reviewed unseen; one named twice is reviewed once.
+- **Breaking:** `delete_comment` takes `text_start`, how the text it deletes begins as `list_comments` shows it: at least 20 characters, or all of a shorter text, and empty for a reply with no text. The comment is read first, and a delete whose `text_start` does not match is refused `[stale]`, a dry run too. Your client's prompt now shows which comment goes, as the server's question used to.
+- **Breaking:** `force` no longer writes a Markdown file past changes made in the Docs editor and not saved yet. `edit_document` and `write_markdown_file` refuse `[conflict]` until the editor saves, since no revision holds that work.
+- **Breaking:** a forced op that runs in a later batch of an `edit_table` or `edit_document` call, after a grid change, is refused on every client, not only one that could be asked: no dry run shows what it destroys. Run it as a call of its own, after a dry run.
+- **Breaking:** the Go module path is now `github.com/mmedum/google-docs-mcp/v3`, as Go requires from v3 on; install with `go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest`.
+
+### Removed
+
+- **Breaking:** `GDOCS_REQUIRE_PROMPT` and `--require-prompt`. Set to anything but `false`, the server refuses to start; unset it, and drop the flag from your client's arguments.
+
+### Fixed
+
+- `export_document` no longer overwrites a file in `GDOCS_EXPORT_DIR`, nor writes through a symbolic link there. A second export of a document replaced the first without a word, and a link at the export's name was followed to wherever it pointed. A name already taken now gains a counter, as in `Report-1AbCdE-2.pdf`.
+- The live driver's transcript no longer carries the signed-in account's numeric id. Drive's link to a Word file names it (`ouid=`), and `get_document` prints that link.
+
+## [2.4.0] - 2026-10-22
+
+### Added
+
+- Word files (.docx). The Docs API reads one and refuses every write to it, so the server now writes the file itself: `edit_document`'s text ops are made in the file's XML, addressed by exact text, `heading_id` or handle as on a Google Doc, and the file is uploaded whole through Drive. `mode: suggest` writes Word tracked changes, which Docs shows as suggestions; `mode: comment` and `add_comment` write Word comments, which `list_comments` lists. Headings take the file's heading styles and lists continue the list they are placed against. `replace_all` replaces the matches in the body and warns of any in headers, footers or footnotes, which are not written. A write checks Docs and the file agree, puts back a save that lands in between, and waits for Docs to read the new revision. `get_document` says `kind: word_file`. Formatting, tables, images, layout, tabs and reviewing suggestions are refused, saying to save the file as a Google Doc. See "Word files" in the README.
+- `edit_document` takes `list_level` on insert, append and replace: the level a list starting the content takes, in place of the level of the list item it is placed against. One more than an item's level nests the content under it, and 0 after a nested item puts it back at the top; neither could be written before without replacing the items around it.
+
+### Fixed
+
+- Nested list items written next to an existing list land at their level. Google turns a list item's leading tabs into its level only on a paragraph without a bullet, and inserted paragraphs take the bullet of the one they land in, so content inserted before, into or in place of a list item came out with its sub-items at the top level, a literal tab before their text, in every write mode. A list item that took the right bullet now keeps it, staying in its list; the rest are rebuilt so levels count from the right item. A list written against a list item continues it at that item's level when their kinds match. Where items before the content have to be rebuilt for its list to start above them, an indent set on them by hand is put back, and in suggest mode a warning says they show a bullet change that changes nothing. Reported by a user.
+- A paragraph or list inserted inside a list, and a paragraph `format_document` takes out of a list, no longer keeps the indent of the bullet it dropped. An indent set on an item by hand stays.
+- A list written inside a paragraph that is no list item leaves that paragraph as it is, as other content does: the first item merges into its text and the list starts after it. The paragraph became a list item.
+- Replacing text inside a paragraph with content that is not plain text, such as **bold** or more than one paragraph, keeps that paragraph's style. A list item lost its bullet and a heading became body text, because the content's first paragraph, which merges into the one it lands in, was styled as a paragraph of its own.
+- A table or image placed after a nested list in the same content lands where it should: its place now counts the tabs the list consumes.
+- Writing to a Word file used to plan the change and then fail with Google's refusal of every edit to an Office file. What the server does not write into one now refuses up front, a dry run included, saying where it goes.
+
+### Security
+
+- Built with Go 1.27.3, whose `crypto/x509` refuses intermediate certificates known to be compromised where a system trust store may not (GO-2026-6809). `govulncheck` found it reachable from this server.
+
 ## [2.3.1] - 2026-10-14
 
 ### Fixed

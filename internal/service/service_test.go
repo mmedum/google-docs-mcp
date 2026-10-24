@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
 
 const fixtureID = "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX"
@@ -736,12 +736,3 @@ func TestReadWholeBudget(t *testing.T) {
 		t.Fatal("expected an error for a bad reference")
 	}
 }
-
-// accepting is ctx with a person who accepts every question, for the
-// tests of what a write does rather than of asking.
-func accepting(ctx context.Context) context.Context { return WithAsker(ctx, yes{}) }
-
-type yes struct{}
-
-func (yes) Ask(context.Context, render.Question) error { return nil }
-func (yes) Asks() bool                                 { return true }

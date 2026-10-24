@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
 )
 
 func seg() Segment { return Segment{ID: "", TabID: "t.0", Start: 1, End: 100} }
@@ -383,7 +383,7 @@ func TestFollowupsAndFormats(t *testing.T) {
 	got := kinds(t, res)
 	// Formats first, content highest-index first, lists last (they shift
 	// what follows), then global replacements.
-	if !strings.HasPrefix(got, "updateTextStyle[30,40) updateParagraphStyle[30,40) insertPageBreak[0,0) createFootnote[0,0) createHeader[0,0) deleteParagraphBullets[30,40) createParagraphBullets[30,40)") {
+	if !strings.HasPrefix(got, "updateTextStyle[30,40) updateParagraphStyle[30,40) insertPageBreak[0,0) createFootnote[0,0) createHeader[0,0) deleteParagraphBullets[30,40) updateParagraphStyle[30,40) createParagraphBullets[30,40)") {
 		t.Fatalf("order: %s", got)
 	}
 	if !SuggestModeUnsupported["deleteTab"] {

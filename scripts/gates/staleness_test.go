@@ -81,9 +81,10 @@ func TestDifference(t *testing.T) {
 // asserts a floor on what it found, and these pin the shapes.
 func TestPatternsMatchTheRealShapes(t *testing.T) {
 	const config = `	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level")
+	sw(&s.ReadOnly, "read-only", "READ_ONLY", "register only read tools")
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-request timeout")`
 	keys := configKey.FindAllStringSubmatch(config, -1)
-	if len(keys) != 2 || keys[0][1] != "LOG_LEVEL" || keys[1][1] != "HTTP_TIMEOUT" {
+	if len(keys) != 3 || keys[0][1] != "LOG_LEVEL" || keys[1][1] != "READ_ONLY" || keys[2][1] != "HTTP_TIMEOUT" {
 		t.Errorf("config keys = %v", keys)
 	}
 
@@ -214,5 +215,42 @@ func TestScopesAgreeRefusesAnEmptyDerivation(t *testing.T) {
 	got := scopesAgree("anything at all", []string{"https://www.googleapis.com/auth/documents"})
 	if len(got) != 1 || !strings.Contains(got[0], "not reading the code") {
 		t.Errorf("a one-scope derivation should be refused; got %v", got)
+	}
+}
+
+// A rule under another server's name is not this server's to check, and
+// a tool named in prose is not a rule.
+func TestPermissionRuleToolsReadsOnlyThisServersRules(t *testing.T) {
+	const readme = "Call `mcp__google-docs__get_document` first.\n" +
+		"```json\n" +
+		`"ask": ["mcp__google-docs__delete_tab", "mcp__google-docs__delete_coment",` + "\n" +
+		`  "mcp__google-drive__share_file"]` + "\n" +
+		"```\n"
+	got := permissionRuleTools(readme)
+	want := []string{"delete_tab", "delete_coment"}
+	if !slices.Equal(got, want) {
+		t.Errorf("permissionRuleTools\n got %v\nwant %v", got, want)
+	}
+}
+
+// Every rule names a registered tool, and a README with no rule at all
+// fails too, since it would no longer say how to be asked.
+func TestPermissionProblems(t *testing.T) {
+	registered := []string{"delete_comment", "delete_tab", "get_document"}
+	for _, tc := range []struct {
+		name, readme string
+		want         []string
+	}{
+		{"every rule names a tool", `"ask": ["mcp__google-docs__delete_tab", "mcp__google-docs__delete_comment"]`, nil},
+		{"a rule names no tool", `"ask": ["mcp__google-docs__delete_tab", "mcp__google-docs__delete_coment"]`,
+			[]string{"README gives a permission rule for delete_coment, which the server does not register"}},
+		{"no rule at all", "Approve each call in your client.",
+			[]string{`README gives no Claude Code permission rule ("mcp__google-docs__<tool>")`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := permissionProblems(tc.readme, registered); !slices.Equal(got, tc.want) {
+				t.Errorf("permissionProblems = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

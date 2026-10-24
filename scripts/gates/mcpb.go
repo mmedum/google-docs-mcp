@@ -1,15 +1,25 @@
 package main
 
 import (
+	"bytes"
+	"cmp"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/credentials"
+	"github.com/mmedum/google-docs-mcp/v3/internal/userconfig"
 )
 
 // The bundle gate and the packer (§12, and the standard's §10b).
@@ -53,7 +63,8 @@ type staged struct {
 	// glob finds the file under the release's dist directory. Empty for
 	// a file this repository ships itself.
 	glob string
-	// source is a file in this repository, for the launcher.
+	// source is a file in this repository: the launcher, the license
+	// and the README.
 	source string
 	// platform is the one this file is the entry point for, empty for a
 	// file a launcher chooses rather than the manifest.
@@ -62,6 +73,16 @@ type staged struct {
 	// names appear in a shell script no manifest mentions, so nothing
 	// else can check them.
 	launched bool
+}
+
+// mode is the mode a staged file is packed with. What runs is 0755,
+// because the desktop spawns it with the mode the zip gives it. The
+// license and the README are read, and are 0644.
+func (f staged) mode() os.FileMode {
+	if f.platform != "" || f.launched {
+		return 0o755
+	}
+	return 0o644
 }
 
 // bundleFiles is what a bundle contains. The macOS slot is goreleaser's
@@ -78,8 +99,12 @@ var bundleFiles = []staged{
 	{path: "server/google-docs-mcp-darwin", glob: "dist/*universal*darwin*/google-docs-mcp", platform: "darwin"},
 	{path: "server/google-docs-mcp.exe", glob: "dist/*windows_amd64*/google-docs-mcp.exe", platform: "win32"},
 	{path: "server/launch-linux.sh", source: launcherPath, platform: "linux"},
-	{path: "server/google-docs-mcp-linux-x64", glob: "dist/*linux_amd64*/google-docs-mcp", launched: true},
+	{path: "server/google-docs-mcp-linux-amd64", glob: "dist/*linux_amd64*/google-docs-mcp", launched: true},
 	{path: "server/google-docs-mcp-linux-arm64", glob: "dist/*linux_arm64*/google-docs-mcp", launched: true},
+	// The license, because the bundle redistributes the binaries as the
+	// archives do, and the README, as in the archives.
+	{path: "LICENSE", source: "LICENSE"},
+	{path: "README.md", source: "README.md"},
 }
 
 // manifest is the part of the document these checks are about.
@@ -87,14 +112,15 @@ type manifest struct {
 	// Schema and Support are what the document says about ITSELF:
 	// which definition of the format it claims, and where a failing
 	// install is reported. Neither was read.
-	Schema          string `json:"$schema"`
-	Support         string `json:"support"`
-	ManifestVersion string `json:"manifest_version"`
-	Name            string `json:"name"`
-	Version         string `json:"version"`
-	License         string `json:"license"`
-	Description     string `json:"description"`
-	LongDescription string `json:"long_description"`
+	Schema          string   `json:"$schema"`
+	Support         string   `json:"support"`
+	ManifestVersion string   `json:"manifest_version"`
+	Name            string   `json:"name"`
+	Version         string   `json:"version"`
+	License         string   `json:"license"`
+	Description     string   `json:"description"`
+	LongDescription string   `json:"long_description"`
+	PrivacyPolicies []string `json:"privacy_policies"`
 	Server          struct {
 		Type       string `json:"type"`
 		EntryPoint string `json:"entry_point"`
@@ -111,7 +137,8 @@ type manifest struct {
 	} `json:"server"`
 	UserConfig    map[string]json.RawMessage `json:"user_config"`
 	Compatibility struct {
-		Platforms []string `json:"platforms"`
+		ClaudeDesktop string   `json:"claude_desktop"`
+		Platforms     []string `json:"platforms"`
 	} `json:"compatibility"`
 }
 
@@ -156,6 +183,7 @@ func mcpbGate() error {
 		problems = append(problems, fmt.Sprintf(
 			"the manifest says the license is %q and LICENSE is %s", m.License, want))
 	}
+	problems = append(problems, bundleProblems(m)...)
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
@@ -463,3 +491,263 @@ func majorMinor(v string) (int, int, bool) {
 	}
 	return major, minor, true
 }
+
+// bundleProblems is everything the bundle claims beyond its file names:
+// the claims every bundle in the family makes, the settings it asks
+// for, and the launcher's install hint. The gate and the packer both
+// run it.
+func bundleProblems(m manifest) []string {
+	problems := claimProblems(m)
+	problems = append(problems, bundleSettingProblems(m, serverVars())...)
+	launcher, err := os.ReadFile(launcherPath)
+	if err != nil {
+		return append(problems, "cannot read the launcher: "+err.Error())
+	}
+	goMod, err := os.ReadFile("go.mod")
+	if err != nil {
+		return append(problems, "cannot read go.mod: "+err.Error())
+	}
+	return append(problems, installHintProblems(string(launcher), string(goMod))...)
+}
+
+// claudeDesktopFloor is the Claude Desktop version every bundle in the
+// family claims.
+const claudeDesktopFloor = ">=0.10.0"
+
+// claimProblems holds the two claims the schema leaves optional and the
+// family makes. The manifest specification requires privacy_policies of
+// a server that connects to a service processing user data, as this one
+// does to Google, and neither the schema nor `mcpb validate` enforces
+// it.
+func claimProblems(m manifest) []string {
+	var problems []string
+	if len(m.PrivacyPolicies) == 0 {
+		problems = append(problems, "privacy_policies is empty; the manifest specification requires one for a "+
+			"server that connects to a service processing user data, as this one does to Google")
+	}
+	if m.Compatibility.ClaudeDesktop != claudeDesktopFloor {
+		problems = append(problems, fmt.Sprintf("compatibility.claude_desktop is %q; the family's bundles claim %q",
+			m.Compatibility.ClaudeDesktop, claudeDesktopFloor))
+	}
+	return problems
+}
+
+// bundleAsked are the settings the bundle asks for at install: what a
+// person sets in another client's configuration. Each is asked under
+// its name without the prefix, lowercased, which gives the family's
+// bundles the same keys.
+var bundleAsked = []string{
+	config.EnvPrefix + "CLIENT_SECRET",
+	config.EnvPrefix + "PROFILE",
+	config.EnvPrefix + "READ_ONLY",
+	config.EnvPrefix + "ENABLE_DESTRUCTIVE",
+	config.EnvPrefix + "DEFAULT_WRITE_MODE",
+	config.EnvPrefix + "EXPORT_DIR",
+}
+
+// Why bundleLeftOut leaves a setting out.
+const diagnostics = "diagnostics, set by hand while chasing a problem"
+
+// bundleLeftOut is every other variable the server reads, with why the
+// bundle does not ask for it.
+var bundleLeftOut = map[string]string{
+	config.EnvPrefix + "LOG_LEVEL":      diagnostics,
+	config.EnvPrefix + "LOG_FORMAT":     diagnostics,
+	config.EnvPrefix + "HTTP_TIMEOUT":   "a timeout, whose default suits an install",
+	config.EnvPrefix + "PREVIEW":        "ignored since 2.1.0, when comments and suggestions became generally available",
+	config.EnvPrefix + "REQUIRE_PROMPT": "removed in 3.0.0, and read only to refuse it set",
+	userconfig.EnvDir:                   "moves every profile, which tests do; a second account is a profile",
+	credentials.EnvVar:                  "a credential for automation; a bundle install uses the login's keyring entry",
+}
+
+// serverVars is every variable the server reads: what Define looks up,
+// and the two read outside it, named by their own constants so a rename
+// is a compile error here rather than a shorter list.
+func serverVars() []string {
+	vars := append(config.EnvVars(), userconfig.EnvDir, credentials.EnvVar)
+	slices.Sort(vars)
+	return slices.Compact(vars)
+}
+
+// bundleKey is the user_config key a setting is asked under.
+func bundleKey(name string) string {
+	return strings.ToLower(strings.TrimPrefix(name, config.EnvPrefix))
+}
+
+// userConfigOption is the part of a user_config entry these checks read.
+// Default stays raw, so an absent default and a JSON comparison are both
+// possible.
+type userConfigOption struct {
+	Type     string          `json:"type"`
+	Required bool            `json:"required"`
+	Default  json.RawMessage `json:"default"`
+}
+
+// bundleSettingProblems holds what the bundle asks for to the server's
+// own settings. known is every variable the server reads, an argument so
+// a test can add one.
+//
+// Every variable is asked for or left out with a reason, and each one
+// asked for reaches its variable and nothing else is set. A switch
+// defaults to the server's own default, compared as JSON so a text
+// "false" is refused: in Claude Desktop the only guard besides the
+// switch is its approval of each tool, which a person can set to always
+// allow, so a bundle install may turn on nothing an unconfigured server
+// leaves off. An optional key has a default, because the reference host
+// passes ${user_config.x} to the server as written when it has none and
+// the person leaves the field blank. And the environment the defaults
+// give the server configures it as no environment does.
+func bundleSettingProblems(m manifest, known []string) []string {
+	switches := map[string]string{}
+	for _, v := range config.Vars() {
+		if v.Switch {
+			switches[v.Name] = v.Default
+		}
+	}
+
+	var problems []string
+	for _, name := range known {
+		if !slices.Contains(bundleAsked, name) && bundleLeftOut[name] == "" {
+			problems = append(problems, fmt.Sprintf("the server reads %s, and the bundle neither asks for it "+
+				"nor says why not", name))
+		}
+	}
+	for _, name := range slices.Concat(bundleAsked, slices.Sorted(maps.Keys(bundleLeftOut))) {
+		if !slices.Contains(known, name) {
+			problems = append(problems, fmt.Sprintf("the bundle has a verdict on %s, which the server does not read", name))
+		}
+	}
+
+	options := map[string]userConfigOption{}
+	for _, key := range slices.Sorted(maps.Keys(m.UserConfig)) {
+		var opt userConfigOption
+		if err := json.Unmarshal(m.UserConfig[key], &opt); err != nil {
+			problems = append(problems, fmt.Sprintf("user_config.%s is not an object: %v", key, err))
+			continue
+		}
+		options[key] = opt
+		if !opt.Required && opt.Default == nil {
+			problems = append(problems, fmt.Sprintf("user_config.%s is optional with no default; the reference host "+
+				"passes ${user_config.%s} to the server as written when the field is left blank", key, key))
+		}
+	}
+
+	asked := map[string]bool{}
+	for _, name := range bundleAsked {
+		key := bundleKey(name)
+		asked[key] = true
+		opt, ok := options[key]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("user_config does not ask for %s, which sets %s", key, name))
+			continue
+		}
+		if got, want := m.Server.MCPConfig.Env[name], "${user_config."+key+"}"; got != want {
+			problems = append(problems, fmt.Sprintf("mcp_config.env.%s is %q, want %q", name, got, want))
+		}
+		def, isSwitch := switches[name]
+		if !isSwitch {
+			continue
+		}
+		var got bytes.Buffer
+		if opt.Default == nil || json.Compact(&got, opt.Default) != nil || got.String() != def {
+			problems = append(problems, fmt.Sprintf("user_config.%s is a %s defaulting to %s; %s is a switch the "+
+				"server defaults to %s, and a bundle install may turn on nothing an unconfigured server leaves off",
+				key, cmp.Or(opt.Type, "field"), cmp.Or(got.String(), "nothing"), name, def))
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(options)) {
+		if !asked[key] {
+			problems = append(problems, fmt.Sprintf("user_config asks for %s, which is no setting's key", key))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(m.Server.MCPConfig.Env)) {
+		if !slices.Contains(bundleAsked, name) {
+			problems = append(problems, fmt.Sprintf("mcp_config.env sets %s, which the bundle does not ask for", name))
+		}
+	}
+	if p := defaultsProblem(m.Server.MCPConfig.Env, options); p != "" {
+		problems = append(problems, p)
+	}
+	return problems
+}
+
+// defaultsProblem reports a bundle whose defaults configure the server
+// otherwise than no environment does.
+//
+// The environment is built as the reference host builds it: a boolean
+// becomes "true" or "false", a text default stays as it is, and a
+// reference with no default is left as written. A setting the person
+// must supply is left out, since it is theirs either way.
+func defaultsProblem(env map[string]string, options map[string]userConfigOption) string {
+	given := map[string]string{}
+	for name, value := range env {
+		required := false
+		given[name] = userConfigRef.ReplaceAllStringFunc(value, func(ref string) string {
+			opt := options[userConfigRef.FindStringSubmatch(ref)[1]]
+			required = required || opt.Required
+			var d any
+			if json.Unmarshal(opt.Default, &d) != nil {
+				return ref
+			}
+			switch d := d.(type) {
+			case bool:
+				return strconv.FormatBool(d)
+			case string:
+				return d
+			case float64:
+				return strconv.FormatFloat(d, 'f', -1, 64)
+			}
+			return ref
+		})
+		if required {
+			delete(given, name)
+		}
+	}
+	build := func(env map[string]string) (config.Config, error) {
+		fs := flag.NewFlagSet("bundle", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		return config.Define(fs, func(name string) string { return env[name] }).Build()
+	}
+	got, err := build(given)
+	if err != nil {
+		return fmt.Sprintf("the environment the bundle's defaults give the server is refused: %v", err)
+	}
+	want, err := build(nil)
+	if err != nil {
+		return fmt.Sprintf("an unconfigured server is refused: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		return fmt.Sprintf("the bundle's defaults configure the server otherwise than no environment does: %v", given)
+	}
+	return ""
+}
+
+// installHintProblems holds the launcher's install hint, given on an
+// architecture the bundle does not carry, to the module go.mod declares.
+// The path changes with every major version from v2, so a hint written
+// before one names a module that `go install` no longer updates.
+func installHintProblems(launcher, goMod string) []string {
+	module := moduleLine.FindStringSubmatch(goMod)
+	if module == nil {
+		return []string{"go.mod names no module"}
+	}
+	want := "go install " + module[1] + "/cmd/google-docs-mcp@latest"
+	hints := installHint.FindAllString(launcher, -1)
+	if len(hints) == 0 {
+		return []string{"the launcher gives no install hint for an architecture the bundle does not carry"}
+	}
+	var problems []string
+	for _, hint := range hints {
+		if hint != want {
+			problems = append(problems, fmt.Sprintf("the launcher says %q, and go.mod's module gives %q", hint, want))
+		}
+	}
+	return problems
+}
+
+var (
+	// moduleLine is go.mod's module directive. Trailing space is allowed
+	// because a checkout with Windows line endings ends it with "\r".
+	moduleLine  = regexp.MustCompile(`(?m)^module\s+(\S+)\s*$`)
+	installHint = regexp.MustCompile(`go install [^\s"]+`)
+)

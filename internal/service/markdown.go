@@ -12,12 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/mdfile"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // A Markdown file that Docs opens in place stays a text/markdown blob:
@@ -27,9 +26,9 @@ import (
 // (architecture §7.5).
 
 const (
-	// mdMaxWrite is the largest file written: Drive's ceiling for a
+	// maxUpload is the largest file written: Drive's ceiling for a
 	// simple upload is 5 MB.
-	mdMaxWrite = 5 << 20
+	maxUpload = 5 << 20
 	// mdMaxRead is the largest file read.
 	mdMaxRead = 20 << 20
 )
@@ -42,7 +41,7 @@ const IsMarkdownMessage = "this is a Markdown file, which Docs opens in place an
 const markupRefused = "the content holds Docs' comment markup (a gdoc_comment marker, or a line starting gdoc_comments:), which would forge or end a comment"
 
 func tooLarge(n int) error {
-	return Errorf("unsupported", "%d bytes is over the %d this server uploads, Drive's ceiling for a simple upload", n, mdMaxWrite)
+	return Errorf("unsupported", "%d bytes is over the %d this server uploads, Drive's ceiling for a simple upload", n, maxUpload)
 }
 
 // mdFile is a Markdown file as one read saw it.
@@ -80,47 +79,46 @@ func (m *mdFile) mime() string { return m.meta.MimeType }
 // revision, which every upload moves.
 func (m *mdFile) revision() string { return m.meta.HeadRevisionID }
 
-// kind asks Drive once per id per session whether a document is a
-// Markdown file, and returns the metadata when this call is the one
-// that asked, for a caller that would fetch it anyway. Drive refusing
-// the id is remembered as a Google Doc, which the Docs API then answers
-// for; a failure that may pass is not remembered.
-func (s *Service) kind(ctx context.Context, ref string) (bool, *gapi.File) {
+// kind asks Drive once per id per session what type a document is, and
+// returns the metadata when this call is the one that asked, for a caller
+// that would fetch it anyway. Drive refusing the id is remembered as a
+// Google Doc, which the Docs API then answers for; a failure that may
+// pass is not remembered.
+func (s *Service) kind(ctx context.Context, ref string) (string, *gapi.File) {
 	id, err := parseRef(ref)
 	if err != nil {
-		return false, nil
+		return "", nil
 	}
 	s.mu.Lock()
 	k, ok := s.kinds[id]
 	s.mu.Unlock()
 	if ok && (k.until.IsZero() || s.now().Before(k.until)) {
-		return k.md, nil
+		return k.mime, nil
 	}
 	file, err := s.api.GetFile(ctx, id)
 	switch {
 	case err == nil && file != nil:
-		md := gapi.IsMarkdownMimeType(file.MimeType)
-		s.rememberKind(id, md)
-		return md, file
+		s.rememberKind(id, file.MimeType)
+		return file.MimeType, file
 	case errors.Is(err, gapi.ErrNotFound) || errors.Is(err, gapi.ErrForbidden):
-		s.rememberKind(id, false)
+		s.rememberKind(id, gapi.DocumentMimeType)
 	default:
 		// Drive may be failing for a while; every call paying a failing
 		// round trip, retries included, before the Docs API is asked
 		// would make that the Docs API's outage too.
 		s.mu.Lock()
-		s.kinds[id] = kindMemo{until: s.now().Add(kindRetryAfter)}
+		s.kinds[id] = kindMemo{mime: gapi.DocumentMimeType, until: s.now().Add(kindRetryAfter)}
 		s.mu.Unlock()
 	}
 	s.log.DebugContext(ctx, "could not ask Drive for the file's type; reading it as a Google Doc", "class", gapi.Class(err))
-	return false, nil
+	return gapi.DocumentMimeType, nil
 }
 
-// kindMemo is what a session remembers of a document's type: whether it
-// is a Markdown file, and, for a guess made because Drive could not be
-// asked, until when.
+// kindMemo is what a session remembers of a document's type: its Drive
+// type, and, for a guess made because Drive could not be asked, until
+// when.
 type kindMemo struct {
-	md    bool
+	mime  string
 	until time.Time
 }
 
@@ -131,13 +129,27 @@ const kindRetryAfter = time.Minute
 // that does not parse is not a Markdown file; the path it falls through
 // to says what is wrong with it.
 func (s *Service) isMarkdown(ctx context.Context, ref string) bool {
-	md, _ := s.kind(ctx, ref)
-	return md
+	mime, _ := s.kind(ctx, ref)
+	return gapi.IsMarkdownMimeType(mime)
 }
 
-func (s *Service) rememberKind(id string, md bool) {
+// wordUnsupported refuses on a Word file what only the Docs API does,
+// which refuses every write to one (spike G); nil for any other document.
+func (s *Service) wordUnsupported(ctx context.Context, ref, what string) error {
+	if s.isWord(ctx, ref) {
+		return Errorf("unsupported", "this is a Word file (.docx), whose text this server writes into the file itself, "+
+			"with edit_document and comments; %s needs the file saved as a Google Doc (File > Save as Google Docs)", what)
+	}
+	return nil
+}
+
+// wordFileNote is what get_document tells a person about a Word file.
+const wordFileNote = "a Word file (.docx): edit_document writes its text into the file and uploads it whole through Drive, " +
+	"a suggestion as a tracked change and a comment as a Word comment, which an editor that has it open reloads; " + wordElsewhere
+
+func (s *Service) rememberKind(id string, mime string) {
 	s.mu.Lock()
-	s.kinds[id] = kindMemo{md: md}
+	s.kinds[id] = kindMemo{mime: mime}
 	s.mu.Unlock()
 }
 
@@ -160,7 +172,7 @@ func (s *Service) fetchMarkdown(ctx context.Context, ref string, meta *gapi.File
 		if !gapi.IsMarkdownMimeType(meta.MimeType) {
 			// Retyped since this session asked, by an upload sent as
 			// another type: the Docs API refuses a text/plain .md.
-			s.rememberKind(id, false)
+			s.rememberKind(id, meta.MimeType)
 			return nil, Errorf("unsupported", "the file is %s now, not a Markdown file; Docs opens a .md file in place only while it is typed %s or %s", meta.MimeType, gapi.MarkdownMimeType, gapi.LegacyMarkdownMimeType)
 		}
 		if size, _ := strconv.ParseInt(meta.Size, 10, 64); size > mdMaxRead {
@@ -270,7 +282,7 @@ func mdWritable(m *mdFile) error {
 			return Errorf("forbidden", "%s", msg)
 		}
 	}
-	if n := len(m.md.Source()); n > mdMaxWrite {
+	if n := len(m.md.Source()); n > maxUpload {
 		return tooLarge(n)
 	}
 	return nil
@@ -481,15 +493,15 @@ type mdPlanned struct {
 	// summary has one entry per op, in op order, so summary[seq] is op
 	// seq's: the ops come numbered from 0.
 	summary  []plan.OpSummary
-	forced   []render.Forced
 	warnings []string
 }
 
 type opSpan struct{ op, start, end int }
 
-// mdOpKinds are the ops a Markdown file takes: the ones that change
-// text. Any other is refused, whichever tool sent it.
-var mdOpKinds = map[plan.OpKind]bool{plan.OpInsert: true, plan.OpAppend: true, plan.OpReplace: true, plan.OpDelete: true, plan.OpReplaceAll: true}
+// textOpKinds are the ops a Markdown or Word file takes, written into the
+// file itself: the ones that change text. Any other is refused, whichever
+// tool sent it.
+var textOpKinds = map[plan.OpKind]bool{plan.OpInsert: true, plan.OpAppend: true, plan.OpReplace: true, plan.OpDelete: true, plan.OpReplaceAll: true}
 
 // mdPlan resolves every op against one read and turns it into edits of
 // the visible text, then runs the guard over them.
@@ -497,7 +509,7 @@ func mdPlan(f *mdfile.File, ops []EditOp, force bool) (*mdPlanned, error) {
 	p := &mdPlanned{}
 	text := f.Text()
 	for _, op := range ops {
-		if !mdOpKinds[op.Kind] {
+		if !textOpKinds[op.Kind] {
 			return nil, mdUnsupported(fmt.Sprintf("op %d (%s) needs the Docs API", op.Seq, op.Kind),
 				"write the change as markdown with insert, append, replace, delete or replace_all")
 		}
@@ -644,7 +656,7 @@ func (p *mdPlanned) checkOverlaps() error {
 }
 
 // guard refuses a direct edit that would delete commented text, an
-// image or a footnote, unless forced; forced, it records what goes.
+// image or a footnote, unless forced; forced, it warns of what goes.
 func (p *mdPlanned) guard(f *mdfile.File, force bool) error {
 	hitsByOp := map[int][]mdfile.Hit{}
 	var order []int
@@ -665,7 +677,6 @@ func (p *mdPlanned) guard(f *mdfile.File, force bool) error {
 			return Errorf("blocked", "op %d (%s of %s) would change %s; narrow the target, or pass force: true if the person chose to", op, sum.Kind, sum.Description, what)
 		}
 		p.warnings = append(p.warnings, fmt.Sprintf("op %d: forced; it changes %s", op, what))
-		p.forced = append(p.forced, render.Forced{Seq: op, Kind: string(sum.Kind), Description: sum.Description, Destroys: what})
 	}
 	return nil
 }

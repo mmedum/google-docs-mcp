@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
 
 type replyEnvelope struct {
@@ -91,6 +91,11 @@ func (e replyEnvelope) addedTabID() string {
 // cached copy, and returns the decoded replies and the new revision.
 // writeMode is "" or "SUGGEST".
 func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMessage, writeMode string) (replyEnvelope, string, error) {
+	if f.Word {
+		// Google refuses every write to one (spike G). The tools refuse it
+		// up front, dry runs included; a path that did not stops here.
+		return replyEnvelope{}, "", Errorf("unsupported", "this is a Word file (.docx); %s", wordElsewhere)
+	}
 	wc := &gapi.WriteControl{RequiredRevisionID: f.Doc.RevisionID, WriteMode: writeMode}
 	res, err := s.api.BatchUpdate(ctx, f.Doc.ID, &gapi.BatchUpdateRequest{Requests: reqs, WriteControl: wc})
 	if err != nil {

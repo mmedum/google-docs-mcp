@@ -471,8 +471,9 @@ const (
 	CheckboxPreset = "BULLET_CHECKBOX"
 )
 
-// CreateBullets turns the paragraphs in r into a list. Leading tabs set
-// nesting and are consumed by the API.
+// CreateBullets turns the paragraphs in r into a list. On a paragraph with
+// no bullet yet, leading tabs set its nesting and are consumed by the API
+// (lists.go has the rest of the rules).
 func CreateBullets(r Rng, preset string) json.RawMessage {
 	return raw(map[string]any{"createParagraphBullets": map[string]any{"range": r.json(), "bulletPreset": preset}})
 }
@@ -480,6 +481,12 @@ func CreateBullets(r Rng, preset string) json.RawMessage {
 // DeleteBullets removes list membership from the paragraphs in r.
 func DeleteBullets(r Rng) json.RawMessage {
 	return raw(map[string]any{"deleteParagraphBullets": map[string]any{"range": r.json()}})
+}
+
+// ClearIndent puts the paragraphs in r back on their named style's
+// indent: a field the mask names and the style leaves out is cleared.
+func ClearIndent(r Rng) json.RawMessage {
+	return raw(map[string]any{"updateParagraphStyle": map[string]any{"range": r.json(), "paragraphStyle": map[string]any{}, "fields": "indentStart,indentFirstLine"}})
 }
 
 // ReplaceAllText replaces every occurrence in the given tab. The tab is

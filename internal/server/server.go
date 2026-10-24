@@ -13,9 +13,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/service"
-	"github.com/mmedum/google-docs-mcp/v2/internal/tools"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/service"
+	"github.com/mmedum/google-docs-mcp/v3/internal/tools"
 )
 
 // Name is the MCP server name.
@@ -55,14 +55,18 @@ func instructionsFor(cfg config.Config) string {
 	const markdownWrites = "Its edits take mode direct or comment, since such a file has no suggestions, and every edit uploads " +
 		"the whole file, which makes an editor that has it open reload; to work in one together with a person, make a " +
 		"working copy (create_document from_file), work in that Google Doc, and write it back with write_markdown_file. "
+	const word = "A Word file (.docx) reads like a Google Doc, handles included, and get_document says kind word_file. "
+	const wordWrites = "edit_document and add_comment write its body's text into the file itself, in every mode, a suggestion " +
+		"as a tracked change and a comment as a Word comment, and upload it whole; formatting, tables, images, layout, tabs " +
+		"and suggestion review need it saved as a Google Doc. "
 	const closing = "Handles like p12 are valid for the revision_id they came with. " +
 		"Resources gdocs://<id>, gdocs://<id>/outline and gdocs://<id>/tabs/<tab> hold the same content as markdown " +
 		"for clients that attach a document whole; they carry no handles."
 
 	if cfg.ReadOnly {
-		return opening + readOnly + markdown + closing
+		return opening + readOnly + markdown + word + closing
 	}
-	return opening + writing + markdown + markdownWrites + closing
+	return opening + writing + markdown + markdownWrites + word + wordWrites + closing
 }
 
 // Deps are what the server needs.
@@ -87,7 +91,7 @@ func New(d Deps) *mcp.Server {
 	if d.Logger != nil {
 		s.AddReceivingMiddleware(logCalls(d.Logger))
 	}
-	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config, Logger: d.Logger})
+	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config})
 	return s
 }
 

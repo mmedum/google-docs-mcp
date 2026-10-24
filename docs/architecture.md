@@ -1,6 +1,10 @@
 # Architecture — google-docs-mcp
 
-**Status:** v3.0.0 (released 2026-10-23, live run green). The server
+**Status:** v3.1.0 (2026-10-24). The Claude Desktop bundle has the
+shape the sibling servers' bundles share: every setting another client
+sets, each off or empty by default as the server is, the shared file
+names, LICENSE and the README, and Google's privacy policy; the server
+is unchanged. v3.0.0 (released 2026-10-23, live run green). The server
 asks the person nothing, and the client approves each call (§12a).
 `review_suggestion` names each suggestion it reviews, `delete_comment`
 takes the start of the text it deletes, and `force` never writes past
@@ -1060,6 +1064,27 @@ accounts. That sets these requirements:
   Desktop (`claude_desktop_config.json`) and Cursor (`mcp.json`). All
   three pass only `command`, `args` and `env`, which is why config is
   env-first.
+- **Claude Desktop bundle.** Each release carries a `.mcpb` with the
+  family's layout: `server/google-docs-mcp-darwin` (universal),
+  `server/google-docs-mcp.exe`, `server/google-docs-mcp-linux-amd64`,
+  `server/google-docs-mcp-linux-arm64` and `server/launch-linux.sh`, with
+  `LICENSE` and `README.md` at the root. It asks for what a person sets
+  in another client's configuration: the OAuth client file, the profile,
+  read-only, the destructive switch, the default write mode and the
+  export folder, each under its variable's name without `GDOCS_`,
+  lowercased. Logging, the timeout, the deprecated preview switch, the
+  removed prompt setting, the config directory and the refresh token are
+  left out, each with its reason in `gates mcpb`, which fails on a
+  variable with no verdict. Each switch defaults to the server's own
+  default, off, and every other key to `""`, which the server reads as
+  unset. Claude Desktop approves each tool, and a person can set a tool
+  to always allow, so a switch left off is the one guard a bundle install
+  keeps (§18). No combination of the fields is refused: read-only leaves
+  the destructive switch nothing to register and the default write mode
+  nothing to apply to, so those fields say so. The manifest names
+  Google's privacy policy and declares no `tools` list, which would be
+  display only and wrong for most installs, since two settings change
+  what registers.
 - **Setup guide** in the README, per-deployer, in the order `doctor`
   checks it: Cloud project → APIs → consent screen (Internal vs Testing)
   → Desktop OAuth client → `login` → `doctor`.
@@ -1530,3 +1555,6 @@ checked rather than assumed.
 | A tracked insertion may wrap a link | Refuted live (spike H): with `w:hyperlink` inside `w:ins`, Docs read the paragraph without the link's text; with `w:ins` inside `w:hyperlink` it read it | A tracked insertion goes inside the link (`internal/ooxml`). |
 | The server should confirm a write with the person itself, through MCP form elicitation | **Refuted 2026-10-22** for the family on documents and source, rechecked 2026-10-23 against the most-used servers and clients. The specification (`server/tools`, 2025-06-18 to 2026-07-28) puts consent to each call on the host; `client/elicitation` lets the client answer "from the user or other sources". Claude Code documents that an `Elicitation` hook answers with no dialog, Codex in full access accepts a form with no fields by itself, open user reports have Claude Code's VS Code extension and Claude Desktop's Code tab decline it unseen and Cowork leave it hanging, and no client's permission rules match it | §12a: the server asks nobody. Registration, the retyped target, the guards, the witnesses and `dry_run` stay; `review_suggestion` carries the ids the question used to show, and `delete_comment` the start of the text. The rows above on asking and on the mark describe what this replaces. |
 | claude.ai, Codex and VS Code all prompt by `destructiveHint` (the family's assumption until 2026-10-23) | **Refuted for VS Code 2026-10-23**, at source: VS Code ignores `destructiveHint` and prompts on every tool not marked `readOnlyHint: true`. Codex prompts by `destructiveHint` in its default `auto` mode, and claude.ai and ChatGPT document that it decides their prompts. Each remembers an approval per tool, never per argument | `readOnlyHint` only on the nine reads, which change nothing; `destructiveHint` on the two deletes. The README says what each client prompts for. |
+| A bundle install has a second approval behind the server, as Claude Code's ask rules are | **Refuted 2026-10-24** on the docs and the reference host, for the family's §10b; Claude Desktop itself not probed, and no page names desktop extensions. anthropics/mcpb v2.1.2 and `70fe3b34` declare `tools` for display, and `src/` reads it only in `init`; v2.1.2 `src/shared/config.ts` passes a boolean to `env` as "true" or "false". claude.com/docs/connectors/getting-started: "Select Allow once to continue, or Always allow to skip the prompt for that tool from now on". claude.com/docs/connectors/building/review-criteria: readOnlyHint and destructiveHint "determine auto-permissions in Claude" | Every switch the bundle asks for defaults to the server's own default, off, and `gates mcpb` refuses one that does not, compared as JSON. The bundle declares no `tools` list (§13). |
+| A bundle's optional setting the person leaves blank reaches the server empty | **Refuted 2026-10-24** on the reference host: anthropics/mcpb v2.1.2 `src/shared/config.ts` builds its variables from the defaults and the person's values, and leaves one it does not have as written, so an optional key with no default reaches `env` as the text `${user_config.x}`. The 3.0.0 bundle gave each of its three keys a default, so it was not affected; without one, the export folder would reach the server as that text, which it refuses as not an absolute path | Every optional key has a default, and `gates mcpb` refuses one without. The environment the defaults give the server must configure it as no environment does, which `TestVarsDescribeWhatBuildDoes` holds for each setting's default and for `""`. |
+| `privacy_policies` is optional for a bundle | **Refuted 2026-10-24** on the specification: anthropics/mcpb `MANIFEST.md`, "Required when the extension connects to external services (first- or third-party) that process user data"; added in manifest_version 0.2, and enforced by neither the schema nor `mcpb validate` | The manifest names https://policies.google.com/privacy, which answered 200 on 2026-10-24, and `gates mcpb` refuses an empty list. |

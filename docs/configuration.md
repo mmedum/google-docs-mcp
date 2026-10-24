@@ -5,6 +5,11 @@ Everything is an environment variable, because MCP clients pass `command`,
 has a flag with the same name (`GDOCS_LOG_LEVEL` ↔ `--log-level`); a flag
 given explicitly wins over the environment.
 
+The Claude Desktop bundle asks for `GDOCS_CLIENT_SECRET`, `GDOCS_PROFILE`,
+`GDOCS_READ_ONLY`, `GDOCS_ENABLE_DESTRUCTIVE`, `GDOCS_DEFAULT_WRITE_MODE`
+and `GDOCS_EXPORT_DIR`, each under its name without `GDOCS_`, lowercased.
+A field left empty or off does what the variable left unset does.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `GDOCS_PROFILE` | `default` | Named profile. Profiles keep separate client secrets, tokens and account. Use one per Google account. |

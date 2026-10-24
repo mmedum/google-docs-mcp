@@ -81,9 +81,10 @@ func TestDifference(t *testing.T) {
 // asserts a floor on what it found, and these pin the shapes.
 func TestPatternsMatchTheRealShapes(t *testing.T) {
 	const config = `	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level")
+	sw(&s.ReadOnly, "read-only", "READ_ONLY", "register only read tools")
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-request timeout")`
 	keys := configKey.FindAllStringSubmatch(config, -1)
-	if len(keys) != 2 || keys[0][1] != "LOG_LEVEL" || keys[1][1] != "HTTP_TIMEOUT" {
+	if len(keys) != 3 || keys[0][1] != "LOG_LEVEL" || keys[1][1] != "READ_ONLY" || keys[2][1] != "HTTP_TIMEOUT" {
 		t.Errorf("config keys = %v", keys)
 	}
 

@@ -275,6 +275,19 @@ while it runs, dropping edits made behind its back: quit it fully, then
 edit, then start it. It also loads tool definitions lazily, so give it a
 moment before expecting the tools in a chat.
 
+Claude Desktop can instead open the `.mcpb` bundle from a release, with
+no config file to edit. It asks for the same settings: the OAuth client
+JSON, the profile, read-only, the default write mode, deleting comments
+and tabs (`enable_destructive`) and the export folder (`export_dir`).
+Deleting stays off unless you turn it on, and binary exports stay off
+until you pick a folder. This server asks nobody before a call. Claude
+Desktop approves each tool, with Allow once or Always allow, and a tool
+you always allow then runs unasked, so leave `enable_destructive` off
+unless you need its tools. The bundle covers macOS, Windows and Linux on
+both architectures. It does **not** log you in: install the binary as
+well, run `google-docs-mcp login` once, and the bundle picks up the same
+credentials.
+
 All settings are environment variables; see
 [`docs/configuration.md`](docs/configuration.md). Nothing needs to be set
 for the defaults.

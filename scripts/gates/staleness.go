@@ -16,11 +16,12 @@ import (
 
 var (
 	// def(&s.Field, "flag-name", "ENV_KEY", default, usage) is how every
-	// setting is registered, so the list of settings is derivable rather
+	// setting is registered, and sw(&s.Field, "flag-name", "ENV_KEY",
+	// usage) every switch, so the list of settings is derivable rather
 	// than typed. The shell version this replaces carried a hand-written
 	// case list of eleven names, which is the same shape as the coverage
 	// floor's hand-written package list: silent when it falls behind.
-	configKey  = regexp.MustCompile(`def\(&s\.\w+,\s*"[a-z-]+",\s*"([A-Z_]+)"`)
+	configKey  = regexp.MustCompile(`(?:def|sw)\(&s\.\w+,\s*"[a-z-]+",\s*"([A-Z_]+)"`)
 	readmeTool = regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z_]+)` + "`" + ` \|`)
 	// A tool named anywhere in the prose, for the tools that register
 	// only behind a flag and so are described rather than tabulated.

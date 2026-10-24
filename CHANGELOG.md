@@ -8,6 +8,15 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+
+- The Claude Desktop bundle asks for the OAuth client file, `enable_destructive` and the export folder as well as the profile, read-only and the default write mode, each off or empty unless you set it, and names Google's privacy policy.
+
+### Changed
+
+- The bundle's profile and default write mode start empty, which the server reads as the default profile and `suggest`.
+- The bundle stages its Linux binaries as `server/google-docs-mcp-linux-amd64` and `server/google-docs-mcp-linux-arm64`, and carries `LICENSE` and `README.md` at its root. On an architecture it does not carry, its Linux launcher names the `go install` command for `/v3`.
+
 ## [3.0.0] - 2026-10-23
 
 ### Changed

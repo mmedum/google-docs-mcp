@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // API is the subset of the Google client the service uses.
@@ -131,7 +131,7 @@ func Errorf(class, format string, args ...any) *Error {
 //	rate_limited       a quota; the message says whether waiting helps
 //	server             Google failed after retries; try again shortly
 //	network            Google could not be reached
-//	blocked            a guard or the person refused the write; nothing changed
+//	blocked            a guard refused the write; nothing changed
 //	ambiguous_outcome  a write whose result is unknown; go and look
 //	unexpected         a failure this server did not anticipate
 //
@@ -159,6 +159,9 @@ type Fetched struct {
 	// is how this server learns that the comment and suggestion
 	// features reach this project for this document.
 	CommentsView bool
+	// Word says the document is a Word file (.docx), which the Docs API
+	// reads and refuses every write to: its text is written into the file.
+	Word bool
 
 	threadsOnce sync.Once
 	threads     []CommentThread
@@ -201,7 +204,8 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 	// API serves one for a Markdown file too, with handles no write could
 	// use, and refuses every write to it, so a path that forgot to branch
 	// on the kind stops here instead.
-	if s.isMarkdown(ctx, id) {
+	mime, _ := s.kind(ctx, id)
+	if gapi.IsMarkdownMimeType(mime) {
 		return nil, mdUnsupported("this needs the Docs API", "")
 	}
 	if !fresh {
@@ -236,6 +240,7 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 	if err != nil {
 		return nil, err
 	}
+	f.Word = mime == gapi.WordMimeType
 	s.cacheFetched(f)
 	if !fresh {
 		s.Remember(f)
@@ -253,8 +258,10 @@ const CommentsViewRefused = "Google refused the comments view for this document"
 // canSuggest is the one rule for suggestion mode. A project the comment
 // features have not reached might apply a SUGGEST batch as a direct
 // edit, which would overwrite what the person asked to propose, so only
-// a read Google answered with comments allows it.
-func (f *Fetched) canSuggest() bool { return f.CommentsView }
+// a read Google answered with comments allows it. A Word file's
+// suggestions are tracked changes written into the file, which need no
+// view.
+func (f *Fetched) canSuggest() bool { return f.CommentsView || f.Word }
 
 // parse builds a Fetched from a wire document without caching it.
 func (s *Service) parse(w *gdocs.Document, commentsView bool) (*Fetched, error) {

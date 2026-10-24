@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/mdfile"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
 
 // Every write to a Markdown file is a whole-file upload, and Drive has no
@@ -39,13 +39,12 @@ import (
 // again on a newer version when a save lands while the write is under
 // way, so it may depend on nothing but its argument and what it closed
 // over before the write began.
-type mdChange func(m *mdFile) (*mdfile.File, *EditResult, []render.Forced, error)
+type mdChange func(m *mdFile) (*mdfile.File, *EditResult, error)
 
 type mdWriteOpts struct {
 	ref            string
 	expectRevision string
 	dryRun         bool
-	force          bool
 	// comment says the change writes comment markup; posts names their
 	// bodies, which the live session must show afterwards.
 	comment bool
@@ -53,11 +52,11 @@ type mdWriteOpts struct {
 }
 
 const (
-	// mdWriteAttempts bounds how often a write waits for the editor or
+	// writeAttempts bounds how often a write waits for the editor or
 	// plans again.
-	mdWriteAttempts = 3
-	// mdWait is how long a write waits for the editor to save.
-	mdWait = 3 * time.Second
+	writeAttempts = 3
+	// saveWait is how long a write waits for the editor to save.
+	saveWait = 3 * time.Second
 )
 
 // liveFields is the part of the live session a write checks: its
@@ -110,6 +109,12 @@ func editorPending(f *mdfile.File, v liveView) string {
 	return ""
 }
 
+// unchangedWarning says a write to a whole file sent nothing.
+const unchangedWarning = "the change leaves the file as it is, so nothing was uploaded"
+
+// filePreview is a whole-file write's change as a unified diff.
+func filePreview(before, after string) string { return render.UnifiedDiff(before, after, 2, 6000).Text }
+
 // mdWrite runs one write to a Markdown file. It returns the result of
 // the change as finally written.
 func (s *Service) mdWrite(ctx context.Context, o mdWriteOpts, change mdChange) (*EditResult, error) {
@@ -141,7 +146,7 @@ func (s *Service) mdWriteOnce(ctx context.Context, id string, o mdWriteOpts, cha
 	if err := mdWritable(m); err != nil {
 		return nil, false, err
 	}
-	after, res, forced, err := change(m)
+	after, res, err := change(m)
 	if err != nil {
 		return nil, false, err
 	}
@@ -151,53 +156,47 @@ func (s *Service) mdWriteOnce(ctx context.Context, id string, o mdWriteOpts, cha
 		res.Warnings = append(res.Warnings, "could not ask Google whether the file is being edited in Docs ("+messageOf(wrapAPI(view.err, "file"))+")")
 	}
 	if after.Source() == m.md.Source() {
-		res.Warnings = append(res.Warnings, "the change leaves the file as it is, so nothing was uploaded")
+		res.Warnings = append(res.Warnings, unchangedWarning)
 		return res, false, nil
 	}
-	if n := len(after.Source()); n > mdMaxWrite {
+	if n := len(after.Source()); n > maxUpload {
 		return nil, false, tooLarge(n)
 	}
-	res.Preview = render.UnifiedDiff(m.md.Text(), after.Text(), 2, 6000).Text
+	res.Preview = filePreview(m.md.Text(), after.Text())
 	if o.comment && res.Preview == "" {
 		res.Preview = "(the text does not change; the comment is written into the file)"
 	}
-	forced, again, err := s.awaitEditor(ctx, o, m, view, attempt, forced, res)
+	again, err := s.awaitEditor(ctx, o.dryRun, m, view, attempt)
 	if again || err != nil || o.dryRun {
 		return res, again, err
 	}
-	if len(forced) > 0 && asks(ctx) {
-		if err := ask(ctx, render.AskForced(m.id(), m.title(), forced)); err != nil {
-			return nil, false, err
-		}
-	}
-	if again, err := s.stillWhereItWas(ctx, id, m, view, attempt); again || err != nil {
+	if again, err := s.stillWhereItWas(ctx, id, m.meta, view, attempt); again || err != nil {
 		return nil, again, err
 	}
 	return res, false, s.upload(ctx, id, m, after, o, change, res)
 }
 
 // awaitEditor holds a write back while the live session has work the
-// file does not show yet: it waits and tries again, then refuses, unless
-// forced, which asks the person and names what it discards.
-func (s *Service) awaitEditor(ctx context.Context, o mdWriteOpts, m *mdFile, view liveView, attempt int, forced []render.Forced, res *EditResult) ([]render.Forced, bool, error) {
+// file does not show yet: it waits and tries again, then refuses. Force
+// does not write past it: that work is in no Drive revision yet, so
+// nothing could bring it back.
+func (s *Service) awaitEditor(ctx context.Context, dryRun bool, m *mdFile, view liveView, attempt int) (bool, error) {
 	what := editorPending(m.md, view)
 	switch {
 	case what == "":
-		return forced, false, nil
-	case o.force:
-		res.Warnings = append(res.Warnings, "forced past "+what+" made in the Docs editor and not saved yet, which this write discards")
-		return append(forced, render.Forced{Seq: -1, Kind: "write", Description: "the file", Destroys: what + " made in the Docs editor and not saved yet"}), false, nil
-	case attempt < mdWriteAttempts && !o.dryRun:
+		return false, nil
+	case attempt < writeAttempts && !dryRun:
 		s.log.InfoContext(ctx, "the Markdown file has changes in the Docs editor not saved yet; waiting", "what", what)
-		return forced, true, s.sleep(ctx, mdWait)
+		return true, s.sleep(ctx, saveWait)
 	}
-	return forced, false, Errorf("conflict", "the file is being worked on in the Docs editor: %s has not reached the file yet, and writing now would lose it; "+
-		"try again in a moment, or pass force: true if the person chose to write anyway", what)
+	return false, Errorf("conflict", "the file is being worked on in the Docs editor: %s has not reached the file yet, and writing now would lose it, "+
+		"which force does not override; once the editor has saved it, or the person closes the file, call again", what)
 }
 
 // stillWhereItWas is the check just before an upload, which is all Drive
-// offers: the file and the live session where the plan was made.
-func (s *Service) stillWhereItWas(ctx context.Context, id string, m *mdFile, view liveView, attempt int) (bool, error) {
+// offers: the file, as meta had it, and the live session where the plan
+// was made.
+func (s *Service) stillWhereItWas(ctx context.Context, id string, meta *gapi.File, view liveView, attempt int) (bool, error) {
 	nowCh := make(chan liveView, 1)
 	go func() { nowCh <- s.live(ctx, id) }()
 	now, err := s.api.GetFile(ctx, id)
@@ -205,17 +204,17 @@ func (s *Service) stillWhereItWas(ctx context.Context, id string, m *mdFile, vie
 	if err != nil {
 		return false, wrapAPI(err, "file")
 	}
-	moved := now.HeadRevisionID != m.meta.HeadRevisionID || now.MD5Checksum != m.meta.MD5Checksum
+	moved := now.HeadRevisionID != meta.HeadRevisionID || now.MD5Checksum != meta.MD5Checksum
 	edited := view.err == nil && viewNow.err == nil && viewNow.revision != view.revision
 	switch {
 	case !moved && !edited:
 		return false, nil
-	case attempt >= mdWriteAttempts:
+	case attempt >= writeAttempts:
 		return false, Errorf("conflict", "the file kept changing while this write was planned; read it again and retry")
 	}
-	s.log.InfoContext(ctx, "the Markdown file moved while planning; planning again", "saved", moved, "edited", edited)
+	s.log.InfoContext(ctx, "the file moved while planning; planning again", "saved", moved, "edited", edited)
 	if edited {
-		return true, s.sleep(ctx, mdWait)
+		return true, s.sleep(ctx, saveWait)
 	}
 	return true, nil
 }
@@ -229,12 +228,7 @@ func (s *Service) upload(ctx context.Context, id string, m *mdFile, after *mdfil
 	}
 	res.RevisionID = up.HeadRevisionID
 	res.Warnings = append(res.Warnings, fmt.Sprintf("the text before this write is Drive revision %s (diff_revisions from it shows the change; Drive keeps it at least 30 days unless the file passes 100 revisions)", m.revision()))
-	if up.MD5Checksum != "" && up.MD5Checksum != md5Hex([]byte(after.Source())) {
-		res.Warnings = append(res.Warnings, "Drive's checksum of the uploaded file is not the checksum of what was sent; read the file before relying on it")
-	}
-	if up.MimeType != "" && up.MimeType != m.mime() {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("Drive typed the file %s after the upload", up.MimeType))
-	}
+	checkUpload(res, up, []byte(after.Source()), m.mime())
 	if err := s.repair(ctx, m, up, change, res); err != nil {
 		return err
 	}
@@ -248,23 +242,49 @@ func (s *Service) upload(ctx context.Context, id string, m *mdFile, after *mdfil
 	return s.confirmComments(ctx, id, m, posts, res)
 }
 
+// checkUpload warns when what Drive says it stored is not what was sent.
+func checkUpload(res *EditResult, up *gapi.File, sent []byte, mime string) {
+	if up.MD5Checksum != "" && up.MD5Checksum != md5Hex(sent) {
+		res.Warnings = append(res.Warnings, "Drive's checksum of the uploaded file is not the checksum of what was sent; read the file before relying on it")
+	}
+	if up.MimeType != "" && up.MimeType != mime {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("Drive typed the file %s after the upload", up.MimeType))
+	}
+}
+
+// revisionBefore is the revision before head in a file's history, the
+// one an upload that made head replaced; "" when head is the first.
+func revisionBefore(revs []*gapi.Revision, head string) string {
+	for i, r := range revs {
+		if r.ID == head && i > 0 {
+			return revs[i-1].ID
+		}
+	}
+	return ""
+}
+
+// savedBetween is the revision an upload replaced when it is not the one
+// the change was made on: a save that landed in between. "" when there is
+// none, or when the history cannot be read, which res is warned of.
+func (s *Service) savedBetween(ctx context.Context, id, planned string, up *gapi.File, res *EditResult) string {
+	revs, err := s.api.ListRevisions(ctx, id)
+	if err != nil {
+		res.Warnings = append(res.Warnings, "could not read the file's history to confirm nothing was saved in between: "+messageOf(wrapAPI(err, "revisions")))
+		return ""
+	}
+	if prev := revisionBefore(revs, up.HeadRevisionID); prev != planned {
+		return prev
+	}
+	return ""
+}
+
 // repair finds the revision the upload replaced. When it is not the one
 // the change was planned on, somebody's save landed in between: it is
 // taken from Drive's history and the change made again on top of it,
 // or, when the change no longer fits, put back as it was.
 func (s *Service) repair(ctx context.Context, m *mdFile, up *gapi.File, change mdChange, res *EditResult) error {
-	revs, err := s.api.ListRevisions(ctx, m.id())
-	if err != nil {
-		res.Warnings = append(res.Warnings, "could not read the file's history to confirm nothing was saved in between: "+messageOf(wrapAPI(err, "revisions")))
-		return nil
-	}
-	prev := ""
-	for i, r := range revs {
-		if r.ID == up.HeadRevisionID && i > 0 {
-			prev = revs[i-1].ID
-		}
-	}
-	if prev == "" || prev == m.revision() {
+	prev := s.savedBetween(ctx, m.id(), m.revision(), up, res)
+	if prev == "" {
 		return nil
 	}
 	data, err := s.api.DownloadRevision(ctx, m.id(), prev)
@@ -273,7 +293,7 @@ func (s *Service) repair(ctx context.Context, m *mdFile, up *gapi.File, change m
 			"restore it from the file's history", prev, messageOf(wrapAPI(err, "revision "+prev)))
 	}
 	theirs := &mdFile{meta: withRevision(m.meta, prev, md5Hex(data)), md: mdfile.Parse(string(data))}
-	again, _, _, cerr := change(theirs)
+	again, _, cerr := change(theirs)
 	if cerr != nil || again == nil {
 		// The change does not fit the save: the save wins.
 		if _, err := s.api.UploadFile(ctx, m.id(), data, m.mime()); err != nil {
@@ -386,7 +406,7 @@ func (s *Service) mdEdit(ctx context.Context, req EditRequest) (*EditResult, err
 	if err != nil {
 		return nil, err
 	}
-	o := mdWriteOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun, force: req.Force}
+	o := mdWriteOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun}
 	switch mode {
 	case plan.ModeSuggest:
 		return nil, Errorf("unavailable", "a Markdown file takes no suggestions: Docs has no suggestion mode for it and the Docs API refuses every write to it; "+
@@ -394,21 +414,20 @@ func (s *Service) mdEdit(ctx context.Context, req EditRequest) (*EditResult, err
 	case plan.ModeComment:
 		author, at := s.account(ctx), s.postTime()
 		o.comment = true
-		return s.mdWrite(ctx, o, func(m *mdFile) (*mdfile.File, *EditResult, []render.Forced, error) {
-			out, res, err := mdPropose(m.md, req.Ops, author, at)
-			return out, res, nil, err
+		return s.mdWrite(ctx, o, func(m *mdFile) (*mdfile.File, *EditResult, error) {
+			return mdPropose(m.md, req.Ops, author, at)
 		})
 	}
-	return s.mdWrite(ctx, o, func(m *mdFile) (*mdfile.File, *EditResult, []render.Forced, error) {
+	return s.mdWrite(ctx, o, func(m *mdFile) (*mdfile.File, *EditResult, error) {
 		p, err := mdPlan(m.md, req.Ops, req.Force)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		after, err := m.md.Apply(p.edits)
 		if err != nil {
-			return nil, nil, nil, Errorf("invalid", "%v; nothing was written", err)
+			return nil, nil, Errorf("invalid", "%v; nothing was written", err)
 		}
-		return after, &EditResult{Mode: string(plan.ModeDirect), Applied: len(req.Ops), Changes: p.summary, Warnings: p.warnings}, p.forced, nil
+		return after, &EditResult{Mode: string(plan.ModeDirect), Applied: len(req.Ops), Changes: p.summary, Warnings: p.warnings}, nil
 	})
 }
 
@@ -433,7 +452,7 @@ func mdPropose(f *mdfile.File, ops []EditOp, author, at string) (*mdfile.File, *
 	}
 	quote := func(s string) string { return "“" + doc.Clip(doc.OneLine(s), 80) + "”" }
 	for _, op := range ops {
-		if !mdOpKinds[op.Kind] {
+		if !textOpKinds[op.Kind] {
 			return nil, nil, mdUnsupported(fmt.Sprintf("op %d (%s) needs the Docs API", op.Seq, op.Kind), "propose the change as markdown with insert, append, replace, delete or replace_all")
 		}
 		var err error
@@ -544,10 +563,10 @@ func (s *Service) mdAddComment(ctx context.Context, req AddCommentRequest, conte
 	author, at := s.account(ctx), s.postTime()
 	res := &AddCommentResult{Anchored: true, DryRun: req.DryRun}
 	er, err := s.mdWrite(ctx, mdWriteOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun, comment: true, posts: []string{content}},
-		func(m *mdFile) (*mdfile.File, *EditResult, []render.Forced, error) {
+		func(m *mdFile) (*mdfile.File, *EditResult, error) {
 			span, err := mdTarget(m.md, *req.Target)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, err
 			}
 			text := m.md.Text()
 			end := span.end
@@ -556,10 +575,10 @@ func (s *Service) mdAddComment(ctx context.Context, req AddCommentRequest, conte
 			}
 			out, _, err := m.md.AddComment(span.start, end, mdfile.NewPost{Author: author, Time: at, Body: content})
 			if err != nil {
-				return nil, nil, nil, Errorf("invalid", "%v", err)
+				return nil, nil, Errorf("invalid", "%v", err)
 			}
 			res.Quote, res.Handle = text[span.start:end], fmt.Sprintf("L%d", m.md.LineOf(span.start))
-			return out, &EditResult{Mode: string(plan.ModeComment)}, nil, nil
+			return out, &EditResult{Mode: string(plan.ModeComment)}, nil
 		})
 	if er != nil {
 		res.RevisionID, res.Warnings = er.RevisionID, er.Warnings
@@ -614,17 +633,17 @@ func (s *Service) mdReply(ctx context.Context, req ReplyRequest, action, content
 	}
 	author, at := s.account(ctx), s.postTime()
 	if _, err := s.mdWrite(ctx, mdWriteOpts{ref: req.Document, comment: true, posts: []string{content}},
-		func(m *mdFile) (*mdfile.File, *EditResult, []render.Forced, error) {
+		func(m *mdFile) (*mdfile.File, *EditResult, error) {
 			entries := m.md.Comments()
 			k := matchEntry(entries, make([]bool, len(entries)), *thread)
 			if k < 0 {
-				return nil, nil, nil, Errorf("not_found", "comment %s is not in the file's text (it lost its passage), so a reply cannot be written into it", commentID)
+				return nil, nil, Errorf("not_found", "comment %s is not in the file's text (it lost its passage), so a reply cannot be written into it", commentID)
 			}
 			out, err := m.md.AddReply(entries[k].Key, mdfile.NewPost{Author: author, Time: at, Body: content})
 			if err != nil {
-				return nil, nil, nil, Errorf("invalid", "%v", err)
+				return nil, nil, Errorf("invalid", "%v", err)
 			}
-			return out, &EditResult{Mode: string(plan.ModeComment)}, nil, nil
+			return out, &EditResult{Mode: string(plan.ModeComment)}, nil
 		}); err != nil {
 		return nil, err
 	}

@@ -7,8 +7,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/service"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/service"
 )
 
 // TargetInput points at content. Set exactly one selector.
@@ -56,8 +56,9 @@ type EditOpInput struct {
 	Op            string         `json:"op" jsonschema:"insert, append, replace, delete, replace_all, insert_break (page break), insert_footnote, create_header, create_footer, delete_header, delete_footer, create_named_range, delete_named_range, replace_named_range"`
 	Target        *TargetInput   `json:"target,omitempty" jsonschema:"what replace, delete or replace_all (tab only) act on"`
 	Location      *LocationInput `json:"location,omitempty" jsonschema:"where insert, insert_break and insert_footnote go; append defaults to the end of the body"`
-	Content       string         `json:"content,omitempty" jsonschema:"new content as markdown: paragraphs, # headings, **bold**, *italic*, ~~strike~~, code, [links](url), bullet and numbered lists (nested by indentation), tables (cells are plain text) and images (![alt](https://…) on a line of its own). Content with a table or image must be the only op in its call: its text lands first, then later batches place up to 10 tables and images."`
+	Content       string         `json:"content,omitempty" jsonschema:"new content as markdown: paragraphs, # headings, **bold**, *italic*, ~~strike~~, code, [links](url), bullet and numbered lists (nested by indentation; a list placed against a list item continues its list at its level unless list_level says otherwise), tables (cells are plain text) and images (![alt](https://…) on a line of its own). Content with a table or image must be the only op in its call: its text lands first, then later batches place up to 10 tables and images."`
 	ContentFormat string         `json:"content_format,omitempty" jsonschema:"markdown (default) or text for verbatim text, one paragraph per line"`
+	ListLevel     *int           `json:"list_level,omitempty" jsonschema:"insert, append and replace, for content that starts with a list: the level its top items take, 0 for the top of the list; by default the level of the list item it is placed against. One more than an item's level nests the content under it; 0 after a nested item puts it back at the top"`
 	Find          string         `json:"find,omitempty" jsonschema:"replace_all: the text to find"`
 	Replace       string         `json:"replace,omitempty" jsonschema:"replace_all: the replacement text (may be empty)"`
 	MatchCase     bool           `json:"match_case,omitempty" jsonschema:"replace_all: match case exactly. With regex the pattern decides instead: it is case-sensitive unless it starts with (?i)"`
@@ -127,7 +128,7 @@ type FormatInput struct {
 }
 
 func registerWrite(s *mcp.Server, d Deps) {
-	addAsking(s, d, &mcp.Tool{
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "edit_document",
 		Description: "Change the text of a Google Doc with one batch of operations. Address content by exact text " +
 			"(quoted from a read), by heading_id or heading (a whole section), by block handle, or by cell; never by " +
@@ -146,9 +147,11 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"as the file's own markdown, mode is direct or comment (no suggestions), the comments Docs keeps in the file " +
 			"are never touched, and the whole file is uploaded once per call, which makes an editor that has it open " +
 			"reload; the write waits for, then refuses, changes made there and not saved yet. To work in one together " +
-			"live, use a working copy (create_document from_file).",
+			"live, use a working copy (create_document from_file). On a Word file (.docx) the same ops write its body's " +
+			"text into the file, addressed as on a Google Doc, a suggestion as a tracked change and comment mode as Word " +
+			"comments, and the file is uploaded whole; formatting, tables and images need it saved as a Google Doc.",
 		Annotations: writeSafe,
-	}, "When force lets a direct edit destroy comments, suggestions, images or footnotes", func(ctx context.Context, _ *mcp.CallToolRequest, in EditInput) (*mcp.CallToolResult, *service.EditResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in EditInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
 			kind := plan.OpKind(strings.ToLower(strings.TrimSpace(o.Op)))
@@ -156,7 +159,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 				return nil, nil, fail(service.Errorf("invalid", "op %d: unknown op %q; use %s", i, o.Op, plan.KindList(plan.ToolEdit)))
 			}
 			eo := service.EditOp{Kind: kind, Target: o.Target.target(), Content: o.Content, ContentFormat: o.ContentFormat,
-				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase}, Regex: o.Regex}
+				Params: plan.Params{Find: o.Find, Replace: o.Replace, MatchCase: o.MatchCase, ListLevel: o.ListLevel}, Regex: o.Regex}
 			eo.Location = o.Location.location()
 			if o.Name != "" || o.RangeID != "" || o.Text != "" {
 				eo.NamedRange = &plan.NamedRangeParams{Name: strings.TrimSpace(o.Name), ID: strings.TrimSpace(o.RangeID), Text: o.Text}
@@ -241,34 +244,34 @@ func registerWrite(s *mcp.Server, d Deps) {
 		return text(msg), res, nil
 	})
 
-	addAsking(s, d, &mcp.Tool{
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "write_markdown_file",
 		Description: "Write a working copy back into the Markdown file it was made from (create_document from_file makes " +
 			"one). Only what changed in the copy is carried over, block by block; the rest of the file keeps its own " +
 			"Markdown, its front matter and the comments Docs keeps in it. A change to a block that was also changed in " +
 			"the file since the copy was made is a conflict and is refused, unless force keeps the file's version of " +
 			"those and writes the rest. edit_document's guard applies, and a write waits for, then refuses, changes made " +
-			"in the Docs editor on the file and not saved yet. dry_run shows the diff.",
+			"in the Docs editor on the file and not saved yet, forced or not: that work is in no revision yet. dry_run " +
+			"shows the diff.",
 		Annotations: writeSafe,
-	}, "When force writes past conflicts, unsaved editor changes, or comments, images or footnotes the change would destroy",
-		func(ctx context.Context, _ *mcp.CallToolRequest, in WriteBackInput) (*mcp.CallToolResult, *service.EditResult, error) {
-			res, err := d.Service.WriteBack(ctx, service.WriteBackRequest{Document: in.Document, File: in.File, Force: in.Force, DryRun: in.DryRun})
-			if err != nil {
-				return nil, nil, fail(err)
-			}
-			return text(res.Text), res, nil
-		})
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in WriteBackInput) (*mcp.CallToolResult, *service.EditResult, error) {
+		res, err := d.Service.WriteBack(ctx, service.WriteBackRequest{Document: in.Document, File: in.File, Force: in.Force, DryRun: in.DryRun})
+		if err != nil {
+			return nil, nil, fail(err)
+		}
+		return text(res.Text), res, nil
+	})
 
-	addAsking(s, d, &mcp.Tool{
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "review_suggestion",
-		Description: "Accept, reject or discard pending suggested edits by id (from list_suggestions) or all of them. " +
+		Description: "Accept, reject or discard pending suggested edits, each named by its id from list_suggestions. " +
 			"Accepting applies the suggested text; rejecting declines it, which any editor may " +
 			"do; discarding removes the suggestion outright, which Google allows only its author. Pass expect_revision " +
 			"to refuse if the document changed since the list was read. dry_run resolves the suggestions and stops " +
 			"before the write.",
 		Annotations: writeSafe,
-	}, "With all: true", func(ctx context.Context, _ *mcp.CallToolRequest, in ReviewInput) (*mcp.CallToolResult, *service.ReviewResult, error) {
-		res, err := d.Service.Review(ctx, service.ReviewRequest{Document: in.Document, Action: in.Action, IDs: in.IDs, All: in.All,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReviewInput) (*mcp.CallToolResult, *service.ReviewResult, error) {
+		res, err := d.Service.Review(ctx, service.ReviewRequest{Document: in.Document, Action: in.Action, IDs: in.IDs,
 			ExpectRevision: in.ExpectRevision, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
@@ -290,7 +293,7 @@ type CreateInput struct {
 type WriteBackInput struct {
 	Document string `json:"document" jsonschema:"the working copy: the Google Doc create_document from_file made"`
 	File     string `json:"file,omitempty" jsonschema:"the Markdown file to write into, when it is not the one the copy was made from"`
-	Force    bool   `json:"force,omitempty" jsonschema:"write past conflicts (the file's version of those blocks is kept), changes in the Docs editor not saved yet, and the guard; only when the person chose to"`
+	Force    bool   `json:"force,omitempty" jsonschema:"write past conflicts (the file's version of those blocks is kept) and the guard; only when the person chose to. Changes in the Docs editor not saved yet are never written past"`
 	DryRun   bool   `json:"dry_run,omitempty" jsonschema:"plan and show the diff, write nothing"`
 }
 
@@ -298,8 +301,7 @@ type WriteBackInput struct {
 type ReviewInput struct {
 	Document       string   `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Action         string   `json:"action" jsonschema:"accept, reject, or discard (author only)"`
-	IDs            []string `json:"ids,omitempty" jsonschema:"suggestion ids from list_suggestions"`
-	All            bool     `json:"all,omitempty" jsonschema:"act on every pending suggestion"`
+	IDs            []string `json:"ids" jsonschema:"the suggestions to review, each by its id from list_suggestions"`
 	ExpectRevision string   `json:"expect_revision,omitempty"`
 	DryRun         bool     `json:"dry_run,omitempty" jsonschema:"resolve the suggestions and stop before the write"`
 }

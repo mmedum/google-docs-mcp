@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 func TestListCommentsLocatesAndRenders(t *testing.T) {
@@ -248,7 +249,7 @@ func TestListSuggestionsShowsTheThreadsReplies(t *testing.T) {
 
 func TestReplyAndDeleteComment(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := accepting(context.Background())
+	ctx := context.Background()
 	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x"}, {ID: "c2", Content: "y", Resolved: true,
 		Replies: []*gapi.DriveReply{{ID: "r7", Content: "done"}}}, {ID: "c3", Deleted: true}}
 	res, err := svc.Reply(ctx, ReplyRequest{Document: fixtureID, CommentID: "c1", Content: "thanks"})
@@ -286,11 +287,11 @@ func TestReplyAndDeleteComment(t *testing.T) {
 		t.Fatalf("delete without flag: %v", err)
 	}
 	svc = New(api, Options{Destructive: true, DefaultWriteMode: "direct"})
-	dres, err := svc.DeleteComment(ctx, DeleteCommentRequest{Document: fixtureID, CommentID: "c1"})
+	dres, err := svc.DeleteComment(ctx, DeleteCommentRequest{Document: fixtureID, CommentID: "c1", TextStart: "x"})
 	if err != nil || dres.Text != "deleted comment c1" || api.deleted[0] != "c1" {
 		t.Fatalf("delete: %+v %v %v", dres, err, api.deleted)
 	}
-	dres, err = svc.DeleteComment(ctx, DeleteCommentRequest{Document: fixtureID, CommentID: "c2", ReplyID: "r7"})
+	dres, err = svc.DeleteComment(ctx, DeleteCommentRequest{Document: fixtureID, CommentID: "c2", ReplyID: "r7", TextStart: "done"})
 	if err != nil || dres.ReplyID != "r7" || api.deleted[1] != "c2/r7" {
 		t.Fatalf("delete reply: %+v %v %v", dres, err, api.deleted)
 	}
@@ -300,6 +301,61 @@ func TestReplyAndDeleteComment(t *testing.T) {
 	ro := New(api, Options{Destructive: true, ReadOnly: true})
 	if _, err := ro.DeleteComment(ctx, DeleteCommentRequest{Document: fixtureID, CommentID: "c1"}); classOf(err) != "forbidden" {
 		t.Fatalf("read-only delete: %v", err)
+	}
+}
+
+// The witness is how the deleted text begins, read back before anything
+// is deleted, so the client's prompt says which comment goes. A mismatch
+// is [stale], a missing or too short one [invalid], and neither reaches
+// the delete, a dry run included.
+func TestDeleteCommentHoldsItsTextToTheWitness(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		reply   string
+		witness string
+		dryRun  bool
+		class   string
+		deleted string
+	}{
+		{name: "the start of the text", witness: "Please check the third", deleted: "c1"},
+		{name: "the whole text", witness: "Please check the third paragraph again", deleted: "c1"},
+		{name: "the start with its spacing changed", witness: "Please  check the\tthird", deleted: "c1"},
+		{name: "a reply's text", reply: "r1", witness: "Agreed, the figures need", deleted: "c1/r1"},
+		{name: "the whole of a short reply", reply: "r3", witness: "Fixed.", deleted: "c1/r3"},
+		{name: "a reply with no text, and no witness", reply: "r2", witness: "", deleted: "c1/r2"},
+		{name: "a reply's text for the thread", witness: "Agreed, the figures need", class: "stale"},
+		{name: "the thread's text for a reply", reply: "r1", witness: "Please check the third", class: "stale"},
+		{name: "a case that differs", witness: "please check the third", class: "stale"},
+		{name: "a word that differs", witness: "Please check the third paragraph today", class: "stale"},
+		{name: "a witness for a reply with no text", reply: "r2", witness: "Please check the third", class: "stale"},
+		{name: "a dry run with another text", witness: "Agreed, the figures need", dryRun: true, class: "stale"},
+		{name: "no witness for a text", witness: "", class: "invalid"},
+		{name: "too little of a long text", witness: "Please check", class: "invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeAPI{comments: []*gapi.DriveComment{{ID: "c1",
+				Content: "Please check\nthe third paragraph again", Replies: []*gapi.DriveReply{
+					{ID: "r1", Content: "Agreed, the figures need a source."},
+					{ID: "r2", Action: "resolve"},
+					{ID: "r3", Content: "Fixed."},
+				}}}}
+			svc := New(api, Options{Destructive: true, DefaultWriteMode: "direct"})
+			_, err := svc.DeleteComment(context.Background(), DeleteCommentRequest{Document: fixtureID, CommentID: "c1",
+				ReplyID: tc.reply, TextStart: tc.witness, DryRun: tc.dryRun})
+			switch {
+			case tc.class == "" && err != nil:
+				t.Fatalf("refused: %v", err)
+			case tc.class != "" && classOf(err) != tc.class:
+				t.Fatalf("class %q, want %q: %v", classOf(err), tc.class, err)
+			}
+			want := []string{}
+			if tc.deleted != "" {
+				want = []string{tc.deleted}
+			}
+			if got := append([]string{}, api.deleted...); !slices.Equal(got, want) {
+				t.Errorf("deleted %v, want %v", got, want)
+			}
+		})
 	}
 }
 

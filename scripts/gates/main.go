@@ -215,10 +215,10 @@ type dumpedTool struct {
 	} `json:"outputSchema"`
 }
 
-// diff reports what changed between two schema dumps and whether any of
-// it breaks a caller: a tool, argument or output field that disappeared,
-// or an argument that became required.
-func diff(w io.Writer, old, new *schemaDump) bool {
+// diff reports what changed between two schema dumps and returns each
+// change that breaks a caller: a tool, argument or output field that
+// disappeared, or an argument that became required.
+func diff(w io.Writer, old, new *schemaDump) []string {
 	index := func(d *schemaDump) map[string]dumpedTool {
 		m := make(map[string]dumpedTool, len(d.Tools))
 		for _, t := range d.Tools {
@@ -258,7 +258,7 @@ func diff(w io.Writer, old, new *schemaDump) bool {
 	}
 	_, _ = fmt.Fprintln(w, "added tools:", list(added))
 	_, _ = fmt.Fprintln(w, "breaking changes:", list(breaking))
-	return len(breaking) > 0
+	return breaking
 }
 
 func list(xs []string) string {

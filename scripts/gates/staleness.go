@@ -10,16 +10,18 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/auth"
+	"github.com/mmedum/google-docs-mcp/v3/internal/auth"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
 var (
 	// def(&s.Field, "flag-name", "ENV_KEY", default, usage) is how every
-	// setting is registered, so the list of settings is derivable rather
+	// setting is registered, and sw(&s.Field, "flag-name", "ENV_KEY",
+	// usage) every switch, so the list of settings is derivable rather
 	// than typed. The shell version this replaces carried a hand-written
 	// case list of eleven names, which is the same shape as the coverage
 	// floor's hand-written package list: silent when it falls behind.
-	configKey  = regexp.MustCompile(`def\(&s\.\w+,\s*"[a-z-]+",\s*"([A-Z_]+)"`)
+	configKey  = regexp.MustCompile(`(?:def|sw)\(&s\.\w+,\s*"[a-z-]+",\s*"([A-Z_]+)"`)
 	readmeTool = regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z_]+)` + "`" + ` \|`)
 	// A tool named anywhere in the prose, for the tools that register
 	// only behind a flag and so are described rather than tabulated.
@@ -103,6 +105,7 @@ func staleness(bin string) error {
 	if extra := difference(tabled, registered); len(extra) > 0 {
 		problems = append(problems, "README's tool table names tools that are not registered: "+strings.Join(extra, ", "))
 	}
+	problems = append(problems, permissionProblems(string(readme), registered)...)
 
 	// Every setting config.go registers, mentioned in the configuration
 	// document under its full environment name.
@@ -121,6 +124,13 @@ func staleness(bin string) error {
 	for _, m := range keys {
 		if !strings.Contains(string(conf), "GDOCS_"+m[1]) {
 			problems = append(problems, "docs/configuration.md does not document GDOCS_"+m[1])
+		}
+	}
+	// A removed setting the server still reads, to refuse it set, is
+	// named too, so a person whose server will not start can find why.
+	for _, name := range config.RemovedVars() {
+		if !strings.Contains(string(conf), name) {
+			problems = append(problems, "docs/configuration.md does not say "+name+" was removed")
 		}
 	}
 
@@ -142,6 +152,37 @@ func staleness(bin string) error {
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
 	}
 	return nil
+}
+
+// permissionRule is a Claude Code permission rule for one of this
+// server's tools, under the server name the README's install line gives.
+var permissionRule = regexp.MustCompile(`"mcp__google-docs__([a-z0-9_]+)"`)
+
+// permissionRuleTools is every tool the README's permission rules name.
+func permissionRuleTools(readme string) []string {
+	matches := permissionRule.FindAllStringSubmatch(readme, -1)
+	names := make([]string, 0, len(matches))
+	for _, m := range matches {
+		names = append(names, m[1])
+	}
+	return names
+}
+
+// permissionProblems holds the README's Claude Code permission rules to
+// the registered tools. A rule for a tool that does not exist matches
+// nothing, so the person it was meant to ask is never asked; and with no
+// rule at all the README no longer says how to be asked, since the
+// server asks nobody itself.
+func permissionProblems(readme string, registered []string) []string {
+	rules := permissionRuleTools(readme)
+	if len(rules) == 0 {
+		return []string{`README gives no Claude Code permission rule ("mcp__google-docs__<tool>")`}
+	}
+	var problems []string
+	for _, name := range difference(rules, registered) {
+		problems = append(problems, "README gives a permission rule for "+name+", which the server does not register")
+	}
+	return problems
 }
 
 // changelogDocumentsTheChange requires entries when Go source changed

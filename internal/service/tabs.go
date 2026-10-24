@@ -6,9 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // TabRequest manages tabs. Tab operations are always direct edits: the
@@ -81,6 +80,9 @@ func (s *Service) tabChange(ctx context.Context, req TabRequest, action string, 
 	if err := s.requireWritable(); err != nil {
 		return nil, err
 	}
+	if err := s.wordUnsupported(ctx, req.Document, "managing tabs"); err != nil {
+		return nil, err
+	}
 	f, err := s.FetchFresh(ctx, req.Document)
 	if err != nil {
 		return nil, err
@@ -100,12 +102,6 @@ func (s *Service) tabChange(ctx context.Context, req TabRequest, action string, 
 		res.DryRun = true
 		res.Text = tabText(res)
 		return res, nil
-	}
-	if action == "delete" && asks(ctx) {
-		q := render.AskDeleteTab(f.Doc.ID, f.Doc.Title, res.TabID, res.Title, f.Doc.Descendants(res.TabID))
-		if err := ask(ctx, q); err != nil {
-			return nil, err
-		}
 	}
 	env, revision, err := s.batchUpdate(ctx, f, []json.RawMessage{request}, "")
 	if err != nil {

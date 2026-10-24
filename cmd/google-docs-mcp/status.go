@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/redact"
-	"github.com/mmedum/google-docs-mcp/v2/internal/version"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/redact"
+	"github.com/mmedum/google-docs-mcp/v3/internal/version"
 )
 
 // statusSchemaVersion is the version of the JSON object `status --json`

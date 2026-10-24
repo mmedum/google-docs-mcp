@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
 // compact strips the indentation of a dry run's request dump.
@@ -44,7 +44,7 @@ func TestTableOpsResolve(t *testing.T) {
 		{"style", EditOp{Kind: plan.OpStyleCells, Table: &TableOp{Table: "tbl1", FromCell: "r2c1", Style: plan.CellStyleSpec{Background: "#ffff00"}}}, "updateTableCellStyle", []string{`"rowIndex":1`, `"columnIndex":0`, `"rowSpan":1`, `"backgroundColor"`}},
 		{"pin", EditOp{Kind: plan.OpPinHeaderRows, Table: &TableOp{Table: "tbl1", Count: 1}}, "pinTableHeaderRows", []string{`"pinnedHeaderRowsCount":1`}},
 		{"set cells grid", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Data: [][]string{{"Name", "Score"}, {"Beta", "2"}}}}, "deleteContentRange[155,156) insertText@155 deleteContentRange[148,152) insertText@148 deleteContentRange[141,145) insertText@141", []string{`"text":"Bet"`, `"text":"Scor"`}},
-		{"set cells list with markdown", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: "**two**\nlines"}}}}, "deleteContentRange[155,156) insertText@155 updateTextStyle[155,164) updateParagraphStyle[155,164) updateTextStyle[155,158)", []string{`"text":"two lines"`}},
+		{"set cells list with markdown", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: "**two**\nlines"}}}}, "deleteContentRange[155,156) insertText@155 updateTextStyle[155,164) updateTextStyle[155,158)", []string{`"text":"two lines"`}},
 		{"set cells clears", EditOp{Kind: plan.OpSetCells, Table: &TableOp{Table: "tbl1", Cells: []CellContent{{Cell: "r2c2", Content: ""}}}}, "deleteContentRange[155,156)", nil},
 	}
 	for _, tc := range cases {
@@ -257,7 +257,7 @@ func TestInsertTablePositionsAndFills(t *testing.T) {
 
 func TestDeleteRowsGuardAndSegments(t *testing.T) {
 	svc, api := writable(t, false)
-	ctx := accepting(context.Background())
+	ctx := context.Background()
 	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x", QuotedFileContent: &gapi.QuotedText{Value: "Alpha"}}}
 	_, err := svc.Edit(ctx, EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{{Kind: plan.OpDeleteRows, Table: &TableOp{Table: "tbl1", RowList: []int{2}}}}})
 	if classOf(err) != "blocked" || !strings.Contains(messageOf(err), "1 comment (c1)") {

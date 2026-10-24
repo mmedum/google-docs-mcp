@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -78,11 +79,7 @@ type Config struct {
 	EnableDestructive bool
 	ExportDir         string
 	HTTPTimeout       time.Duration
-	// RequirePrompt refuses the writes that ask the person when the
-	// client cannot ask, rather than letting the call's own arguments
-	// stand in for the person.
-	RequirePrompt    bool
-	ClientSecretPath string
+	ClientSecretPath  string
 	// Warnings name settings that were accepted but no longer do
 	// anything, for the caller to log once at start.
 	Warnings []string
@@ -105,8 +102,43 @@ type Settings struct {
 	EnableDestructive string
 	ExportDir         string
 	HTTPTimeout       string
-	RequirePrompt     string
 	ClientSecretPath  string
+	// removed are the removed settings, as the environment gives them,
+	// read only to refuse one still set.
+	removed map[string]string
+	// vars is every setting Define binds to a flag, in order.
+	vars []Var
+}
+
+// Var is one setting Define binds to a flag.
+type Var struct {
+	// Name is the environment variable.
+	Name string
+	// Default is what the server uses when neither the variable nor its
+	// flag is set, written as a person would set it. A switch's is
+	// "false", which is also how a bundle's checkbox reaches the
+	// environment.
+	Default string
+	// Switch marks a setting that is on or off.
+	Switch bool
+}
+
+// removedSettings are the removed settings that made the server ask the
+// person, each with what to do instead. Off, the old default, is still accepted. On, or a value
+// that is not a boolean, is refused at start: ignored, it would quietly
+// allow what its owner set it to stop.
+var removedSettings = []struct{ key, instead string }{
+	{"REQUIRE_PROMPT", "leave " + EnvPrefix + "ENABLE_DESTRUCTIVE off for a client that runs with nobody watching"},
+}
+
+// RemovedVars are the variables a release removed that the server still
+// reads, only to refuse one set to anything but off.
+func RemovedVars() []string {
+	out := make([]string, 0, len(removedSettings))
+	for _, r := range removedSettings {
+		out = append(out, EnvPrefix+r.key)
+	}
+	return out
 }
 
 // Define registers one flag per setting on fs. Each flag defaults to the
@@ -114,27 +146,55 @@ type Settings struct {
 // the command line wins over the environment, and the environment wins
 // over the built-in default.
 func Define(fs *flag.FlagSet, env func(string) string) *Settings {
-	s := &Settings{}
-	def := func(p *string, name, key, fallback, usage string) {
+	s := &Settings{removed: map[string]string{}}
+	for _, r := range removedSettings {
+		s.removed[r.key] = env(EnvPrefix + r.key)
+	}
+	bind := func(p *string, name, key, fallback, usage string, isSwitch bool) {
 		v := env(EnvPrefix + key)
 		if v == "" {
 			v = fallback
 		}
 		fs.StringVar(p, name, v, usage+" [env "+EnvPrefix+key+"]")
+		s.vars = append(s.vars, Var{Name: EnvPrefix + key, Default: fallback, Switch: isSwitch})
 	}
+	def := func(p *string, name, key, fallback, usage string) { bind(p, name, key, fallback, usage, false) }
+	// A switch is off unless set.
+	sw := func(p *string, name, key, usage string) { bind(p, name, key, "false", usage, true) }
 	def(&s.Profile, "profile", "PROFILE", "default", "named configuration profile")
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
 	def(&s.Preview, "preview", "PREVIEW", "", "deprecated and ignored: comments and suggestions are generally available")
 	def(&s.DefaultWriteMode, "default-write-mode", "DEFAULT_WRITE_MODE", "", "default write mode: suggest, direct, comment")
-	def(&s.ReadOnly, "read-only", "READ_ONLY", "false", "register only read tools and request read-only scopes")
-	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register destructive tools (delete comment, delete tab)")
+	sw(&s.ReadOnly, "read-only", "READ_ONLY", "register only read tools and request read-only scopes")
+	sw(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "register destructive tools (delete comment, delete tab)")
 	def(&s.ExportDir, "export-dir", "EXPORT_DIR", "", "directory binary exports may be written to (unset disables them)")
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-request timeout for Google API calls")
-	def(&s.RequirePrompt, "require-prompt", "REQUIRE_PROMPT", "false",
-		"refuse the writes that ask the person when the client cannot ask them")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
 	return s
+}
+
+// Vars is every setting Define binds to a flag, in the order it binds
+// them. The bundle gate reads each switch's default here.
+func Vars() []Var {
+	fs := flag.NewFlagSet("vars", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	return Define(fs, func(string) string { return "" }).vars
+}
+
+// EnvVars is every variable Define reads, the removed ones included,
+// sorted. It is recorded from the lookups rather than listed, so it
+// cannot fall behind.
+func EnvVars() []string {
+	var seen []string
+	fs := flag.NewFlagSet("envvars", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	Define(fs, func(name string) string {
+		seen = append(seen, name)
+		return ""
+	})
+	slices.Sort(seen)
+	return slices.Compact(seen)
 }
 
 var (
@@ -179,8 +239,12 @@ func (s *Settings) Build() (Config, error) {
 	if c.EnableDestructive, err = parseBool("enable-destructive", s.EnableDestructive); err != nil {
 		errs = append(errs, err)
 	}
-	if c.RequirePrompt, err = parseBool("require-prompt", s.RequirePrompt); err != nil {
-		errs = append(errs, err)
+	for _, r := range removedSettings {
+		if on, err := parseBool(r.key, s.removed[r.key]); err == nil && !on {
+			continue
+		}
+		errs = append(errs, fmt.Errorf("%w: %s%s was removed: the server no longer asks the person, and the client's own "+
+			"approval decides each call. Unset it, and %s", ErrInvalid, EnvPrefix, r.key, r.instead))
 	}
 
 	mode := WriteMode(strings.ToLower(strings.TrimSpace(s.DefaultWriteMode)))

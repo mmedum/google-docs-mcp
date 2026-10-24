@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
 
 // TabInfo summarizes one tab.
@@ -82,13 +82,17 @@ const (
 	KindDocument = "document"
 	// KindMarkdownFile is a Markdown file Docs opens in place (§7.5).
 	KindMarkdownFile = "markdown_file"
+	// KindWordFile is a Word file (.docx), read through Docs and written
+	// into the file itself (§7.6).
+	KindWordFile = "word_file"
 )
 
 // Info is the get_document result.
 type Info struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	// Kind is document or markdown_file; Bytes is a Markdown file's size.
+	// Kind is document, markdown_file or word_file; Bytes is a Markdown
+	// file's size.
 	Kind  string `json:"kind"`
 	Bytes int    `json:"bytes,omitempty"`
 	// WorkingCopyOf is the Markdown file a Google Doc was made from as a
@@ -127,8 +131,8 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	md, file := s.kind(ctx, id)
-	if md {
+	mime, file := s.kind(ctx, id)
+	if gapi.IsMarkdownMimeType(mime) {
 		return s.mdInfo(ctx, id, file)
 	}
 	type fileResult struct {
@@ -152,6 +156,10 @@ func (s *Service) Info(ctx context.Context, ref string) (*Info, error) {
 	}
 	d := f.Doc
 	info := &Info{ID: d.ID, Title: d.Title, Kind: KindDocument, URL: doc.DocumentURL(d.ID), RevisionID: d.RevisionID, Stats: d.Stats(), Capabilities: s.capabilities(f)}
+	if f.Word {
+		info.Kind = KindWordFile
+		info.Warnings = append(info.Warnings, wordFileNote)
+	}
 	for _, t := range d.Tabs {
 		ti := TabInfo{Number: t.Number, ID: t.ID, Title: t.Title, Nesting: t.Nesting, Blocks: len(t.Body.Blocks),
 			Headers: len(t.Headers), Footers: len(t.Footers), Footnotes: len(t.Footnotes), Page: t.Page}
@@ -269,11 +277,11 @@ func (i *Info) writeIdentity(b *strings.Builder, revisionNote string) {
 // writeServer is the line on what this server can do with the document.
 func (i *Info) writeServer(b *strings.Builder) {
 	c := i.Capabilities
-	modes := strings.Join(c.WriteModes, "/")
-	if modes == "" {
-		modes = "none"
+	if len(c.WriteModes) == 0 {
+		fmt.Fprintf(b, "server: write modes none, read-only %t\n", c.ReadOnly)
+		return
 	}
-	fmt.Fprintf(b, "server: write modes %s (default %s), read-only %t\n", modes, c.DefaultWriteMode, c.ReadOnly)
+	fmt.Fprintf(b, "server: write modes %s (default %s), read-only %t\n", strings.Join(c.WriteModes, "/"), c.DefaultWriteMode, c.ReadOnly)
 }
 
 // writeExtras lists what a tab holds that a read of its text does not

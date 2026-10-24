@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
 )
 
 // SearchRequest looks for documents in Drive.
@@ -86,7 +86,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	for _, f := range list.Files {
 		h := SearchHit{ID: f.ID, Title: f.Name, Kind: KindDocument, URL: f.WebViewLink, Modified: f.ModifiedTime, ModifiedBy: userLabel(f.LastModifyingUser)}
 		if f.MimeType != "" {
-			s.rememberKind(f.ID, gapi.IsMarkdownMimeType(f.MimeType))
+			s.rememberKind(f.ID, f.MimeType)
 		}
 		if gapi.IsMarkdownMimeType(f.MimeType) {
 			h.Kind = KindMarkdownFile

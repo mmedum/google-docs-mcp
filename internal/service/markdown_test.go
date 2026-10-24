@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/config"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v2/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v2/internal/mdfile"
-	"github.com/mmedum/google-docs-mcp/v2/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v2/internal/render"
+	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
+	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
 
 // mdNotes is a synthetic Markdown file in the shape Docs leaves one that
@@ -236,11 +236,8 @@ func TestMarkdownFileGuard(t *testing.T) {
 	if len(api.uploads) != 0 {
 		t.Fatalf("a blocked edit uploaded")
 	}
-	// Forced, the person is asked and the markers stay around the new text.
-	if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: inComment, Force: true}); err == nil {
-		t.Error("a forced edit with no way to ask went ahead")
-	}
-	res, err := svc.Edit(accepting(context.Background()), EditRequest{Document: fixtureID, Ops: inComment, Force: true})
+	// Forced, the markers stay around the new text.
+	res, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: inComment, Force: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +274,7 @@ func TestMarkdownFileRefusesWhatItCannotTake(t *testing.T) {
 	ctx := context.Background()
 	for name, err := range map[string]error{
 		"review": func() error {
-			_, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", All: true})
+			_, err := svc.Review(ctx, ReviewRequest{Document: fixtureID, Action: "accept", IDs: []string{"s1"}})
 			return err
 		}(),
 		"tabs": func() error {
@@ -631,7 +628,7 @@ func TestMarkdownFileTakesTwoAppends(t *testing.T) {
 }
 
 func TestMarkdownFileRefusesGrowingPastTheUploadCeiling(t *testing.T) {
-	text := strings.Repeat("x", mdMaxWrite-10) + "\n"
+	text := strings.Repeat("x", maxUpload-10) + "\n"
 	api := &fakeAPI{md: &text}
 	svc := New(api, Options{DefaultWriteMode: config.WriteDirect, Sleep: noSleep})
 	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: []EditOp{{Kind: plan.OpAppend, Content: strings.Repeat("y", 100)}}})
@@ -720,7 +717,7 @@ func TestMarkdownFileWaitsForTheEditor(t *testing.T) {
 			waits := 0
 			svc.opts.Sleep = func(context.Context, time.Duration) error { waits++; return nil }
 			_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: op})
-			if classOf(err) != "conflict" || len(api.uploads) != 0 || waits != mdWriteAttempts-1 {
+			if classOf(err) != "conflict" || len(api.uploads) != 0 || waits != writeAttempts-1 {
 				t.Errorf("while the editor holds unsaved work: %v, %d upload(s), %d wait(s)", err, len(api.uploads), waits)
 			}
 			// The editor saves, and the write goes ahead.
@@ -730,12 +727,15 @@ func TestMarkdownFileWaitsForTheEditor(t *testing.T) {
 			}
 		})
 	}
-	// Forced, the person is asked, and the write goes ahead saying what it discards.
+	// Forced, the write is refused all the same: work the editor has not
+	// saved is in no Drive revision, so nothing could bring it back.
 	svc, api := mdService(t, config.WriteDirect)
 	api.raw = viewWith(t, unsaved)
-	res, err := svc.Edit(accepting(context.Background()), EditRequest{Document: fixtureID, Ops: op, Force: true})
-	if err != nil || len(api.uploads) != 1 || !strings.Contains(strings.Join(res.Warnings, "\n"), "a comment made in the editor") {
-		t.Errorf("forced: %+v, %v", res, err)
+	waits := 0
+	svc.opts.Sleep = func(context.Context, time.Duration) error { waits++; return nil }
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Ops: op, Force: true})
+	if classOf(err) != "conflict" || len(api.uploads) != 0 || waits != writeAttempts-1 {
+		t.Errorf("forced while the editor holds unsaved work: %v, %d upload(s), %d wait(s)", err, len(api.uploads), waits)
 	}
 }
 
@@ -978,5 +978,21 @@ func TestInfoNamesAWorkingCopy(t *testing.T) {
 	if err != nil || info.WorkingCopyOf != "1SyntheticMarkdownSourceXXXXXXXXXXXXXXXXXXXXX" ||
 		!strings.Contains(info.Text, "working copy of the Markdown file https://drive.google.com/file/d/1SyntheticMarkdownSourceXXXXXXXXXXXXXXXXXXXXX/view: write_markdown_file") {
 		t.Errorf("Info of a working copy: %v\n%s", err, info.Text)
+	}
+}
+
+// A Markdown file's lists nest by their own indentation; list_level, a
+// Google Doc's, is refused rather than ignored.
+func TestMarkdownRefusesListLevel(t *testing.T) {
+	svc, api := mdService(t, config.WriteDirect)
+	level := 1
+	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{
+		{Kind: plan.OpAppend, Content: "- item", Params: plan.Params{ListLevel: &level}}}})
+	var se *Error
+	if !errors.As(err, &se) || se.Class != "invalid" {
+		t.Fatalf("got %v, want invalid", err)
+	}
+	if len(api.uploads) != 0 {
+		t.Fatalf("%d uploads", len(api.uploads))
 	}
 }

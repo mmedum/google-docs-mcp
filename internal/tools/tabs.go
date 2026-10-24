@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/v2/internal/service"
+	"github.com/mmedum/google-docs-mcp/v3/internal/service"
 )
 
 // TabInput is the manage_tabs call.
@@ -50,14 +50,13 @@ func registerTabs(s *mcp.Server, d Deps) {
 	if !d.Config.EnableDestructive {
 		return
 	}
-	addAsking(s, d, &mcp.Tool{
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "delete_tab",
 		Description: "Delete a tab of a Google Doc together with everything in it and any child tabs. Irreversible " +
 			"through this server (version history keeps the content). A document keeps at least one tab. Pass " +
 			"confirm_tab repeating the tab exactly, or the call is refused; dry_run resolves the tab and stops.",
 		Annotations: destructive,
-		Meta:        destructiveMeta,
-	}, "", func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteTabInput) (*mcp.CallToolResult, *service.TabResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeleteTabInput) (*mcp.CallToolResult, *service.TabResult, error) {
 		if err := confirmTarget("tab", in.Tab, in.ConfirmTab); err != nil {
 			return nil, nil, fail(err)
 		}

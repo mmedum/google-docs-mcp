@@ -226,7 +226,7 @@ func literalNames(f *ast.File) (typed, tagged map[string]token.Pos) {
 		}
 		if s, err := strconv.Unquote(lit.Value); err == nil {
 			for _, word := range words(s) {
-				if variableName.MatchString(word) {
+				if isName(word) {
 					into[word] = lit.Pos()
 				}
 			}
@@ -339,6 +339,12 @@ func nameConstants(t *testing.T) map[string]bool {
 // word standing alone.
 var variableName = regexp.MustCompile(`^` + config.NamePattern + `$`)
 
+// isName reports whether word is a variable's name. One ending in _ is
+// a prefix, as GDOCS_ENABLE_ is, and not a name.
+func isName(word string) bool {
+	return variableName.MatchString(word) && !strings.HasSuffix(word, "_")
+}
+
 // words is s split into runs of capitals, digits and underscores, the
 // characters a name is made of.
 func words(s string) []string {
@@ -351,14 +357,11 @@ func nameChar(r rune) bool {
 }
 
 // namesIn is every GDOCS_ name f spells, each with where it is spelled.
-// A run of literals that another operand follows ends in a prefix
-// rather than a name when its last character is part of a name, as in
-// EnvPrefix + "ENABLE_" + kind, so that last word is not read.
 func namesIn(f *ast.File) map[string]token.Pos {
 	found := map[string]token.Pos{}
 	spell := func(s string, at token.Pos) {
 		for _, word := range words(s) {
-			if variableName.MatchString(word) {
+			if isName(word) {
 				found[word] = at
 			}
 		}
@@ -382,7 +385,7 @@ func namesIn(f *ast.File) map[string]token.Pos {
 					run += s
 					continue
 				}
-				spell(strings.TrimRightFunc(run, nameChar), at)
+				spell(run, at)
 				run = ""
 				ast.Inspect(op, visit)
 			}
@@ -402,9 +405,9 @@ func namesIn(f *ast.File) map[string]token.Pos {
 // The scan reads a literal, EnvPrefix joined to literals by +, through
 // a selector and parentheses, and a run that starts after another
 // operand, which a scan reading only a chain's head would miss. A run
-// that another operand follows ends in a prefix when it ends in a name's
-// character, as EnvPrefix + "ENABLE_" + kind does, and the rest of it
-// is still read. A name is config.NamePattern's, a doubled underscore
+// that another operand follows is read whole: one ending in _, as
+// EnvPrefix + "ENABLE_" + kind does, ends in a prefix, and one ending in
+// a name's last character ends in that name. A name is config.NamePattern's, a doubled underscore
 // included. A name built from another constant or through a format verb
 // is not seen.
 func TestTheScanReadsEachChainInOrder(t *testing.T) {
@@ -422,6 +425,7 @@ var (
 	k = "set " + x + EnvPrefix + "NEW"
 	l = "GDOCS_KEPT=1, " + EnvPrefix + "CUT_" + kind
 	m = "GDOCS__DOUBLED"
+	n = EnvPrefix + "WHOLE" + suffix
 )
 `
 	f, err := parser.ParseFile(token.NewFileSet(), "p.go", src, 0)
@@ -429,7 +433,7 @@ var (
 		t.Fatal(err)
 	}
 	want := []string{"GDOCS_JOINED", "GDOCS_KEPT", "GDOCS_LAST", "GDOCS_LATER", "GDOCS_NEW", "GDOCS_PAREN",
-		"GDOCS_PLAIN", "GDOCS_SELECTED", "GDOCS__DOUBLED"}
+		"GDOCS_PLAIN", "GDOCS_SELECTED", "GDOCS_WHOLE", "GDOCS__DOUBLED"}
 	if got := slices.Sorted(maps.Keys(namesIn(f))); !slices.Equal(got, want) {
 		t.Errorf("namesIn = %v, want %v", got, want)
 	}

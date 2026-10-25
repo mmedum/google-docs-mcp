@@ -8,6 +8,10 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Fixed
+
+- The configuration scan reads a whole variable name joined before another operand, such as `EnvPrefix + "NAME" + suffix`, which it used to skip, so a misspelling built that way is caught. Nothing a person running the server sees changes.
+
 ## [3.1.1] - 2026-10-24
 
 ### Changed

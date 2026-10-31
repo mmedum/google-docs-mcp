@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-31
+
 ### Changed
 
 - The nine tools that change or remove what is already in a document now say `destructiveHint: true`, as the MCP spec reads `false` as "only additive updates": `edit_document`, `format_document`, `edit_table`, `insert_object`, `layout_document`, `manage_tabs`, `reply_comment`, `review_suggestion` and `write_markdown_file`. claude.ai, ChatGPT and Codex may now ask before these; if you run them unattended there, allow them again. They still need no `GDOCS_ENABLE_DESTRUCTIVE` and no confirm.

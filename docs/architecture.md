@@ -1,6 +1,13 @@
 # Architecture — google-docs-mcp
 
-**Status:** v3.1.1 (2026-10-24). 3.1.0's bundle work reviewed after its
+**Status:** v3.2.0 (2026-10-31). Every tool that changes or removes what
+a document holds says `destructiveHint: true`, as the MCP schema reads
+`false` as only additive; the nine stay ungated. Comment text keeps to
+2048 bytes, now measured live on both paths, and a Google Doc's
+comment-mode proposal is held to it before anything posts. A named
+range's name is counted in UTF-16 units, Google's epoch reads as no
+time, and the README asks for the scope list on External apps only.
+The live driver passed. v3.1.1 (2026-10-24): 3.1.0's bundle work reviewed after its
 release by `/simplify`, `/code-review medium` and `/security-review`, with
 the family's bundle rules ported (§17a): the gate derives its settings
 from the server's registry, starts the server from the bundle's

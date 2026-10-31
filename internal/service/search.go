@@ -84,7 +84,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (*SearchResult,
 	}
 	res := &SearchResult{DriveQuery: q, NextPageToken: list.NextPageToken, Hits: []SearchHit{}}
 	for _, f := range list.Files {
-		h := SearchHit{ID: f.ID, Title: f.Name, Kind: KindDocument, URL: f.WebViewLink, Modified: f.ModifiedTime, ModifiedBy: userLabel(f.LastModifyingUser)}
+		h := SearchHit{ID: f.ID, Title: f.Name, Kind: KindDocument, URL: f.WebViewLink, Modified: string(f.ModifiedTime), ModifiedBy: userLabel(f.LastModifyingUser)}
 		if f.MimeType != "" {
 			s.rememberKind(f.ID, f.MimeType)
 		}

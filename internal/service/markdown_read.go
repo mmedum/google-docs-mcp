@@ -11,6 +11,7 @@ import (
 
 	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
 	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
 	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
 	"github.com/mmedum/google-docs-mcp/v3/internal/render"
 )
@@ -220,7 +221,7 @@ func entryThread(f *mdfile.File, e mdfile.Comment) mdThread {
 		author = authorFromFile(author)
 	}
 	t := mdThread{key: e.Key, CommentThread: CommentThread{ID: e.Key, Author: author, Content: e.Body, Quote: e.Quote,
-		Resolved: e.Status == "RESOLVED", Created: e.Time, Replies: []CommentReply{}}}
+		Resolved: e.Status == "RESOLVED", Created: gdocs.KnownTime(e.Time), Replies: []CommentReply{}}}
 	locate(&t, f, e)
 	return t
 }
@@ -243,7 +244,7 @@ func matchEntry(entries []mdfile.Comment, used []bool, t CommentThread) int {
 		}
 	}
 	for i, e := range entries {
-		if !used[i] && e.Time != "" && e.Time == t.Created {
+		if at := gdocs.KnownTime(e.Time); !used[i] && at != "" && at == t.Created {
 			return i
 		}
 	}

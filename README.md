@@ -83,16 +83,20 @@ is no shared app and nothing to verify with Google.
    - **External** with publishing status **Testing** for a consumer
      account. Add yourself as a test user. Google expires refresh tokens
      for such apps after 7 days, so you will run `login` weekly.
-4. Add scopes (Google Auth Platform → Data Access): `.../auth/documents`,
-   `.../auth/documents.readonly`, `.../auth/drive`, `.../auth/drive.readonly`.
+4. On an **External** app, add the scopes (Google Auth Platform → Data
+   Access): `.../auth/documents`, `.../auth/documents.readonly`,
+   `.../auth/drive`, `.../auth/drive.readonly`. Google asks for the list
+   only from apps used by people outside your Workspace organization, so
+   an **Internal** app can skip this step. Listing them there anyway does
+   no harm.
 
    All four, though one login never asks for more than two of them: a
    normal login requests `documents` and `drive`, and `GDOCS_READ_ONLY=true`
-   requests `documents.readonly` and `drive.readonly` instead. The consent
-   screen lists what the client may ask for, so it has to cover both, and
-   a scope it has not been given is refused at the moment somebody first
-   tries read-only mode. Google grants only what is requested, so listing
-   the read-only pair costs a normal login nothing.
+   requests `documents.readonly` and `drive.readonly` instead. An External
+   app's consent screen lists what the client may ask for, so it has to
+   cover both, and a scope it has not been given is refused at the moment
+   somebody first tries read-only mode. Google grants only what is
+   requested, so listing the read-only pair costs a normal login nothing.
 5. Create an OAuth client (Google Auth Platform → Clients) of type
    **Desktop app**, download its JSON, and store it as
    `~/.config/google-docs-mcp/client_secret.json` (Linux; the
@@ -376,8 +380,11 @@ read and diffed through Google's export, so they have no handles.
   `GDOCS_ENABLE_DESTRUCTIVE=true`. `GDOCS_READ_ONLY=true` registers only
   read tools and requests read-only scopes.
 - **Your MCP client approves each call; the server asks you nothing.**
-  claude.ai and Codex prompt for the two deletes, which are marked
-  destructive. VS Code prompts for every tool that is not read-only:
+  claude.ai and Codex prompt for every tool marked destructive: the two
+  deletes, and every write that changes or removes what is there, such as
+  `edit_document`, `format_document` or `reply_comment`. Only
+  `create_document`, `add_comment` and `export_document`, which add, are
+  not marked. VS Code prompts for every tool that is not read-only:
   every write, and `export_document`, which writes a local file. In
   Claude Code, list the calls you want to approve one by one under
   `permissions.ask` in your settings, with the name you gave the server

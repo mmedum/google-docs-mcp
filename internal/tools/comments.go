@@ -19,7 +19,7 @@ type ListCommentsInput struct {
 type AddCommentInput struct {
 	Document       string       `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Target         *TargetInput `json:"target,omitempty" jsonschema:"the text, section, block or cell to comment on; omit for a comment on the document as a whole"`
-	Content        string       `json:"content" jsonschema:"the comment text (plain text, up to 2048 bytes)"`
+	Content        string       `json:"content" jsonschema:"the comment text (plain text, up to 2048 bytes; a letter outside ASCII takes two or more)"`
 	Assignee       string       `json:"assignee,omitempty" jsonschema:"email address to assign the comment to (pinned comments only)"`
 	ExpectRevision string       `json:"expect_revision,omitempty" jsonschema:"fail if the document is no longer at this revision id"`
 	DryRun         bool         `json:"dry_run,omitempty" jsonschema:"resolve the target and stop before posting"`
@@ -31,7 +31,7 @@ type ReplyInput struct {
 	CommentID    string `json:"comment_id,omitempty" jsonschema:"thread id from list_comments or add_comment; pass this or suggestion_id"`
 	SuggestionID string `json:"suggestion_id,omitempty" jsonschema:"reply on a suggestion's thread instead; id from list_suggestions. Plain replies only"`
 	ReplyID      string `json:"reply_id,omitempty" jsonschema:"edit: the reply to rewrite; without it the thread's own comment is rewritten"`
-	Content      string `json:"content,omitempty" jsonschema:"reply text; required for a plain reply and for edit, optional with resolve or reopen"`
+	Content      string `json:"content,omitempty" jsonschema:"reply text, up to 2048 bytes; required for a plain reply and for edit, optional with resolve or reopen"`
 	Action       string `json:"action,omitempty" jsonschema:"reply (default), resolve, reopen, or edit"`
 }
 
@@ -73,7 +73,7 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 			"Nothing in the document text changes. To propose an edit as a comment, use edit_document with mode comment. " +
 			"On a Markdown file (.md) the comment is written into the file under the signed-in account's name, the way " +
 			"the Docs editor writes its own, and needs a target. dry_run resolves the target and stops before posting.",
-		Annotations: writeSafe,
+		Annotations: adding,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in AddCommentInput) (*mcp.CallToolResult, *service.AddCommentResult, error) {
 		res, err := d.Service.AddComment(ctx, service.AddCommentRequest{Document: in.Document, Target: in.Target.target(), Content: in.Content,
 			Assignee: in.Assignee, ExpectRevision: in.ExpectRevision, DryRun: in.DryRun})
@@ -91,7 +91,7 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 			"reply ids come from list_comments. With suggestion_id instead of comment_id it replies on a suggested " +
 			"edit's thread; accepting or rejecting one is review_suggestion. On a Markdown file (.md) a comment the Docs " +
 			"editor keeps takes replies only, written into the file; the person resolves it in the editor.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReplyInput) (*mcp.CallToolResult, *service.ReplyResult, error) {
 		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, SuggestionID: in.SuggestionID,
 			ReplyID: in.ReplyID, Content: in.Content, Action: in.Action})

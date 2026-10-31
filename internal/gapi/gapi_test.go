@@ -4,9 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,6 +20,8 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
 )
 
 func newTestClient(t *testing.T, h http.Handler) (*Client, *httptest.Server) {
@@ -854,5 +862,63 @@ func TestOnlyACommentReadAsksForTheAssignee(t *testing.T) {
 		if !strings.Contains(f, "assigneeEmailAddress") {
 			t.Errorf("a read did not ask for the assignee: fields=%s", f)
 		}
+	}
+}
+
+// Google writes a time it does not have as the Unix epoch, which reads
+// as no time; any other value is kept as sent.
+func TestTheEpochReadsAsNoTime(t *testing.T) {
+	for _, tc := range []struct{ sent, want string }{
+		{`"1970-01-01T00:00:00Z"`, ""},
+		{`"1970-01-01T00:00:00.000Z"`, ""},
+		{`"1970-01-01T01:00:00+01:00"`, ""},
+		{`"1970-01-01T00:00:01Z"`, "1970-01-01T00:00:01Z"},
+		{`"2026-10-31T09:00:00.123Z"`, "2026-10-31T09:00:00.123Z"},
+		{`"not a time"`, "not a time"},
+		{`null`, ""},
+	} {
+		var got gdocs.Time
+		if err := json.Unmarshal([]byte(tc.sent), &got); err != nil || string(got) != tc.want {
+			t.Errorf("%s read as %q, %v; want %q", tc.sent, got, err, tc.want)
+		}
+	}
+}
+
+// Every field of a Drive or Docs wire type whose JSON name ends in Time
+// is a gdocs.Time, so the epoch rule reaches a time field added later.
+func TestEveryGoogleTimeFieldIsATime(t *testing.T) {
+	fset := token.NewFileSet()
+	checked := 0
+	for _, pattern := range []string{"*.go", "../gdocs/*.go"} {
+		paths, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range paths {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			f, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ast.Inspect(f, func(n ast.Node) bool {
+				field, ok := n.(*ast.Field)
+				if !ok || field.Tag == nil {
+					return true
+				}
+				tag := reflect.StructTag(strings.Trim(field.Tag.Value, "`")).Get("json")
+				if name, _, _ := strings.Cut(tag, ","); strings.HasSuffix(name, "Time") {
+					checked++
+					if typ := types.ExprString(field.Type); typ != "gdocs.Time" && typ != "Time" {
+						t.Errorf("%s: %s is %s, not gdocs.Time", fset.Position(field.Pos()), name, typ)
+					}
+				}
+				return true
+			})
+		}
+	}
+	if checked < 8 {
+		t.Fatalf("found %d time fields, fewer than the 8 known; the scan is missing files", checked)
 	}
 }

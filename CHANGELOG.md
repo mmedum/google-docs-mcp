@@ -8,8 +8,18 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-31
+
+### Changed
+
+- The nine tools that change or remove what is already in a document now say `destructiveHint: true`, as the MCP spec reads `false` as "only additive updates": `edit_document`, `format_document`, `edit_table`, `insert_object`, `layout_document`, `manage_tabs`, `reply_comment`, `review_suggestion` and `write_markdown_file`. claude.ai, ChatGPT and Codex may now ask before these; if you run them unattended there, allow them again. They still need no `GDOCS_ENABLE_DESTRUCTIVE` and no confirm.
+
 ### Fixed
 
+- A named range's name is counted the way Google counts it, with an emoji counting as two, so a name Google would refuse is refused before it is sent.
+- In comment mode on a Google Doc, a proposal longer than Google's 2,048 bytes of comment text is refused for its op before anything is posted, `dry_run` included. Google used to refuse it instead, and on a document without the comments view the proposals before it had already been posted.
+- Google writes a time it does not have as 1970-01-01. A document's, a comment's or a revision's time is now left out in that case rather than shown as 1970.
+- The README said every app must list its scopes on the consent screen. Google asks for that list only from External apps, so an Internal app can skip the step.
 - The configuration scan reads a whole variable name joined before another operand, such as `EnvPrefix + "NAME" + suffix`, which it used to skip, so a misspelling built that way is caught. Nothing a person running the server sees changes.
 
 ## [3.1.1] - 2026-10-24

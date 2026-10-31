@@ -160,6 +160,11 @@ type Op struct {
 type Options struct {
 	Mode  Mode
 	Force bool
+	// CommentLimit is the most bytes a comment-mode proposal may hold,
+	// or 0 for no limit. A Google Doc's proposals are posted to Google,
+	// which holds them to MaxCommentBytes; a Word file's are written
+	// into the file.
+	CommentLimit int
 }
 
 // Proposal is a comment-mode change description.
@@ -246,6 +251,9 @@ func planOps(ops []Op, o Options, requests bool) (*Result, error) {
 			p, err := proposal(&ops[i])
 			if err != nil {
 				return nil, err
+			}
+			if n := len(p.Content); o.CommentLimit > 0 && n > o.CommentLimit {
+				return nil, fmt.Errorf("op %d (%s): as a comment it is %d bytes, and Google takes at most %d bytes of comment text, a letter outside ASCII being two or more; shorten it or use mode suggest", ops[i].Seq, ops[i].Kind, n, o.CommentLimit)
 			}
 			res.Proposals = append(res.Proposals, p)
 			add(&ops[i], nil, false)
@@ -884,6 +892,16 @@ func replaceRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 // inBody says an op writes into a tab's body, the one segment a table or
 // an image in content may go: headers, footers and footnotes hold text.
 func inBody(op *Op) bool { return op.Seg.ID == "" }
+
+// MaxCommentBytes is the limit on a comment's text, in bytes, as Google
+// counts it. The Docs API's insertComment refuses more than 2048,
+// "content must not exceed 2048 UTF-8 code units"; Drive's comments and
+// replies take 4096. Both measured live
+// (internal/gapi/rawlimits_integration_test.go). A comment takes either
+// path, as the comments view allows, and a reply on a suggestion's
+// thread goes through the Docs API, unmeasured, so all comment text
+// keeps to the lower limit, a plain reply's included.
+const MaxCommentBytes = 2048
 
 func proposal(op *Op) (Proposal, error) {
 	anchor := op.CommentAnchor

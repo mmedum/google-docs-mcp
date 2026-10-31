@@ -47,7 +47,7 @@ func registerObjects(s *mcp.Server, d Deps) {
 			"delete can reach. Both name the object by the id a read shows, like kix.img1. Same mode, dry_run, " +
 			"expect_revision and force semantics as edit_document; deleting an inline object that also carries a " +
 			"comment or a suggestion is refused in direct mode unless forced. Suggestion mode tracks the insertion.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ObjectInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		obj := &plan.ObjectParams{Kind: strings.ToLower(strings.TrimSpace(in.Kind)), URL: strings.TrimSpace(in.URL), WidthPt: in.WidthPt, HeightPt: in.HeightPt,
 			Name: strings.TrimSpace(in.Name), Email: strings.TrimSpace(in.Email), Title: strings.TrimSpace(in.Title),

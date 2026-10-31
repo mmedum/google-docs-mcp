@@ -37,7 +37,7 @@ func registerTabs(s *mcp.Server, d Deps) {
 			"and initial markdown content; rename changes the title or emoji; move changes the position among siblings " +
 			"or nests the tab under a parent. Tab changes are always direct edits (the API cannot suggest them). Other " +
 			"tools address tabs by id, title or number; get_document lists them.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TabInput) (*mcp.CallToolResult, *service.TabResult, error) {
 		res, err := d.Service.ManageTabs(ctx, service.TabRequest{Document: in.Document, Action: in.Action, Tab: in.Tab, Title: in.Title, Position: in.Position,
 			Parent: in.Parent, Emoji: in.Emoji, Content: in.Content, ExpectRevision: in.ExpectRevision})

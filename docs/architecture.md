@@ -1,6 +1,13 @@
 # Architecture — google-docs-mcp
 
-**Status:** v3.1.1 (2026-10-24). 3.1.0's bundle work reviewed after its
+**Status:** v3.2.0 (2026-10-31). Every tool that changes or removes what
+a document holds says `destructiveHint: true`, as the MCP schema reads
+`false` as only additive; the nine stay ungated. Comment text keeps to
+2048 bytes, now measured live on both paths, and a Google Doc's
+comment-mode proposal is held to it before anything posts. A named
+range's name is counted in UTF-16 units, Google's epoch reads as no
+time, and the README asks for the scope list on External apps only.
+The live driver passed. v3.1.1 (2026-10-24): 3.1.0's bundle work reviewed after its
 release by `/simplify`, `/code-review medium` and `/security-review`, with
 the family's bundle rules ported (§17a): the gate derives its settings
 from the server's registry, starts the server from the bundle's
@@ -779,24 +786,27 @@ registers only readOnly rows and requests readonly scopes.
 | `read_document` | Scoped, budgeted markdown/text/raw view; `with_styles`; `revision_id` | readOnly | 0 |
 | `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
 | `export_document` | pdf/docx/md/html/txt; writes a local file, so it is a non-destructive write that read-only mode still registers | destructive=false | 1, 2.0 |
-| `create_document` | Title, optional markdown body; `kind: markdown_file` makes a `.md` file, `from_file` a working copy of one (§7.5) | — | 1, 2.3 |
-| `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive=false*, idempotent=false | 1, 2, 4 |
-| `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | — | 1 |
+| `create_document` | Title, optional markdown body; `kind: markdown_file` makes a `.md` file, `from_file` a working copy of one (§7.5) | destructive=false | 1, 2.3 |
+| `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive*, idempotent=false | 1, 2, 4 |
+| `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | destructive* | 1 |
 | `list_suggestions` | Pending suggestions with handles, authors and the replies on their threads | readOnly | 1 |
-| `review_suggestion` | accept / reject / discard (discard is author-only), each suggestion named by the id `list_suggestions` shows; dry_run | — | 1, 4, 2.0, 3.0 |
+| `review_suggestion` | accept / reject / discard (discard is author-only), each suggestion named by the id `list_suggestions` shows; dry_run | destructive* | 1, 4, 2.0, 3.0 |
 | `list_comments` | Full threads: replies, resolved, deleted, assignee, quoted text, handles | readOnly | 2 |
-| `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | — | 2, 2.0 |
-| `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only); `suggestion_id` replies on a suggestion's thread | — | 2, 4 |
+| `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | destructive=false | 2, 2.0 |
+| `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only); `suggestion_id` replies on a suggestion's thread | destructive* | 2, 4 |
 | `delete_comment` | Gated; a thread or one reply; `confirm_comment_id`; `text_start`, how the text it deletes begins, read and compared; dry_run | destructive | 2, 2.0, 3.0 |
 | `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
-| `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | — | 2, 4 |
-| `insert_object` | `action: insert \| replace \| delete`; insert takes `kind: image \| person \| rich_link \| date` at a Location, replace swaps an image's source, delete removes an object by id (the only way to remove a floating one) | — | 2, 4 |
-| `layout_document` | ops: `page`, `section`, `section_break`, `named_style` | — | 4 |
-| `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | — | 2 |
+| `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | destructive* | 2, 4 |
+| `insert_object` | `action: insert \| replace \| delete`; insert takes `kind: image \| person \| rich_link \| date` at a Location, replace swaps an image's source, delete removes an object by id (the only way to remove a floating one) | destructive* | 2, 4 |
+| `layout_document` | ops: `page`, `section`, `section_break`, `named_style` | destructive* | 4 |
+| `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | destructive* | 2 |
 | `delete_tab` | Gated; child tabs go with it; `confirm_tab`; dry_run | destructive | 2, 2.0 |
-| `write_markdown_file` | Merge a working copy back into its Markdown file, block by block (§7.5); conflicts refused unless forced; unsaved editor work never written past; dry_run | — | 2.3, 3.0 |
+| `write_markdown_file` | Merge a working copy back into its Markdown file, block by block (§7.5); conflicts refused unless forced; unsaved editor work never written past; dry_run | destructive* | 2.3, 3.0 |
 
-\* `edit_document` changes text by design; it is not gated. The layers
+\* Marked destructive, as every write that changes or removes what is
+there is: the MCP schema reads `destructiveHint: false` as "the tool
+performs only additive updates". Not gated: these register without
+`GDOCS_ENABLE_DESTRUCTIVE` and take no confirm. The layers
 this server controls are the write mode the person chose, the overwrite
 guard, `dry_run`, read-only mode, and not registering the destructive
 tools at all. Client-side approval is **not** one of them: whether a call
@@ -847,7 +857,8 @@ preview included. Measured in the Phase 3 evals (§14).
   Docs API and Google Drive API; configure the OAuth consent screen
   (**Internal** for a Workspace organization, which avoids the 7-day
   token expiry; **External + Testing** with the user added as a test user
-  for consumer accounts, with weekly `login`); add the four scopes; create
+  for consumer accounts, with weekly `login`); on an External app, add the
+  four scopes, which an Internal one does not need listed; create
   a **Desktop app** OAuth client; download its `client_secret.json`; run
   `google-docs-mcp login --client-secret <path>`.
 - **No enrollment.** Suggestion mode, anchored comments and
@@ -1000,9 +1011,10 @@ What stays is what holds on every client:
    is pinned to, and a Markdown file's conflict check and editor check
    (§7.5).
 4. **`dry_run`** on every write.
-5. **Annotations.** `destructiveHint` is true on the two deletes, so a
-   client that prompts by it, as claude.ai and Codex do, prompts for
-   them. VS Code ignores `destructiveHint` and prompts on every tool
+5. **Annotations.** `destructiveHint` is true on every write but the
+   three that only add (`create_document`, `add_comment`,
+   `export_document`), so a client that prompts by it, as claude.ai and
+   Codex do, prompts for the deletes and for every edit. VS Code ignores `destructiveHint` and prompts on every tool
    without `readOnlyHint`, which only the nine reads carry. No tool
    carries Claude Code's `anthropic/requiresUserInteraction`, which is
    for an unrecoverable delete of a whole container, a permanent delete
@@ -1635,7 +1647,12 @@ checked rather than assumed.
 | A Docs suggestion id names a Word tracked change | Refuted live (spike H): the ids are `suggestIdImport<uuid>_<n>`, the uuid new on every revision and `n` not the `w:id`; adjacent changes by one author at one time share one | Reviewing a Word file's suggestions would go by position; it is not offered, and refused saying so. |
 | A tracked insertion may wrap a link | Refuted live (spike H): with `w:hyperlink` inside `w:ins`, Docs read the paragraph without the link's text; with `w:ins` inside `w:hyperlink` it read it | A tracked insertion goes inside the link (`internal/ooxml`). |
 | The server should confirm a write with the person itself, through MCP form elicitation | **Refuted 2026-10-22** for the family on documents and source, rechecked 2026-10-23 against the most-used servers and clients. The specification (`server/tools`, 2025-06-18 to 2026-07-28) puts consent to each call on the host; `client/elicitation` lets the client answer "from the user or other sources". Claude Code documents that an `Elicitation` hook answers with no dialog, Codex in full access accepts a form with no fields by itself, open user reports have Claude Code's VS Code extension and Claude Desktop's Code tab decline it unseen and Cowork leave it hanging, and no client's permission rules match it | §12a: the server asks nobody. Registration, the retyped target, the guards, the witnesses and `dry_run` stay; `review_suggestion` carries the ids the question used to show, and `delete_comment` the start of the text. The rows above on asking and on the mark describe what this replaces. |
-| claude.ai, Codex and VS Code all prompt by `destructiveHint` (the family's assumption until 2026-10-23) | **Refuted for VS Code 2026-10-23**, at source: VS Code ignores `destructiveHint` and prompts on every tool not marked `readOnlyHint: true`. Codex prompts by `destructiveHint` in its default `auto` mode, and claude.ai and ChatGPT document that it decides their prompts. Each remembers an approval per tool, never per argument | `readOnlyHint` only on the nine reads, which change nothing; `destructiveHint` on the two deletes. The README says what each client prompts for. |
+| claude.ai, Codex and VS Code all prompt by `destructiveHint` (the family's assumption until 2026-10-23) | **Refuted for VS Code 2026-10-23**, at source: VS Code ignores `destructiveHint` and prompts on every tool not marked `readOnlyHint: true`. Codex prompts by `destructiveHint` in its default `auto` mode, and claude.ai and ChatGPT document that it decides their prompts. Each remembers an approval per tool, never per argument | `readOnlyHint` only on the nine reads, which change nothing; `destructiveHint` on the two deletes, and since 2026-10-31 on every write that changes or removes. The README says what each client prompts for. |
+| `destructiveHint: false` fits any write the guard keeps from deleting more than was asked | **Refuted 2026-10-31.** The MCP schema (2025-11-25), `ToolAnnotations`: "If false, the tool performs only additive updates", and the default is true. An edit, a restyle, a resolved thread or a renamed tab changes what is there, whatever the guard allows | Every write says true but `create_document`, `add_comment` and `export_document`, which add. `add_comment` stays false on a Markdown or Word file too: the upload carries the whole file, but the guard refuses it when the file moved since the read. The nine that flip stay ungated, with no confirm. `TestOnlyToolsThatAddSayTheyAreNotDestructive` holds it. This reverses the reading in the rows above |
+| A comment's text may be 2048 bytes, counted in bytes | **Confirmed live 2026-10-31** (`internal/gapi/rawlimits_integration_test.go`); no reference states either limit. The Docs API's insertComment refuses more than 2048 bytes: "content must not exceed 2048 UTF-8 code units". Drive's comments.create and replies.create take 4096 bytes, 2048 é or 1024 emoji, and refuse one more with 403 `commentLengthLimitExceeded` | A comment takes either path, as the comments view allows, and a reply on a suggestion's thread goes through the Docs API, unmeasured, so all comment text keeps to 2048 bytes, a plain reply's included. A Google Doc's comment-mode proposal is held to it too, refused for its op before anything posts; a Word file's is written into the file and is not. A refusal says a letter outside ASCII is two bytes or more |
+| A named range's name is counted in characters | **Refuted.** The Docs discovery document (revision 20261026), `CreateNamedRangeRequest.name`: "no more than 256 characters, measured in UTF-16 code units". Confirmed live 2026-10-31 (`internal/gapi/rawlimits_integration_test.go`): a name of 128 emoji was taken and one of 129 refused | The plan counts UTF-16 units, so an emoji counts as two |
+| Google writes a time it does not have as the Unix epoch | Seen live in the sibling Chat server on 2026-10-31: an administrator's read of a space answered `1970-01-01T00:00:00Z` for a time it lacked. Not seen yet from Docs or Drive | Every time a Docs or Drive read carries decodes through `gdocs.Time`, which reads the epoch as no time. A date chip's timestamp is the document's own content and is left as written |
+| A scope must be on the consent screen to be granted | **Refined 2026-10-31.** Google's configure-oauth-consent guide (updated 2026-09-03): "you only need to list scopes for apps used by people outside your Google Workspace organization", and for internal apps "scopes aren't listed on the consent screen". Confirmed live the same day on an Internal app, whose token held scopes its Data Access page does not list | The README asks for the scope list on External apps only |
 | A bundle install has a second approval behind the server, as Claude Code's ask rules are | **Refuted 2026-10-24** on the docs and the reference host, for the family's §10b; Claude Desktop itself not probed, and no page names desktop extensions. anthropics/mcpb v2.1.2 and `70fe3b34` declare `tools` for display, and `src/` reads it only in `init`; v2.1.2 `src/shared/config.ts` passes a boolean to `env` as "true" or "false". claude.com/docs/connectors/getting-started: "Select Allow once to continue, or Always allow to skip the prompt for that tool from now on". claude.com/docs/connectors/building/review-criteria: readOnlyHint and destructiveHint "determine auto-permissions in Claude" | Every switch the bundle asks for is a boolean defaulting to the server's own default, off. `gates mcpb` starts the server's `config.Load` from the environment the defaults give it and refuses any field that differs from an unconfigured start, naming it. The bundle declares no `tools` list (§13). |
 | A bundle's optional setting the person leaves blank reaches the server empty | **Refuted 2026-10-24** on the reference host: anthropics/mcpb v2.1.2 `src/shared/config.ts` builds its variables from the defaults and the person's values, and leaves one it does not have as written, so an optional key with no default reaches `env` as the text `${user_config.x}`. The 3.0.0 bundle gave each of its three keys a default, so it was not affected; without one, the export folder would reach the server as that text, which it refuses as not an absolute path | Every optional key has a default, and `gates mcpb` refuses one without. The environment the defaults give the server must configure it as no environment does, which `TestVarsDescribeWhatBuildDoes` holds for each setting's default and for `""`, and `TestASettingOfSpacesIsUnset` for spaces alone, the two variables read outside Define included. |
 | `privacy_policies` is optional for a bundle | **Refuted 2026-10-24** on the specification: anthropics/mcpb `MANIFEST.md`, "Required when the extension connects to external services (first- or third-party) that process user data"; added in manifest_version 0.2, and enforced by neither the schema nor `mcpb validate` | The manifest names https://policies.google.com/privacy, which answered 200 on 2026-10-24, and `gates mcpb` refuses an empty list. |

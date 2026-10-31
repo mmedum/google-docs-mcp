@@ -201,8 +201,8 @@ func (i *Info) fromFile(file *gapi.File) {
 	if len(file.Owners) > 0 {
 		i.Owner = userLabel(file.Owners[0])
 	}
-	i.Created = file.CreatedTime
-	i.LastModified = file.ModifiedTime
+	i.Created = string(file.CreatedTime)
+	i.LastModified = string(file.ModifiedTime)
 	if file.LastModifyingUser != nil {
 		i.LastModifiedBy = userLabel(file.LastModifyingUser)
 	}

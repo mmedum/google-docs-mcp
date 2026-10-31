@@ -153,7 +153,7 @@ func registerLayout(s *mcp.Server, d Deps) {
 			"one looks like today). Lengths are in " +
 			"points: 72 to the inch, so US Letter is 612×792 and A4 is 595×842. Use format_document instead to style " +
 			"one passage. Same mode, dry_run and expect_revision semantics as edit_document.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in LayoutInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {

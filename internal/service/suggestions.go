@@ -182,7 +182,7 @@ func (s *suggestionSet) list(threads map[string]gdocs.SuggestionThread) []Sugges
 			sg.Kind = "format"
 		}
 		if t, ok := threads[id]; ok {
-			sg.Author, sg.Status, sg.Summary, sg.Created = t.HeadPost.Author.DisplayName, t.Status, t.SummaryText, t.HeadPost.CreateTime
+			sg.Author, sg.Status, sg.Summary, sg.Created = t.HeadPost.Author.DisplayName, t.Status, t.SummaryText, string(t.HeadPost.CreateTime)
 			for _, p := range t.Replies {
 				sg.Replies = append(sg.Replies, postReply(p))
 			}

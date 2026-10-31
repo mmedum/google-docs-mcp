@@ -150,7 +150,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"live, use a working copy (create_document from_file). On a Word file (.docx) the same ops write its body's " +
 			"text into the file, addressed as on a Google Doc, a suggestion as a tracked change and comment mode as Word " +
 			"comments, and the file is uploaded whole; formatting, tables and images need it saved as a Google Doc.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in EditInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
@@ -183,7 +183,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"target: to restyle every paragraph carrying a style at once, and everything written with it later, " +
 			"redefine the style itself with layout_document's named_style op. Same mode, dry_run and " +
 			"expect_revision semantics.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FormatInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {
@@ -228,7 +228,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"(.md) instead, holding the content as written; such a file is edited as text. With from_file it makes a " +
 			"working copy of a Markdown file: a Google Doc holding its text, for working in together live with every " +
 			"write mode, which write_markdown_file writes back into the file.",
-		Annotations: writeSafe,
+		Annotations: adding,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, *service.CreateResult, error) {
 		res, err := d.Service.Create(ctx, service.CreateRequest{Title: in.Title, Content: in.Content, ContentFormat: in.ContentFormat, Kind: in.Kind, FromFile: in.FromFile})
 		if err != nil {
@@ -253,7 +253,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"those and writes the rest. edit_document's guard applies, and a write waits for, then refuses, changes made " +
 			"in the Docs editor on the file and not saved yet, forced or not: that work is in no revision yet. dry_run " +
 			"shows the diff.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in WriteBackInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		res, err := d.Service.WriteBack(ctx, service.WriteBackRequest{Document: in.Document, File: in.File, Force: in.Force, DryRun: in.DryRun})
 		if err != nil {
@@ -269,7 +269,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"do; discarding removes the suggestion outright, which Google allows only its author. Pass expect_revision " +
 			"to refuse if the document changed since the list was read. dry_run resolves the suggestions and stops " +
 			"before the write.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReviewInput) (*mcp.CallToolResult, *service.ReviewResult, error) {
 		res, err := d.Service.Review(ctx, service.ReviewRequest{Document: in.Document, Action: in.Action, IDs: in.IDs,
 			ExpectRevision: in.ExpectRevision, DryRun: in.DryRun})

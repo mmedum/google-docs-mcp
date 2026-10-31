@@ -111,7 +111,6 @@ func TestAddComment(t *testing.T) {
 		class string
 	}{
 		{AddCommentRequest{Document: fixtureID, Content: " "}, "invalid"},
-		{AddCommentRequest{Document: fixtureID, Content: strings.Repeat("x", 2049)}, "invalid"},
 		{AddCommentRequest{Document: fixtureID, Content: "x", Target: &Target{Text: "nowhere"}}, "not_found"},
 		{AddCommentRequest{Document: fixtureID, Content: "x", ExpectRevision: "old"}, "conflict"},
 	} {
@@ -133,6 +132,35 @@ func TestAddComment(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "comment pc1 posted on p5") {
 		t.Fatalf("text: %s", res.Text)
+	}
+}
+
+// Google counts comment text in bytes, and the Docs API takes 2048 of
+// them, so 1024 é fill it as 2048 x do; live probes met the limit
+// (internal/gapi/rawlimits_integration_test.go). A reply, resolving
+// ones included, keeps to the same limit.
+func TestCommentTextTakesGooglesLimitInBytes(t *testing.T) {
+	svc, api := writable(t, false)
+	ctx := context.Background()
+	api.comments = []*gapi.DriveComment{{ID: "c1", Content: "x"}}
+	for _, tc := range []struct {
+		name    string
+		content string
+		ok      bool
+	}{
+		{"2048 x", strings.Repeat("x", 2048), true},
+		{"2049 x", strings.Repeat("x", 2049), false},
+		{"1024 é", strings.Repeat("é", 1024), true},
+		{"1025 é", strings.Repeat("é", 1025), false},
+	} {
+		_, err := svc.AddComment(ctx, AddCommentRequest{Document: fixtureID, Content: tc.content})
+		if (err == nil) != tc.ok || (!tc.ok && classOf(err) != "invalid") {
+			t.Errorf("comment of %s: err = %v, want ok %v", tc.name, err, tc.ok)
+		}
+		_, err = svc.Reply(ctx, ReplyRequest{Document: fixtureID, CommentID: "c1", Action: "resolve", Content: tc.content})
+		if (err == nil) != tc.ok || (!tc.ok && classOf(err) != "invalid") {
+			t.Errorf("resolving reply of %s: err = %v, want ok %v", tc.name, err, tc.ok)
+		}
 	}
 }
 

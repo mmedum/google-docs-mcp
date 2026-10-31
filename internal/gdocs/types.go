@@ -5,7 +5,37 @@
 // tags follow the API.
 package gdocs
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
+
+// Time is a timestamp as Google writes it, in RFC 3339. Google writes a
+// time it does not have as the Unix epoch, a protobuf Timestamp of zero:
+// Chat's API sent 1970-01-01T00:00:00Z for one, live, on 2026-10-31.
+// Time reads the epoch as no time, so nothing reports a document or a
+// comment from 1970. Any other value, one that does not parse included,
+// is kept as Google sent it.
+type Time string
+
+// UnmarshalJSON keeps the string, unless it is the epoch.
+func (t *Time) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*t = Time(KnownTime(s))
+	return nil
+}
+
+// KnownTime is s, or "" when s is the epoch: the one rule for every time
+// Google writes, in an API reply or in a Markdown file's comments.
+func KnownTime(s string) string {
+	if at, err := time.Parse(time.RFC3339Nano, s); err == nil && at.Equal(time.Unix(0, 0)) {
+		return ""
+	}
+	return s
+}
 
 // Document is the documents.get response.
 type Document struct {
@@ -37,8 +67,8 @@ type Post struct {
 	PostID           string     `json:"postId,omitempty"`
 	Content          string     `json:"content,omitempty"`
 	Author           PostAuthor `json:"author,omitempty"`
-	CreateTime       string     `json:"createTime,omitempty"`
-	UpdateTime       string     `json:"updateTime,omitempty"`
+	CreateTime       Time       `json:"createTime,omitempty"`
+	UpdateTime       Time       `json:"updateTime,omitempty"`
 	CommentAction    string     `json:"commentAction,omitempty"`
 	SuggestionAction string     `json:"suggestionAction,omitempty"`
 	// Deleted leaves the post in its thread with no content or author.

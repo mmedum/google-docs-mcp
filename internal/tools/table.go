@@ -90,7 +90,7 @@ func registerTable(s *mcp.Server, d Deps) {
 			"with with_handles; cells as r2c3. Text inside cells can also be edited with edit_document (target cell) and " +
 			"styled with format_document. Same mode, dry_run, expect_revision and force semantics as edit_document; " +
 			"deleting rows or columns that hold comments or suggestions is refused in direct mode unless forced.",
-		Annotations: writeSafe,
+		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TableInput) (*mcp.CallToolResult, *service.EditResult, error) {
 		ops := make([]service.EditOp, 0, len(in.Ops))
 		for i, o := range in.Ops {

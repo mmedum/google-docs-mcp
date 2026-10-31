@@ -296,6 +296,30 @@ func TestGuard(t *testing.T) {
 	}
 }
 
+// A Google Doc's proposal is posted as a comment, so it keeps to Google's
+// limit on comment text, which counts bytes: 1010 é is 2020 bytes before
+// the proposal's own words, over the limit though far under 2048
+// letters. The op is refused before anything posts. A Word file's
+// proposal is written into the file and has no limit.
+func TestCommentModeKeepsAProposalToTheCommentLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		text  string
+		limit int
+		ok    bool
+	}{
+		{"1000 é", strings.Repeat("é", 1000), MaxCommentBytes, true},
+		{"1010 é", strings.Repeat("é", 1010), MaxCommentBytes, false},
+		{"1010 é with no limit", strings.Repeat("é", 1010), 0, true},
+	} {
+		ops := []Op{{Seq: 0, Kind: OpReplace, Seg: seg(), Target: &Rng{Start: 10, End: 20}, TargetText: "old words", Fragment: frag(t, tc.text), Description: "p2"}}
+		_, err := Plan(ops, Options{Mode: ModeComment, CommentLimit: tc.limit})
+		if (err == nil) != tc.ok || (err != nil && !strings.Contains(err.Error(), "at most 2048 bytes")) {
+			t.Errorf("%s: err = %v, want ok %v", tc.name, err, tc.ok)
+		}
+	}
+}
+
 func TestCommentModeProposals(t *testing.T) {
 	s := seg()
 	ops := []Op{

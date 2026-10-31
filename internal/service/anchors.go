@@ -64,7 +64,7 @@ func viewThreads(w *gdocs.Document) []CommentThread {
 	out := make([]CommentThread, 0, len(w.Comments))
 	for _, c := range w.Comments {
 		t := CommentThread{ID: c.CommentID, Author: postAuthor(c.HeadPost), Content: c.HeadPost.Content, Quote: c.PlainTextQuote,
-			Resolved: c.Status == "RESOLVED", Created: c.HeadPost.CreateTime, Modified: c.HeadPost.UpdateTime, Replies: []CommentReply{}}
+			Resolved: c.Status == "RESOLVED", Created: string(c.HeadPost.CreateTime), Modified: string(c.HeadPost.UpdateTime), Replies: []CommentReply{}}
 		for _, p := range c.Replies {
 			t.Replies = append(t.Replies, postReply(p))
 		}
@@ -76,7 +76,7 @@ func viewThreads(w *gdocs.Document) []CommentThread {
 // postReply is one reply post of a Docs thread, a comment's or a
 // suggestion's.
 func postReply(p gdocs.Post) CommentReply {
-	return CommentReply{ID: p.PostID, Author: postAuthor(p), Content: p.Content, Created: p.CreateTime,
+	return CommentReply{ID: p.PostID, Author: postAuthor(p), Content: p.Content, Created: string(p.CreateTime),
 		Action: commentAction(p.CommentAction), Deleted: p.Deleted}
 }
 
@@ -112,7 +112,7 @@ func commentAction(a string) string {
 func driveThreads(list []*gapi.DriveComment) []CommentThread {
 	out := make([]CommentThread, 0, len(list))
 	for _, c := range list {
-		t := CommentThread{ID: c.ID, Content: c.Content, Resolved: c.Resolved, Deleted: c.Deleted, Created: c.CreatedTime, Modified: c.ModifiedTime,
+		t := CommentThread{ID: c.ID, Content: c.Content, Resolved: c.Resolved, Deleted: c.Deleted, Created: string(c.CreatedTime), Modified: string(c.ModifiedTime),
 			Assignee: c.AssigneeEmailAddress, Replies: []CommentReply{}}
 		if c.Author != nil {
 			t.Author = c.Author.DisplayName
@@ -121,7 +121,7 @@ func driveThreads(list []*gapi.DriveComment) []CommentThread {
 			t.Quote = c.QuotedFileContent.Value
 		}
 		for _, r := range c.Replies {
-			rp := CommentReply{ID: r.ID, Content: r.Content, Created: r.CreatedTime, Action: r.Action, Deleted: r.Deleted}
+			rp := CommentReply{ID: r.ID, Content: r.Content, Created: string(r.CreatedTime), Action: r.Action, Deleted: r.Deleted}
 			if r.Author != nil {
 				rp.Author = r.Author.DisplayName
 			}

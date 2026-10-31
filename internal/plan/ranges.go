@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
 )
 
 // Named-range ops. A named range is the one anchor that survives an
@@ -16,7 +17,9 @@ const (
 	OpReplaceNamedRange OpKind = "replace_named_range"
 )
 
-// MaxNamedRangeName is the API's limit on a name.
+// MaxNamedRangeName is the API's limit on a name: "no more than 256
+// characters, measured in UTF-16 code units" (CreateNamedRangeRequest,
+// Docs discovery revision 20261026), so an emoji counts as two.
 const MaxNamedRangeName = 256
 
 // NamedRangeParams name a range to create, delete or fill.
@@ -46,8 +49,8 @@ func validateNamedRange(op *Op) error {
 			return fmt.Errorf("op %d: name the range by name or by id, not both", op.Seq)
 		}
 	}
-	if n := utf8.RuneCountInString(p.Name); n > MaxNamedRangeName {
-		return fmt.Errorf("op %d: a name is at most %d characters, got %d", op.Seq, MaxNamedRangeName, n)
+	if n := doc.UTF16Len(p.Name); n > MaxNamedRangeName {
+		return fmt.Errorf("op %d: a name is at most %d characters as Google counts them, got %d: an emoji counts as two", op.Seq, MaxNamedRangeName, n)
 	}
 	if op.Kind == OpReplaceNamedRange && strings.ContainsAny(p.Text, "\n\v") {
 		return fmt.Errorf("op %d: replace_named_range writes one run of text, so it cannot contain a newline", op.Seq)

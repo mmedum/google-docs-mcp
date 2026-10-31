@@ -300,9 +300,6 @@ func TestListToolsAndSchemas(t *testing.T) {
 		}
 		if tool.Name == "delete_comment" || tool.Name == "delete_tab" {
 			found[tool.Name] = true
-			if tool.Annotations == nil || tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint {
-				t.Errorf("%s annotations = %+v", tool.Name, tool.Annotations)
-			}
 		}
 	}
 	if len(found) != 2 || len(dres.Tools) != len(res.Tools)+2 {
@@ -323,6 +320,39 @@ func TestListToolsAndSchemas(t *testing.T) {
 	}
 	if len(res.Tools) != len(readTools)+1 {
 		t.Fatalf("read-only tools = %d", len(res.Tools))
+	}
+}
+
+// destructiveHint false means "the tool performs only additive updates"
+// (MCP schema, ToolAnnotations), so only the tools that add say it: a new
+// document, a new comment, a new local file. Every other write says true,
+// gated or not.
+func TestOnlyToolsThatAddSayTheyAreNotDestructive(t *testing.T) {
+	adds := map[string]bool{"add_comment": true, "create_document": true, "export_document": true}
+	s := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{EnableDestructive: true, DefaultWriteMode: config.WriteDirect})
+	res, err := s.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, tool := range res.Tools {
+		a := tool.Annotations
+		if a == nil {
+			t.Errorf("%s has no annotations", tool.Name)
+			continue
+		}
+		if a.ReadOnlyHint {
+			continue
+		}
+		if adds[tool.Name] {
+			seen++
+		}
+		if a.DestructiveHint == nil || *a.DestructiveHint == adds[tool.Name] {
+			t.Errorf("%s says destructiveHint %v; want %v", tool.Name, a.DestructiveHint, !adds[tool.Name])
+		}
+	}
+	if seen != len(adds) {
+		t.Fatalf("found %d of the %d tools that add", seen, len(adds))
 	}
 }
 

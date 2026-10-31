@@ -46,7 +46,7 @@ func (s *Service) ListRevisions(ctx context.Context, ref string, limit int) (*Re
 	res := &RevisionsResult{Revisions: []RevisionInfo{}, Total: len(revs)}
 	for i := len(revs) - 1; i >= 0 && len(res.Revisions) < limit; i-- {
 		r := revs[i]
-		res.Revisions = append(res.Revisions, RevisionInfo{ID: r.ID, Modified: r.ModifiedTime, ModifiedBy: userLabel(r.LastModifyingUser), KeepForever: r.KeepForever})
+		res.Revisions = append(res.Revisions, RevisionInfo{ID: r.ID, Modified: string(r.ModifiedTime), ModifiedBy: userLabel(r.LastModifyingUser), KeepForever: r.KeepForever})
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%d revision(s), newest first", res.Total)

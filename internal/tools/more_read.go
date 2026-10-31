@@ -74,7 +74,7 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 			"max_chars); pdf, docx, odt, rtf and epub are written as new files under the server's export directory, " +
 			"never over a file already there, and the path is returned. The markdown export is Google's own rendering, useful for a faithful whole-document " +
 			"dump; read_document is better for working with sections.",
-		Annotations: localWrite,
+		Annotations: adding,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ExportInput) (*mcp.CallToolResult, any, error) {
 		res, err := d.Service.Export(ctx, service.ExportRequest{Document: in.Document, Format: in.Format, MaxChars: in.MaxChars})
 		if err != nil {

@@ -463,7 +463,7 @@ func scopesAgree(text string, wanted []string) []string {
 		// The README writes them abbreviated, as `.../auth/documents`.
 		if !strings.Contains(text, scope) && !strings.Contains(text, shortScope(scope)) {
 			problems = append(problems, "README does not list the OAuth scope "+scope+
-				", which login requests; a consent screen built from it will refuse that mode")
+				", which login requests; an External app's consent screen built from it will refuse that mode")
 		}
 	}
 	for _, found := range readmeScopes.FindAllStringSubmatch(text, -1) {

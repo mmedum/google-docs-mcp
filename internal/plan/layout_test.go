@@ -173,6 +173,25 @@ func TestNamedRangeValidation(t *testing.T) {
 	}
 }
 
+// Google counts a name in UTF-16 code units, so 128 emoji fill it and
+// one more letter is over, though that is 129 characters.
+func TestNamedRangeNameIsCountedInUTF16(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		ok   bool
+	}{
+		{"256 x", strings.Repeat("x", 256), true},
+		{"128 emoji", strings.Repeat("😀", 128), true},
+		{"128 emoji and an x", strings.Repeat("😀", 128) + "x", false},
+	} {
+		op := Op{Kind: OpCreateNamedRange, NamedRange: NamedRangeParams{Name: tc.text}}
+		if err := validateNamedRange(&op); (err == nil) != tc.ok {
+			t.Errorf("%s: err = %v, want ok %v", tc.name, err, tc.ok)
+		}
+	}
+}
+
 func TestTableLineStyleRequests(t *testing.T) {
 	tbl := Loc{Index: 133, TabID: "t"}
 	cols := view(t, UpdateTableColumnProperties(tbl, []int{0, 2}, floatp(120), false))

@@ -373,7 +373,7 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 	if err := checkEmbeds(req.Ops, ro.ops); err != nil {
 		return nil, nil, err
 	}
-	planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force})
+	planned, err := plan.Plan(ro.ops, plan.Options{Mode: mode, Force: req.Force, CommentLimit: plan.MaxCommentBytes})
 	if err != nil {
 		return nil, nil, planError(err)
 	}

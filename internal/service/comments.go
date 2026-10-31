@@ -179,7 +179,7 @@ func (s *Service) AddComment(ctx context.Context, req AddCommentRequest) (*AddCo
 	if err := s.requireWritable(); err != nil {
 		return nil, err
 	}
-	content, err := commentText(req.Content, "content")
+	content, err := commentText(req.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -242,15 +242,24 @@ func (r *AddCommentResult) say(head, tail string) {
 }
 
 // commentText validates a comment or reply body against the API limit.
-func commentText(text, what string) (string, error) {
+func commentText(text string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return "", Errorf("invalid", "%s is empty", what)
+		return "", Errorf("invalid", "content is empty")
 	}
-	if len(text) > 2048 {
-		return "", Errorf("invalid", "%s is %d bytes; comments are limited to 2048", what, len(text))
+	if err := commentFits(text); err != nil {
+		return "", err
 	}
 	return text, nil
+}
+
+// commentFits refuses text over plan.MaxCommentBytes, which counts
+// bytes: a letter outside ASCII is two or more.
+func commentFits(text string) error {
+	if len(text) > plan.MaxCommentBytes {
+		return Errorf("invalid", "content is %d bytes; Google takes at most %d bytes of comment text, and a letter outside ASCII is two bytes or more", len(text), plan.MaxCommentBytes)
+	}
+	return nil
 }
 
 // postAnchoredComment pins a comment to a range through the Docs API,
@@ -378,13 +387,10 @@ func replyAction(req ReplyRequest) (string, string, error) {
 	switch action {
 	case "reply", "edit":
 		var err error
-		content, err = commentText(content, "content")
+		content, err = commentText(content)
 		return action, content, err
 	case "resolve", "reopen":
-		if len(content) > 2048 {
-			return "", "", Errorf("invalid", "content is %d bytes; replies are limited to 2048", len(content))
-		}
-		return action, content, nil
+		return action, content, commentFits(content)
 	}
 	return "", "", Errorf("invalid", "action %q; use reply, resolve, reopen or edit", req.Action)
 }

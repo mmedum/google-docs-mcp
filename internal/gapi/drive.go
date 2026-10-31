@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
 )
 
 // User is a Drive user reference.
@@ -42,8 +44,8 @@ type File struct {
 	ID                string            `json:"id,omitempty"`
 	Name              string            `json:"name,omitempty"`
 	MimeType          string            `json:"mimeType,omitempty"`
-	CreatedTime       string            `json:"createdTime,omitempty"`
-	ModifiedTime      string            `json:"modifiedTime,omitempty"`
+	CreatedTime       gdocs.Time        `json:"createdTime,omitempty"`
+	ModifiedTime      gdocs.Time        `json:"modifiedTime,omitempty"`
 	Owners            []*User           `json:"owners,omitempty"`
 	LastModifyingUser *User             `json:"lastModifyingUser,omitempty"`
 	WebViewLink       string            `json:"webViewLink,omitempty"`
@@ -198,8 +200,8 @@ type DriveComment struct {
 	Content           string        `json:"content,omitempty"`
 	HTMLContent       string        `json:"htmlContent,omitempty"`
 	Author            *User         `json:"author,omitempty"`
-	CreatedTime       string        `json:"createdTime,omitempty"`
-	ModifiedTime      string        `json:"modifiedTime,omitempty"`
+	CreatedTime       gdocs.Time    `json:"createdTime,omitempty"`
+	ModifiedTime      gdocs.Time    `json:"modifiedTime,omitempty"`
 	Resolved          bool          `json:"resolved,omitempty"`
 	Deleted           bool          `json:"deleted,omitempty"`
 	Anchor            string        `json:"anchor,omitempty"`
@@ -217,12 +219,12 @@ type QuotedText struct {
 
 // DriveReply is one reply in a thread.
 type DriveReply struct {
-	ID          string `json:"id,omitempty"`
-	Content     string `json:"content,omitempty"`
-	Author      *User  `json:"author,omitempty"`
-	CreatedTime string `json:"createdTime,omitempty"`
-	Action      string `json:"action,omitempty"`
-	Deleted     bool   `json:"deleted,omitempty"`
+	ID          string     `json:"id,omitempty"`
+	Content     string     `json:"content,omitempty"`
+	Author      *User      `json:"author,omitempty"`
+	CreatedTime gdocs.Time `json:"createdTime,omitempty"`
+	Action      string     `json:"action,omitempty"`
+	Deleted     bool       `json:"deleted,omitempty"`
 }
 
 // ReplyFields is what reply calls ask for.
@@ -401,11 +403,11 @@ func (c *Client) DeleteReply(ctx context.Context, fileID, commentID, replyID str
 
 // Revision is a Drive revision (version history entry) of a document.
 type Revision struct {
-	ID                string `json:"id,omitempty"`
-	MimeType          string `json:"mimeType,omitempty"`
-	ModifiedTime      string `json:"modifiedTime,omitempty"`
-	KeepForever       bool   `json:"keepForever,omitempty"`
-	LastModifyingUser *User  `json:"lastModifyingUser,omitempty"`
+	ID                string     `json:"id,omitempty"`
+	MimeType          string     `json:"mimeType,omitempty"`
+	ModifiedTime      gdocs.Time `json:"modifiedTime,omitempty"`
+	KeepForever       bool       `json:"keepForever,omitempty"`
+	LastModifyingUser *User      `json:"lastModifyingUser,omitempty"`
 }
 
 // RevisionFields is what ListRevisions asks for per revision.

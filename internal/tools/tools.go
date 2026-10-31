@@ -94,16 +94,20 @@ func confirmTarget(what, target, confirm string) error {
 
 var (
 	readOnly = &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)}
-	// writeSafe marks tools that change the document but never delete
-	// beyond what the person asked and the guard allows.
-	writeSafe = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
+	// adding marks a tool that adds and replaces nothing: a new document,
+	// a new comment, or a new local file in the one directory the person
+	// configured. Only such a tool may say destructiveHint false, which
+	// the MCP schema defines as "the tool performs only additive updates".
+	adding = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
+	// overwriting marks a tool that changes or removes what is there: an
+	// edit, a restyle, a resolved thread, a renamed tab. It says
+	// destructiveHint true, as the schema asks, and is not gated: it
+	// registers without GDOCS_ENABLE_DESTRUCTIVE and takes no confirm.
+	overwriting = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
 	// destructive marks the gated tools. No tool carries Claude Code's
 	// requiresUserInteraction mark (§12a): version history keeps a
 	// deleted tab's text, and a deleted comment, which cannot be
 	// restored, is one item of many, deleted many in a row, where a
 	// prompt on every call goes unread. The operator's own rules decide.
 	destructive = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
-	// localWrite marks a tool that reads Google and writes only a local
-	// file, in the one directory the person configured.
-	localWrite = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
 )

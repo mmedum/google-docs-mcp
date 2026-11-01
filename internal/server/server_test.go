@@ -546,7 +546,7 @@ func TestReadToolsAreTextOnly(t *testing.T) {
 func TestDumpSchemas(t *testing.T) {
 	srv := server.New(server.Deps{Config: config.Config{}, Version: "test"})
 	var buf bytes.Buffer
-	if err := server.DumpSchemas(context.Background(), srv, &buf, "test"); err != nil {
+	if err := server.DumpSchemas(context.Background(), srv, nil, &buf, "test"); err != nil {
 		t.Fatal(err)
 	}
 	var out struct {
@@ -1207,5 +1207,47 @@ func TestInstructionsNameOnlyRegisteredTools(t *testing.T) {
 				t.Errorf("the instructions name %d tools; they are not describing this server", named)
 			}
 		})
+	}
+}
+
+// A fixed resource, a prompt and the instructions are in the dump, so no
+// schema gate misses a change to them. The server has no fixed resource
+// or prompt today, so this test builds one that does.
+func TestDumpSchemasListsEverythingAClientIsTold(t *testing.T) {
+	s := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "0"}, &mcp.ServerOptions{Instructions: "Read before writing."})
+	ro := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "0"}, &mcp.ServerOptions{Instructions: "Read only."})
+	mcp.AddTool(s, &mcp.Tool{Name: "noop", Description: "d"},
+		func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
+			return nil, struct{}{}, nil
+		})
+	s.AddResource(&mcp.Resource{URI: "gdocs://example", Name: "example"},
+		func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) { return nil, nil })
+	s.AddPrompt(&mcp.Prompt{Name: "summarize"},
+		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) { return nil, nil })
+	var buf bytes.Buffer
+	if err := server.DumpSchemas(context.Background(), s, ro, &buf, "test"); err != nil {
+		t.Fatal(err)
+	}
+	var dump struct {
+		Instructions         string `json:"instructions"`
+		ReadOnlyInstructions string `json:"readOnlyInstructions"`
+		Resources            []struct {
+			URI string `json:"uri"`
+		} `json:"resources"`
+		Prompts []struct {
+			Name string `json:"name"`
+		} `json:"prompts"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &dump); err != nil {
+		t.Fatal(err)
+	}
+	if len(dump.Resources) != 1 || dump.Resources[0].URI != "gdocs://example" {
+		t.Errorf("resources = %+v, want gdocs://example", dump.Resources)
+	}
+	if len(dump.Prompts) != 1 || dump.Prompts[0].Name != "summarize" {
+		t.Errorf("prompts = %+v, want summarize", dump.Prompts)
+	}
+	if dump.Instructions != "Read before writing." || dump.ReadOnlyInstructions != "Read only." {
+		t.Errorf("instructions = %q and %q, want the server's and the read-only server's", dump.Instructions, dump.ReadOnlyInstructions)
 	}
 }

@@ -197,7 +197,10 @@ func runServer(args []string, stdout, stderr io.Writer) int {
 		// diff compares two dumps, and a tool behind a flag can lose a field
 		// or gain a required one like any other.
 		srv := server.New(server.Deps{Config: tools.FullSurface(cfg), Logger: logger, Version: version.String()})
-		if err := server.DumpSchemas(context.Background(), srv, stdout, version.String()); err != nil {
+		roCfg := cfg
+		roCfg.ReadOnly = true
+		ro := server.New(server.Deps{Config: roCfg, Logger: logger, Version: version.String()})
+		if err := server.DumpSchemas(context.Background(), srv, ro, stdout, version.String()); err != nil {
 			return fail(stderr, "dump schemas: %v", err)
 		}
 		return 0

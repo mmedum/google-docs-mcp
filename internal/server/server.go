@@ -129,20 +129,15 @@ func logCalls(logger *slog.Logger) mcp.Middleware {
 
 // DumpSchemas writes the tool list and the resource templates as the wire
 // would carry them: the SDK has no public enumerator, so an in-memory
-// client asks the server.
-func DumpSchemas(ctx context.Context, s *mcp.Server, w io.Writer, version string) error {
-	ct, st := mcp.NewInMemoryTransports()
-	ss, err := s.Connect(ctx, st, nil)
+// client asks the server. readOnly, when it is not nil, is the same
+// server started read-only: its instructions differ, and a client of it
+// is told them.
+func DumpSchemas(ctx context.Context, s, readOnly *mcp.Server, w io.Writer, version string) error {
+	cs, done, err := session(ctx, s, version)
 	if err != nil {
-		return fmt.Errorf("connect server: %w", err)
+		return err
 	}
-	defer func() { _ = ss.Close() }()
-	client := mcp.NewClient(&mcp.Implementation{Name: "schema-dump", Version: version}, nil)
-	cs, err := client.Connect(ctx, ct, nil)
-	if err != nil {
-		return fmt.Errorf("connect client: %w", err)
-	}
-	defer func() { _ = cs.Close() }()
+	defer done()
 	res, err := cs.ListTools(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("list tools: %w", err)
@@ -155,14 +150,62 @@ func DumpSchemas(ctx context.Context, s *mcp.Server, w io.Writer, version string
 	sort.Slice(tmpls.ResourceTemplates, func(i, j int) bool {
 		return tmpls.ResourceTemplates[i].URITemplate < tmpls.ResourceTemplates[j].URITemplate
 	})
+	// Fixed resources and prompts too. The server has none today, so one
+	// added later still reaches the schema gates.
+	rs, err := cs.ListResources(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("list resources: %w", err)
+	}
+	sort.Slice(rs.Resources, func(i, j int) bool { return rs.Resources[i].URI < rs.Resources[j].URI })
+	ps, err := cs.ListPrompts(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("list prompts: %w", err)
+	}
+	sort.Slice(ps.Prompts, func(i, j int) bool { return ps.Prompts[i].Name < ps.Prompts[j].Name })
+	var readOnlyInstructions string
+	if readOnly != nil {
+		ro, done, err := session(ctx, readOnly, version)
+		if err != nil {
+			return err
+		}
+		defer done()
+		readOnlyInstructions = ro.InitializeResult().Instructions
+	}
 	out := struct {
-		Server            string                  `json:"server"`
-		Version           string                  `json:"version"`
-		SDK               string                  `json:"sdk"`
-		Tools             []*mcp.Tool             `json:"tools"`
-		ResourceTemplates []*mcp.ResourceTemplate `json:"resourceTemplates"`
-	}{Name, version, SDKVersion, res.Tools, tmpls.ResourceTemplates}
+		Server  string `json:"server"`
+		Version string `json:"version"`
+		SDK     string `json:"sdk"`
+		// The instructions are what a client puts in front of the model,
+		// so an edit to them changes what the model is told as surely as
+		// a tool description does.
+		Instructions         string                  `json:"instructions,omitempty"`
+		ReadOnlyInstructions string                  `json:"readOnlyInstructions,omitempty"`
+		Tools                []*mcp.Tool             `json:"tools"`
+		ResourceTemplates    []*mcp.ResourceTemplate `json:"resourceTemplates"`
+		Resources            []*mcp.Resource         `json:"resources,omitempty"`
+		Prompts              []*mcp.Prompt           `json:"prompts,omitempty"`
+	}{
+		Server: Name, Version: version, SDK: SDKVersion,
+		Instructions: cs.InitializeResult().Instructions, ReadOnlyInstructions: readOnlyInstructions,
+		Tools: res.Tools, ResourceTemplates: tmpls.ResourceTemplates, Resources: rs.Resources, Prompts: ps.Prompts,
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+// session connects an in-memory client to s, and returns what closes both.
+func session(ctx context.Context, s *mcp.Server, version string) (*mcp.ClientSession, func(), error) {
+	ct, st := mcp.NewInMemoryTransports()
+	ss, err := s.Connect(ctx, st, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect server: %w", err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "schema-dump", Version: version}, nil)
+	cs, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		_ = ss.Close()
+		return nil, nil, fmt.Errorf("connect client: %w", err)
+	}
+	return cs, func() { _ = cs.Close(); _ = ss.Close() }, nil
 }

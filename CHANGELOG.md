@@ -10,7 +10,10 @@ diff in CI flags them.
 
 ### Changed
 
-- For contributors: a pull request that changes the tool surface, an annotation such as `destructiveHint` included, now fails CI unless one of its commits ends with a `SCHEMA-CHANGE:` footer saying what changed, or `BREAKING CHANGE:` for a break. The schema diff also lists each change by the part that moved, and counts a removed resource template as a break.
+- For contributors:
+  - CI fails a pull request that changes the tool surface, annotations included, unless a commit footer names each changed item. A break of something a release shipped needs `BREAKING CHANGE:`.
+  - The schema diff lists each change by the part that moved, and counts a removed resource template as a break.
+  - `--dump-schemas` carries the server's instructions, the read-only server's too, and lists fixed resources and prompts once the server has any.
 
 ## [3.2.0] - 2026-10-31
 

@@ -62,7 +62,7 @@ func init() {
 		},
 		"schema-ack": {
 			run: schemaAck, args: "BASE HEAD", pr: true,
-			doc: "a tool-surface change since the merge-base carries a SCHEMA-CHANGE: or BREAKING CHANGE: footer",
+			doc: "every item changed since the merge-base is named in a SCHEMA-CHANGE: or BREAKING CHANGE: footer",
 		},
 		"schema-diff": {
 			run: schemaDiff, args: "[BIN]", gate: true,
@@ -227,12 +227,20 @@ type dumpedTool struct {
 	Name string `json:"name"`
 }
 
-// diff reports what changed between two schema dumps and returns each
-// change that breaks a caller.
-func diff(w io.Writer, old, new *schemaDump) []string {
-	c := compareSurfaces(old, new)
-	c.write(w)
-	return c.breaking
+// A change is one difference between two dumps: the item it is to, which
+// is what a footer names, and how the report shows it. The item is a
+// tool's name, a resource template's URI, a list item's name, or a
+// top-level key such as instructions.
+type change struct {
+	item, text string
+}
+
+func texts(cs []change) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.text
+	}
+	return out
 }
 
 // surfaceChanges is what differs between two dumps. breaking is what
@@ -240,7 +248,7 @@ func diff(w io.Writer, old, new *schemaDump) []string {
 // that disappeared, or an argument that became required. changed is
 // every other difference, an annotation or a description included.
 type surfaceChanges struct {
-	breaking, added, changed []string
+	breaking, added, changed []change
 }
 
 func (c surfaceChanges) empty() bool {
@@ -248,16 +256,18 @@ func (c surfaceChanges) empty() bool {
 }
 
 func (c surfaceChanges) write(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "added:", list(c.added))
-	_, _ = fmt.Fprintln(w, "breaking changes:", list(c.breaking))
-	_, _ = fmt.Fprintln(w, "changed:", list(c.changed))
+	_, _ = fmt.Fprintln(w, "added:", list(texts(c.added)))
+	_, _ = fmt.Fprintln(w, "breaking changes:", list(texts(c.breaking)))
+	_, _ = fmt.Fprintln(w, "changed:", list(texts(c.changed)))
 }
 
 // compareSurfaces compares every top-level key of two dumps. A list is
 // compared item by item, keyed by identity (itemIndex): an item gone
 // breaks a caller, a new one is added, and any other difference names
 // the parts that moved. A tool still there breaks a caller when it loses
-// an argument or output field or gains a required one (toolBreaks).
+// an argument or output field or gains a required one (toolBreaks); it
+// then lists its other changes, such as a flipped hint, but not its
+// schemas again.
 func compareSurfaces(old, new *schemaDump) surfaceChanges {
 	var c surfaceChanges
 	for _, key := range sortedUnion(old.whole, new.whole) {
@@ -267,7 +277,7 @@ func compareSurfaces(old, new *schemaDump) surfaceChanges {
 		ni, nKeyed := itemIndex(nl)
 		if !oList || !nList || !oKeyed || !nKeyed {
 			if !reflect.DeepEqual(old.whole[key], new.whole[key]) {
-				c.changed = append(c.changed, key)
+				c.changed = append(c.changed, change{key, key})
 			}
 			continue
 		}
@@ -275,22 +285,27 @@ func compareSurfaces(old, new *schemaDump) surfaceChanges {
 		for _, id := range slices.Sorted(mapKeys(oi)) {
 			nv, ok := ni[id]
 			if !ok {
-				c.breaking = append(c.breaking, label+" removed: "+id)
+				c.breaking = append(c.breaking, change{id, label + " removed: " + id})
 				continue
 			}
+			parts := changedParts(oi[id], nv)
 			if key == "tools" {
 				if breaks := toolBreaks(id, oi[id], nv); len(breaks) > 0 {
-					c.breaking = append(c.breaking, breaks...)
-					continue
+					for _, b := range breaks {
+						c.breaking = append(c.breaking, change{id, b})
+					}
+					parts = slices.DeleteFunc(parts, func(p string) bool {
+						return strings.HasPrefix(p, "inputSchema") || strings.HasPrefix(p, "outputSchema")
+					})
 				}
 			}
-			if parts := changedParts(oi[id], nv); len(parts) > 0 {
-				c.changed = append(c.changed, label+" "+id+" ("+strings.Join(parts, ", ")+")")
+			if len(parts) > 0 {
+				c.changed = append(c.changed, change{id, label + " " + id + " (" + strings.Join(parts, ", ") + ")"})
 			}
 		}
 		for _, id := range slices.Sorted(mapKeys(ni)) {
 			if _, ok := oi[id]; !ok {
-				c.added = append(c.added, label+" "+id)
+				c.added = append(c.added, change{id, label + " " + id})
 			}
 		}
 	}
@@ -299,6 +314,10 @@ func compareSurfaces(old, new *schemaDump) surfaceChanges {
 
 // toolBreaks is what breaks a caller of a tool that is still there: an
 // argument or output field gone, or an argument that became required.
+// A break's text is its identity across comparisons, which is how
+// schema-ack tells a break of a release from one of unreleased surface:
+// it names only what identifies the break, never a value that differs
+// between the two sides.
 func toolBreaks(name string, old, new map[string]any) []string {
 	var breaks []string
 	for _, f := range stringList(new, "inputSchema", "required") {

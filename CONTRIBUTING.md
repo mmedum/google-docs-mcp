@@ -50,9 +50,13 @@ test. Also:
 - Run `./google-docs-mcp --dump-schemas` and check the diff; a removed
   tool, argument or output field, or a new required argument, is a
   breaking change.
-- A change to the tool surface, annotations included, needs a commit in
-  the pull request with a `SCHEMA-CHANGE:` footer saying what changed,
-  or `BREAKING CHANGE:` for a break. `schema-ack` checks it in CI.
+- A pull request that changes the tool surface, annotations included,
+  needs a footer naming each changed item: `SCHEMA-CHANGE: add_comment,
+  edit_document: destructiveHint true`. Name a tool by its name, a
+  resource template by its URI, and the instructions as `instructions`
+  or `readOnlyInstructions`. If it breaks something a release shipped,
+  name that item in a `BREAKING CHANGE:` footer instead. `schema-ack`
+  checks this in CI.
 
 ## Layout
 

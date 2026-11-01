@@ -11,9 +11,9 @@ tag and flags removed tools, resource templates, arguments or output
 fields and new required arguments. It also lists every other change, by
 the part that changed, such as `annotations.destructiveHint`.
 
-In a pull request, CI also runs `schema-ack`. It fails when the tool
-surface changed and no commit carries the footer `CONTRIBUTING.md` asks
-for. `make schema-ack` runs it locally against `origin/main`.
+In a pull request, CI also runs `schema-ack`. It fails when a changed
+item is named in no footer, as `CONTRIBUTING.md` asks. `make schema-ack`
+runs it locally against `origin/main`.
 
 Before a phase is called done, also run `/simplify` and `/code-review
 high` on the changed code and resolve or explicitly defer the findings

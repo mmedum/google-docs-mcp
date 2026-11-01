@@ -2,6 +2,9 @@
 
 GO       ?= go
 BIN      ?= ./google-docs-mcp
+# What schema-ack measures: pull-request CI sets both.
+PR_BASE_REF ?= origin/main
+PR_HEAD  ?= HEAD
 VERSION  ?= dev
 PKG       = github.com/mmedum/google-docs-mcp/v3
 LDFLAGS   = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
@@ -63,6 +66,10 @@ schemas: build ## Dump tool schemas
 .PHONY: schema-diff
 schema-diff: build ## Diff tool schemas against the last tag
 	@$(GO) run ./scripts/gates schema-diff $(BIN)
+
+.PHONY: schema-ack
+schema-ack: ## Check a tool-surface change since the merge-base carries a SCHEMA-CHANGE: footer
+	@$(GO) run ./scripts/gates schema-ack $(PR_BASE_REF) $(PR_HEAD)
 
 .PHONY: smoke
 smoke: build ## Drive the binary over stdio, twice

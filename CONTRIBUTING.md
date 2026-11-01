@@ -50,6 +50,9 @@ test. Also:
 - Run `./google-docs-mcp --dump-schemas` and check the diff; a removed
   tool, argument or output field, or a new required argument, is a
   breaking change.
+- A change to the tool surface, annotations included, needs a commit in
+  the pull request with a `SCHEMA-CHANGE:` footer saying what changed,
+  or `BREAKING CHANGE:` for a break. `schema-ack` checks it in CI.
 
 ## Layout
 

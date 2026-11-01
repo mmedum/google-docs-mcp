@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,7 +39,7 @@ func schemaDiff(w io.Writer, args []string) error {
 		return err
 	}
 
-	old, err := schemasAtTag(last)
+	old, err := schemasAt(last)
 	if err != nil {
 		return err
 	}
@@ -74,6 +75,21 @@ func schemaDiff(w io.Writer, args []string) error {
 	return nil
 }
 
+// codeSpan is a name in backticks, which is how a **Breaking:** entry
+// names a tool or a resource template.
+var codeSpan = regexp.MustCompile("`([^`]+)`")
+
+// breakSubject is what a breaking change is about, which a **Breaking:**
+// entry has to name: the item removed from any list of the dump, or the
+// tool whose argument or output field broke.
+func breakSubject(b string) string {
+	if _, item, ok := strings.Cut(b, " removed: "); ok {
+		return item
+	}
+	name, _, _ := strings.Cut(b, ": ")
+	return name
+}
+
 // A version heading as Keep a Changelog writes it, a prerelease included,
 // unlike staleness's versionHeading: a prerelease that keeps the major
 // may not break the surface either.
@@ -98,14 +114,13 @@ func undeclaredBreaks(breaking []string, changelog, tag string) ([]string, error
 		if !strings.Contains(line, "**Breaking:**") {
 			continue
 		}
-		for _, m := range readmeMention.FindAllStringSubmatch(line, -1) {
+		for _, m := range codeSpan.FindAllStringSubmatch(line, -1) {
 			named[m[1]] = true
 		}
 	}
 	var out []string
 	for _, b := range breaking {
-		tool, _, _ := strings.Cut(strings.TrimPrefix(b, "tool removed: "), ":")
-		if !named[tool] {
+		if !named[breakSubject(b)] {
 			out = append(out, b)
 		}
 	}
@@ -122,12 +137,13 @@ func undeclaredBreaks(breaking []string, changelog, tag string) ([]string, error
 	return out, nil
 }
 
-// schemasAtTag builds the binary as it was at a tag and asks it for its
-// schemas. The worktree is removed whether or not the build succeeds:
-// leaving one behind makes every later `git worktree add` fail with a
-// message about the path already existing, which is a confusing way to
-// learn that a gate crashed an hour ago.
-func schemasAtTag(tag string) (out []byte, err error) {
+// schemasAt builds the binary as it was at a revision and asks it for
+// its schemas. The
+// worktree is removed whether or not the build succeeds: leaving one
+// behind makes every later `git worktree add` fail with a message about
+// the path already existing, which is a confusing way to learn that a
+// gate crashed an hour ago.
+func schemasAt(rev string) (out []byte, err error) {
 	tmp, err := os.MkdirTemp("", "gates-schema-*")
 	if err != nil {
 		return nil, err
@@ -135,8 +151,8 @@ func schemasAtTag(tag string) (out []byte, err error) {
 	defer func() { _ = os.RemoveAll(tmp) }()
 
 	src := filepath.Join(tmp, "src")
-	if err := runCmd("git", "worktree", "add", "-q", src, tag); err != nil {
-		return nil, fmt.Errorf("worktree for %s: %w", tag, err)
+	if err := runCmd("git", "worktree", "add", "-q", "--detach", src, rev); err != nil {
+		return nil, fmt.Errorf("worktree for %s: %w", rev, err)
 	}
 	defer func() {
 		if rmErr := runCmd("git", "worktree", "remove", "-f", src); rmErr != nil && err == nil {
@@ -148,7 +164,7 @@ func schemasAtTag(tag string) (out []byte, err error) {
 	build := exec.Command("go", "build", "-o", oldBin, "./cmd/google-docs-mcp")
 	build.Dir = src
 	if b, buildErr := build.CombinedOutput(); buildErr != nil {
-		return nil, fmt.Errorf("build %s: %w: %s", tag, buildErr, b)
+		return nil, fmt.Errorf("build %s: %w: %s", rev, buildErr, b)
 	}
 	return dumpSchemas(oldBin)
 }
@@ -171,11 +187,11 @@ func dumpSchemas(bin string) ([]byte, error) {
 }
 
 func lastTag() string {
-	out, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output()
+	tag, err := gitOutput("describe", "--tags", "--abbrev=0")
 	if err != nil {
 		return "" // no tags yet, or not a checkout
 	}
-	return trimLine(string(out))
+	return tag
 }
 
 func runCmd(name string, args ...string) error {
@@ -183,4 +199,124 @@ func runCmd(name string, args ...string) error {
 		return fmt.Errorf("%s: %w: %s", name, err, out)
 	}
 	return nil
+}
+
+// ackFooter is a footer that acknowledges a change to the tool surface:
+// SCHEMA-CHANGE: for any change, BREAKING CHANGE: for one that breaks a
+// caller, or BREAKING-CHANGE:, which Conventional Commits makes its
+// synonym. The text after the colon says what changed.
+var ackFooter = regexp.MustCompile(`^(SCHEMA-CHANGE|BREAKING[ -]CHANGE):`)
+
+// footerToken is a footer line: a token, a colon, a space and a value,
+// as Co-Authored-By: is. continuation is a line that starts with white
+// space and continues the footer above it.
+var (
+	footerToken  = regexp.MustCompile(`^(BREAKING CHANGE|[A-Za-z][A-Za-z0-9-]*):[ \t]+\S`)
+	continuation = regexp.MustCompile(`^[ \t]+\S`)
+)
+
+// paragraphBreak is a blank line, which ends a paragraph.
+var paragraphBreak = regexp.MustCompile(`\n[ \t]*\n`)
+
+// footers is a commit message's footer block: the paragraphs at its end
+// in which every line is a footer line, never the subject. A line of
+// prose that happens to start "BREAKING CHANGE:" is not a footer.
+func footers(message string) []string {
+	paras := paragraphBreak.Split(strings.TrimSpace(strings.ReplaceAll(message, "\r\n", "\n")), -1)
+	var out []string
+	for i := len(paras) - 1; i > 0; i-- {
+		lines := strings.Split(strings.Trim(paras[i], "\n"), "\n")
+		for j, l := range lines {
+			if !footerToken.MatchString(l) && (j == 0 || !continuation.MatchString(l)) {
+				return out
+			}
+		}
+		out = append(lines, out...)
+	}
+	return out
+}
+
+// schemaAck fails a pull request whose tool surface differs from its
+// merge-base's, unless a commit it adds says so. Annotations count: a
+// flipped destructiveHint changes whether a client asks the person.
+//
+// Both sides are built from commits, the merge-base and the head. In CI
+// the checkout is the merge commit, which carries whatever the base
+// branch changed since the branch point, and that change is not this
+// pull request's to acknowledge.
+func schemaAck(w io.Writer, args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("usage: gates schema-ack BASE HEAD")
+	}
+	baseRef, head := args[0], args[1]
+	base, err := gitOutput("merge-base", baseRef, head)
+	if err != nil {
+		return err
+	}
+	var dumps [2]*schemaDump
+	for i, rev := range []string{base, head} {
+		raw, err := schemasAt(rev)
+		if err != nil {
+			return err
+		}
+		if dumps[i], err = parseSchemas(raw); err != nil {
+			return fmt.Errorf("%s: %w", rev, err)
+		}
+	}
+	log, err := gitOutput("log", "--format=%B%x00", base+".."+head)
+	if err != nil {
+		return err
+	}
+	return checkAck(w, compareSurfaces(dumps[0], dumps[1]), strings.Split(log, "\x00"), base)
+}
+
+// checkAck is the rule, over the changes and the commit messages, so a
+// test can hand it both.
+func checkAck(w io.Writer, c surfaceChanges, messages []string, base string) error {
+	base = shortSHA(base)
+	if c.empty() {
+		_, err := fmt.Fprintf(w, "schema ack ok: the tool surface is unchanged since %s\n", base)
+		return err
+	}
+	c.write(w)
+	var schema, breaking bool
+	for _, message := range messages {
+		for _, line := range footers(message) {
+			if m := ackFooter.FindStringSubmatch(line); m != nil {
+				schema = true
+				breaking = breaking || m[1] != "SCHEMA-CHANGE"
+			}
+		}
+	}
+	switch {
+	case len(c.breaking) > 0 && !breaking:
+		return fmt.Errorf("the pull request breaks the tool surface and no commit since %s says BREAKING CHANGE:; "+
+			"add an empty commit (git commit --allow-empty) whose message carries it, never an amend", base)
+	case !schema:
+		return fmt.Errorf("the pull request changes the tool surface and no commit since %s says SCHEMA-CHANGE: or "+
+			"BREAKING CHANGE:; add an empty commit (git commit --allow-empty) whose message carries it, never an amend", base)
+	}
+	_, err := fmt.Fprintf(w, "schema ack ok: the change since %s is acknowledged\n", base)
+	return err
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
+// gitOutput runs git and returns its trimmed output, or an error that
+// carries git's own message.
+func gitOutput(args ...string) (string, error) {
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, trimLine(string(exit.Stderr)))
+		}
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return trimLine(string(out)), nil
 }

@@ -68,7 +68,7 @@ schema-diff: build ## Diff tool schemas against the last tag
 	@$(GO) run ./scripts/gates schema-diff $(BIN)
 
 .PHONY: schema-ack
-schema-ack: ## Check a tool-surface change since the merge-base carries a SCHEMA-CHANGE: footer
+schema-ack: ## Check every item changed since the merge-base is named in a SCHEMA-CHANGE: footer
 	@$(GO) run ./scripts/gates schema-ack $(PR_BASE_REF) $(PR_HEAD)
 
 .PHONY: smoke

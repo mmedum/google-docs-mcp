@@ -142,7 +142,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go build -o google-docs-mcp ./cmd/google-docs-mcp
+      # The flags make build and schema-ack use, so the tag schema-diff
+      # builds shares the cache.
+      - run: CGO_ENABLED=0 go build -trimpath -o google-docs-mcp ./cmd/google-docs-mcp
       - run: go run ./scripts/gates smoke ./google-docs-mcp
       - run: go run ./scripts/gates schema-diff ./google-docs-mcp
       - run: go run ./scripts/gates staleness ./google-docs-mcp

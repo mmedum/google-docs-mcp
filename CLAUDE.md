@@ -66,7 +66,8 @@ tool surface, the addressing model, or the write path.
   that writes an artifact a person may paste goes through it.
 - **The dev tooling lives in `scripts/`, as Go, and there is no shell.**
   `scripts/gates/` is one command with a registry: coverage, staleness,
-  pins, leaks, classes, schema-diff, smoke and parity. `internal/` is the
+  pins, leaks, classes, schema-diff, smoke and parity, plus schema-ack,
+  which CI runs on pull requests. `internal/` is the
   server's own implementation, and a thing that only ever runs on a
   maintainer's machine does not belong there. No shell either — a shell
   script is held to no gofmt, vet, lint or test, `make check` runs on the

@@ -196,3 +196,32 @@ func TestParityRefusesToRunOnTooLittle(t *testing.T) {
 		})
 	}
 }
+
+// A pull-request gate runs in ci.yml and stays out of `make check`,
+// which has no merge-base to measure from.
+func TestParityHoldsThePullRequestGates(t *testing.T) {
+	ci := parityCI + `  pr:
+    steps:
+      - run: go run ./scripts/gates schema-ack "$PR_BASE_REF" "$PR_HEAD"
+`
+	pr := []string{"schema-ack"}
+	for _, tc := range []struct {
+		name, makefile, ci string
+		pr                 []string
+		want               string
+	}{
+		{"in ci.yml only", parityMakefile, ci, pr, ""},
+		{"missing from ci.yml", parityMakefile, parityCI, pr, `"schema-ack" is declared but no ` + "`run:`" + ` step in ci.yml runs it`},
+		{"commented out", parityMakefile, strings.Replace(ci, "      - run: go run ./scripts/gates schema-ack", "      # - run: go run ./scripts/gates schema-ack", 1), pr,
+			`"schema-ack" is declared but no`},
+		{"in make check", strings.Replace(parityMakefile, "check: fmt", "check: schema-ack fmt", 1), ci, pr, `"schema-ack" is in ` + "`make check`"},
+		{"none declared", parityMakefile, ci, nil, "no pull-request command is declared"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := strings.Join(prOnlyProblems(tc.makefile, tc.ci, tc.pr), "\n")
+			if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
+				t.Errorf("problems = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

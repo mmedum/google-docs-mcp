@@ -63,12 +63,54 @@ func parity(w io.Writer, _ []string) error {
 	if err != nil {
 		return err
 	}
+	pr := prCommands()
+	problems = append(problems, prOnlyProblems(string(makefile), ci, pr)...)
 	if len(problems) > 0 {
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
 	}
-	_, err = fmt.Fprintf(w, "parity ok: %d gates in both, %d tagged vet passes in both\n",
-		len(declared), vetPasses)
+	_, err = fmt.Fprintf(w, "parity ok: %d gates in both, %d tagged vet passes in both, %d pull-request gate(s) in ci.yml only\n",
+		len(declared), vetPasses, len(pr))
 	return err
+}
+
+// prCommands is every command the registry marks as pull-request only,
+// sorted.
+func prCommands() []string {
+	var pr []string
+	for name, c := range commands {
+		if c.pr {
+			pr = append(pr, name)
+		}
+	}
+	slices.Sort(pr)
+	return pr
+}
+
+// prOnlyProblems holds each pull-request-only command to a `run:` step in
+// ci.yml, and keeps it out of `make check`, where no merge-base exists.
+// Without it, deleting the step leaves every gate green.
+func prOnlyProblems(makefile, ci string, pr []string) []string {
+	if len(pr) == 0 {
+		return []string{"no pull-request command is declared; schema-ack belongs there, and the registry is not being read"}
+	}
+	var prereqs []string
+	if m := checkTarget.FindStringSubmatch(makefile); m != nil {
+		prereqs = strings.Fields(m[1])
+	}
+	inCI := map[string]bool{}
+	for _, m := range ciGate.FindAllStringSubmatch(runLines(ci), -1) {
+		inCI[m[1]] = true
+	}
+	var problems []string
+	for _, name := range pr {
+		if !inCI[name] {
+			problems = append(problems, fmt.Sprintf("pull-request gate %q is declared but no `run:` step in ci.yml runs it", name))
+		}
+		if slices.Contains(prereqs, name) || slices.Contains(prereqs, makeTargetFor(name)) {
+			problems = append(problems, fmt.Sprintf("pull-request gate %q is in `make check`, where there is no merge-base", name))
+		}
+	}
+	return problems
 }
 
 // declaredGates is every command the registry marks as running in both

@@ -8,6 +8,10 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+
+- For contributors: a pull request that changes the tool surface, an annotation such as `destructiveHint` included, now fails CI unless one of its commits ends with a `SCHEMA-CHANGE:` footer saying what changed, or `BREAKING CHANGE:` for a break. The schema diff also lists each change by the part that moved, and counts a removed resource template as a break.
+
 ## [3.2.0] - 2026-10-31
 
 ### Changed

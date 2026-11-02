@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -155,6 +156,9 @@ func schemasAt(rev string) (out []byte, err error) {
 	}()
 
 	oldBin := filepath.Join(tmp, "old")
+	if runtime.GOOS == "windows" {
+		oldBin += ".exe"
+	}
 	build := exec.Command("go", "build", "-trimpath", "-o", oldBin, "./cmd/google-docs-mcp")
 	build.Dir = src
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")

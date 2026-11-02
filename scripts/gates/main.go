@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -133,14 +134,14 @@ func init() {
 
 func main() {
 	if len(os.Args) < 2 {
-		fail("%s", usage())
+		fail(2, "%s", usage())
 	}
 	c, ok := commands[os.Args[1]]
 	if !ok {
-		fail("unknown command %q\n\n%s", os.Args[1], usage())
+		fail(2, "unknown command %q\n\n%s", os.Args[1], usage())
 	}
 	if err := c.run(os.Stdout, os.Args[2:]); err != nil {
-		fail("%v", err)
+		fail(exitCode(err), "%v", err)
 	}
 }
 
@@ -230,9 +231,11 @@ type dumpedTool struct {
 // A change is one difference between two dumps: the item it is to, which
 // is what a footer names, and how the report shows it. The item is a
 // tool's name, a resource template's URI, a list item's name, or a
-// top-level key such as instructions.
+// top-level key such as instructions. field is, on the break of a tool
+// still there, the field it breaks, such as "input document", so a break
+// is matched across two comparisons by item and field, never by its text.
 type change struct {
-	item, text string
+	item, text, field string
 }
 
 func texts(cs []change) []string {
@@ -266,8 +269,9 @@ func (c surfaceChanges) write(w io.Writer) {
 // breaks a caller, a new one is added, and any other difference names
 // the parts that moved. A tool still there breaks a caller when it loses
 // an argument or output field or gains a required one (toolBreaks); it
-// then lists its other changes, such as a flipped hint, but not its
-// schemas again.
+// still lists every part that moved, its schemas included, since the
+// break names only the fields it broke and an output added beside it is
+// a change a reviewer has to see.
 func compareSurfaces(old, new *schemaDump) surfaceChanges {
 	var c surfaceChanges
 	for _, key := range sortedUnion(old.whole, new.whole) {
@@ -277,7 +281,7 @@ func compareSurfaces(old, new *schemaDump) surfaceChanges {
 		ni, nKeyed := itemIndex(nl)
 		if !oList || !nList || !oKeyed || !nKeyed {
 			if !reflect.DeepEqual(old.whole[key], new.whole[key]) {
-				c.changed = append(c.changed, change{key, key})
+				c.changed = append(c.changed, change{item: key, text: key})
 			}
 			continue
 		}
@@ -285,27 +289,19 @@ func compareSurfaces(old, new *schemaDump) surfaceChanges {
 		for _, id := range slices.Sorted(mapKeys(oi)) {
 			nv, ok := ni[id]
 			if !ok {
-				c.breaking = append(c.breaking, change{id, label + " removed: " + id})
+				c.breaking = append(c.breaking, change{item: id, text: label + " removed: " + id, field: label})
 				continue
 			}
-			parts := changedParts(oi[id], nv)
 			if key == "tools" {
-				if breaks := toolBreaks(id, oi[id], nv); len(breaks) > 0 {
-					for _, b := range breaks {
-						c.breaking = append(c.breaking, change{id, b})
-					}
-					parts = slices.DeleteFunc(parts, func(p string) bool {
-						return strings.HasPrefix(p, "inputSchema") || strings.HasPrefix(p, "outputSchema")
-					})
-				}
+				c.breaking = append(c.breaking, toolBreaks(id, oi[id], nv)...)
 			}
-			if len(parts) > 0 {
-				c.changed = append(c.changed, change{id, label + " " + id + " (" + strings.Join(parts, ", ") + ")"})
+			if parts := changedParts(oi[id], nv); len(parts) > 0 {
+				c.changed = append(c.changed, change{item: id, text: label + " " + id + " (" + strings.Join(parts, ", ") + ")"})
 			}
 		}
 		for _, id := range slices.Sorted(mapKeys(ni)) {
 			if _, ok := oi[id]; !ok {
-				c.added = append(c.added, change{id, label + " " + id})
+				c.added = append(c.added, change{item: id, text: label + " " + id})
 			}
 		}
 	}
@@ -314,22 +310,23 @@ func compareSurfaces(old, new *schemaDump) surfaceChanges {
 
 // toolBreaks is what breaks a caller of a tool that is still there: an
 // argument or output field gone, or an argument that became required.
-// A break's text is its identity across comparisons, which is how
-// schema-ack tells a break of a release from one of unreleased surface:
-// it names only what identifies the break, never a value that differs
-// between the two sides.
-func toolBreaks(name string, old, new map[string]any) []string {
-	var breaks []string
+// Each names the field it breaks, which is how schema-ack tells a break
+// of a release from one of unreleased surface.
+func toolBreaks(name string, old, new map[string]any) []change {
+	var breaks []change
+	broke := func(side, how, f string) {
+		breaks = append(breaks, change{name, name + ": " + how + " " + f, side + " " + f})
+	}
 	for _, f := range stringList(new, "inputSchema", "required") {
 		if !slices.Contains(stringList(old, "inputSchema", "required"), f) {
-			breaks = append(breaks, fmt.Sprintf("%s: new required field %s", name, f))
+			broke("input", "new required field", f)
 		}
 	}
-	for _, part := range []struct{ schema, what string }{{"inputSchema", "field"}, {"outputSchema", "output field"}} {
+	for _, part := range []struct{ schema, side, how string }{{"inputSchema", "input", "field removed"}, {"outputSchema", "output", "output field removed"}} {
 		was, now := object(old, part.schema, "properties"), object(new, part.schema, "properties")
 		for _, f := range slices.Sorted(mapKeys(was)) {
 			if _, ok := now[f]; !ok {
-				breaks = append(breaks, fmt.Sprintf("%s: %s removed %s", name, part.what, f))
+				broke(part.side, part.how, f)
 			}
 		}
 	}
@@ -485,9 +482,26 @@ func parseSchemas(b []byte) (*schemaDump, error) {
 // trimLine drops the trailing newline a command leaves behind.
 func trimLine(s string) string { return strings.TrimSpace(s) }
 
-func fail(format string, args ...any) {
+// couldNotRun is a gate that could not reach a verdict, a failed build
+// or git call, rather than one that found a problem. It says so, and
+// exits 2 where a verdict exits 1: under `go run`, which exits 1 for
+// both, the message is what tells them apart.
+type couldNotRun struct{ err error }
+
+func (e couldNotRun) Error() string { return "could not run: " + e.err.Error() }
+func (e couldNotRun) Unwrap() error { return e.err }
+
+// exitCode is 2 for a gate that could not run and 1 for a verdict.
+func exitCode(err error) int {
+	if errors.As(err, new(couldNotRun)) {
+		return 2
+	}
+	return 1
+}
+
+func fail(code int, format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "gates: "+format+"\n", args...)
-	os.Exit(2)
+	os.Exit(code)
 }
 
 // moduleRoot walks up from the working directory to the directory

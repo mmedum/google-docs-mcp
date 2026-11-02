@@ -52,11 +52,15 @@ test. Also:
   breaking change.
 - A pull request that changes the tool surface, annotations included,
   needs a footer naming each changed item: `SCHEMA-CHANGE: add_comment,
-  edit_document: destructiveHint true`. Name a tool by its name, a
-  resource template by its URI, and the instructions as `instructions`
-  or `readOnlyInstructions`. If it breaks something a release shipped,
-  name that item in a `BREAKING CHANGE:` footer instead. `schema-ack`
-  checks this in CI.
+  edit_document: destructiveHint true`. The names are the list before
+  the first `: `; the text after it describes the change and names
+  nothing. Name a tool by its name, a resource template by its URI, and
+  the instructions as `instructions` or `readOnlyInstructions`. If it
+  breaks something a release shipped, name that item in a `BREAKING
+  CHANGE:` footer instead. Keep the list of names on one line: a wrapped
+  line that starts `word: ` begins a new footer, as Conventional Commits
+  reads it. `schema-ack` checks this in CI, and a refusal prints the
+  footer that fixes it.
 
 ## Layout
 

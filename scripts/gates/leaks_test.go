@@ -165,10 +165,7 @@ func TestLeaksCatchesAPlantedBinary(t *testing.T) {
 // controls.
 func fakeRepo(t *testing.T, n int, extra map[string]string) {
 	t.Helper()
-	dir := t.TempDir()
-	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
-		t.Skipf("git init: %v %s", err, out)
-	}
+	dir := initRepo(t)
 	files := map[string]string{"go.mod": "module fake\n"}
 	for i := range n - 1 {
 		files[fmt.Sprintf("f%02d.txt", i)] = "nothing here\n"
@@ -179,7 +176,6 @@ func fakeRepo(t *testing.T, n int, extra map[string]string) {
 			t.Fatal(err)
 		}
 	}
-	t.Chdir(dir)
 }
 
 // A gate that reads almost nothing passes everything, so too small a

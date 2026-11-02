@@ -211,10 +211,16 @@ func TestSchemaAckNeedsEveryItemNamed(t *testing.T) {
 		{"the instructions by their key", reworded, "Reword them\n\nSCHEMA-CHANGE: instructions: reworded", ""},
 		{"the instructions unnamed", reworded, "Reword them", "no footer names instructions"},
 		{"a description word names nothing", flipped, "Mark it\n\nSCHEMA-CHANGE: export_document: add_comment is destructive", unnamed},
-		{"a tab after the colon starts the description too", flipped, "Mark it\n\nSCHEMA-CHANGE: export_document:\tadd_comment is destructive", unnamed},
+		{"a tab after the colon starts the description too", flipped, "Mark it\n\nSCHEMA-CHANGE: export_document:\tdestructive, add_comment", unnamed},
 		{"a value with no description names its whole list", flipped, "Mark them\n\nSCHEMA-CHANGE: export_document, add_comment", ""},
 		{"a value wrapped at the margin continues it", flipped, "Mark them\n\nSCHEMA-CHANGE: export_document,\nadd_comment: destructiveHint true", ""},
+		{"prose after a bare list names nothing", flipped, "Mark it\n\nSCHEMA-CHANGE: export_document\nadd_comment is destructive now", unnamed},
+		{"a bare list ends at its line, and its name counts", flipped, "Mark it\n\nSCHEMA-CHANGE: add_comment\nhints flipped", ""},
+		{"prose after a trailing comma names nothing", flipped, "Mark them\n\nSCHEMA-CHANGE: export_document,\nwhich add_comment also reads", unnamed},
+		{"a list is split on commas, not spaces", flipped, "Mark them\n\nSCHEMA-CHANGE: export_document add_comment: hints", unnamed},
 		{"a Token #value footer is a footer", flipped, "Mark it\n\nSCHEMA-CHANGE: add_comment: hints\n\nCloses #12", ""},
+		{"a Token #value footer acknowledges nothing", flipped, "Mark it\n\nSCHEMA-CHANGE #add_comment", unnamed},
+		{"nor does a BREAKING CHANGE #value one", broken, "Rename it\n\nBREAKING CHANGE #add_comment", unnamedBreak},
 		{"a footer ends the value before it", flipped, "Mark it\n\nSCHEMA-CHANGE: export_document,\nRefs #12, add_comment", unnamed},
 		{"three blank lines end one paragraph", flipped, "Mark it\n\nSCHEMA-CHANGE: add_comment: hints\n\n\n\nCo-Authored-By: someone <x@example.com>", ""},
 		{"a token is read in any case", flipped, "Mark it\n\nschema-change: add_comment: hints", ""},
@@ -234,6 +240,16 @@ func TestSchemaAckNeedsEveryItemNamed(t *testing.T) {
 				t.Errorf("checkAck = %v, want an error containing %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// A break no footer names is asked for once, as a break: the BREAKING
+// CHANGE: footer that fixes it names it for both checks.
+func TestARefusalAsksForAnUnnamedBreakOnce(t *testing.T) {
+	broken := strings.Replace(plain, `"document": {}`, `"doc": {}`, 1)
+	err := checkAck(io.Discard, compareSurfaces(mustParse(t, plain), mustParse(t, broken)), nil, "base")
+	if want := "the tool surface changed since base, and no BREAKING CHANGE: footer names add_comment. "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("checkAck = %v, want it to start %q", err, want)
 	}
 }
 

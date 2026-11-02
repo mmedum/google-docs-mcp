@@ -11,7 +11,7 @@ diff in CI flags them.
 ### Changed
 
 - For contributors:
-  - CI fails a pull request that changes the tool surface, annotations included, unless a commit footer names each changed item. A break of something a release shipped needs `BREAKING CHANGE:`.
+  - CI fails a pull request that changes the tool surface, annotations included, unless a commit footer names each changed item. A break of something a release shipped needs `BREAKING CHANGE:`. Only the names before a footer's first colon count. A footer's value may run on over several lines, and a `Closes #12` footer after it no longer drops it. A refusal prints the footer that fixes it, and a gate that could not run says so.
   - The schema diff lists each change by the part that moved, and counts a removed resource template as a break.
   - `--dump-schemas` carries the server's instructions, the read-only server's too, and lists fixed resources and prompts once the server has any.
 

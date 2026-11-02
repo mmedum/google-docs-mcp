@@ -324,11 +324,8 @@ func acknowledged(messages []string) (named, breaks map[string]bool) {
 // Both sides are built from commits, the merge-base and the head. In CI
 // the checkout is the merge commit, which carries whatever the base
 // branch changed since the branch point, and that change is not this
-// pull request's to acknowledge.
-//
-// A gate that could not run, a failed build or git call, says so and
-// exits 2; a refusal exits 1. Under `go run`, which exits 1 for both,
-// the message is what tells them apart.
+// pull request's to acknowledge. A gate that could not run says so
+// (couldNotRun).
 func schemaAck(w io.Writer, args []string) error {
 	if len(args) != 2 {
 		return fmt.Errorf("usage: gates schema-ack BASE HEAD")

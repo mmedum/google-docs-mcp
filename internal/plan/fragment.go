@@ -38,8 +38,9 @@ type FragmentOptions struct {
 	// the first fragment paragraph takes its own style instead.
 	Fill bool
 	// Slots lets the fragment hold tables and images: each becomes an
-	// empty paragraph, its slot, which a later round fills (spike E).
-	// Without it they are refused.
+	// empty paragraph, its slot, which a later round fills. Without it
+	// they are refused. Checked by the integration test
+	// TestRawTablesInContent.
 	Slots bool
 	// Isolate gives a slot that ends the fragment a newline of its own.
 	// Set where the newline it would end with follows text the batch

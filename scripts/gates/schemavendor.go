@@ -162,7 +162,7 @@ func schemaRefetch(stdout io.Writer) error {
 			continue
 		}
 		drifted = append(drifted, fmt.Sprintf(
-			"%s has changed upstream: the vendored copy is %s and %s now serves %s",
+			"%s has changed upstream: the vendored copy is %s and %s serves %s",
 			name, want.sha256[:12], want.source, upstream[:12]))
 	}
 	if len(drifted) > 0 {

@@ -351,7 +351,7 @@ func emptiedTable(t *testing.T, raw []byte) []byte {
 // fill read them as markdown and dropped the asterisks.
 func TestInsertTableDataFormat(t *testing.T) {
 	for _, tc := range []struct{ format, want string }{
-		// The empty paragraph is the old newline of the one before (spike E).
+		// The empty paragraph is the old newline of the one before.
 		{"text", "Title\n[*a*|**b**]\n\nLast."},
 		{"", "Title\n[a|b]\n\nLast."},
 	} {

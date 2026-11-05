@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -22,21 +23,14 @@ var (
 	readmeMention = regexp.MustCompile("`" + `([a-z_]+)` + "`")
 	// A version heading, as Keep a Changelog writes it.
 	versionHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`)
-	// The status line at the top of each document, which is the first
-	// thing anyone reads and the last thing anyone updates.
-	// Both spellings count: `**Status:** v1.0.0` is what this repository
-	// writes, and `**Status: v1.0.0.**` is what it used to, which is also
-	// what a sibling copying this check may still have. Accepting the
-	// form you no longer use costs one optional group and saves the next
-	// repository a debugging session.
-	statusLine = regexp.MustCompile(`(?m)^\*\*Status:(?:\*\*)? +v?(\d+\.\d+\.\d+)`)
 )
 
 // staleness fails when the documentation drifts from the code. Each
-// check answers a question somebody asked once and then stopped asking:
-// does the README list the tools that exist, does configuration.md
-// mention every setting, does the CHANGELOG say what changed, does the
-// architecture still claim there is no code.
+// check answers a question nobody keeps asking by hand: does the README
+// list the tools that exist, the scopes login requests and a permission
+// rule for each tool it names, does configuration.md name every setting,
+// and does the CHANGELOG say what changed. What the docs cite and link is
+// the docs gate's.
 func staleness(bin string) error {
 	var problems []string
 
@@ -72,15 +66,14 @@ func staleness(bin string) error {
 
 	// Two directions, two sets, because they are asking different things.
 	//
-	// Every registered tool has to be documented SOMEWHERE, and the two
+	// Every registered tool has to be documented somewhere, and the ones
 	// that register only under GDOCS_ENABLE_DESTRUCTIVE are deliberately
-	// not in the table — the table is the surface a person gets by
+	// not in the table: the table is the surface a person gets by
 	// default, and they are described in the paragraph that explains the
-	// flag. So the missing check reads the whole file. It only got away
-	// with reading the table before because --dump-schemas emitted a
-	// default build, which is the thing that made the schema diff blind.
+	// flag. --dump-schemas dumps every tool, so the missing check reads
+	// the whole file.
 	//
-	// The other direction still reads the table only: a row naming
+	// The other direction reads the table only: a row naming
 	// something that is not a tool is a real error, while an inline code
 	// span is as likely to be a field or an op name.
 	mentioned := map[string]bool{}
@@ -115,19 +108,11 @@ func staleness(bin string) error {
 	}
 	problems = append(problems, configDocProblems(vars, string(conf))...)
 
-	arch, err := os.ReadFile("docs/architecture.md")
+	changelog, err := checkChangelog()
 	if err != nil {
 		return err
 	}
-	if strings.Contains(strings.ToLower(string(arch)), "no code yet") {
-		problems = append(problems, "docs/architecture.md still says 'no code yet'")
-	}
-
-	if err := changelogDocumentsTheChange(); err != nil {
-		problems = append(problems, err.Error())
-	}
-
-	problems = append(problems, staleStatusLines()...)
+	problems = append(problems, changelog...)
 
 	if len(problems) > 0 {
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
@@ -189,7 +174,7 @@ func permissionRuleTools(readme string) []string {
 // permissionProblems holds the README's Claude Code permission rules to
 // the registered tools. A rule for a tool that does not exist matches
 // nothing, so the person it was meant to ask is never asked; and with no
-// rule at all the README no longer says how to be asked, since the
+// rule at all the README does not say how to be asked, since the
 // server asks nobody itself.
 func permissionProblems(readme string, registered []string) []string {
 	rules := permissionRuleTools(readme)
@@ -203,69 +188,67 @@ func permissionProblems(readme string, registered []string) []string {
 	return problems
 }
 
-// changelogDocumentsTheChange requires entries when Go source changed
-// since the last tag.
-//
-// The exception in the middle is a scar: a release commit moves the
-// entries out of [Unreleased] and under the version it is about to tag,
-// and CI runs before that tag can exist — so this gate used to fail on
-// every release pull request, which is the one it was written to guard.
-func changelogDocumentsTheChange() error {
-	last := strings.TrimSpace(run("git", "describe", "--tags", "--abbrev=0"))
-	diffArgs := []string{"diff", "--quiet", "HEAD~1", "--", "*.go"}
-	if last != "" {
-		diffArgs = []string{"diff", "--quiet", last + "..HEAD", "--", "*.go"}
-	}
-	if exec.Command("git", diffArgs...).Run() == nil {
-		return nil // no Go changed
-	}
-
-	changelog, err := os.ReadFile("CHANGELOG.md")
+// checkChangelog holds the checkout the gates run in to changelogRule:
+// whether Go source differs from the last tag, or from the commit before
+// HEAD when there is none, and which versions have a tag.
+func checkChangelog() ([]string, error) {
+	raw, err := os.ReadFile(changelogPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if entriesUnder(string(changelog), "## [Unreleased]") > 0 {
-		return nil
+	last, err := lastTag("HEAD")
+	if err != nil {
+		return nil, couldNotRun{err}
 	}
-	// Entries under a version heading whose tag does not exist yet are
-	// this release's documentation.
-	if m := versionHeading.FindStringSubmatch(string(changelog)); m != nil {
-		if exec.Command("git", "rev-parse", "-q", "--verify", "refs/tags/v"+m[1]).Run() != nil &&
-			entriesUnder(string(changelog), "## ["+m[1]+"]") > 0 {
-			return nil
-		}
+	base := cmp.Or(last, "HEAD~1")
+	// An error is a difference or a base that does not exist; on the
+	// first commit there is nothing to compare against, and asking for
+	// the entry then is the safe way round.
+	_, err = gitOutput("diff", "--quiet", base, "--", "*.go")
+	changed := err != nil
+	tagged := func(version string) bool {
+		_, err := gitOutput("rev-parse", "-q", "--verify", "refs/tags/v"+version)
+		return err == nil
 	}
-	since := last
-	if since == "" {
-		since = "the previous commit"
-	}
-	return fmt.Errorf("source changed since %s but CHANGELOG.md documents nothing new\n"+
-		"put the entries under [Unreleased], or under the version heading this release is about to tag", since)
+	return changelogRule(string(raw), changed, tagged), nil
 }
 
-// entriesUnder counts "- " bullets between a heading and the next one.
-func entriesUnder(changelog, heading string) int {
+// changelogRule requires a change to Go source to be written up: an
+// entry under [Unreleased], or, on a release commit, under the newest
+// version heading while that version has no tag. A release commit moves
+// the entries under the version it is about to tag, and CI runs on it
+// before the tag exists.
+func changelogRule(text string, sourceChanged bool, tagged func(version string) bool) []string {
+	if !sourceChanged {
+		return nil
+	}
+	lines := strings.Split(text, "\n")
+	if countEntries(lines, "Unreleased") > 0 {
+		return nil
+	}
+	where := "[Unreleased]"
+	if m := versionHeading.FindStringSubmatch(text); m != nil && !tagged(m[1]) {
+		if countEntries(lines, m[1]) > 0 {
+			return nil
+		}
+		where = "[" + m[1] + "], the untagged version this commit releases,"
+	}
+	return []string{"Go source changed and " + changelogPath + " " + where + " has no entry; " +
+		"write one under [Unreleased], or under the version heading this release tags"}
+}
+
+// countEntries counts the entries in a version's section: the lines that
+// open a bullet at the margin. An indented bullet sits inside a
+// paragraph, and prose is no entry.
+func countEntries(lines []string, version string) int {
+	from, to := changelogSection(lines, version)
 	n := 0
-	inside := false
-	for line := range strings.Lines(changelog) {
-		switch {
-		case strings.HasPrefix(line, heading):
-			inside = true
-		case strings.HasPrefix(line, "## ["):
-			inside = false
-		case inside && strings.HasPrefix(line, "- "):
+	for _, line := range lines[from:to] {
+		if strings.HasPrefix(line, "- ") {
 			n++
 		}
 	}
 	return n
-}
-
-func run(name string, args ...string) string {
-	out, err := exec.Command(name, args...).Output()
-	if err != nil {
-		return ""
-	}
-	return string(out)
 }
 
 // difference returns the members of a that are not in b. Both sorted.
@@ -283,157 +266,14 @@ func difference(a, b []string) []string {
 	return out
 }
 
-// staleStatusLines checks the version each document claims at the top.
-//
-// This is here because both of them were wrong at once and nothing
-// noticed: the README said v0.5.0 five releases after v0.5.0, and the
-// architecture document said v0.9.1 and "phases 0, 1 and 2 are
-// implemented" on the day v1.0.0 shipped with phases 0 to 4 done. They
-// are the first lines a reader sees and the ones furthest from any test,
-// which is exactly the combination this file exists for.
-//
-// Either the released version or the one about to be released counts,
-// because a release commit writes the new version into these lines
-// before the tag exists — the same scar changelogDocumentsTheChange
-// carries, for the same reason.
-func staleStatusLines() []string {
-	tag := strings.TrimPrefix(strings.TrimSpace(run("git", "describe", "--tags", "--abbrev=0")), "v")
-	changelog, err := os.ReadFile("CHANGELOG.md")
-	if err != nil {
-		return []string{"read CHANGELOG.md: " + err.Error()}
-	}
-	next := ""
-	if m := versionHeading.FindSubmatch(changelog); m != nil {
-		next = string(m[1])
-	}
-	data, err := os.ReadFile(architectureDoc)
-	if err != nil {
-		return []string{"read " + architectureDoc + ": " + err.Error()}
-	}
-	return statusProblems(string(data), tag, next)
-}
-
-// statusProblems is the whole rule, separated from the files so it can be
-// tested. The paths that matter most cannot run in this repository, which
-// always has a tag: they exist for a repository before its first release,
-// and a gate that only ever runs one of its branches here would ship a
-// defect green and misfire in a sibling. This file's own rule — a gate
-// that has never been watched fail is not yet a gate — applies to the
-// gate as much as to the code it guards.
-//
-// Only the architecture document is checked. The README used to carry a
-// version too, and the honest fix for a copy of a fact going stale was to
-// delete the copy rather than build machinery to maintain it: the release
-// badge shows the version, updates itself and cannot be wrong.
-// architectureDoc is the only document whose status line is checked.
-const architectureDoc = "docs/architecture.md"
-
-func statusProblems(text, tag, next string) []string {
-	// Nothing tagged and nothing under a version heading is the normal
-	// state of a project that has not shipped, not a failure. The failure
-	// is a document claiming a version when nothing can confirm it.
-	unreleased := tag == "" && next == ""
-
-	var problems []string
-	m := statusLine.FindStringSubmatch(text)
-	switch {
-	case m == nil && unreleased:
-		// Nothing claimed, nothing shipped, nothing to check.
-	case m == nil:
-		problems = append(problems, architectureDoc+" has no **Status:** line; the check cannot see what it claims")
-	case unreleased:
-		problems = append(problems, fmt.Sprintf(
-			"%s claims Status v%s, but there is no tag and no version heading to confirm it "+
-				"— say which phase it is in until the first release", architectureDoc, m[1]))
-	case m[1] != tag && m[1] != next:
-		problems = append(problems, fmt.Sprintf(
-			"%s says Status v%s; %s and the changelog's newest heading is %s",
-			architectureDoc, m[1], describeTag(tag), describeVersion(next)))
-	}
-
-	// The version is the half a badge could carry. This is the half it
-	// cannot: the same sentence claims whether any design decision is
-	// open, and that claim was false on the day v1.0.0 shipped. Without
-	// it the gate goes green on a release that bumps the number and
-	// leaves the sentence beside it wrong, which is the second half of
-	// the failure this gate was written for.
-	if openInBody := !strings.Contains(sectionBody(text, "## 17."), "None."); openInBody != claimsOpenDecision(text) {
-		claimed, actual := "no open decision", "has none"
-		if !openInBody {
-			claimed = "an open decision"
-		} else {
-			actual = "lists one"
-		}
-		problems = append(problems, fmt.Sprintf(
-			"%s's status line claims %s while §17 %s", architectureDoc, claimed, actual))
-	}
-	return problems
-}
-
-// claimsOpenDecision reports whether the status paragraph says a design
-// decision is open. Both spellings the document has used are accepted;
-// neither is a shape worth being clever about.
-func claimsOpenDecision(text string) bool {
-	head := text
-	if i := strings.Index(text, "\n## "); i > 0 {
-		head = text[:i]
-	}
-	lower := strings.ToLower(head)
-	// The negation first. "No design decision is open" contains "decision
-	// is open", so a plain substring test reads a denial as a claim —
-	// which is what it did, on the commit that closed §17.
-	for _, denial := range []string{"no design decision is open", "no design decisions are open"} {
-		if strings.Contains(lower, denial) {
-			return false
-		}
-	}
-	return strings.Contains(lower, "decision is open") || strings.Contains(lower, "decisions are open")
-}
-
-// sectionBody returns the text under a heading, up to the next one.
-func sectionBody(text, heading string) string {
-	i := strings.Index(text, heading)
-	if i < 0 {
-		return ""
-	}
-	rest := text[i+len(heading):]
-	if j := strings.Index(rest, "\n## "); j >= 0 {
-		return rest[:j]
-	}
-	return rest
-}
-
-// describeTag keeps the message readable when git told us nothing —
-// run() discards its error, so an empty tag means "no tags" or "git
-// failed", and "the released tag is v" reads like a truncated string.
-func describeTag(tag string) string {
-	if tag == "" {
-		return "no released tag was found (no tags, or git is unavailable)"
-	}
-	return "the released tag is v" + tag
-}
-
-func describeVersion(v string) string {
-	if v == "" {
-		return "absent"
-	}
-	return "v" + v
-}
-
 // scopeProblems holds the README's OAuth scope list to the scopes the
 // code actually requests.
 //
 // The setup step is the one page a person follows exactly once, with no
-// way to tell whether it worked until a login fails, and no gate here
-// compared it with the code. An outside reader following it found four
-// scopes listed, checked what `login` sends, saw two, and reported the
-// other two as dead — they belong to read-only mode, so the instruction
-// was right and unexplained. Two sibling servers had the same blind spot
-// and worse: one listed a single scope where login can request five under
-// feature flags, and one said "add the two scopes below" and then listed
-// none at all, in a released README. A feature-gated scope is the one
-// nobody notices, because it is absent from every run that does not use
-// the feature.
+// way to tell whether it worked until a login fails. Read-only mode
+// requests scopes of its own, and a mode-gated scope is the one nobody
+// notices, because it is absent from every run that does not use the
+// mode.
 //
 // The list is derived from auth.Scopes rather than typed here, so adding
 // a scope fails this until the README says so.
@@ -450,9 +290,8 @@ func scopeProblems() []string {
 }
 
 // scopesAgree is the rule itself, over the README's text. It is split
-// from the reading because a fix that lives in the reader is one any
-// caller can walk past — a sibling put the same comment stripping in its
-// file loader and watched its own tests bypass it.
+// from the reading because a rule that lives in the reader is one a test
+// of the rule can walk past.
 func scopesAgree(text string, wanted []string) []string {
 	if len(wanted) < 2 {
 		return []string{"auth.Scopes returned fewer than two scopes; the derivation is not reading the code"}

@@ -92,8 +92,8 @@ func (e replyEnvelope) addedTabID() string {
 // writeMode is "" or "SUGGEST".
 func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMessage, writeMode string) (replyEnvelope, string, error) {
 	if f.Word {
-		// Google refuses every write to one (spike G). The tools refuse it
-		// up front, dry runs included; a path that did not stops here.
+		// The Docs API refuses every write to a Word file. The tools refuse
+		// it up front, dry runs included; a path that did not stops here.
 		return replyEnvelope{}, "", Errorf("unsupported", "this is a Word file (.docx); %s", wordElsewhere)
 	}
 	wc := &gapi.WriteControl{RequiredRevisionID: f.Doc.RevisionID, WriteMode: writeMode}
@@ -110,11 +110,14 @@ func (s *Service) batchUpdate(ctx context.Context, f *Fetched, reqs []json.RawMe
 }
 
 // commentBatch sends a batch of comments or replies and nothing else.
-// Google can answer 200 and still save none of them, naming no reason;
-// since the batch held only comments, nothing was written and asking
-// again is safe. Only here: a review's accept or reject also counts as a
-// thread post, and saying "nothing was posted" after one applied would
-// invite applying it twice.
+// Google can answer 200 and still save none of them, naming no reason:
+// commentUpdateState ALL_FAILED_UNKNOWN_REASON. Since the batch held only
+// comments, nothing was written and asking again is safe. Only here: a
+// review's accept or reject also counts as a thread post, and saying
+// "nothing was posted" after one applied would invite applying it twice.
+// Checked by the live step "add comment", which needs a thread id back;
+// nothing can make Google fail a comment on purpose.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate#body.response_body
 func (s *Service) commentBatch(ctx context.Context, f *Fetched, reqs []json.RawMessage) (replyEnvelope, string, error) {
 	env, revision, err := s.batchUpdate(ctx, f, reqs, "")
 	if err == nil && env.CommentUpdateState == "ALL_FAILED_UNKNOWN_REASON" {

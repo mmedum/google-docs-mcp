@@ -1,21 +1,21 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-// pins is the gate. It was four tests, which meant `make check` ran it
-// only as part of `go test ./...` and the target list gave no sign it
-// existed. The rules are unchanged; what moved is that a person reading
-// the Makefile can now see that pinning is checked.
+// pins is the gate. It is a command rather than a test, so a person
+// reading the Makefile's target list can see that pinning is checked.
 
 var (
-	usesLine    = regexp.MustCompile(`(?m)^\s*-?\s*uses:\s*([^\s#]+)`)
+	usesLine    = regexp.MustCompile(`(?m)^[ \t]*-?[ \t]*uses:[ \t]*([^\s#]+)`)
 	fullSHA     = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	exactSemver = regexp.MustCompile(`^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
 
@@ -127,11 +127,15 @@ func pins(w io.Writer, _ []string) error {
 	if err := scannersAgree(root); err != nil {
 		problems = append(problems, err.Error())
 	}
+	if err := makefileAgrees(root); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
 	}
-	_, err = fmt.Fprintf(w, "pins ok: %d actions by SHA, %d tool versions exact, %d installers name their tool's version, %d workflows pin the shell\n",
-		actions, versions, installers, len(files))
+	_, err = fmt.Fprintf(w, "pins ok: %d actions by SHA, %d tool versions exact, %d installers name their tool's version, "+
+		"%d workflows pin the shell, %d Makefile pins match CI\n",
+		actions, versions, installers, len(files), len(makefilePins))
 	return err
 }
 
@@ -164,6 +168,89 @@ func scannersAgree(root string) error {
 		return fmt.Errorf("gitleaks is %s in pre-commit and %s in CI; a commit can pass one and fail the other", hook, ci)
 	}
 	return nil
+}
+
+// makefilePins are the tools the Makefile and CI both run. The Makefile
+// runs each as module@$(variable); ci.yml runs it as module@version, or,
+// with action set, installs it through that action's input.
+var makefilePins = []struct {
+	variable, module string
+	action, input    string
+}{
+	{"GOLANGCI_VERSION", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint", "golangci/golangci-lint-action", "version"},
+	{"GOVULNCHECK_VERSION", "golang.org/x/vuln/cmd/govulncheck", "", ""},
+	{"GO_LICENSES_VERSION", "github.com/google/go-licenses", "", ""},
+}
+
+// makefileAgrees keeps the Makefile on the tools CI runs. Two versions
+// means `make check` passes on a tool CI never runs, or fails on one it
+// has moved past.
+func makefileAgrees(root string) error {
+	mk, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		return fmt.Errorf("read Makefile: %w", err)
+	}
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		return fmt.Errorf("read ci.yml: %w", err)
+	}
+	var problems []error
+	for _, p := range makefilePins {
+		tool := path.Base(p.module)
+		if !strings.Contains(string(mk), p.module+"@$("+p.variable+")") {
+			problems = append(problems, fmt.Errorf("the Makefile does not run %s@$(%s), the pin this check holds to CI",
+				p.module, p.variable))
+			continue
+		}
+		local := makefileVar(string(mk), p.variable)
+		if local == "" {
+			problems = append(problems, fmt.Errorf("the Makefile does not set %s, which it runs %s at", p.variable, tool))
+			continue
+		}
+		ci := ciPins(string(workflow), p.module, p.action, p.input)
+		if len(ci) == 0 {
+			problems = append(problems, fmt.Errorf("ci.yml pins no %s, which the Makefile runs at $(%s)", tool, p.variable))
+		}
+		for _, v := range ci {
+			if strings.TrimPrefix(v, "v") != strings.TrimPrefix(local, "v") {
+				problems = append(problems, fmt.Errorf("%s is %s in the Makefile's %s and %s in ci.yml; make check runs one and CI the other",
+					tool, local, p.variable, v))
+			}
+		}
+	}
+	return errors.Join(problems...)
+}
+
+// makefileVar is the value a Makefile assignment gives name, with =, :=
+// or ?=, or empty.
+func makefileVar(mk, name string) string {
+	m := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(name) + `[ \t]*[:?]?=[ \t]*(\S+)`).FindStringSubmatch(mk)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// ciPins is every version a workflow pins module at: each `module@version`
+// it runs and, when action is set, input on each step that uses action.
+func ciPins(workflow, module, action, input string) []string {
+	var out []string
+	for _, m := range regexp.MustCompile(regexp.QuoteMeta(module)+`@([^\s"']+)`).FindAllStringSubmatch(workflow, -1) {
+		out = append(out, m[1])
+	}
+	if action == "" {
+		return out
+	}
+	key := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(input) + `:\s*["']?([^"'\s#]+)`)
+	for _, loc := range usesLine.FindAllStringSubmatchIndex(workflow, -1) {
+		if ref, _, _ := strings.Cut(workflow[loc[2]:loc[3]], "@"); ref != action {
+			continue
+		}
+		if m := key.FindStringSubmatch(stepBlock(workflow, loc[0])); m != nil {
+			out = append(out, m[1])
+		}
+	}
+	return out
 }
 
 // pinsShell reports whether a workflow sets bash as the default shell
@@ -257,15 +344,13 @@ func gitleaksRev(config string) string {
 // A SHA pins the wrapper, not the tool. The checks above can only judge
 // the versions that are *written*; an action that installs a tool and
 // names no version at all is an absence, and nothing here could see it.
-// That is not hypothetical — a sibling server's release failed on
-// exactly this shape: cosign-installer pinned by SHA with no
-// `cosign-release`, so the job took whatever cosign was newest, and that
-// cosign had changed its default signing format. `download-syft` had the
-// same hole one step below it.
+// cosign-installer pinned by SHA with no `cosign-release` takes whatever
+// cosign is newest, and a new cosign major can change what signing
+// needs. `download-syft` has the same hole one step below it.
 //
 // So every action is classified, and an unknown one fails the gate
-// rather than passing quietly — being unclassified is the state that let
-// those through.
+// rather than passing quietly: an unclassified action is how a floating
+// tool goes unseen.
 var (
 	// installerPins maps an action to the input keys that pin the tool
 	// it installs. Any one of them satisfies the rule.

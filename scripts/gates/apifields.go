@@ -62,14 +62,11 @@ type fieldVerdict struct {
 // and every struct that shares its name with no schema at all says so in
 // a row, so that the set being compared is itself part of the rule.
 //
-// This gate exists because the types drifted and nothing said so. Issue
-// #46 was a suggestion the API recorded and this server could not see,
-// because internal/gdocs had no field for it; the spike that found out
-// why also counted 39 other published fields the types silently dropped,
-// SectionStyle alone missing all four margins. The evidence log had a row
-// saying the types had drifted and the repository had nothing that would
-// say it again. "A rule a comment cannot hold is a rule that needs a
-// test" — so here it is as a test.
+// Hand-written types drift silently. A published field internal/gdocs
+// has no field for is dropped from every decode, so a suggestion the API
+// records goes unseen (issue #46), and a style loses properties such as
+// SectionStyle's margins. A comment cannot hold that rule, so this gate
+// does.
 func apiFields(w io.Writer, _ []string) error {
 	root, err := moduleRoot()
 	if err != nil {
@@ -180,7 +177,7 @@ func readFieldDecisions(published map[string][]string, modeled map[string]map[st
 	}
 	// withdrawn is the complaint every verdict but local shares.
 	withdrawn := func(v fieldVerdict) {
-		problem("%s:%d: %s is not a published schema any more; drop the row", apiFieldVerdict, v.line, v.Schema)
+		problem("%s:%d: %s is not a published schema; drop the row", apiFieldVerdict, v.line, v.Schema)
 	}
 	seen := map[string]int{}
 	for _, v := range verdicts {
@@ -267,16 +264,16 @@ func staleFieldRows(published map[string][]string, modeled map[string]map[string
 		isPublished := slices.Contains(published[v.Schema], v.Property)
 		switch {
 		case v.Verdict == "out" && !isPublished:
-			problem("%s:%d: %s.%s is written off and Google does not publish it any more; drop the row",
+			problem("%s:%d: %s.%s is written off and Google does not publish it; drop the row",
 				apiFieldVerdict, v.line, v.Schema, v.Property)
 		case v.Verdict == "out" && tags[v.Property]:
-			problem("%s:%d: %s.%s is written off and %s models it now; drop the row",
+			problem("%s:%d: %s.%s is written off, yet %s models it; drop the row",
 				apiFieldVerdict, v.line, v.Schema, v.Property, structRef(name, v.Schema))
 		case v.Verdict == "extra" && !tags[v.Property]:
-			problem("%s:%d: %s.%s is declared an extra and no struct carries it any more; drop the row",
+			problem("%s:%d: %s.%s is declared an extra and no struct carries it; drop the row",
 				apiFieldVerdict, v.line, v.Schema, v.Property)
 		case v.Verdict == "extra" && isPublished:
-			problem("%s:%d: %s.%s is declared an extra and Google publishes it now; drop the row",
+			problem("%s:%d: %s.%s is declared an extra, yet Google publishes it; drop the row",
 				apiFieldVerdict, v.line, v.Schema, v.Property)
 		}
 	}

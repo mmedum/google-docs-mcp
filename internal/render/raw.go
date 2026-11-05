@@ -13,12 +13,10 @@ import (
 //
 // The bytes the API sent, where the element still has them, rather than
 // a re-encoding of the wire types. Marshaling those can only return the
-// fields they model, which made this — the one read whose whole job is
-// to show what Google said — the least trustworthy read on the server:
-// #46 was filed on a raw read that had silently dropped the field
-// proving the write it was reporting as broken had worked. Nine types
-// model fewer fields than the API publishes, so the gap outlived that
-// fix; keeping the bytes closes it for all of them at once.
+// fields they model, and several model fewer fields than the API
+// publishes, so a re-encoded raw read can drop the very field that shows
+// what Google did (#46). Keeping the bytes closes that gap for every
+// type at once.
 func Raw(seg *doc.Segment, from, to, maxChars int) (Result, error) {
 	var err error
 	first := true

@@ -43,7 +43,11 @@ func (s *Segment) Preamble() Section {
 	return Section{From: 0, To: len(s.Blocks)}
 }
 
-// SectionByHeadingID finds a section by Google's stable heading id.
+// SectionByHeadingID finds a section by Google's heading id. The
+// reference documents headingId as read-only but not as stable; an id
+// outlives edits to the document. Checked by the live steps "link to a
+// heading" and "read the heading link back".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#ParagraphStyle
 func (s *Segment) SectionByHeadingID(id string) (Section, bool) {
 	if id == "" {
 		return Section{}, false

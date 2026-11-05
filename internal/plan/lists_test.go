@@ -40,8 +40,8 @@ func listView(t *testing.T, reqs []json.RawMessage) string {
 	return strings.Join(out, " ")
 }
 
-// The cases are the shapes spike F measured live; the requests after the
-// insertion are each one's remedy.
+// The cases are the shapes the TestRawBullets integration tests send to
+// Google; the requests after the insertion are each one's remedy.
 func TestCompileFragmentListLevels(t *testing.T) {
 	// A default bulleted list, as the Docs editor and this server make one.
 	item := func(level int) *ListItem { return &ListItem{Level: level, Preset: BulletPreset} }

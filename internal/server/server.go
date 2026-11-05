@@ -3,11 +3,13 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"time"
 
@@ -21,20 +23,36 @@ import (
 // Name is the MCP server name.
 const Name = "google-docs-mcp"
 
-// SDKVersion is recorded in schema dumps so a diff caused by an SDK
-// upgrade can be told apart from a tool-surface change.
-const SDKVersion = "v1.7.0"
+// sdkModule is the MCP Go SDK's module path.
+const sdkModule = "github.com/modelcontextprotocol/go-sdk"
+
+// sdkVersion is recorded in a schema dump so a diff caused by an SDK
+// upgrade can be told from a change to the tool surface. It is read
+// from the build, so it cannot fall behind go.mod, and a replace
+// directive wins, since that is the code built in.
+func sdkVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, d := range bi.Deps {
+			if d.Path != sdkModule {
+				continue
+			}
+			if r := d.Replace; r != nil {
+				return cmp.Or(r.Version, r.Path)
+			}
+			return d.Version
+		}
+	}
+	return "unknown"
+}
 
 // instructionsFor is what the server tells a model about itself, for the
 // configuration it was actually started in.
 //
-// It was one constant, and `GDOCS_READ_ONLY=true` drops every write tool
-// — so a read-only server opened by telling the model to "edit with
-// edit_document and format_document" and then registered neither. The
-// test that should have caught it built only the default surface, which
-// is the same reason a sibling server carried the identical bug: a
-// configuration nobody tests is a configuration whose instructions
-// nobody reads.
+// It is built per configuration because `GDOCS_READ_ONLY=true` drops
+// every write tool, and a read-only server that tells the model to "edit
+// with edit_document and format_document" sends it to tools that are not
+// there. A configuration nobody tests is a configuration whose
+// instructions nobody reads.
 //
 // The read-only note says whose limit it is. A model that cannot tell
 // "this server was started without writes" from "Google Docs cannot do
@@ -44,7 +62,7 @@ func instructionsFor(cfg config.Config) string {
 		"get_outline (headings with stable heading_id and block handles), then read_document scoped to a section; " +
 		"avoid reading long documents whole. "
 	const writing = "Edit with edit_document and format_document: target content by quoting exact text, by " +
-		"heading_id, or by handle; never by position. Every write takes mode suggest, direct or comment; use the " +
+		"heading_id, or by handle; never by position. Each edit takes mode suggest, direct or comment; use the " +
 		"mode the person asked for, and dry_run when unsure. "
 	const readOnly = "This server was started read-only and registers no write tools at all: nothing here can " +
 		"change a document, add a comment or make a suggestion. That is how this server was configured, not a " +
@@ -79,10 +97,12 @@ type Deps struct {
 
 // New builds the MCP server with every tool registered.
 func New(d Deps) *mcp.Server {
-	// The SDK logs transport errors and one handler warning, never a
-	// JSON-RPC frame (checked in v1.7.0, §18). Attach it at debug, where
-	// its session chatter belongs; at info it would put two lines per
-	// session into every client's log file for nothing.
+	// The SDK logs session lifecycle, transport errors and handler
+	// warnings, never a JSON-RPC frame; it names a resource URI only for
+	// subscriptions, which this server does not offer. Attach it at
+	// debug, where its session chatter belongs; at info it would fill
+	// every client's log file with lines per session for nothing.
+	// https://github.com/modelcontextprotocol/go-sdk/blob/v1.8.0/mcp/server.go
 	opts := &mcp.ServerOptions{Instructions: instructionsFor(d.Config)}
 	if d.Logger != nil && d.Logger.Enabled(context.Background(), slog.LevelDebug) {
 		opts.Logger = d.Logger
@@ -185,7 +205,7 @@ func DumpSchemas(ctx context.Context, s, readOnly *mcp.Server, w io.Writer, vers
 		Resources            []*mcp.Resource         `json:"resources,omitempty"`
 		Prompts              []*mcp.Prompt           `json:"prompts,omitempty"`
 	}{
-		Server: Name, Version: version, SDK: SDKVersion,
+		Server: Name, Version: version, SDK: sdkVersion(),
 		Instructions: cs.InitializeResult().Instructions, ReadOnlyInstructions: readOnlyInstructions,
 		Tools: res.Tools, ResourceTemplates: tmpls.ResourceTemplates, Resources: rs.Resources, Prompts: ps.Prompts,
 	}

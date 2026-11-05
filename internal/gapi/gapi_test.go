@@ -114,7 +114,8 @@ func TestErrorClassification(t *testing.T) {
 		{403, "The user's Drive storage quota has been exceeded.", "storageQuotaExceeded", ErrForbidden, "forbidden"},
 		{404, "Requested entity was not found.", "", ErrNotFound, "not_found"},
 		{400, "Invalid requests[0]", "", ErrInvalid, "invalid"},
-		{400, "The provided revision id does not match the current revision", "", ErrConflict, "conflict"},
+		// Google's text for a stale requiredRevisionId, with a made-up id.
+		{400, "The required revision ID 'made-up-revision' does not match the latest revision.", "", ErrConflict, "conflict"},
 		{418, "teapot", "", ErrUnexpected, "unexpected"},
 	}
 	for _, tc := range cases {
@@ -410,8 +411,8 @@ func TestAuthErrors(t *testing.T) {
 
 func TestHelpers(t *testing.T) {
 	// The path keeps its shape and loses the id entirely: six characters
-	// of an id is still six characters of an id, and §12 promises a log
-	// carries nothing about the document.
+	// of an id is still six characters of an id, and a log carries
+	// nothing about the document.
 	if got := redactPath("https://docs.googleapis.com/v1/documents/1AbCdEfGhIjKlMnOp/x?includeTabsContent=true"); got != "/v1/documents/…/x" {
 		t.Fatalf("redactPath = %q", got)
 	}
@@ -822,7 +823,7 @@ func TestReadRetriesOnInternalError(t *testing.T) {
 
 // Drive answers a comment create or update that asks for the assignee
 // with 400 "Invalid field selection assignee_email_address", and serves
-// it on get and list (live, 2026-10-09). The fake does the same.
+// it on get and list. The fake does the same.
 func TestOnlyACommentReadAsksForTheAssignee(t *testing.T) {
 	var readFields []string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

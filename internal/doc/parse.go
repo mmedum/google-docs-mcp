@@ -333,9 +333,14 @@ func parseParagraph(tab *Tab, p *gdocs.Paragraph) *Paragraph {
 // a carrier that cannot be restyled — which is the shape of #46.
 //
 // A suggested insertion's own textStyle is the style it inherited; the
-// style it will have is the entry filed under its own insertion id (see
-// the evidence log, 2026-10-03). That entry is applied to the style here
-// and is not a restyling: it cannot be reviewed apart from the insertion.
+// style it will have is the entry filed under its own insertion id,
+// which the reference does not mention. That entry "only includes the
+// changes made in this suggestion", an unset property meaning inherited,
+// so it is applied to the style here and is not a restyling: it cannot
+// be reviewed apart from the insertion. Checked by the integration tests
+// TestRawSuggestedReset and TestRawAcceptedView, and the live step "list
+// suggestions".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#SuggestedTextStyle
 func (r *Run) suggestions(s gdocs.Suggested, st gdocs.SuggestedStyle, ts *gdocs.TextStyle) {
 	r.Inserted, r.Deleted = s.SuggestedInsertionIDs, s.SuggestedDeletionIDs
 	for _, c := range textChanges(st) {

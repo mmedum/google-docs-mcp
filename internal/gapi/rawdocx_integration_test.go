@@ -2,10 +2,10 @@
 
 package gapi
 
-// Spike G: what can the API do with a Word file (.docx) in Drive? A
-// person asked for edits to one, directly or as suggestions. Runs against
-// the caller's own account and leaves two clearly named scratch files
-// behind: the .docx and a Google Doc converted from it.
+// What the API does with a Word file (.docx) in Drive, which a person may
+// ask to edit directly or as suggestions. Runs against the caller's own
+// account and leaves two clearly named scratch files behind: the .docx
+// and a Google Doc converted from it.
 //
 //	GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestRawDocx -v
 //
@@ -15,7 +15,7 @@ package gapi
 // tracked changes as suggestions and the comment as a comment, whether
 // any write is accepted, and what a converted copy and its export keep.
 //
-// What it established, 2026-10-21: documents.get reads the file, the
+// Findings: documents.get reads the file, the
 // tracked changes as suggestions and the comment as an anchored comment
 // (fromImportedDocument); every batchUpdate, direct or SUGGEST, is 400
 // "The document must not be an Office file"; Drive's comments.list on it

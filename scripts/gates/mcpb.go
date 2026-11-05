@@ -20,7 +20,9 @@ import (
 	"github.com/mmedum/google-docs-mcp/v3/internal/server"
 )
 
-// The bundle gate and the packer (§12, and the standard's §10b).
+// The bundle gate and the packer. Every release ships a Claude Desktop
+// bundle beside its archives: opening it installs the server and asks
+// for its settings, where the alternative is a hand-edited config file.
 //
 // They are two subcommands because the useful half needs no build. The
 // checks below are REFERENTIAL — they ask whether the manifest's names
@@ -324,10 +326,12 @@ func manifestProblems(raw []byte, m manifest, files []staged, root string) []str
 var userConfigRef = regexp.MustCompile(`\$\{user_config\.([A-Za-z0-9_]+)\}`)
 
 // dirnameRef starts every command: ${__dirname} is the one path the
-// specification fixes to the bundle. It shows a relative command once
-// and never says what it is resolved against, and the reference host
-// resolves no path, so a sibling server's evidence log records the
-// verdict, Desktop not probed.
+// specification fixes, to the bundle's directory. The specification
+// shows a relative command once and never says what it is resolved
+// against, and the reference host substitutes variables in a command
+// and resolves no path. Claude Desktop is not probed.
+// https://github.com/anthropics/mcpb/blob/v2.1.2/MANIFEST.md
+// https://github.com/anthropics/mcpb/blob/v2.1.2/src/shared/config.ts
 const dirnameRef = "${__dirname}/"
 
 // validateManifest is the referential checks the manifest alone
@@ -570,12 +574,13 @@ var immutableRef = regexp.MustCompile(`^(v[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{40})$`
 
 // minManifestVersion is the format version this repository has checked.
 //
-// Checked 2026-09-17 against the published schemas: v0.2, v0.3 and v0.4
-// are served and v0.5 is not, and 0.4's only difference from 0.3 is a
+// At anthropics/mcpb v2.1.2 the schemas for v0.2, v0.3 and v0.4 are
+// published and v0.5 is not, and 0.4's only difference from 0.3 is a
 // `uv` value in the `server.type` enum — which a `binary` server gains
 // nothing from. Raise it after checking what a newer format changes AND
 // that a desktop installs a bundle declaring it, not because another
 // repository moved.
+// https://github.com/anthropics/mcpb/tree/v2.1.2/schemas
 const minManifestVersion = "0.3"
 
 // declarationProblems holds what the manifest claims about itself.
@@ -657,17 +662,14 @@ func majorMinor(v string) (int, int, bool) {
 	return major, minor, true
 }
 
-// claudeDesktopFloor is the Claude Desktop version every bundle in the
-// family claims.
+// claudeDesktopFloor is the oldest Claude Desktop the bundle claims to
+// install in. The manifest is held to it, so the claim changes only here.
 const claudeDesktopFloor = ">=0.10.0"
 
 // identityProblems holds what the manifest says it is: the server's own
-// name, a binary, the family's Claude Desktop floor, a privacy policy,
-// and exactly the platforms the packer stages an entry point for, so
-// dropping one platform and its override together is refused. The
-// manifest specification requires privacy_policies of a server that
-// connects to a service processing user data, as this one does to
-// Google, and neither the schema nor `mcpb validate` enforces it.
+// name, a binary, the Claude Desktop floor, a privacy policy, and
+// exactly the platforms the packer stages an entry point for, so
+// dropping one platform and its override together is refused.
 // validateManifest holds each platform to the file staged for it.
 func identityProblems(m manifest, files []staged) []string {
 	var problems []string
@@ -678,7 +680,7 @@ func identityProblems(m manifest, files []staged) []string {
 		problems = append(problems, fmt.Sprintf("server.type is %q; the bundle carries a binary", m.Server.Type))
 	}
 	if m.Compatibility.ClaudeDesktop != claudeDesktopFloor {
-		problems = append(problems, fmt.Sprintf("compatibility.claude_desktop is %q; the family's bundles claim %q",
+		problems = append(problems, fmt.Sprintf("compatibility.claude_desktop is %q; the bundle supports Claude Desktop %q",
 			m.Compatibility.ClaudeDesktop, claudeDesktopFloor))
 	}
 	var entryPoints []string
@@ -692,6 +694,10 @@ func identityProblems(m manifest, files []staged) []string {
 		problems = append(problems, fmt.Sprintf("compatibility.platforms is %v; the packer stages entry points for %v",
 			claimed, entryPoints))
 	}
+	// The specification requires privacy_policies of a server that
+	// connects to a service processing user data, as this one does to
+	// Google; neither the schema nor `mcpb validate` enforces it.
+	// https://github.com/anthropics/mcpb/blob/v2.1.2/MANIFEST.md
 	if len(m.PrivacyPolicies) == 0 {
 		problems = append(problems, "privacy_policies is empty; the manifest specification requires one for a "+
 			"server that connects to a service processing user data, as this one does to Google")
@@ -742,8 +748,8 @@ func bundleVarsFrom(vars []config.Var, leftOut map[string]string) (asked []confi
 }
 
 // bundleKey is the user_config key a setting is asked under: its name
-// without the prefix, lowercased, which gives the family's bundles the
-// same keys.
+// without the prefix, lowercased, so the key follows from the variable's
+// name alone.
 func bundleKey(name string) string {
 	return strings.ToLower(strings.TrimPrefix(name, config.EnvPrefix))
 }
@@ -813,22 +819,16 @@ var fieldRules = map[string]fieldRule{
 //
 // Every setting bundleVarsFrom derives is asked for and reaches its
 // variable, and nothing else is. A switch is asked as a boolean, so
-// Claude Desktop shows it as one. An optional key has a default,
-// because the reference host passes ${user_config.x} to the server as
-// written when it has none and the person leaves the field blank (§18).
-// The environment the defaults give the server configures it as no
-// environment does: a bundle install may turn on nothing an
-// unconfigured server leaves off, because in Claude Desktop the only
-// other guard is its approval of each tool, which a person can set to
-// always allow (§18). The sets of switches the server refuses together
-// are the ones bundleRefused declares. mcp_config.args is there and
-// empty, and a platform override carries neither env nor args, an empty
-// one included: the reference host replaces the base's with an
-// override's rather than merging, and an argument such as
-// --enable-destructive=true would configure the server past every check
-// on env (§18). The profile and default write mode fields say what the
-// server accepts, and a bundle that stops asking for either is refused,
-// so that check cannot go quiet. leftOut is bundleLeftOut, or a test's.
+// Claude Desktop shows it as one. An optional key has a default, so a
+// blank field cannot reach the server unsubstituted. The environment the
+// defaults give the server configures it as no environment does, which
+// defaultsProblems checks. The sets of switches the server refuses
+// together are the ones bundleRefused declares. mcp_config.args is
+// there and empty, and a platform override carries neither env nor
+// args, an empty one included, which argsProblems checks. The profile
+// and default write mode fields say what the server accepts, and a
+// bundle that stops asking for either is refused, so that check cannot
+// go quiet. leftOut is bundleLeftOut, or a test's.
 func settingProblems(m manifest, leftOut map[string]string) []string {
 	vars := config.Vars()
 	asked, problems := bundleVarsFrom(vars, leftOut)
@@ -836,6 +836,11 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 
 	for _, key := range slices.Sorted(maps.Keys(m.UserConfig)) {
 		opt := m.UserConfig[key]
+		// The reference host builds its variables from the defaults and
+		// the person's values, and leaves one it does not have as
+		// written: a blank optional field with no default reaches the
+		// server as ${user_config.x}. Claude Desktop is not probed.
+		// https://github.com/anthropics/mcpb/blob/v2.1.2/src/shared/config.ts
 		if !opt.Required && opt.Default == nil {
 			problems = append(problems, fmt.Sprintf("user_config.%s is optional with no default; the reference host "+
 				"passes ${user_config.%s} to the server as written when the field is left blank", key, key))
@@ -909,8 +914,14 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 
 // argsProblems holds the bundle to passing every setting by env:
 // mcp_config.args there and [], and no platform override carrying env or
-// args, an empty one included, since the host replaces the base's with
-// it.
+// args, an empty one included.
+//
+// The reference host replaces the base's env and args with a platform
+// override's rather than merging the two, so the settings would not
+// reach that platform, and an argument such as
+// --enable-destructive=true would configure the server past every check
+// on env. Claude Desktop is not probed.
+// https://github.com/anthropics/mcpb/blob/v2.1.2/src/shared/config.ts#L118-L120
 func argsProblems(m manifest) []string {
 	var problems []string
 	const keepArgs = "keep it as [], since no Claude Desktop launch has shown the key optional"
@@ -996,8 +1007,19 @@ func loadEnv(env map[string]string) (config.Config, error) {
 }
 
 // defaultsProblems reports a bundle whose defaults configure the server
-// otherwise than no environment does, naming the fields that differ. A
-// default that is a list or an object is reported rather than guessed
+// otherwise than no environment does, naming the fields that differ.
+//
+// A bundle install may turn on nothing an unconfigured server leaves
+// off. Claude Desktop has no second approval behind the server, as
+// Claude Code's ask rules are: its one guard is the approval of each
+// tool, which a person can set to always allow. That rests on Claude's
+// connector docs and the reference host, which passes a boolean to env
+// as "true" or "false"; no page names desktop extensions, and Claude
+// Desktop is not probed.
+// https://claude.com/docs/connectors/getting-started
+// https://github.com/anthropics/mcpb/blob/v2.1.2/src/shared/config.ts
+//
+// A default that is a list or an object is reported rather than guessed
 // at, every one in key order, and the comparison still runs over the
 // rest. defaultsErr is what the server refuses the defaults with, which
 // decides whether refusalProblems starts the sets of switches.
@@ -1244,7 +1266,8 @@ func startProblems(m manifest, switches []string, declared [][]string) []string 
 // installHintProblems holds the launcher's install hint, given on an
 // architecture the bundle does not carry, to module, which go.mod
 // declares. The path changes with every major version from v2, so a hint
-// written before one names a module that `go install` no longer updates.
+// written before one names the previous major's module, which `go
+// install` does not move past.
 func installHintProblems(launcher, module string) []string {
 	want := "go install " + module + "/cmd/" + server.Name + "@latest"
 	hints := installHint.FindAllString(launcher, -1)

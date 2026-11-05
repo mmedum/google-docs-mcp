@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 # bash on every runner, for every `run` step in this file. Uniform
-# across workflows, and checked by TestWorkflowsPinTheShell; ci.yml
-# carries why, and §18 of docs/architecture.md carries the evidence.
+# across workflows, and the `pins` gate checks it (pinsShell); ci.yml
+# carries why.
 defaults:
   run:
     shell: bash
@@ -40,8 +40,8 @@ jobs:
       - run: go test ./...
       # Pinning the action does not pin what the action installs: both of
       # these fetch a tool, and an unpinned tool is an unpinned build
-      # dependency wearing a pinned wrapper. cosign 3 is what broke the
-      # first attempt at this release.
+      # dependency wearing a pinned wrapper. A new cosign major can change
+      # what signing needs (.goreleaser.yaml's signs block says what).
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3
@@ -49,19 +49,19 @@ jobs:
         with:
           syft-version: v1.51.1
       # The release body is the CHANGELOG.md section for this tag, not a
-      # list of commit SHAs. relnotes fails when the tag has no section,
-      # which fails the release rather than publishing one that says
-      # nothing.
+      # list of commit SHAs. `gates release-notes` fails when the tag has
+      # no section, which fails the release rather than publishing one
+      # that says nothing.
       - name: Release notes from the CHANGELOG
         env:
           REF_NAME: ${{ github.ref_name }}
         run: go run ./scripts/gates release-notes "${REF_NAME}" > "${RUNNER_TEMP}/release-notes.md"
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          # Exact, not "~> v2": a SHA pins the action, never the tool the
-          # action installs — the lesson from the cosign 3 release
-          # failure, applied to the step that decides what the artifacts
-          # are.
+          # Exact, not "~> v2": this input takes a semver range and
+          # installs the highest match, so a SHA on the action still
+          # leaves goreleaser, which decides what the artifacts are,
+          # floating. https://github.com/goreleaser/goreleaser-action#inputs
           version: "v2.18.1"
           args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
@@ -70,11 +70,11 @@ jobs:
       # commit and this runner, checkable with `gh attestation verify`.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          # The bundle is a subject in its own right. It was covered only
-          # through its row in checksums.txt, which is a claim about the
-          # checksum file rather than about the bundle: `gh attestation
-          # verify` on the .mcpb answered 404 while every archive passed.
-          # The bundle is what most people actually install.
+          # The bundle is a subject in its own right. Its row in
+          # checksums.txt is a claim about the checksum file rather than
+          # about the bundle: without this, `gh attestation verify` on the
+          # .mcpb answers 404 while every archive passes. The bundle is
+          # what most people actually install.
           subject-path: "dist/*.tar.gz,dist/*.zip,dist/*.mcpb,dist/checksums.txt"
 
   # The registry entry, in its own workflow so it can also be run by hand

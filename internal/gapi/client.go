@@ -1,7 +1,7 @@
 // Package gapi is a thin raw REST client for the Google Docs and Drive
-// APIs. Requests are built by hand so fields that the generated client
-// lacks can be sent; responses decode into the
-// generated types where they exist. No MCP imports live here.
+// APIs. Requests are built by hand, and responses decode into the
+// hand-written wire types in internal/gdocs and this package; no
+// generated client is imported. No MCP imports live here.
 package gapi
 
 import (
@@ -51,14 +51,16 @@ type Options struct {
 	// Timeout applies per attempt.
 	Timeout time.Duration
 	Retry   RetryPolicy
-	// Limiters stay under the per-user quotas (300 reads and 60 writes per minute).
+	// Limiters stay under the Docs API's per-user quotas of 300 reads and
+	// 60 writes a minute; nil gives 240 and 48.
+	// https://developers.google.com/workspace/docs/api/limits
 	ReadLimiter  *rate.Limiter
 	WriteLimiter *rate.Limiter
 	UserAgent    string
 	// Sleep is replaced in tests.
 	Sleep func(context.Context, time.Duration) error
 	// AllowURL decides which URLs receive credentials; nil means HTTPS to
-	// Google's API and content hosts only. Tests point it at their server.
+	// the hosts googleHost allows. Tests point it at their server.
 	AllowURL func(u *url.URL) bool
 }
 
@@ -220,14 +222,13 @@ const acceptJSON = "application/json"
 // prettyPrint is a system parameter of every Google API, documented at
 // cloud.google.com/apis/docs/system-parameters, and it defaults to true:
 // a 150-page document is 7.44 MB indented against 2.96 MB without it. It
-// costs more than bandwidth now that StructuralElement keeps the bytes
-// it decoded from, because retained indentation is retained memory.
+// costs more than bandwidth: StructuralElement keeps the bytes it decoded
+// from, so retained indentation is retained memory.
 //
-// Here rather than in GetDocument's query, where it started: the Drive
-// half of this client — exports, comments, revisions — was still asking
-// for indented JSON, and a call added later should not have to remember.
-// The three sibling servers set it in the same one place for the same
-// reason.
+// Set on the one request path rather than in each call's query, so the
+// Drive half of this client asks for it too and a call added later does
+// not have to remember. The sibling servers set it in the same one place
+// for the same reason.
 //
 // Called after the allowlist check, which is what makes rewriting the
 // URL safe: every request reaching that point is one this client has
@@ -278,6 +279,7 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 		// net/http wraps a failure in a *url.Error that repeats the whole
 		// URL, and the query can carry a search term. Only the redacted
 		// path is kept, before anything below reads the text.
+		// https://pkg.go.dev/net/http#Client.Do
 		var ue *url.Error
 		if errors.As(err, &ue) {
 			err = fmt.Errorf("%s %s: %w", ue.Op, redactPath(rawURL), ue.Err)
@@ -314,6 +316,7 @@ func (c *Client) once(ctx context.Context, method, rawURL string, body []byte, a
 // is reported as ambiguous instead. That covers Drive writes as well as
 // document batches: creating a comment is not idempotent either, and a
 // repeat after a 5xx posts it twice.
+// https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
 func retryable(k reqKind, err error) (bool, time.Duration) {
 	var te *transientError
 	if errors.As(err, &te) {
@@ -359,16 +362,15 @@ func parseRetryAfter(v string) time.Duration {
 var idInPath = regexp.MustCompile(`/(documents|files)/([^/?]+)`)
 
 // ShortID shortens a document or file id. It is for a filename a person
-// has to recognize, never for a log: §12 promises a log carries nothing
-// about the document, and six characters of an id is still six
-// characters of an id.
+// has to recognize, never for a log: a log carries nothing about the
+// document, and six characters of an id is still six characters of an
+// id.
 //
-// It used to end a shortened id with U+2026, which reads well in prose
-// and badly in a filename: an outside user reported it, and they were
-// right. A character outside ASCII in a name a person has to type, tab
-// complete, quote in a shell or move between filesystems buys nothing
-// here — the id fragment is there to tell two exports of the same title
-// apart, and it does that without announcing that it is short.
+// It ends without an ellipsis. A character outside ASCII in a name a
+// person has to type, tab complete, quote in a shell or move between
+// filesystems buys nothing here: the id fragment is there to tell two
+// exports of the same title apart, and it does that without announcing
+// that it is short.
 func ShortID(id string) string {
 	if len(id) > 6 {
 		return id[:6]
@@ -378,9 +380,8 @@ func ShortID(id string) string {
 
 // redactPath removes document and file ids from URLs before they reach
 // logs, keeping the shape of the path so a line still says which method
-// ran. It used to leave the first six characters, which made the
-// promise that a debug log is safe to paste into a bug report a promise
-// the reporter had to check.
+// ran. No part of an id is left, so a debug log is safe to paste into a
+// bug report without the reporter checking it first.
 func redactPath(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {

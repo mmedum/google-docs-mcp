@@ -2,8 +2,8 @@
 
 package gapi
 
-// Spike H: what a real .docx looks like, and what Docs does with one this
-// server edits. A Google Doc made from synthetic content is exported as
+// What a real .docx looks like, and what Docs does with one this server
+// edits. A Google Doc made from synthetic content is exported as
 // .docx, which gives a file with the parts Word writes: styles, numbering,
 // settings, relationships.
 //

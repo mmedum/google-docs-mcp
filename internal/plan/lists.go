@@ -7,19 +7,21 @@ import (
 	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
 )
 
-// How a fragment's list items get their levels. Google's rules, measured
-// live in spike F (internal/gapi/rawbullets_integration_test.go):
+// How a fragment's list items get their levels. Google's rules, which
+// its references state only in part:
 //
 //   - Every inserted paragraph takes the bullet of the paragraph at the
 //     insertion point, as InsertTextRequest documents.
 //   - createParagraphBullets skips a paragraph that already has a
-//     bullet, leaving its leading tabs as text; the lists guide says a
-//     bullet's level cannot be changed, only deleted and made again.
+//     bullet, leaving its leading tabs as text, though a new preset still
+//     restyles that paragraph's list; the lists guide says a bullet's
+//     level cannot be changed, only deleted and made again.
 //   - A list it makes joins the list of the paragraph just before when
-//     their kinds match, as documented, and counts levels from that
-//     paragraph's: a level is that paragraph's level plus the tabs beyond
-//     the fewest in the range. So a run can start neither deeper nor
-//     shallower than the item before it.
+//     their presets match ("added to that preceding list"), and counts
+//     levels from that paragraph's, which no reference says: a level is
+//     that paragraph's level plus the tabs beyond the fewest in the
+//     range. So a run can start neither deeper nor shallower than the
+//     item before it.
 //   - deleteParagraphBullets leaves the indent of the level it removed,
 //     and a new bullet adds its own to it.
 //
@@ -31,12 +33,22 @@ import (
 // none), the list made, the temporary paragraph removed. When the item
 // before is deeper than the window, the window takes in the items before
 // it until one is not, rebuilding them at their own levels. The window is
-// gdoc's (listnest.py), measured there and again here. A rebuilt item gets
-// its level's standard indent, so one set by hand is lost, and in suggest
-// mode it shows a bullet change that changes nothing. That happens only
-// when the item before the content is deeper than where the content goes,
-// in a list of one of the server's presets: a checklist or a custom list
-// is never rebuilt, since a list made after it would not join it.
+// gdoc's (listnest.py). Existing items are rebuilt only when the item
+// before the content is deeper than where the content goes, in a list of
+// one of the server's presets: a checklist or a custom list is never
+// rebuilt, since a list made after it would not join it. A rebuilt item
+// set apart by hand gets its own indents back, and in suggest mode it
+// shows a bullet change that changes nothing.
+//
+// Checked by the integration tests TestRawBullets, TestRawBulletsBase,
+// TestRawBulletsAnchor, TestRawBulletsWindow, TestRawBulletsTop and
+// TestRawBulletsPreset, and by the live steps "a nested item at the top
+// of a numbered list", "an item after a nested one gains a child", "a
+// paragraph and a list inside a nested list" and "back to the top after
+// a nested item by list_level".
+// https://developers.google.com/workspace/docs/api/how-tos/lists
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#CreateParagraphBulletsRequest
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTextRequest
 
 // ListItem is a list paragraph next to an insertion: its level, whether
 // its list is numbered, the server's preset its list matches ("" for
@@ -53,7 +65,8 @@ type ListItem struct {
 
 // handIndented says a list item's indents are its own, not its level's:
 // a list from one of the server's presets indents each level 36pt more,
-// its first line 18pt less (spike F). A rebuilt item gets its level's.
+// its first line 18pt less. A rebuilt item gets its level's. Checked by
+// the live step "read the lists".
 func (it ListItem) handIndented() bool {
 	level := 36 * float64(it.Level+1)
 	return (it.IndentStart != 0 || it.IndentFirstLine != 0) && (it.IndentStart != level || it.IndentFirstLine != level-18)
@@ -89,7 +102,8 @@ type ListContext struct {
 }
 
 // presetGlyphs are the glyph types and symbols the first three levels of
-// a list made from each of the server's presets report (spike F).
+// a list made from each of the server's presets report. Checked by the
+// integration test TestRawBulletsGlyphs.
 var presetGlyphs = map[string][3][2]string{
 	BulletPreset:   {{"", "●"}, {"", "○"}, {"", "■"}},
 	NumberedPreset: {{"DECIMAL", ""}, {"ALPHA", ""}, {"ROMAN", ""}},

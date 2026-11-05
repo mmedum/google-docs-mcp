@@ -2,10 +2,9 @@
 
 package gapi
 
-// Spike D: what can the API do with a Markdown file, now that Docs edits
-// .md files in place without converting them (Workspace Updates,
-// 2026-10-05)? Runs against the caller's own account and leaves two
-// clearly named scratch files behind.
+// What the API can do with a Markdown file, which Docs edits in place
+// without converting it. Runs against the caller's own account and leaves
+// two clearly named scratch files behind.
 //
 //	GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestRawMarkdownFile -v
 //
@@ -280,8 +279,8 @@ func TestRawMarkdownFile(t *testing.T) {
 	status, body = rawCall(t, c, http.MethodGet, fileURL+"/revisions?fields=*", "", nil)
 	logCall(t, "revisions.list", status, body, 0)
 
-	// Spike C: the same Markdown converted to a Google Doc on import, and
-	// exported back.
+	// The same Markdown converted to a Google Doc on import, and exported
+	// back.
 	conv := uploadMarkdown(t, c, markdownProbeName+" (converted)", DocumentMimeType)
 	convID, _ := conv["id"].(string)
 	status, body = docsGet(t, c, convID)
@@ -292,7 +291,7 @@ func TestRawMarkdownFile(t *testing.T) {
 		t.Logf("--- round trip, lines only one side has ---\n%s", lineDiff(markdownCorpus, body))
 	}
 
-	t.Logf("=== stage 2: open %v in Docs, edit it, comment on a word, then rerun with GDOCS_MD_PROBE_ID=%s ===", md["webViewLink"], id)
+	t.Logf("=== next: open %v in Docs, edit it, comment on a word, then run TestRawMarkdownAfterDocs with GDOCS_MD_PROBE_ID=%s ===", md["webViewLink"], id)
 }
 
 func TestRawMarkdownAfterDocs(t *testing.T) {
@@ -333,10 +332,10 @@ func TestRawMarkdownAfterDocs(t *testing.T) {
 	t.Logf("=== now look in Docs: is the comment still attached to its word? ===")
 }
 
-// TestRawMarkdownRewrite follows up stage 2, which found that Docs keeps
-// a comment made in its editor inside the file — markers around the
-// quoted text and a gdoc_comments block at the end — and that Drive's
-// comments.list does not list it while the Docs comments view does. It
+// TestRawMarkdownRewrite follows TestRawMarkdownAfterDocs. Docs keeps a
+// comment made in its editor inside the file — markers around the quoted
+// text and a gdoc_comments block at the end — and Drive's comments.list
+// does not list it while the Docs comments view does. It
 // rewrites the bytes through Drive four ways, each starting from what
 // Docs wrote, asks the comments view after each whether the comment is
 // still there, and puts Docs' bytes back after each. Last, it asks
@@ -393,8 +392,8 @@ func TestRawMarkdownRewrite(t *testing.T) {
 	}
 }
 
-// TestRawMarkdownFollowups asks what stages 1 and 2 left open without
-// needing a person: the whole Docs model of the file, whether the Docs
+// TestRawMarkdownFollowups asks what TestRawMarkdownFile and
+// TestRawMarkdownAfterDocs leave open, without needing a person: the whole Docs model of the file, whether the Docs
 // API takes a suggestion or an anchored comment on it, whether old
 // revisions download, and what type Drive gives Markdown uploaded under
 // other names and types. The typing half leaves three more scratch
@@ -892,8 +891,8 @@ func TestRawMarkdownComments(t *testing.T) {
 	logCall(t, "files.get at the end", status, body, 2000)
 }
 
-// TestRawMarkdownWithPerson is stage 3, run in two steps around a
-// person with the file open in the Docs editor.
+// TestRawMarkdownWithPerson runs in two steps around a person with the
+// file open in the Docs editor.
 //
 // GDOCS_MD_PROBE_STEP=seed writes a comment into the bytes, as a server
 // would, and leaves it there; the person then looks for it in the

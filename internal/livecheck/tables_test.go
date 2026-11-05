@@ -84,8 +84,9 @@ var bareHandle = regexp.MustCompile(`(?m)^\[(?:tab\d+/)?p\d+\]$`)
 
 // liveContentEmbeds puts tables and images in edit_document content. The
 // text lands first, later batches place each table and image in the
-// empty paragraph left for it, and what a table leaves is deleted
-// (spike E). Run before liveTabs, which reorders the tabs.
+// empty paragraph left for it, and what a table leaves is deleted, as
+// the integration test TestRawTablesInContent measures against the API.
+// Run before liveTabs, which reorders the tabs.
 func liveContentEmbeds(t *testing.T, d *driver, doc string) {
 	const logo = "https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png"
 	afterBackground := map[string]any{"at": "after", "of": map[string]any{"heading": "Background", "include_heading": true}}
@@ -130,8 +131,9 @@ func liveContentEmbeds(t *testing.T, d *driver, doc string) {
 	}
 
 	// What Google does with a suggested deletion of a suggested empty
-	// paragraph is not in the spike; the transcript shows it, and the
-	// suggestions are rejected so later steps see the document as it was.
+	// paragraph is not measured by TestRawTablesInContent; the transcript
+	// shows it, and the suggestions are rejected so later steps see the
+	// document as it was.
 	suggested := strings.ReplaceAll(content, "Item", "Proposed")
 	text, sc := d.okStruct("content with a table and an image, suggested", "edit_document", insert("suggest", suggested))
 	if strings.Contains(text, "not placed") || strings.Contains(text, "not removed") {

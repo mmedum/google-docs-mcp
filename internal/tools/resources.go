@@ -19,6 +19,13 @@ const resourceScheme = "gdocs://"
 // registerResources adds the resource templates: a document, its outline
 // and one tab, each rendered as markdown. Resources are for clients that
 // attach a document whole; the read tools scope, budget and show handles.
+//
+// go-sdk matches a template through an anchored RFC 6570 regexp in which
+// {document} excludes '/', so gdocs://{document} does not shadow
+// gdocs://{document}/outline, and it answers an unmatched URI with
+// -32602. Checked by the live steps "resource: outline" and
+// "resource: unknown document".
+// https://github.com/modelcontextprotocol/go-sdk/blob/v1.8.0/mcp/resource.go
 func registerResources(s *mcp.Server, d Deps) {
 	s.AddResourceTemplate(&mcp.ResourceTemplate{
 		Name:        "document",

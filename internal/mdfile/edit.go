@@ -145,8 +145,8 @@ func (f *File) guarded() []span {
 // with it: a commented passage it overlaps, an image or a footnote
 // reference or definition. A comment is counted even where only part of
 // its passage goes, as the overwrite guard does for a Docs comment
-// anchor; the probe found such a comment survives, but the person did
-// not ask for their comment's text to change.
+// anchor. Docs keeps such a comment and grows its passage, but the person
+// did not ask for their comment's text to change.
 func (f *File) Destroys(start, end int) []Hit {
 	if start >= end {
 		return nil
@@ -180,7 +180,11 @@ var ErrMarkup = errors.New("comment markup")
 //     begins or ends there, and inside one that spans it.
 //
 // The result is parsed again and must name the same markers and carry
-// the same block, byte for byte; anything else is ErrMarkup.
+// the same block, byte for byte; anything else is ErrMarkup. An upload
+// that keeps both keeps the file's comments: Docs re-parses it within
+// seconds, moves each anchor with its text and writes nothing back.
+// Checked by the live step "read after the write-back" and by the
+// integration test TestRawMarkdownRewrite.
 func (f *File) Apply(edits []Edit) (*File, error) {
 	edits = sortEdits(edits)
 	for i, e := range edits {

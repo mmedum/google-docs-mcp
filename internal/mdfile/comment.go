@@ -11,10 +11,13 @@ import (
 // Writing a comment is the one change to the markup this package makes:
 // markers around a passage and an entry in the block, in the shape Docs
 // writes them, which the Docs editor shows as a comment "From imported
-// document" and keeps, with a token, on a person's save (spike D). An
-// entry carries no token; Google issues one on that save. A resolve is
-// never written: a RESOLVED status in the bytes makes the Docs API fail
-// on the whole file.
+// document" and keeps, with a token, on a person's save. An entry
+// carries no token; Google issues one on that save. A resolve is never
+// written: a RESOLVED status in the bytes makes the Docs API fail on the
+// whole file. The editor's side needs a person, so only the integration
+// test TestRawMarkdownWithPerson checks it. The live steps
+// "comment on a passage" and "reply in the file" check that the Docs view
+// lists what was written.
 
 // NewPost is a comment or reply to write: who, when, what.
 type NewPost struct {

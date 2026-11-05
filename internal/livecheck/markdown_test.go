@@ -19,11 +19,11 @@ const scratchMarkdown = "---\ntitle: Live markdown test\n---\n\n# Live markdown 
 var continueLine = regexp.MustCompile(`continue_from (L\d+)`)
 
 // TestLiveMarkdown drives the binary over a Markdown file it creates
-// itself, and leaves the file behind named "safe to delete". It does
-// not make a comment: whether the editor shows one written into the
-// file is what a person is still checking (architecture §7.5).
+// itself, and leaves the file behind named "safe to delete". It writes
+// comments into the file and reads them back through the server; whether
+// the Docs editor shows them is for a person to look at in that file.
 //
-//	make build && go test -tags=live ./internal/livecheck -run TestLiveMarkdown -v
+//	make live LIVE_ARGS='-run TestLiveMarkdown'
 func TestLiveMarkdown(t *testing.T) {
 	d := start(t)
 
@@ -43,7 +43,7 @@ func TestLiveMarkdown(t *testing.T) {
 			t.Errorf("get_document lacks %q: %s", want, shown(info, 400))
 		}
 	}
-	if outline := d.ok("outline", "get_outline", map[string]any{"document": file}); !strings.Contains(outline, "H2 Plan {plan}") {
+	if outline := d.ok("outline of the Markdown file", "get_outline", map[string]any{"document": file}); !strings.Contains(outline, "H2 Plan {plan}") {
 		t.Errorf("outline: %s", shown(outline, 400))
 	}
 	whole := d.ok("read it whole", "read_document", map[string]any{"document": file})
@@ -57,7 +57,7 @@ func TestLiveMarkdown(t *testing.T) {
 		d.ok("read on from the line", "read_document", map[string]any{"document": file, "continue_from": line})
 	}
 	d.ok("read one section", "read_document", map[string]any{"document": file, "heading_id": "risks"})
-	if found := d.ok("find", "find_in_document", map[string]any{"document": file, "query": "second step"}); !strings.Contains(found, "[L12]") {
+	if found := d.ok("find in the Markdown file", "find_in_document", map[string]any{"document": file, "query": "second step"}); !strings.Contains(found, "[L12]") {
 		t.Errorf("find: %s", shown(found, 300))
 	}
 

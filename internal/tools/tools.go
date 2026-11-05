@@ -57,7 +57,11 @@ func Register(s *mcp.Server, d Deps) {
 	}
 }
 
-// text wraps a string as the tool's unstructured content.
+// text wraps a string as the tool's unstructured content. A write tool
+// returns it beside an object Out: go-sdk then leaves Content alone and
+// adds the structured result, where a nil Content would get the JSON as
+// text and send it twice. Checked by the live step "suggest edit".
+// https://github.com/modelcontextprotocol/go-sdk/blob/v1.8.0/mcp/server.go
 func text(s string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: s}}}
 }
@@ -77,9 +81,9 @@ func fail(err error) error {
 // boolean, which a model can supply as easily as omit — and the refusal
 // lives here rather than in the schema on purpose: a required field
 // would be a breaking schema change, while a server-side refusal is the
-// half a client cannot skip. §12 makes the same point about annotations.
+// half a client cannot skip, as it can skip an annotation.
 // It is a witness that the caller meant this target, never approval: the
-// model types it, and approving the call is the client's (§12a).
+// model types it, and approving the call is the client's.
 func confirmTarget(what, target, confirm string) error {
 	switch {
 	case confirm == "":
@@ -97,7 +101,9 @@ var (
 	// adding marks a tool that adds and replaces nothing: a new document,
 	// a new comment, or a new local file in the one directory the person
 	// configured. Only such a tool may say destructiveHint false, which
-	// the MCP schema defines as "the tool performs only additive updates".
+	// the MCP schema defines as "the tool performs only additive updates";
+	// left out, it defaults to true.
+	// https://modelcontextprotocol.io/specification/2025-11-25/schema#toolannotations
 	adding = &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
 	// overwriting marks a tool that changes or removes what is there: an
 	// edit, a restyle, a resolved thread, a renamed tab. It says
@@ -105,7 +111,7 @@ var (
 	// registers without GDOCS_ENABLE_DESTRUCTIVE and takes no confirm.
 	overwriting = &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(false)}
 	// destructive marks the gated tools. No tool carries Claude Code's
-	// requiresUserInteraction mark (§12a): version history keeps a
+	// requiresUserInteraction mark (D-58): version history keeps a
 	// deleted tab's text, and a deleted comment, which cannot be
 	// restored, is one item of many, deleted many in a row, where a
 	// prompt on every call goes unread. The operator's own rules decide.

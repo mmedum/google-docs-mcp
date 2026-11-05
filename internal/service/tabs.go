@@ -169,8 +169,11 @@ func moveTabRequest(f *Fetched, req TabRequest, res *TabResult) (json.RawMessage
 	// removes it afterwards, so moving one later in the same list lands
 	// it one place short — and moving it to the very next position does
 	// nothing at all. Raise the index by one for those; moving a tab
-	// earlier, or under a different parent, needs no adjustment. Verified
-	// live (§18 of docs/architecture.md).
+	// earlier, or under a different parent, needs no adjustment. The
+	// reference's "zero-based index of the tab within the parent" holds
+	// for add, not for a move. Checked by the live steps
+	// "move parent tab back to the end" and "tabs after moving it back".
+	// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#TabProperties
 	if props.Index != nil && (props.ParentID == "" || props.ParentID == tab.ParentID) {
 		if siblingIndex(f.Doc, tab) <= *props.Index {
 			*props.Index++
@@ -237,6 +240,10 @@ func deleteTabRequest(f *Fetched, req TabRequest, res *TabResult) (json.RawMessa
 		return nil, Errorf("invalid", "a document keeps at least one top-level tab; delete the content instead")
 	}
 	res.TabID, res.Title = tab.ID, tab.Title
+	// deleteTab deletes the tab's children with it, as the reference says.
+	// Checked by the live step "delete the parent tab, child and all",
+	// which runs only with GDOCS_ENABLE_DESTRUCTIVE=true.
+	// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#DeleteTabRequest
 	if f.Doc.Descendants(tab.ID) > 0 {
 		res.Warnings = append(res.Warnings, "child tabs go with it")
 	}

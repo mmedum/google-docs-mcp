@@ -121,7 +121,7 @@ jobs:
           #
           # The identity carries the exact tag. Bumping PUBLISHER_VERSION
           # without bumping it here fails loudly, where a regexp would
-          # quietly accept whatever that tag now points at.
+          # quietly accept whatever that tag points at when this runs.
           cosign verify-blob "${asset}" \
             --bundle "${asset}.sigstore.json" \
             --certificate-identity \

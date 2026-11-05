@@ -102,7 +102,12 @@ type EditResult struct {
 	Text string `json:"-"`
 	// written is the revision the last batch's reply gave. A later batch
 	// runs only on a read at that revision: any other means somebody
-	// else wrote in between.
+	// else wrote in between. A reply's writeControl.requiredRevisionId is
+	// the revision the next read reports; the reference says only that it
+	// is the write control after the request. Checked by the live step
+	// "content with a table and an image", whose rounds each compare a
+	// fresh read to the reply.
+	// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate#body.response_body
 	written string
 }
 
@@ -234,10 +239,13 @@ func validateEditRequest(req EditRequest) error {
 	return nil
 }
 
-// editFetched plans against a document the caller already holds. A
-// revision conflict is re-planned once against a fresh read. It returns
-// the read taken after the last batch, which a caller chaining batches
-// passes to the next one instead of taking its own.
+// editFetched plans against a document the caller already holds.
+// expect_revision is checked against that read before anything is sent.
+// Google refuses a batch when the document moved after the read, as a
+// person's edit in between does; that conflict is re-planned once against
+// a fresh read, expect_revision checked again. It returns the read taken
+// after the last batch, which a caller chaining batches passes to the
+// next one instead of taking its own.
 func (s *Service) editFetched(ctx context.Context, f *Fetched, req EditRequest) (*EditResult, *Fetched, error) {
 	mode, err := s.mode(req.Mode)
 	if err != nil {

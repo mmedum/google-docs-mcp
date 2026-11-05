@@ -12,10 +12,11 @@ import (
 
 // Time is a timestamp as Google writes it, in RFC 3339. Google writes a
 // time it does not have as the Unix epoch, a protobuf Timestamp of zero:
-// Chat's API sent 1970-01-01T00:00:00Z for one, live, on 2026-10-31.
-// Time reads the epoch as no time, so nothing reports a document or a
-// comment from 1970. Any other value, one that does not parse included,
-// is kept as Google sent it.
+// the Chat API answers 1970-01-01T00:00:00Z for one. Docs and Drive are
+// not known to, and no live step can make them. Time reads the epoch as no
+// time, so nothing reports a document or a comment from 1970. Any other
+// value, one that does not parse included, is kept as Google sent it.
+// https://protobuf.dev/reference/protobuf/google.protobuf/#timestamp
 type Time string
 
 // UnmarshalJSON keeps the string, unless it is the epoch.
@@ -75,7 +76,8 @@ type Post struct {
 	Deleted bool `json:"deleted,omitempty"`
 	// FromImportedDocument marks a post read out of an imported file
 	// rather than made in Docs, its author whatever the file says: on a
-	// Markdown file, a comment whose entry carries no token (spike D).
+	// Markdown file, a comment whose entry carries no token. Checked by
+	// the integration test TestRawMarkdownEdges.
 	FromImportedDocument bool `json:"fromImportedDocument,omitempty"`
 }
 
@@ -86,7 +88,11 @@ type PostAuthor struct {
 	User        string `json:"user,omitempty"`
 }
 
-// CommentThread is the shape observed live: no range, but the quoted text.
+// CommentThread is a thread in documents.get's comments view. It carries
+// no range, only the quoted text and an anchorId; the anchor's ranges are
+// in the tab's CommentAnchors. Checked by the live step "add comment" and
+// the integration test TestPreviewSpike.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#commentthread
 type CommentThread struct {
 	CommentID      string `json:"commentId,omitempty"`
 	AnchorID       string `json:"anchorId,omitempty"`
@@ -96,7 +102,11 @@ type CommentThread struct {
 	PlainTextQuote string `json:"plainTextQuote,omitempty"`
 }
 
-// SuggestionThread is the shape observed live: id, head post, status, summary.
+// SuggestionThread is a suggestion's thread in the comments view: id,
+// head post, status and summary, and no range. A suggestion's range comes
+// from the run ids of the SUGGESTIONS_INLINE view. Checked by the live
+// steps "suggest edit" and "reject the last suggestion".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#suggestionthread
 type SuggestionThread struct {
 	SuggestionID string `json:"suggestionId,omitempty"`
 	HeadPost     Post   `json:"headPost,omitempty"`
@@ -393,6 +403,7 @@ type Paragraph struct {
 // ParagraphStyle is paragraph formatting. Every field the API accepts on
 // a write is here; tabStops and headingId are read-only per the
 // discovery document, so they are read and never sent.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#paragraphstyle
 type ParagraphStyle struct {
 	NamedStyleType      string           `json:"namedStyleType,omitempty"`
 	HeadingID           string           `json:"headingId,omitempty"`
@@ -684,6 +695,7 @@ type TableCell struct {
 type TableCellStyle struct {
 	// RowSpan and ColumnSpan are read-only (discovery document); a merge
 	// is what changes them.
+	// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#tablecellstyle
 	RowSpan          int64            `json:"rowSpan,omitempty"`
 	ColumnSpan       int64            `json:"columnSpan,omitempty"`
 	BackgroundColor  *OptionalColor   `json:"backgroundColor,omitempty"`

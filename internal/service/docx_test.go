@@ -22,8 +22,8 @@ import (
 )
 
 // wordService serves internal/ooxml/testdata/brief.docx, a Google Doc
-// exported as .docx, with the Docs model documents.get gave for it (spike
-// H, ids made synthetic).
+// exported as .docx, with the Docs model documents.get gave for it (ids
+// made synthetic).
 func wordService(t *testing.T) (*Service, *fakeAPI) {
 	t.Helper()
 	return wordFixture(t, "brief")

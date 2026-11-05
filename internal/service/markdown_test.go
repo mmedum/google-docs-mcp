@@ -79,7 +79,7 @@ func TestMarkdownFileInfo(t *testing.T) {
 func TestMarkdownFileUnderTheOlderType(t *testing.T) {
 	// Drive keeps a .md uploaded as text/x-markdown under that type, and
 	// the Docs API reads it as Markdown and refuses its writes the same
-	// way (§18). It is a Markdown file here, and an edit keeps its type.
+	// way. It is a Markdown file here, and an edit keeps its type.
 	svc, api := mdService(t, config.WriteSuggest)
 	api.file = &gapi.File{MimeType: "text/x-markdown"}
 	ctx := context.Background()

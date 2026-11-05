@@ -326,7 +326,9 @@ func cellContents(b *doc.Block, to *TableOp) ([]cellWrite, error) {
 // resolveInsertTable positions a new table. The API inserts a newline at
 // the index and starts the table right after it, so a block boundary is
 // turned into "before this block's newline": the table follows the block
-// and the block's newline becomes the paragraph after the table.
+// and the block's newline becomes the paragraph after the table. Checked
+// by the live steps "insert table with data" and "read table".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTableRequest
 func (s *Service) resolveInsertTable(f *Fetched, op EditOp, p *plan.Op, out *resolvedOps) error {
 	if op.Table == nil {
 		return Errorf("invalid", "insert_table needs rows and columns")

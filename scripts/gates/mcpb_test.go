@@ -18,13 +18,11 @@ import (
 	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
-// The standard says: break the manifest all six ways and watch each be
-// refused before you believe the check. A check nobody has watched fail
-// is a check nobody knows the shape of — doing this in a sibling
-// repository found a packer that verified the entry point and the Linux
-// files and never the win32 override's command, so a typo in the .exe
-// path would have packed cleanly, installed cleanly, and been caught by
-// nothing.
+// Break the manifest all six ways and watch each be refused before
+// believing the check. A check nobody has watched fail is a check nobody
+// knows the shape of: a packer can verify the entry point and the Linux
+// files and never the win32 override's command, and then a typo in the
+// .exe path packs cleanly, installs cleanly, and is caught by nothing.
 //
 // Each case below breaks exactly one thing in a manifest that is
 // otherwise correct, and asserts the sentence that names it.
@@ -125,7 +123,7 @@ func TestTheSixWaysAManifestBreaks(t *testing.T) {
 		},
 		{
 			// The specification shows this form once and never says what
-			// it is resolved against (§18).
+			// it is resolved against.
 			name: "a relative command",
 			edit: func(d map[string]any) {
 				dig(d, "server", "mcp_config")["command"] = "server/google-docs-mcp-darwin"
@@ -290,7 +288,7 @@ func TestManifestProblemsRunsEveryCheck(t *testing.T) {
 		{name: "a switch the bundle turns on", file: manifestPath, edit: func(d map[string]any) {
 			dig(d, "user_config", "read_only")["default"] = true
 		}, want: "the bundle's defaults configure the server otherwise than no environment does, in ReadOnly;"},
-		// The 3.0.0 name: the family's layout is -linux-amd64.
+		// x64 is the 3.0.0 name; the packer stages -linux-amd64.
 		{name: "a launcher of other names", file: launcherPath,
 			old: "google-docs-mcp-linux-amd64", new: "google-docs-mcp-linux-x64",
 			want: "the launcher runs [google-docs-mcp-linux-arm64 google-docs-mcp-linux-x64]; " +
@@ -688,7 +686,7 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 		{"an empty override argument list, which replaces the base too", func(d map[string]any) {
 			dig(d, "server", "mcp_config", "platform_overrides", "win32")["args"] = []any{}
 		}, "platform_overrides.win32.args is set"},
-		{"a setting the bundle no longer asks for", func(d map[string]any) {
+		{"a setting the bundle does not ask for", func(d map[string]any) {
 			delete(dig(d, "user_config"), "export_dir")
 			delete(dig(d, "server", "mcp_config", "env"), "GDOCS_EXPORT_DIR")
 		}, "user_config does not ask for export_dir, which sets GDOCS_EXPORT_DIR"},
@@ -725,7 +723,7 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 }
 
 // What the bundle says it is, broken once each: the server's own name, a
-// binary, the family's floor, a privacy policy, and exactly the
+// binary, the Claude Desktop floor, a privacy policy, and exactly the
 // platforms the packer stages an entry point for.
 func TestTheIdentityRefusesEachBreak(t *testing.T) {
 	const entryPoints = "; the packer stages entry points for [darwin linux win32]"
@@ -739,7 +737,7 @@ func TestTheIdentityRefusesEachBreak(t *testing.T) {
 		{"a node server", func(d map[string]any) { dig(d, "server")["type"] = "node" },
 			`server.type is "node"; the bundle carries a binary`},
 		{"no Claude Desktop floor", func(d map[string]any) { delete(dig(d, "compatibility"), "claude_desktop") },
-			`compatibility.claude_desktop is ""; the family's bundles claim ">=0.10.0"`},
+			`compatibility.claude_desktop is ""; the bundle supports Claude Desktop ">=0.10.0"`},
 		{"no Linux", func(d map[string]any) { dig(d, "compatibility")["platforms"] = []any{"darwin", "win32"} },
 			"compatibility.platforms is [darwin win32]" + entryPoints},
 		{"a platform the packer stages nothing for", func(d map[string]any) {
@@ -1143,12 +1141,12 @@ func fakeDist(t *testing.T) string {
 	return dist
 }
 
-// The packed bundle has the family's layout: the binaries and the
+// The packed bundle has its layout: the binaries and the
 // launcher executable, the license and the README readable and the
 // repository's own, the manifest stamped, and nothing else. The modes
 // are literals, not staged.mode(), so the assertion does not check the
 // code against itself.
-func TestThePackedBundleHasTheFamilyLayout(t *testing.T) {
+func TestThePackedBundleLayout(t *testing.T) {
 	dist := fakeDist(t)
 	out := filepath.Join(t.TempDir(), "b.mcpb")
 	// The packer reads the manifest, the launcher, the license and the
@@ -1178,7 +1176,7 @@ func TestThePackedBundleHasTheFamilyLayout(t *testing.T) {
 		names = append(names, f.Name)
 		mode, ok := want[f.Name]
 		if !ok {
-			t.Errorf("the bundle carries %s, which is not the family's layout", f.Name)
+			t.Errorf("the bundle carries %s, which is not in the bundle's layout", f.Name)
 			continue
 		}
 		if got := f.Mode().Perm(); got != mode {
@@ -1208,7 +1206,7 @@ func TestThePackedBundleHasTheFamilyLayout(t *testing.T) {
 		}
 	}
 	if len(names) != len(want) {
-		t.Errorf("the bundle carries %v; want the %d files of the family's layout", names, len(want))
+		t.Errorf("the bundle carries %v; want the %d files of the bundle's layout", names, len(want))
 	}
 }
 

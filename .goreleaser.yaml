@@ -73,10 +73,10 @@ sboms:
 # Sign the checksum file with a keyless Sigstore certificate tied to the
 # workflow's OIDC identity: no private key to hold or leak. --bundle is
 # not a preference here: cosign's v3.0.1 notes say it "has moved from
-# optional to required in v3", so the v0.8.0 release did not degrade
-# quietly when cosign-installer fetched 3 — it failed with no output path
-# at all. The notes say nothing about --output-signature or
+# optional to required in v3", and cosign 3 without it fails with no
+# output path at all. The notes say nothing about --output-signature or
 # --output-certificate, so do not describe them as dropped.
+# https://github.com/sigstore/cosign/releases/tag/v3.0.1
 signs:
   - cmd: cosign
     signature: "${artifact}.bundle"
@@ -89,13 +89,16 @@ signs:
     output: true
 
 # No changelog block: the release body is the CHANGELOG.md section for the
-# tag, built by scripts/relnotes and passed with --release-notes, so a
-# generated commit list would only be a second, worse account of the same
-# release. Never set changelog.disable to get that effect — it is read in
-# the pipe's Skip method, before the notes file is loaded, and the body
-# collapses to this footer with nothing above it. The footer below still
-# applies: internal/pipe/release/body.go wraps ReleaseNotes in
-# release.header and release.footer on every path.
+# tag, printed by `go run ./scripts/gates release-notes` and passed with
+# --release-notes, so a generated commit list would only be a second,
+# worse account of the same release. Never set changelog.disable to get
+# that effect — it is read in the changelog pipe's Skip, which runs before
+# Run, so the notes file is never opened and the body collapses to this
+# footer with nothing above it. The footer below still applies:
+# body.go wraps ReleaseNotes in release.header and release.footer on
+# every path, --release-notes included.
+# https://github.com/goreleaser/goreleaser/blob/v2.18.1/internal/pipe/changelog/changelog.go
+# https://github.com/goreleaser/goreleaser/blob/v2.18.1/internal/pipe/release/body.go
 
 release:
   # A tag is the decision; a draft nobody publishes is how releases go

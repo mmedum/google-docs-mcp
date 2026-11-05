@@ -22,7 +22,7 @@ import (
 // back into the file when they are done. The copy names its file and
 // the revision it was made from in its appProperties, which only this
 // OAuth client sees, so the write-back can tell what changed in the copy
-// from what changed in the file since (architecture §7.5).
+// from what changed in the file since.
 
 const (
 	copySourceKey = "md_source"

@@ -2,9 +2,8 @@
 
 package gapi
 
-// Spike E: what a table and an image in edit_document's content need,
-// before content may carry them. Where insertTable puts a table relative
-// to a paragraph, at the start and the end of the body; what is left
+// What a table and an image in edit_document's content need. Where
+// insertTable puts a table relative to a paragraph, at the start and the end of the body; what is left
 // after it and whether text can fill that; whether an inline image can
 // sit in a paragraph of its own; whether the leftover paragraph can be
 // deleted; and whether suggest mode takes a table, its cells and an
@@ -29,7 +28,7 @@ const spikeImage = "https://www.google.com/images/branding/googlelogo/2x/googlel
 func TestRawTablesInContent(t *testing.T) {
 	c := probeClient(t)
 	ctx := context.Background()
-	created, err := c.CreateDocument(ctx, "google-docs-mcp spike E, tables and images (safe to delete)")
+	created, err := c.CreateDocument(ctx, "google-docs-mcp tables and images probe (safe to delete)")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -115,7 +114,7 @@ func TestRawTablesInContent(t *testing.T) {
 			t.Logf("%s -> replies %s\n%s", st.what, reply, show(structure(t, c, ctx, id)))
 		}
 	}
-	t.Logf("one scratch document left behind; Drive search title:\"spike E\" finds it")
+	t.Logf("one scratch document left behind; Drive search title:\"tables and images probe\" finds it")
 }
 
 func insertTable(t *testing.T, index, rows, cols int) json.RawMessage {

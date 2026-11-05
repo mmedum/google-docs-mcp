@@ -4,7 +4,10 @@ import "unicode/utf16"
 
 // UTF16Len returns the length of s in UTF-16 code units, the unit the
 // Docs API counts indices in. Characters outside the BMP (most emoji)
-// count as two.
+// count as two. The body, each header, footer and footnote counts from
+// its own start, and an index holds only for the revision it was read
+// at. Checked by the live step "insert a footnote".
+// https://developers.google.com/workspace/docs/api/concepts/structure
 func UTF16Len(s string) int64 {
 	var n int64
 	for _, r := range s {

@@ -55,7 +55,7 @@ func TestCoverageProblems(t *testing.T) {
 			verdicts: append(slices.Clone(ok),
 				verdict{API: "drive", Method: "files.telepathy", Verdict: "out", Reason: "invented", line: 9}),
 			calls: calls,
-			want:  "is not a published method any more",
+			want:  "has a verdict and is not a published method",
 		},
 		{
 			name: "the same method judged twice",

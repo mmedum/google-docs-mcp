@@ -2,11 +2,18 @@
 
 package gapi_test
 
-// Spike A: does the Developer Preview really give us suggestion mode,
-// anchored comments and the comments view? Runs against the caller's
-// own account and creates one clearly named scratch document.
+// Whether batchUpdate takes suggestion mode and a comment anchored to a
+// range, and documents.get the comments view, and what each answers
+// with. Runs against the caller's own account and creates one clearly
+// named scratch document.
 //
 //	GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestPreviewSpike -v
+//
+// Findings: writeMode SUGGEST answers with the suggestion's id in
+// suggestionResponses, and the inline view carries it on the run;
+// insertComment with a range answers with a comment thread, which holds
+// the quoted text and an anchorId but no range; rejectSuggestion removes
+// the suggestion.
 
 import (
 	"context"
@@ -68,7 +75,7 @@ func TestPreviewSpike(t *testing.T) {
 		t.Logf("report: %s", out)
 	}()
 
-	created, err := c.CreateDocument(ctx, "google-docs-mcp spike A (safe to delete)")
+	created, err := c.CreateDocument(ctx, "google-docs-mcp suggestions and comments probe (safe to delete)")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -187,10 +194,9 @@ func TestPreviewSpike(t *testing.T) {
 			report["rejected_still_present"] = findSuggestion(parsed, "to be rejected") != ""
 		}
 	}
-	// Not the URL. A spike leaves a real document behind and this was
-	// the last line it printed; the id is in the report file the spike
-	// writes, which is not a transcript people paste.
-	t.Log("spike document created; see the report file for its id")
+	// Not the URL. The test leaves a real document behind, and its id
+	// goes in the report file, which is not a transcript people paste.
+	t.Log("scratch document created; see the report file for its id")
 }
 
 func findSuggestion(d *doc.Document, contains string) string {

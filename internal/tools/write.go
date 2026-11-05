@@ -73,7 +73,7 @@ type EditInput struct {
 	Document       string        `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Ops            []EditOpInput `json:"ops" jsonschema:"operations sent together in one batch; the content of a new header, footer or footnote and the tables and images of content follow in later batches. Targets are resolved against the document as it is now"`
 	Mode           string        `json:"mode,omitempty" jsonschema:"suggest (tracked changes a person accepts), direct (edit the text), or comment (post each change as a comment on the passage, changing nothing); default from get_document capabilities"`
-	DryRun         bool          `json:"dry_run,omitempty" jsonschema:"resolve and plan everything, show the exact requests and the current text of the region, but send nothing"`
+	DryRun         bool          `json:"dry_run,omitempty" jsonschema:"resolve and plan everything, show the kinds of request it would send and the current text of the region, but send nothing"`
 	ExpectRevision string        `json:"expect_revision,omitempty" jsonschema:"fail if the document is no longer at this revision id"`
 	Force          bool          `json:"force,omitempty" jsonschema:"direct mode only: allow deleting ranges that hold comment anchors, pending suggestions, images or footnotes; ask the person first"`
 }

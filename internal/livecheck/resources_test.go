@@ -31,32 +31,35 @@ func liveResources(t *testing.T, d *driver, doc string) {
 		t.Errorf("want three templates, got %v", uris)
 	}
 
-	read := func(label, uri string, wantErr bool) {
-		t.Helper()
-		res, err := d.cs.ReadResource(d.ctx, &mcp.ReadResourceParams{URI: uri})
-		if wantErr {
-			if err == nil {
-				t.Errorf("%s should not resolve", label)
-			} else {
-				t.Logf("=== %s (not found, as it should be) ===", label)
-			}
-			return
+	d.readResource("resource: whole document", "gdocs://"+doc, false)
+	d.readResource("resource: outline", "gdocs://"+doc+"/outline", false)
+	d.readResource("resource: one tab", "gdocs://"+doc+"/tabs/"+url.PathEscape("Appendix A"), false)
+	d.readResource("resource: a tab name with an unencoded space", "gdocs://"+doc+"/tabs/Appendix A", true)
+	d.readResource("resource: unknown document", "gdocs://1NoSuchDocumentIdXXXXXXXXXXXXXXXXXXXXXXXXXXX/outline", true)
+}
+
+// readResource is a step that reads a resource, as a client attaching a
+// document whole does; wantErr says the URI must not resolve.
+func (d *driver) readResource(label, uri string, wantErr bool) {
+	d.t.Helper()
+	res, err := d.cs.ReadResource(d.ctx, &mcp.ReadResourceParams{URI: uri})
+	if wantErr {
+		if err == nil {
+			d.t.Errorf("%s should not resolve", label)
+		} else {
+			d.t.Logf("=== %s (not found, as it should be) ===", label)
 		}
-		if err != nil {
-			t.Errorf("%s: %v", label, err)
-			return
-		}
-		var b strings.Builder
-		for _, c := range res.Contents {
-			b.WriteString(c.Text)
-		}
-		t.Logf("=== %s ===\n%s", label, shown(b.String(), 500))
+		return
 	}
-	read("resource: whole document", "gdocs://"+doc, false)
-	read("resource: outline", "gdocs://"+doc+"/outline", false)
-	read("resource: one tab", "gdocs://"+doc+"/tabs/"+url.PathEscape("Appendix A"), false)
-	read("resource: a tab name with an unencoded space", "gdocs://"+doc+"/tabs/Appendix A", true)
-	read("resource: unknown document", "gdocs://1NoSuchDocumentIdXXXXXXXXXXXXXXXXXXXXXXXXXXX/outline", true)
+	if err != nil {
+		d.t.Errorf("%s: %v", label, err)
+		return
+	}
+	var b strings.Builder
+	for _, c := range res.Contents {
+		b.WriteString(c.Text)
+	}
+	d.t.Logf("=== %s ===\n%s", label, shown(b.String(), 500))
 }
 
 // liveRegistration asks servers started with other configurations what

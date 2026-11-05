@@ -37,7 +37,7 @@ body:
     attributes:
       label: Version
       description: From `google-docs-mcp --version`.
-      placeholder: google-docs-mcp v0.7.0 (go1.27.0 linux/amd64)
+      placeholder: google-docs-mcp vX.Y.Z (goX.Y.Z linux/amd64)
     validations:
       required: true
 
@@ -64,21 +64,9 @@ body:
     validations:
       required: true
 
-  - type: dropdown
-    id: preview
-    attributes:
-      label: Developer Preview
-      description: Whether GDOCS_PREVIEW=true and your Cloud project is enrolled. Suggestion mode and anchored comments need it.
-      options:
-        - "enrolled, GDOCS_PREVIEW=true"
-        - "not enrolled (direct and comment modes only)"
-        - "not sure"
-    validations:
-      required: true
-
   - type: textarea
     id: logs
     attributes:
       label: Server log
-      description: Optional. Run the server with GDOCS_LOG_LEVEL=debug and paste the stderr around the failure. It is safe to paste: logs record which tool ran and how it went, never document ids, titles or text.
+      description: Optional. Run the server with GDOCS_LOG_LEVEL=debug and paste the stderr around the failure. It is safe to paste, since logs record which tool ran and how it went, never document ids, titles or text.
       render: text

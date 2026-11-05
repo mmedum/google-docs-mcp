@@ -18,7 +18,12 @@ type Edit struct {
 
 // MinimalEdits computes the smallest set of edits that turn oldText into
 // newText, positioned relative to start. Unchanged spans keep their
-// formatting and anything anchored to them.
+// formatting and anything anchored to them, and inserted text takes the
+// style of the text before it: InsertTextRequest says it "will match the
+// text immediately before the insertion index", and a newline copies the
+// paragraph's style "including lists and bullets". Checked by the live
+// step "direct edit" and the integration test TestRawBullets.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTextRequest
 func MinimalEdits(oldText, newText string, start int64) []Edit {
 	if oldText == newText {
 		return nil

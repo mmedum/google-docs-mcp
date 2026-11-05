@@ -19,7 +19,9 @@ const (
 
 // MaxNamedRangeName is the API's limit on a name: "no more than 256
 // characters, measured in UTF-16 code units" (CreateNamedRangeRequest,
-// Docs discovery revision 20261026), so an emoji counts as two.
+// Docs discovery revision 20261026), so an emoji counts as two. Checked
+// by the integration test TestRawNamedRangeLength.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#CreateNamedRangeRequest
 const MaxNamedRangeName = 256
 
 // NamedRangeParams name a range to create, delete or fill.

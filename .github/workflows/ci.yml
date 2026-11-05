@@ -20,12 +20,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# bash on every runner, for every `run` step in this file. With the
-# default shell, PowerShell on the Windows runner turned
-# `-coverprofile=cov.out` into a file called `cov`, so the profile the
-# next step read did not exist under the name this file gives it, and
-# nobody saw it because the coverage gate ran on Linux only until it
-# stopped being a shell script.
+# bash on every runner, for every `run` step in this file. The Windows
+# runner's default shell is PowerShell, which turns
+# `-coverprofile=cov.out` into a file called `cov`, so the coverage step
+# finds no profile under the name this file gives it.
 #
 # Set here rather than on the job or the step. The runner hands every
 # `run` block to a shell, so this is not about which steps look
@@ -33,8 +31,9 @@ concurrency:
 # somebody adds later. Two things it does not do: it never reaches a
 # `uses:` step, and it is not the shell the implicit default gives you —
 # GitHub runs an explicit bash as `bash --noprofile --norc -eo pipefail`,
-# so a command failing mid-pipeline now fails the step on all three
-# runners. The `pins` gate in `scripts/gates` checks this block is here.
+# so a command failing mid-pipeline fails the step on all three runners.
+# The `pins` gate in `scripts/gates` checks this block is here.
+# https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defaultsrunshell
 defaults:
   run:
     shell: bash
@@ -74,8 +73,8 @@ jobs:
         run: out=$(gofmt -l .); [ -z "$out" ] || { echo "$out"; exit 1; }
       - run: go vet ./...
       # The tagged passes. Without them the build-tagged files compile
-      # only where somebody runs `make check` by hand, which is what the
-      # parity gate now refuses.
+      # only where somebody runs `make check` by hand, which the parity
+      # gate refuses.
       - run: go vet -tags=integration ./...
       - run: go vet -tags=live ./...
       - run: go vet -tags=evals ./...
@@ -107,6 +106,7 @@ jobs:
           # so which gitleaks ran is a line in this file rather than a
           # constant inside a five-megabyte bundle. No `v` prefix — the
           # action's README documents the bare form.
+          # https://github.com/gitleaks/gitleaks-action#environment-variables
           GITLEAKS_VERSION: "8.30.1"
 
   # A pull request is measured from the merge-base of its head and the
@@ -148,6 +148,7 @@ jobs:
       - run: go run ./scripts/gates smoke ./google-docs-mcp
       - run: go run ./scripts/gates schema-diff ./google-docs-mcp
       - run: go run ./scripts/gates staleness ./google-docs-mcp
+      - run: go run ./scripts/gates docs
       - run: go run ./scripts/gates leaks
       - run: go run ./scripts/gates pins
       - run: go run ./scripts/gates classes

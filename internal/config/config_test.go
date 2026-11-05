@@ -140,8 +140,8 @@ func TestExplicitModesAndDirs(t *testing.T) {
 	// Windows, /tmp/... elsewhere. Build one rather than hardcode a
 	// POSIX path the config would rightly refuse.
 	dir := filepath.Join(t.TempDir(), "exports")
-	// The directory has to exist now: an export dir that does not is a
-	// typo, and is refused at startup rather than at the first export.
+	// The directory has to exist: an export dir that does not is a typo,
+	// and is refused at startup rather than at the first export.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -173,10 +173,10 @@ func TestLoggerAndLevels(t *testing.T) {
 	}
 }
 
-// A directory that does not exist used to be accepted, because only a
-// relative path was refused. The typo then surfaced at the moment
-// somebody tried to move a file, a long way from the setting that caused
-// it and invisible to `status`.
+// A directory that does not exist is refused, not only a relative path.
+// Accepted, the typo surfaces at the moment somebody tries to move a
+// file, a long way from the setting that caused it and invisible to
+// `status`.
 func TestTheDirectoryMustExistAndBeADirectory(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a-file")

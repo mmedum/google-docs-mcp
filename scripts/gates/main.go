@@ -1,11 +1,8 @@
 // Command gates runs this repository's own checks.
 //
-// They were shell scripts until two went wrong in ways bash made easy: a
-// hand-written package list that fell behind in silence, and a staleness
-// rule that failed on the release it was written to guard. Being Go, they
-// run wherever CI runs, they are held to gofmt, vet and lint like
-// everything else, and they have tests of their own. GoReleaser builds
-// only ./cmd/..., so none of this ships.
+// They are Go rather than shell: they run wherever CI runs, they are held
+// to gofmt, vet and lint like everything else, and they have tests of
+// their own. GoReleaser builds only ./cmd/..., so none of this ships.
 //
 //	go run ./scripts/gates coverage cov.out 80
 //	go run ./scripts/gates staleness ./google-docs-mcp
@@ -34,8 +31,8 @@ type command struct {
 	doc  string
 	// gate marks a command that must run in BOTH `make check` and the CI
 	// workflow. The parity check reads this field, which is the whole
-	// reason the registry exists: the two lists it compares used to be a
-	// Makefile and a workflow with nothing tying them together.
+	// reason the registry exists: it ties the Makefile and the workflow
+	// to one list.
 	gate bool
 	// pr marks a command only a pull request can run, since it measures
 	// from the merge-base. Parity holds it to a `run:` step in ci.yml and
@@ -80,6 +77,10 @@ func init() {
 		"smoke": {
 			run: smoke, args: "[BIN]", gate: true,
 			doc: "drive the binary over stdio, twice",
+		},
+		"docs": {
+			run: docs, args: "", gate: true,
+			doc: "decision IDs, citations, links, paths, the codemap, live steps and tests resolve",
 		},
 		"leaks": {
 			run: leaks, args: "", gate: true,
@@ -505,8 +506,7 @@ func fail(code int, format string, args ...any) {
 }
 
 // moduleRoot walks up from the working directory to the directory
-// holding go.mod. Every gate that reads the repository needs it, and it
-// existed four times as a test helper before this file did.
+// holding go.mod. Every gate that reads the repository needs it.
 func moduleRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {

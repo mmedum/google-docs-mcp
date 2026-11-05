@@ -106,12 +106,21 @@ func (c *Client) GetFile(ctx context.Context, id string) (*File, error) {
 const DocumentMimeType = "application/vnd.google-apps.document"
 
 // MarkdownMimeType is the Drive MIME type of a Markdown file, which Docs
-// opens in place and leaves a file of this type (architecture §7.5).
+// opens in place and leaves a file of this type. documents.get reads one,
+// comments view included, but every batchUpdate is 400 "The document must
+// not be an Office file" and files.export is 403 fileNotExportable; no
+// reference page says either. Checked by the live step "comments" and
+// the integration tests TestRawMarkdownFile and TestRawMarkdownFollowups.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate
 const MarkdownMimeType = "text/markdown"
 
 // LegacyMarkdownMimeType is the type older tables give a .md. Drive keeps
 // a file under it as sent, and the Docs API reads it as Markdown all the
-// same, refusing every write just as it does for text/markdown (§18).
+// same, refusing every write just as it does for text/markdown.
+// text/x-web-markdown is not an alias: documents.get answers it 400
+// INVALID_ARGUMENT, as it does a text/plain .md. The reference names no
+// type it reads.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/get
 const LegacyMarkdownMimeType = "text/x-markdown"
 
 // IsMarkdownMimeType reports whether a Drive file of this type is a
@@ -121,8 +130,13 @@ func IsMarkdownMimeType(mime string) bool {
 }
 
 // WordMimeType is the Drive MIME type of a Word file (.docx). The Docs
-// API reads one as a document and refuses every write to it, as an
-// Office file (spike G).
+// API reads one as a document, its tracked changes as suggestions and
+// its comments in the comments view, and answers every batchUpdate to it
+// 400 FAILED_PRECONDITION "The document must not be an Office file". No
+// Google page states either half. Checked by the live steps "word:
+// get_document", "word: read it back" and "word: list the comments", and
+// the integration test TestRawDocx.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate
 const WordMimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 // ExportMimeTypes maps short format names to Drive export MIME types.
@@ -230,13 +244,19 @@ type DriveReply struct {
 // ReplyFields is what reply calls ask for.
 const ReplyFields = "id,content,author(displayName,emailAddress),createdTime,action,deleted"
 
-// CommentFields is what a comment read asks for: get and list.
+// CommentFields is what a comment read asks for: get and list. Every
+// comments method but delete must send a fields mask, or Drive answers
+// with an error. Checked by the live steps "list comments" and
+// "document-level comment".
+// https://developers.google.com/workspace/drive/api/guides/manage-comments
 const CommentFields = commentWriteFields + ",assigneeEmailAddress"
 
 // commentWriteFields is what creating or editing a comment asks for back.
-// Not the assignee: Drive accepts it on get and list and answers
-// create and update with 400 "Invalid field selection
-// assignee_email_address" (live, 2026-10-09).
+// Not the assignee: Drive accepts it on get and list and answers create
+// and update with 400 "Invalid field selection assignee_email_address",
+// and the reference gives no hint of the split. Checked by the live steps
+// "document-level comment", "edit a comment" and "list comments".
+// https://developers.google.com/workspace/drive/api/reference/rest/v3/comments
 const commentWriteFields = "id,content,htmlContent,author(displayName,emailAddress),createdTime,modifiedTime,resolved,deleted,anchor,quotedFileContent,replies(" + ReplyFields + ")"
 
 // commentURL is the Drive URL of a file's comment collection or, with an
@@ -249,8 +269,10 @@ func (c *Client) commentURL(fileID, commentID string) string {
 	return u
 }
 
-// CreateComment adds a Drive comment quoting text. The Docs UI shows it
-// unanchored (with the quote) because Drive anchors are opaque to Docs.
+// CreateComment adds a Drive comment quoting text. The Docs editor shows
+// it unanchored, with the quote: Google Workspace editors treat a comment
+// made through Drive as unanchored, whatever its anchor says.
+// https://developers.google.com/workspace/drive/api/guides/manage-comments
 func (c *Client) CreateComment(ctx context.Context, fileID, content, quote string) (*DriveComment, error) {
 	payload := map[string]any{"content": content}
 	if quote != "" {
@@ -312,7 +334,10 @@ func listPages[T any](ctx context.Context, c *Client, base string, v url.Values,
 }
 
 // CreateReply posts a reply on a comment thread. action is "" for a plain
-// reply, "resolve" to resolve the thread or "reopen" to reopen it.
+// reply, "resolve" to resolve the thread or "reopen" to reopen it, the
+// two values Drive's Reply.action takes, on a Google Doc as on any other
+// file. Checked by the live steps "resolve" and "reopen".
+// https://developers.google.com/workspace/drive/api/reference/rest/v3/replies/create
 func (c *Client) CreateReply(ctx context.Context, fileID, commentID, content, action string) (*DriveReply, error) {
 	payload := map[string]any{}
 	if content != "" {
@@ -437,13 +462,17 @@ type operation struct {
 
 // ExportRevision exports one revision of a document through
 // files.download, the only Drive method that takes a revisionId for
-// Docs files. It starts a long-running operation, polls it, then fetches
-// the content it names. The content URL must stay on Google's hosts.
+// Docs files: files.export takes only mimeType. It starts a long-running
+// operation, polls it, then fetches the content it names. The content URL
+// must stay on Google's hosts. Checked by the live steps "read an old
+// revision" and "diff revisions".
+// https://developers.google.com/workspace/drive/api/reference/rest/v3/files/download
+// https://developers.google.com/workspace/drive/api/reference/rest/v3/files/export
 //
 // The POST that starts it is a read: it creates nothing in the person's
 // Drive, so repeating it costs an export, not a duplicate. That is what
-// kindRead now means — retryable on any transient failure — so a POST
-// that does change something must not borrow it.
+// kindRead means — retryable on any transient failure — so a POST that
+// does change something must not borrow it.
 func (c *Client) ExportRevision(ctx context.Context, fileID, revisionID, mimeType string) ([]byte, error) {
 	v := url.Values{}
 	v.Set("mimeType", mimeType)
@@ -482,9 +511,11 @@ func (c *Client) ExportRevision(ctx context.Context, fileID, revisionID, mimeTyp
 }
 
 // googleHost reports whether a host is one this server may send
-// credentials to: the APIs, Google's content hosts, and docs.google.com,
-// where the export URLs that files.download returns for old revisions
-// live (observed live 2026-09-03: docs.google.com/feeds/download/...).
+// credentials to: googleapis.com and its subdomains, the content hosts
+// under googleusercontent.com, and docs.google.com, where the export URLs
+// that files.download returns for old revisions live
+// (docs.google.com/feeds/download/...). Checked by the live step "read an
+// old revision".
 //
 // It is passed url.URL.Host, port and all, and a host carrying a port
 // therefore matches nothing and is refused. That is deliberate: the URL

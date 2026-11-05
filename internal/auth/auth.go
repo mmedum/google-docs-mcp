@@ -1,6 +1,8 @@
 // Package auth implements Google's documented OAuth flow for desktop
 // applications: a loopback redirect on 127.0.0.1 with a random port and
-// PKCE, then a refresh-token-backed token source for API calls.
+// PKCE, then a refresh-token-backed token source for API calls. Google
+// blocks the out-of-band flow, which had the person paste a code back.
+// https://developers.google.com/identity/protocols/oauth2/native-app
 package auth
 
 import (
@@ -25,7 +27,11 @@ import (
 )
 
 // OAuth scopes. documents is "sensitive", drive is "restricted"; both are
-// fine for a per-user app that is never published.
+// fine for a per-user app that is never published. drive.file is not
+// enough: it reaches only the files the app made or was handed, and a
+// person names any document of theirs.
+// https://developers.google.com/workspace/docs/api/auth
+// https://developers.google.com/workspace/drive/api/guides/api-specific-auth
 const (
 	ScopeDocuments         = "https://www.googleapis.com/auth/documents"
 	ScopeDocumentsReadonly = "https://www.googleapis.com/auth/documents.readonly"
@@ -245,6 +251,7 @@ const DefaultHTTPTimeout = 60 * time.Second
 // first tool call for as long as the process runs. The per-request
 // timeout on the API client does not cover the refresh, because the
 // refresh happens inside the token source, not on that client.
+// https://pkg.go.dev/golang.org/x/oauth2#HTTPClient
 func boundHTTP(ctx context.Context, timeout time.Duration) context.Context {
 	if timeout <= 0 {
 		timeout = DefaultHTTPTimeout

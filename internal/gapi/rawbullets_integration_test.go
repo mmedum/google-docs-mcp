@@ -2,10 +2,10 @@
 
 package gapi
 
-// Spike F: when does createParagraphBullets turn leading tabs into
-// nesting? The server writes a nested list as tab-prefixed paragraphs and
-// one createParagraphBullets over them. Nested items were landing at
-// level 0 with a literal tab before the text.
+// When createParagraphBullets turns leading tabs into nesting. The server
+// writes a nested list as tab-prefixed paragraphs and one
+// createParagraphBullets over them, and done naively a nested item lands
+// at level 0 with a literal tab before the text.
 //
 //	GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestRawBullets -v
 //
@@ -15,8 +15,8 @@ package gapi
 //
 //	[1,6) "Head"  [6,12) "L one"  [12,18) "L two"  [18,23) "Tail"
 //
-// What the rounds established, 2026-10-21, in direct and suggest mode
-// alike (internal/plan/lists.go acts on it):
+// Findings, in direct and suggest mode alike (internal/plan/lists.go acts
+// on them):
 //
 //   - Inserted paragraphs take the bullet of the paragraph they land in,
 //     and createParagraphBullets does not re-nest a paragraph that has
@@ -308,7 +308,7 @@ func TestRawBulletsLastBlock(t *testing.T) {
 // TestRawBulletsPreset: format_document's bullets op sends one
 // createParagraphBullets with the new preset. Over paragraphs that are
 // already bulleted, does that change the list at all? It does: the list
-// keeps its id and takes the numbered glyphs (seen 2026-10-21).
+// keeps its id and takes the numbered glyphs.
 func TestRawBulletsPreset(t *testing.T) {
 	runBulletProbes(t, []bulletProbe{
 		{"ak-bulleted-to-numbered", bulletDisc, []json.RawMessage{createBullets(t, 6, 18, numbered)}, nil, nil},

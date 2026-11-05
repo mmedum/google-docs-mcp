@@ -82,7 +82,7 @@ type statusSettings struct {
 	// Preview is the retired GDOCS_PREVIEW. The features it gated are
 	// generally available, so it reads true; whether they reach a given
 	// document is get_document's comments_view. It stays until the
-	// schema version next changes.
+	// schema version next changes (#108).
 	Preview          bool     `json:"preview"`
 	WriteModes       []string `json:"write_modes"`
 	DefaultWriteMode string   `json:"default_write_mode"`

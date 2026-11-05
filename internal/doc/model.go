@@ -350,10 +350,13 @@ func (s *Segment) ContentBlocks() []*Block {
 
 // IsBlankParagraph reports whether the block is a paragraph holding
 // nothing but whitespace: empty, or holding only spaces, as a footnote
-// Google has just created does. Content written there fills it, which
-// removes that whitespace, so a paragraph holding an image, a footnote
-// reference, a chip, an equation or a break is never blank however
-// little text it shows.
+// Google has just created does ("a space followed by a newline
+// character"). Content written there fills it, which removes that
+// whitespace, so a paragraph holding an image, a footnote reference, a
+// chip, an equation or a break is never blank however little text it
+// shows. Checked by the live steps "insert a footnote" and "read the new
+// footnote".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#CreateFootnoteRequest
 func (b *Block) IsBlankParagraph() bool {
 	if b.Paragraph == nil {
 		return false

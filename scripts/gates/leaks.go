@@ -15,10 +15,9 @@ import (
 // leaks is the confidentiality gate: nothing that identifies a person, a
 // document or a deployment may be in this repository.
 //
-// It lived in internal/leakcheck as a test. The rules are unchanged; it
-// is a command now because the Makefile's target list is what a person
-// reads to find out what is checked, and a gate running invisibly inside
-// `go test ./...` is one nobody can audit without grepping for it.
+// It is a command rather than a test because the Makefile's target list
+// is what a person reads to find out what is checked, and a gate running
+// inside `go test ./...` is one nobody can audit without grepping for it.
 
 var skipFiles = map[string]bool{"go.sum": true}
 
@@ -44,6 +43,10 @@ var (
 
 	// A Drive or Docs resource id.
 	resourceID = regexp.MustCompile(`\b1[A-Za-z0-9_\-]{25,}\b`)
+	// A heading's anchor, such as #d-10-everything-the-repository-runs or
+	// #1-create-a-project-in-the-console, is lowercase words after a short
+	// number. An id of random base64url bytes mixes cases.
+	headingSlug = regexp.MustCompile(`^[0-9]{1,3}(-[a-z0-9]+)+$`)
 
 	// What an invented id looks like: a marker word, or the run of one
 	// letter that no real id has. RE2 has no backreferences, so the run
@@ -56,12 +59,7 @@ func leaks(w io.Writer, _ []string) error {
 	if err != nil {
 		return err
 	}
-	// --others --exclude-standard adds files that are not committed yet
-	// but would be by the next `git add -A`. Scanning only the index
-	// meant a brand-new file was invisible until someone staged it, so
-	// `make check` went green on a working tree carrying an address.
-	out, err := exec.Command("git", "-C", root, "ls-files", "-z",
-		"--cached", "--others", "--exclude-standard").Output()
+	files, err := lsFiles(root)
 	if err != nil {
 		// Outside a git checkout there is nothing to enumerate and
 		// nothing to be wrong: a module-cache copy or a source tarball
@@ -72,9 +70,8 @@ func leaks(w io.Writer, _ []string) error {
 			_, err := fmt.Fprintln(w, "leaks: not a git checkout; nothing to enumerate")
 			return err
 		}
-		return fmt.Errorf("git ls-files: %w", err)
+		return err
 	}
-	files := strings.Split(strings.TrimRight(string(out), "\x00"), "\x00")
 	if len(files) < 20 {
 		return fmt.Errorf("only %d files; the scan is not seeing the repository", len(files))
 	}
@@ -91,11 +88,10 @@ func leaks(w io.Writer, _ []string) error {
 		}
 		text := string(data)
 		if strings.IndexByte(text, 0) >= 0 {
-			// Binary, so none of the rules below can read it — which is
-			// how an 8 MB `gates` binary carrying 66 absolute paths from
-			// a maintainer's machine passed this gate, `make check` and
-			// eight green checks. What can still be said about a binary
-			// is whether it belongs in a repository of source at all.
+			// Binary, so none of the rules below can read it, and a
+			// built binary carries the absolute paths of the machine
+			// that built it. What can still be said about a binary is
+			// whether it belongs in a repository of source at all.
 			if why := artifact(data); why != "" {
 				problems = append(problems, name+": "+why)
 			}
@@ -111,6 +107,30 @@ func leaks(w io.Writer, _ []string) error {
 	}
 	_, err = fmt.Fprintf(w, "leaks ok: %d files scanned\n", scanned)
 	return err
+}
+
+// lsFiles is every file git tracks under root, and every untracked file
+// it does not ignore, slash-separated and relative to root, each once.
+// --others --exclude-standard adds the files the next `git add -A` would
+// commit: the index alone leaves out a file nobody has staged, so a gate
+// would pass a working tree carrying an address.
+// https://git-scm.com/docs/git-ls-files
+func lsFiles(root string) ([]string, error) {
+	out, err := exec.Command("git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").Output()
+	if err != nil {
+		return nil, fmt.Errorf("git -C %s ls-files: %w", root, err)
+	}
+	var files []string
+	seen := map[string]bool{}
+	for _, name := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
+		// Each path once, so no finding is reported twice.
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		files = append(files, name)
+	}
+	return files, nil
 }
 
 // hasRun reports whether s repeats one character n times in a row.
@@ -168,7 +188,11 @@ func findLeaks(text string) []string {
 			out = append(out, re.what+": "+m)
 		}
 	}
-	for _, m := range resourceID.FindAllString(text, -1) {
+	for _, loc := range resourceID.FindAllStringIndex(text, -1) {
+		m := text[loc[0]:loc[1]]
+		if anchorSlug(text[:loc[0]], m) {
+			continue // names a heading, not a document
+		}
 		if !invented(m) {
 			out = append(out, "a resource id that does not look invented: "+m+
 				" (if it is synthetic, say so in the value: Synthetic, NoSuch, or a run of XXXX)")
@@ -176,6 +200,16 @@ func findLeaks(text string) []string {
 	}
 	return out
 }
+
+// anchorSlug reports whether m is a heading's anchor: a slug right after
+// "#" or a decision's "d-". An OAuth client id without its suffix, or a
+// UUID, is also lowercase words and digits, but never in that place.
+func anchorSlug(before, m string) bool {
+	afterHash := strings.HasSuffix(before, "#")
+	afterD := len(before) >= 2 && strings.EqualFold(before[len(before)-2:], "d-")
+	return (afterHash || afterD) && headingSlug.MatchString(m)
+}
+
 func safeDomain(domain string) bool {
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
 	if safeDomains[domain] {
@@ -194,9 +228,8 @@ func invented(id string) bool {
 
 // Magic numbers of a linked executable. `go build ./scripts/gates`
 // drops one beside the source under whatever name the directory has,
-// and `git add -A` sweeps it in; two of the four servers in this family
-// did exactly that, and one pushed three of them to a public main,
-// where they are 97% of the packed history.
+// and `git add -A` sweeps it in. Once pushed to a public main, it stays
+// in the history for good.
 var executableMagic = [][]byte{
 	[]byte("\x7fELF"),                                  // Linux, BSD
 	[]byte("MZ"),                                       // Windows PE

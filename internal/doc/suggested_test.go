@@ -575,9 +575,9 @@ func TestAnEmptyNestedStateInventsNoProperty(t *testing.T) {
 	t.Error("the suggestion was dropped entirely")
 }
 
-// TestSuggestedInsertionTakesItsOwnStyle holds the shapes probed live on
-// 2026-10-03 (TestRawSuggestedReset, TestRawDirectOverPendingReset in
-// internal/gapi), each a run inserted as a suggestion after bold text.
+// TestSuggestedInsertionTakesItsOwnStyle holds the shapes the integration
+// tests TestRawSuggestedReset and TestRawDirectOverPendingReset read from
+// Google, each a run inserted as a suggestion after bold text.
 // The response gives the run the style it inherited; the entry under its
 // own insertion id is the style it will have, which
 // PREVIEW_SUGGESTIONS_ACCEPTED confirmed in every case.

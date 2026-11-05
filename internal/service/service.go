@@ -67,11 +67,13 @@ type Service struct {
 	log  *slog.Logger
 	now  func() time.Time
 
-	mu      sync.Mutex
+	mu sync.Mutex
+	// cache holds each document's last complete read, keyed by document
+	// id alone, for CacheTTL; a write drops the document's entry.
 	cache   map[string]*Fetched
 	handles map[string]HandleMemory
 	// kinds remembers, per document, whether Drive types it a Markdown
-	// file rather than a Google Doc (§7.5).
+	// file rather than a Google Doc.
 	kinds map[string]kindMemo
 	// accountName is the signed-in account's name, which a comment
 	// written into a Markdown file carries.
@@ -220,15 +222,19 @@ func (s *Service) fetch(ctx context.Context, ref string, fresh bool) (*Fetched, 
 		}
 	}
 
+	// Only the inline view gives indices a later batchUpdate accepts, so
+	// every read is in it, pending suggestions included. Checked by the
+	// live steps "format" and "read with styles", a change planned below
+	// two pending suggestions read back on its target.
+	// https://developers.google.com/workspace/docs/api/how-tos/suggestions
 	opts := gapi.GetOptions{SuggestionsViewMode: gapi.SuggestionsInline, CommentsViewMode: gapi.CommentsIncluded}
 	res, err := s.api.GetDocument(ctx, id, opts)
 	commentsView := err == nil
 	if errors.Is(err, gapi.ErrInvalid) || errors.Is(err, gapi.ErrForbidden) {
-		// Google made comments and suggestions generally available on
-		// 2026-09-30 with a rollout of up to fifteen days, and a project
-		// it has not reached may refuse the comments view. The read
-		// itself must not fail for that, so it is asked again without
-		// it; a refusal that is about the document fails both times.
+		// Comments and suggestions reach projects in a staged rollout, and
+		// a project they have not reached may refuse the comments view.
+		// The read itself must not fail for that, so it is asked again
+		// without it; a refusal that is about the document fails both times.
 		s.log.DebugContext(ctx, "comments view refused; reading without it", "class", gapi.Class(err))
 		opts.CommentsViewMode = ""
 		res, err = s.api.GetDocument(ctx, id, opts)
@@ -363,7 +369,12 @@ func tabSegment(d *doc.Document, tabRef, segRef string) (*doc.Tab, *doc.Segment,
 }
 
 // DefaultMaxChars is the output budget when a caller gives none
-// (about 5k tokens).
+// (about 5k tokens). Claude Code warns at a tool result over 10 000
+// tokens and cuts one at 25 000 by default, so a read stays well under
+// both and continues from where it stopped. The live step
+// "raw read cut by the budget" reads under a small budget; the driver is
+// not Claude Code, so nothing live checks Claude Code's limits.
+// https://code.claude.com/docs/en/mcp
 const DefaultMaxChars = 20000
 
 // parseRef turns a document id or URL into an id.

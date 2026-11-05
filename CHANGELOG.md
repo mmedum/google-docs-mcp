@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-11-05
+
 ### Changed
 
 - `--dump-schemas` carries the server's instructions, the read-only server's too, and lists fixed resources and prompts once the server has any.
@@ -21,6 +23,8 @@ diff in CI flags them.
 ### Fixed
 
 - The server instructions said every write takes a mode; only `edit_document`, `format_document`, `edit_table`, `insert_object` and `layout_document` do.
+- `edit_document`'s `dry_run` promised the exact requests; a dry run shows the kinds of request it would send.
+- `--dump-schemas` named go-sdk v1.7.0; it names the SDK version the binary is built with.
 
 ## [3.2.0] - 2026-10-31
 

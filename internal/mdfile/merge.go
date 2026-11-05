@@ -9,11 +9,12 @@ import (
 
 // A working copy is a Google Doc made from a Markdown file, for a person
 // and Claude to work in together; its changes come back as Markdown
-// through Docs' export, which writes Markdown its own way (spike D):
-// front matter as a rule and a heading, inline HTML as its text, `__x__`
-// as `**x**`, tables re-spaced, list items with trailing spaces, empty
-// `&nbsp;` paragraphs. Merge carries back only what was changed in the
-// copy and leaves the file's own way of writing everything else.
+// through Docs' export, which writes Markdown its own way: front matter
+// as a rule and a heading, inline HTML as its text, `__x__` as `**x**`,
+// tables re-spaced, list items with trailing spaces, empty `&nbsp;`
+// paragraphs. Merge carries back only what was changed in the copy and
+// leaves the file's own way of writing everything else. The integration
+// test TestRawMarkdownBuild logs a copy's export beside its source.
 
 // Conflict is a block changed in the working copy that was also changed
 // in the file since the copy was made. The file's version is kept.

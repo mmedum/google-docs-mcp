@@ -17,9 +17,9 @@ import (
 
 // TestClientWentAway covers how every session ends. The SDK reports a
 // closed connection as JSON-RPC -32004 with the EOF only as message
-// text, so errors.Is(err, io.EOF) does not match it; before this was
-// handled the process exited non-zero whenever a client closed stdin
-// promptly, and a host reports that as a crash.
+// text, so errors.Is(err, io.EOF) does not match it; unhandled, the
+// process exits non-zero whenever a client closes stdin promptly, and a
+// host reports that as a crash.
 func TestClientWentAway(t *testing.T) {
 	for _, tc := range []struct {
 		name string

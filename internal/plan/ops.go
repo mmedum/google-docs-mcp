@@ -530,7 +530,8 @@ func keyIndex(op *Op) int64 {
 // updateTableCellStyle, and the collision was only ever observed on
 // updateTextStyle and updateParagraphStyle. Warning about a request kind
 // nobody has watched would be inventing a finding; the data is parsed
-// and waiting for whoever runs the probe (spike B in internal/gapi).
+// and waiting for an integration test beside TestRawSuggestedStyle in
+// internal/gapi to probe it.
 func (op *Op) sets() []string {
 	switch op.Kind {
 	case OpTextStyle:
@@ -550,17 +551,21 @@ func (op *Op) sets() []string {
 // a pending suggestion on the same range already sets.
 //
 // A warning rather than a refusal, because Google's behavior here is
-// not one rule. Verified live on 2026-09-12: suggesting bold and then
-// applying bold directly leaves the run unbolded, and the same holds for
-// a paragraph alignment suggested and then applied with the same value —
-// the batch is accepted, the reply is empty, and nothing changes. Yet a
-// font size suggested at 20pt and then set directly to 20pt does land,
-// and so does an alignment set to a different value than the pending
-// suggestion names. So the collision is real and reproducible but its
-// exact rule is not known, and a refusal would block writes that work.
-// What the person needs either way is to be told a pending suggestion is
-// sitting on the property they just set, because that is the thing
-// ops_applied cannot tell them.
+// not one rule, and the reference says nothing of it. Suggesting bold
+// and then applying bold directly leaves the run unbolded, and the same
+// holds for a paragraph alignment suggested and then applied with the
+// same value — the batch is accepted, the reply is empty, and nothing
+// changes. Yet a font size suggested at 20pt and then set directly to
+// 20pt does land, and so does an alignment set to a different value than
+// the pending suggestion names. So the collision is real and
+// reproducible but its exact rule is not known, and a refusal would
+// block writes that work. What the person needs either way is to be told
+// a pending suggestion is sitting on the property they just set, because
+// that is the thing ops_applied cannot tell them. Checked by the
+// integration tests TestRawSuggestedStyleSameProperty,
+// TestRawSuggestedStyleParagraph and TestRawSuggestedStyleValue, and the
+// live step "direct change to the suggested property".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateTextStyleRequest
 func guardRestyle(ops []Op, o Options, res *Result) {
 	if o.Mode != ModeDirect {
 		// In suggest mode the change becomes a suggestion of its own and
@@ -627,7 +632,13 @@ func overlapProps(mask fieldMask, suggested []string) []string {
 	return out
 }
 
-// guard blocks direct edits that would destroy anchored content.
+// guard blocks direct edits that would destroy anchored content:
+// deleting a range also deletes the comment anchors, suggestions and
+// inline objects inside it, which the reference does not say, while a
+// suggested deletion leaves them until it is accepted. Checked by the live steps
+// "guard: direct delete over a commented range" and "read with
+// suggestions".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#DeleteContentRangeRequest
 func guard(ops []Op, o Options, res *Result) error {
 	guardRestyle(ops, o, res)
 	for i := range ops {
@@ -847,16 +858,24 @@ func replaceRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 		return EditRequests(edits, seg), true, nil
 	}
 	// Whole-range replacement: delete, then insert at the same spot. An
-	// empty cell has nothing to delete, and Google refuses an empty range.
+	// empty cell has nothing to delete, and Google refuses an empty range
+	// with 400 "The range should not be empty", which the reference does
+	// not list. Checked by the live step "content with a table and an
+	// image".
+	// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#DeleteContentRangeRequest
 	var reqs []json.RawMessage
 	del := deleteRange(op)
 	if del.End > del.Start {
 		reqs = append(reqs, DeleteRange(del))
 	}
 	// The new paragraphs take the style of the paragraph the text lands
-	// in (spike F): the target's own while its deletion is a suggestion
-	// or it is the segment's only block, the one after it once it is
-	// gone, and the one before a last block, whose newline it lost.
+	// in, as InsertTextRequest documents. Which paragraph that is, the
+	// reference does not say: the target's own while its deletion is a
+	// suggestion or it is the segment's only block, the one after it once
+	// it is gone, and the one before a last block, whose newline it lost.
+	// Checked by the integration test TestRawBulletsLastBlock and the live
+	// step "an item after a nested one gains a child".
+	// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTextRequest
 	opts := FragmentOptions{Inherited: op.List.At, List: op.List, ListLevel: op.ListLevel, Slots: inBody(op) && op.TargetIsBlock}
 	at := Loc{Index: del.Start, SegmentID: seg.ID, TabID: seg.TabID}
 	switch {
@@ -896,11 +915,14 @@ func inBody(op *Op) bool { return op.Seg.ID == "" }
 // MaxCommentBytes is the limit on a comment's text, in bytes, as Google
 // counts it. The Docs API's insertComment refuses more than 2048,
 // "content must not exceed 2048 UTF-8 code units"; Drive's comments and
-// replies take 4096. Both measured live
-// (internal/gapi/rawlimits_integration_test.go). A comment takes either
-// path, as the comments view allows, and a reply on a suggestion's
-// thread goes through the Docs API, unmeasured, so all comment text
-// keeps to the lower limit, a plain reply's included.
+// replies take 4096. Neither reference states a limit. A comment takes
+// either path, as the comments view allows, and a reply on a
+// suggestion's thread goes through the Docs API, unmeasured, so all
+// comment text keeps to the lower limit, a plain reply's included.
+// Checked by the integration tests TestRawCommentLength and
+// TestRawDocsCommentLength.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertCommentRequest
+// https://developers.google.com/workspace/drive/api/reference/rest/v3/comments/create
 const MaxCommentBytes = 2048
 
 func proposal(op *Op) (Proposal, error) {

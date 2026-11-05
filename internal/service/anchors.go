@@ -83,7 +83,8 @@ func postReply(p gdocs.Post) CommentReply {
 // postAuthor is who wrote a post, labeled when the name came out of an
 // imported file rather than an account: on a Markdown file, a comment
 // whose entry carries no token, which anyone who can edit the file could
-// have written (spike D).
+// have written: the Docs view names whoever the bytes name. Checked by
+// the integration test TestRawMarkdownComments.
 func postAuthor(p gdocs.Post) string {
 	if p.FromImportedDocument {
 		return authorFromFile(p.Author.DisplayName)
@@ -133,7 +134,11 @@ func driveThreads(list []*gapi.DriveComment) []CommentThread {
 }
 
 // viewAnchors maps comment ids to the range the comments view pins
-// them to, when the document carries comment anchors.
+// them to, when the document carries comment anchors. A thread carries
+// only an anchor id; its ranges are in the tab's
+// DocumentTab.commentAnchors under that id. Checked by the live step
+// "read a section with its comments", which marks comments through this map.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#DocumentTab
 func viewAnchors(w *gdocs.Document) map[string]*gdocs.Range {
 	if w == nil || len(w.Comments) == 0 {
 		return nil

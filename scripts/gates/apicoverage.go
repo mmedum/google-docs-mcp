@@ -17,9 +17,8 @@ import (
 )
 
 // The two files this gate reads, split by who writes them. Nobody edits
-// the snapshot by hand and nothing but a person writes the verdicts:
-// mixing the two is how a sibling ended up with machine-owned columns in
-// a hand-kept file, checked only by a target CI never runs.
+// the snapshot by hand and nothing but a person writes the verdicts, so
+// no hand-kept file carries a column a command owns.
 const (
 	apiMethodsFile  = "testdata/api-methods.json"
 	apiCoverageFile = "testdata/api-coverage.tsv"
@@ -123,9 +122,8 @@ func countUsed(verdicts []verdict) int {
 }
 
 // coverageProblems is the rule, over three lists rather than three files.
-// The reading is above it: a fix that lives in the reader is one any
-// caller can walk past, which a sibling proved by watching its own tests
-// bypass exactly such a fix.
+// The reading is above it: a rule that lives in the reader is one a test
+// of the rule can walk past.
 func coverageProblems(published map[string]apiMethod, verdicts []verdict, calls []string) []string {
 	var problems []string
 	seen := map[string]int{}
@@ -133,7 +131,7 @@ func coverageProblems(published map[string]apiMethod, verdicts []verdict, calls 
 	for _, v := range verdicts {
 		key := v.API + "\t" + v.Method
 		if _, ok := published[key]; !ok {
-			problems = append(problems, fmt.Sprintf("%s:%d: %s %s has a verdict and is not a published method any more",
+			problems = append(problems, fmt.Sprintf("%s:%d: %s %s has a verdict and is not a published method",
 				apiCoverageFile, v.line, v.API, v.Method))
 			continue
 		}
@@ -389,12 +387,11 @@ func readVerdicts(path string) ([]verdict, error) {
 // first and returns an error last, which is what an API call looks like
 // here.
 //
-// A sibling derives the same list by reflection, which is shorter and
-// sees promoted methods — but that is safe there only because its client
-// package has a test refusing any method that is neither a call by this
-// rule nor a named reporter. internal/gapi has no such test, so the rule
-// stays syntactic: a helper wrongly counted as a call would report
-// coverage this server does not have, which is worse than no gate.
+// The rule is syntactic rather than by reflection. Reflection sees
+// promoted methods, and is safe only beside a test refusing any method
+// that is neither a call by this rule nor a named reporter, which
+// internal/gapi does not have: a helper wrongly counted as a call would
+// report coverage this server does not have, which is worse than no gate.
 func clientCalls(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -70,10 +70,9 @@ func TestFieldProblems(t *testing.T) {
 				fieldVerdict{Schema: "TextRun", Property: "somethingNew", Verdict: "out", line: 2}),
 			modeled: modeledFields(),
 			want:    "is out with no reason given",
-			// And the rejected row must not excuse the field it names.
-			// It used to: every row was searched, valid or not, so a row
-			// the gate had just complained about still counted as a
-			// verdict and the missing field went unreported.
+			// And the rejected row must not excuse the field it names: a
+			// row the gate refuses is no verdict, so the missing field is
+			// reported too.
 			andAlso: "TextRun.somethingNew is published and TextRun does not model it",
 		},
 		{
@@ -104,7 +103,7 @@ func TestFieldProblems(t *testing.T) {
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "Telepathy", Property: "x", Verdict: "out", Reason: "invented", line: 2}),
 			modeled: modeledFields(),
-			want:    "is not a published schema any more",
+			want:    "is not a published schema; drop the row",
 		},
 		{
 			name:      "the same field judged twice",
@@ -193,31 +192,31 @@ func TestFieldProblems(t *testing.T) {
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "withdrawn", Verdict: "out", Reason: "no tool reads it", line: 2}),
 			modeled: modeledFields(),
-			want:    "TextRun.withdrawn is written off and Google does not publish it any more",
+			want:    "TextRun.withdrawn is written off and Google does not publish it;",
 		},
 		{
-			name:      "an out row for a field the types have since grown",
+			name:      "an out row for a field the types model",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "content", Verdict: "out", Reason: "no tool reads it", line: 2}),
 			modeled: modeledFields(),
-			want:    "TextRun.content is written off and TextRun models it now",
+			want:    "TextRun.content is written off, yet TextRun models it",
 		},
 		{
-			name:      "an extra row for a field Google now publishes",
+			name:      "an extra row for a field Google publishes",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "content", Verdict: "extra", Reason: "Developer Preview", line: 2}),
 			modeled: modeledFields(),
-			want:    "TextRun.content is declared an extra and Google publishes it now",
+			want:    "TextRun.content is declared an extra, yet Google publishes it",
 		},
 		{
-			name:      "an extra row for a field nothing carries any more",
+			name:      "an extra row for a field nothing carries",
 			published: publishedFields(),
 			verdicts: append(slices.Clone(ok),
 				fieldVerdict{Schema: "TextRun", Property: "dropped", Verdict: "extra", Reason: "Developer Preview", line: 2}),
 			modeled: modeledFields(),
-			want:    "TextRun.dropped is declared an extra and no struct carries it any more",
+			want:    "TextRun.dropped is declared an extra and no struct carries it;",
 		},
 		{
 			name:      "a property verdict on a schema no struct models",

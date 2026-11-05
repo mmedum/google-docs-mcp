@@ -1,6 +1,6 @@
 package service
 
-// Regression tests for the findings of the Phase 1 and Phase 2 reviews.
+// Regression tests for edge cases of the read and write paths.
 
 import (
 	"context"
@@ -146,7 +146,7 @@ func TestEmptySectionReplaceInsertsParagraph(t *testing.T) {
 // comments view.
 func TestSuggestRecheckedOnConflict(t *testing.T) {
 	svc, api := writable(t, true)
-	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The provided revision id does not match the current revision"}}
+	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The required revision ID 'made-up-revision' does not match the latest revision."}}
 	api.viewErrAfterBatch = viewRefused
 	_, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "suggest", Ops: []EditOp{{Kind: plan.OpReplace, Target: &Target{Text: "First point"}, Content: "First item"}}})
 	if classOf(err) != "unavailable" || len(api.batches) != 1 {
@@ -156,7 +156,7 @@ func TestSuggestRecheckedOnConflict(t *testing.T) {
 
 func TestExpectRevisionRecheckedOnConflict(t *testing.T) {
 	svc, api := writable(t, false)
-	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The provided revision id does not match the current revision"}}
+	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The required revision ID 'made-up-revision' does not match the latest revision."}}
 	var w gdocs.Document
 	_ = json.Unmarshal(api.raw, &w)
 	w.RevisionID = "rev-0002"

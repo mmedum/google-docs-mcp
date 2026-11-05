@@ -635,7 +635,12 @@ func aligned(a string) bool {
 	return a != "" && a != "START" && a != "ALIGNMENT_UNSPECIFIED"
 }
 
-// styleAnnotation names formatting markdown cannot carry.
+// styleAnnotation names formatting markdown cannot carry. A run's
+// TextStyle holds only what the run sets itself ("Inherited text styles
+// are represented as unset fields"), so the annotation is already the
+// run's deviation from what it inherits. Checked by the live step "read
+// with styles".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#TextStyle
 func styleAnnotation(st doc.TextStyle) string {
 	var parts []string
 	// A monospace font is already carried by the backticks around the run.

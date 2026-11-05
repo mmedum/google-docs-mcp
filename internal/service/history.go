@@ -26,8 +26,11 @@ type RevisionsResult struct {
 	Text      string         `json:"-"`
 }
 
-// ListRevisions returns the newest revisions of a document. Drive may
-// omit older revisions of frequently edited documents.
+// ListRevisions returns the newest revisions of a document. Drive's list
+// "might be incomplete for files with a large revision history", busy
+// Google Docs among them, so the result says so. The live step
+// "list revisions" shows the caveat; nothing can force an incomplete list.
+// https://developers.google.com/workspace/drive/api/reference/rest/v3/revisions/list
 func (s *Service) ListRevisions(ctx context.Context, ref string, limit int) (*RevisionsResult, error) {
 	id, err := parseRef(ref)
 	if err != nil {

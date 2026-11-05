@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -46,9 +48,8 @@ func TestPinsShell(t *testing.T) {
 }
 
 // The hole the version checks above could never see: an action pinned by
-// SHA whose tool is left to float. The two named cases are the two that
-// actually shipped unpinned in a sibling server, one of them failing a
-// release.
+// SHA whose tool is left to float. The two named cases are the two tools
+// the release workflow installs.
 func TestUnpinnedTools(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -56,7 +57,7 @@ func TestUnpinnedTools(t *testing.T) {
 		wantBad bool
 	}{
 		{
-			"cosign with no release input — this failed a sibling's release",
+			"cosign with no release input",
 			"jobs:\n  a:\n    steps:\n      - name: Install cosign\n        uses: sigstore/cosign-installer@" + fakeSHA + "\n",
 			true,
 		},
@@ -84,6 +85,12 @@ func TestUnpinnedTools(t *testing.T) {
 			"gitleaks takes its scanner version from the environment",
 			"jobs:\n  a:\n    steps:\n      - uses: gitleaks/gitleaks-action@" + fakeSHA + "\n        env:\n          GITLEAKS_VERSION: 8.31.0\n",
 			false,
+		},
+		{
+			"a blank line above an unpinned installer lends it no later step's version",
+			"jobs:\n  a:\n    steps:\n      - run: echo\n\n      - uses: sigstore/cosign-installer@" + fakeSHA +
+				"\n      - uses: anchore/sbom-action/download-syft@" + fakeSHA + "\n        with:\n          cosign-release: v3.1.3\n          syft-version: v1.51.1\n",
+			true,
 		},
 		{
 			"an action that installs nothing needs no version",
@@ -136,6 +143,112 @@ func TestEveryActionIsClassified(t *testing.T) {
 			}
 		}
 	}
+}
+
+// pinCopy is one copy of a tool's pin: the file that holds it, and a
+// pattern whose first group is everything on the line before the version.
+type pinCopy struct {
+	file    string
+	pattern *regexp.Regexp
+}
+
+const pinsCI = ".github/workflows/ci.yml"
+
+// The six copies of the three tools the Makefile and CI both run.
+var (
+	mkGolangci  = pinCopy{"Makefile", regexp.MustCompile(`(?m)^(GOLANGCI_VERSION\s*\?=\s*)\S+`)}
+	mkVulncheck = pinCopy{"Makefile", regexp.MustCompile(`(?m)^(GOVULNCHECK_VERSION\s*\?=\s*)\S+`)}
+	mkLicenses  = pinCopy{"Makefile", regexp.MustCompile(`(?m)^(GO_LICENSES_VERSION\s*\?=\s*)\S+`)}
+	ciGolangci  = pinCopy{pinsCI, regexp.MustCompile(`(?m)^(\s+version:\s*)\S+`)}
+	ciVulncheck = pinCopy{pinsCI, regexp.MustCompile(`(golang\.org/x/vuln/cmd/govulncheck@)\S+`)}
+	ciLicenses  = pinCopy{pinsCI, regexp.MustCompile(`(github\.com/google/go-licenses@)\S+`)}
+)
+
+// set writes version into the one place the copy is, and fails the test
+// when the file holds it anywhere else or nowhere.
+func (c pinCopy) set(t *testing.T, files map[string]string, version string) {
+	t.Helper()
+	if n := len(c.pattern.FindAllStringIndex(files[c.file], -1)); n != 1 {
+		t.Fatalf("%s matches %s %d times, want once", c.pattern, c.file, n)
+	}
+	files[c.file] = c.pattern.ReplaceAllString(files[c.file], "${1}"+version)
+}
+
+// The Makefile runs three tools CI runs, each at a variable, and the gate
+// holds each variable to CI's copy. Every row starts with all six copies
+// at v1.0.0.
+func TestPinsHoldTheMakefileToCI(t *testing.T) {
+	const drift = " in ci.yml; make check runs one and CI the other"
+	for _, tc := range []struct {
+		name string
+		edit func(t *testing.T, files map[string]string)
+		want string
+	}{
+		{"every copy agrees", func(*testing.T, map[string]string) {}, ""},
+		{"golangci-lint moved in the Makefile", func(t *testing.T, f map[string]string) { mkGolangci.set(t, f, "v1.0.1") },
+			"golangci-lint is v1.0.1 in the Makefile's GOLANGCI_VERSION and v1.0.0" + drift},
+		{"golangci-lint moved in CI", func(t *testing.T, f map[string]string) { ciGolangci.set(t, f, "v1.0.1") },
+			"golangci-lint is v1.0.0 in the Makefile's GOLANGCI_VERSION and v1.0.1" + drift},
+		{"govulncheck moved in the Makefile", func(t *testing.T, f map[string]string) { mkVulncheck.set(t, f, "v1.0.1") },
+			"govulncheck is v1.0.1 in the Makefile's GOVULNCHECK_VERSION and v1.0.0" + drift},
+		{"govulncheck moved in CI", func(t *testing.T, f map[string]string) { ciVulncheck.set(t, f, "v1.0.1") },
+			"govulncheck is v1.0.0 in the Makefile's GOVULNCHECK_VERSION and v1.0.1" + drift},
+		{"go-licenses moved in the Makefile", func(t *testing.T, f map[string]string) { mkLicenses.set(t, f, "v1.0.1") },
+			"go-licenses is v1.0.1 in the Makefile's GO_LICENSES_VERSION and v1.0.0" + drift},
+		{"go-licenses moved in CI", func(t *testing.T, f map[string]string) { ciLicenses.set(t, f, "v1.0.1") },
+			"go-licenses is v1.0.0 in the Makefile's GO_LICENSES_VERSION and v1.0.1" + drift},
+		{"a leading v on one copy only", func(t *testing.T, f map[string]string) { ciVulncheck.set(t, f, "1.0.0") }, ""},
+		{"the Makefile runs a tool at a literal", func(t *testing.T, f map[string]string) {
+			f["Makefile"] = strings.Replace(f["Makefile"], "govulncheck@$(GOVULNCHECK_VERSION)", "govulncheck@v1.0.0", 1)
+		}, "the Makefile does not run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION), the pin this check holds to CI"},
+		{"the Makefile sets no variable", func(t *testing.T, f map[string]string) {
+			f["Makefile"] = mkLicenses.pattern.ReplaceAllString(f["Makefile"], "")
+		}, "the Makefile does not set GO_LICENSES_VERSION, which it runs go-licenses at"},
+		{"CI runs no copy", func(t *testing.T, f map[string]string) {
+			f[pinsCI] = ciLicenses.pattern.ReplaceAllString(f[pinsCI], "go-licenses-gone ")
+		}, "ci.yml pins no go-licenses, which the Makefile runs at $(GO_LICENSES_VERSION)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := pinsFiles(t)
+			for _, c := range []pinCopy{mkGolangci, mkVulncheck, mkLicenses, ciGolangci, ciVulncheck, ciLicenses} {
+				c.set(t, files, "v1.0.0")
+			}
+			tc.edit(t, files)
+			root := t.TempDir()
+			putAll(t, root, files)
+			t.Chdir(root)
+			err := pins(io.Discard, nil)
+			if got := errorText(err); got != tc.want {
+				t.Errorf("pins = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// pinsFiles is the repository's copy of every file the pins gate reads.
+func pinsFiles(t *testing.T) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	for _, rel := range []string{"go.mod", "Makefile", ".pre-commit-config.yaml"} {
+		files[rel] = string(repoFile(t, rel))
+	}
+	entries, err := os.ReadDir(repoPath(t, ".github/workflows"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		rel := ".github/workflows/" + e.Name()
+		files[rel] = string(repoFile(t, rel))
+	}
+	return files
+}
+
+// errorText is the error's text, empty for none.
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 const fakeSHA = "0000000000000000000000000000000000000000"

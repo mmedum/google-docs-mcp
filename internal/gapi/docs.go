@@ -24,7 +24,7 @@ type GetOptions struct {
 	CommentsViewMode    string
 	// Fields is a partial response mask. The comments view honors one
 	// only with the tabs' content asked for, which GetDocument always
-	// does (spike D).
+	// does. Checked by the integration test TestRawMarkdownMask.
 	Fields string
 }
 
@@ -82,8 +82,15 @@ type BatchUpdateResponse struct {
 	Raw          json.RawMessage   `json:"-"`
 }
 
-// BatchUpdate applies requests atomically. A network failure or a 5xx
-// after the request was sent is reported as ErrAmbiguous, never retried.
+// BatchUpdate applies requests atomically: Google validates every one
+// first and, if any is not valid, applies none. A later batch is a call
+// of its own, so its failure leaves an earlier one applied. Checked by
+// the live steps "content with an image Google cannot fetch" and "three
+// grid changes on one table: a batch each, renumbered between".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate
+//
+// A network failure or a 5xx after the request was sent is reported as
+// ErrAmbiguous, never retried.
 func (c *Client) BatchUpdate(ctx context.Context, id string, req *BatchUpdateRequest) (*BatchUpdateResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {

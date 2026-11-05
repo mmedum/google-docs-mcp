@@ -13,8 +13,9 @@ import (
 	"unicode/utf16"
 )
 
-// brief is a Google Doc exported as .docx (spike H): headings, a link, a
-// nested bulleted list, a numbered one, a table. Synthetic content.
+// brief is a Google Doc exported as .docx by the integration test
+// TestRawDocxExport: headings, a link, a nested bulleted list, a numbered
+// one, a table. Synthetic content.
 func brief(t *testing.T) []byte {
 	t.Helper()
 	b, err := os.ReadFile("testdata/brief.docx")
@@ -78,7 +79,8 @@ func texts(f *File) string {
 }
 
 // The paragraphs are the ones the Docs API lists for the same file, in its
-// order and with its text (spike H).
+// order and with its text, as the integration test TestRawDocxRevision
+// reads them.
 func TestOpenBrief(t *testing.T) {
 	f := open(t, brief(t))
 	want := "Brief|Intro paragraph with bold and a link.|Points|First point|Nested point|Second point|One|Two||A|B|1|2||Closing line."
@@ -169,8 +171,9 @@ func TestReplaceInRun(t *testing.T) {
 }
 
 // Tracked, the removed text is marked deleted and the new text inserted;
-// Docs reads both as one suggestion (spike H). Two changes in one run come
-// out as one rewrite of it.
+// Docs reads both as one suggestion, as the integration test
+// TestRawDocxRevision reads it. Two changes in one run come out as one
+// rewrite of it.
 func TestReplaceTracked(t *testing.T) {
 	f := open(t, brief(t))
 	i := para(t, f, "Closing line.")

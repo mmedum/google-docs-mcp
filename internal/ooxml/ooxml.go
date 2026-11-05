@@ -6,11 +6,12 @@
 // encoding/xml cannot write a document back with its namespace prefixes
 // as they were (golang/go#9519, #11496), so nothing is re-encoded.
 //
-// The Docs API reads such a file and refuses every write to it (spike G):
-// a Word tracked change reads there as a suggestion, a Word comment as an
-// anchored comment, and an uploaded revision is read again within seconds
-// (spike H). So a suggestion is written as a tracked change and a comment
-// as a Word comment.
+// The Docs API reads such a file and refuses every write to it with 400
+// "The document must not be an Office file": a Word tracked change reads
+// there as a suggestion, a Word comment as an anchored comment, and an
+// uploaded revision is read again within seconds. So a suggestion is
+// written as a tracked change and a comment as a Word comment. Checked by
+// the integration tests TestRawDocx and TestRawDocxRevision.
 package ooxml
 
 import (
@@ -57,7 +58,7 @@ type File struct {
 	r string
 	// Paras are the body's paragraphs in document order, the paragraphs
 	// of table cells included, which is the order the Docs API lists
-	// them in (spike H).
+	// them in. Checked by the integration test TestRawDocxRevision.
 	Paras   []*Para
 	splices []splice
 	queued  map[int][]pending // per paragraph, until written

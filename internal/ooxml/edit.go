@@ -310,7 +310,10 @@ func (f *File) paraXML(np NewPara, tr *Track) (string, error) {
 
 // runsXML is new runs' markup, each with base's look and its own on top,
 // tracked as inserted when tr says so. A tracked insertion goes inside a
-// link, which may not go inside one.
+// link, which may not go inside one: Docs reads a link's text inside
+// w:ins inside w:hyperlink, and drops it from w:hyperlink inside w:ins,
+// which no reference describes. Checked by the integration test
+// TestRawDocxEngine.
 func (f *File) runsXML(base string, runs []Run, inLink bool, tr *Track) (string, error) {
 	var b strings.Builder
 	for _, r := range runs {

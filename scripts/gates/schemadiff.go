@@ -19,11 +19,11 @@ import (
 // breaks a caller, and this is what makes the version promise in the
 // README enforceable rather than stated.
 //
-// It was a shell script. The reason it is not one any more is the whole
-// of §1: this builds an old revision in a worktree, parses two JSON
-// documents and compares them, and every one of those steps in bash is a
-// place where a quote ends up inside a string. It also has to run on the
-// Windows runner, where bash is a dependency rather than a given.
+// It is Go, not a shell script: this builds an old revision in a
+// worktree, parses two JSON documents and compares them, and every one
+// of those steps in bash is a place where a quote ends up inside a
+// string. It also has to run on the Windows runner, where bash is a
+// dependency rather than a given.
 func schemaDiff(w io.Writer, args []string) error {
 	bin := binOr(args)
 
@@ -57,7 +57,7 @@ func schemaDiff(w io.Writer, args []string) error {
 	if len(c.breaking) == 0 {
 		return nil
 	}
-	changelog, err := os.ReadFile("CHANGELOG.md")
+	changelog, err := os.ReadFile(changelogPath)
 	if err != nil {
 		return err
 	}
@@ -77,9 +77,19 @@ func schemaDiff(w io.Writer, args []string) error {
 	return nil
 }
 
-// codeSpan is a name in backticks, which is how a **Breaking:** entry
+// codeSpan is text in backticks, which is how a **Breaking:** entry
 // names a tool or a resource template.
 var codeSpan = regexp.MustCompile("`([^`]+)`")
+
+// codeSpans is the text of each code span in s.
+func codeSpans(s string) []string {
+	spans := codeSpan.FindAllStringSubmatch(s, -1)
+	out := make([]string, 0, len(spans))
+	for _, m := range spans {
+		out = append(out, m[1])
+	}
+	return out
+}
 
 // A version heading as Keep a Changelog writes it, a prerelease included,
 // unlike staleness's versionHeading: a prerelease that keeps the major
@@ -105,8 +115,8 @@ func undeclaredBreaks(breaking []change, changelog, tag string) ([]string, error
 		if !strings.Contains(line, "**Breaking:**") {
 			continue
 		}
-		for _, m := range codeSpan.FindAllStringSubmatch(line, -1) {
-			named[m[1]] = true
+		for _, span := range codeSpans(line) {
+			named[span] = true
 		}
 	}
 	var out []string
@@ -232,6 +242,7 @@ type footer struct {
 // continues that value, wrapped at the margin or indented (item 10). A
 // paragraph whose first line is prose ends the block, so a line of prose
 // that happens to start "BREAKING CHANGE:" is not a footer.
+// https://www.conventionalcommits.org/en/v1.0.0/#specification
 func footers(message string) []footer {
 	paras := paragraphBreak.Split(strings.TrimSpace(strings.ReplaceAll(message, "\r\n", "\n")), -1)
 	var out []footer
@@ -296,10 +307,7 @@ func footerNames(text string) []string {
 			break
 		}
 	}
-	var out []string
-	for _, m := range codeSpan.FindAllStringSubmatch(list, -1) {
-		out = append(out, m[1])
-	}
+	out := codeSpans(list)
 	// The rest is split on commas alone, so prose is one item that names
 	// nothing rather than words that each might.
 	for _, n := range strings.Split(codeSpan.ReplaceAllString(list, ""), ",") {

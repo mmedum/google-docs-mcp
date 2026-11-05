@@ -18,7 +18,7 @@ import (
 // and each of them has to see it.
 func TestStyleOnlySuggestionIsVisible(t *testing.T) {
 	d := start(t)
-	_, sc := d.okStruct("create", "create_document", map[string]any{
+	_, sc := d.okStruct("create the style-only scratch document", "create_document", map[string]any{
 		"title":   "google-docs-mcp style-only suggestion (safe to delete)",
 		"content": "# Style-only suggestion\n\nClean sentence one here.\n\nClean sentence two here."})
 	doc := str(sc, "id")

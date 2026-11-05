@@ -67,8 +67,8 @@ func (s *Service) ListComments(ctx context.Context, req ListCommentsRequest) (*C
 	threads := driveThreads(l.list)
 	if word && f.Wire != nil {
 		// A Word file's own comments are in the file, which Drive cannot
-		// see and the Docs comments view lists; the two sets are disjoint
-		// (spike G).
+		// see and the Docs comments view lists; the two sets are disjoint.
+		// Checked by the integration test TestRawDocx.
 		threads = append(threads, viewThreads(f.Wire)...)
 	}
 	res := tallyThreads(locateComments(f, threads), f.Doc.RevisionID, req.HideResolved)

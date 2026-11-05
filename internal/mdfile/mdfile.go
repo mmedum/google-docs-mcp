@@ -1,8 +1,8 @@
 // Package mdfile works on a Markdown file stored in Drive as text. Google
 // Docs opens such a file in place and keeps the comments made in its
 // editor inside the bytes: a marker on each side of the commented
-// passage, and a gdoc_comments block that must end the file (spike D,
-// architecture §18). The package shows the text without that markup,
+// passage, and a gdoc_comments block that must end the file. No Google
+// page documents the markup. The package shows the text without it,
 // finds exact text in it, plans edits that never delete, split or move
 // the markup out of order, and checks that the bytes it writes carry
 // the same comments as the bytes it read.
@@ -197,6 +197,9 @@ var frontMatterRE = regexp.MustCompile(`\A---[ \t]*\n[A-Za-z0-9_"'-][^\n]*:[^\n]
 
 // mangledRE is what the Docs editor leaves of front matter on a save: a
 // rule, a blank line, and a second-level heading holding "key: value".
+// Google's help page for Markdown files does not mention front matter,
+// and only a person's save in the editor does this, so no test re-checks it.
+// https://support.google.com/docs/answer/18289341
 var mangledRE = regexp.MustCompile(`\A---\n\n## [A-Za-z0-9_-]+: `)
 
 func frontMatter(text string) FrontMatter {
@@ -292,7 +295,11 @@ var blockKeyRE = regexp.MustCompile(`(?m)^gdoc_comments:`)
 
 // ContainsMarkup reports whether text holds what Docs would read as its
 // comment markup, which content written into a file must not: a marker,
-// or the key that opens the block at the start of a line.
+// or the key that opens the block at the start of a line. Markup uploaded
+// through Drive makes a real thread in the Docs comments view, under
+// whatever author the bytes name, so such content would forge a comment.
+// Checked by the live steps "forged comment markup" and
+// "comment on a passage", and by the integration test TestRawMarkdownEdges.
 func ContainsMarkup(text string) bool {
 	return markerRE.MatchString(text) || blockKeyRE.MatchString(text)
 }

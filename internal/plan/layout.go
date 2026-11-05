@@ -19,7 +19,10 @@ const (
 )
 
 // Section types insertSectionBreak accepts. Columns are not a section
-// type: they are set with SectionSpec.Columns on the section itself.
+// type: they are set with SectionSpec.Columns on the section itself, as
+// SectionStyle.columnProperties. Checked by the live steps "section
+// break" and "two columns in the new section".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertSectionBreakRequest
 const (
 	SectionContinuous = "CONTINUOUS"
 	SectionNextPage   = "NEXT_PAGE"
@@ -127,6 +130,7 @@ func (s PageSpec) body() (map[string]any, []string) {
 	if c, ok := colorJSON(s.Background); ok {
 		// DocumentStyle.background is a Background, whose own color field
 		// is the OptionalColor colorJSON builds.
+		// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#Background
 		set("background", map[string]any{"color": c})
 	} else if s.Background == "none" {
 		fields = append(fields, "background")
@@ -166,7 +170,9 @@ func UpdateDocumentStyle(s PageSpec, tabID string) json.RawMessage {
 // SectionSpec is a change to one section: its columns, its own margins,
 // and where its page numbering starts. It carries no section type:
 // SectionStyle.sectionType is output only, so a section is continuous or
-// starts a page according to the break that made it.
+// starts a page according to the break that made it. Checked by the live
+// steps "section break" and "a section's type is read-only".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#SectionStyle
 type SectionSpec struct {
 	PageMargins
 	Columns               int
@@ -298,9 +304,12 @@ func (s NamedStyleSpec) Validate() error {
 func UpdateNamedStyle(s NamedStyleSpec, tabID string) json.RawMessage {
 	style := map[string]any{"namedStyleType": s.Style}
 	fields := []string{"namedStyleType"}
-	// The mask names the parent as well as each leaf: "to update the text
-	// style to bold, set fields to include text_style and
-	// text_style.bold" (UpdateNamedStyleRequest reference).
+	// The mask names the parent as well as each leaf, as the
+	// UpdateNamedStyleRequest reference says: to make the text style bold,
+	// fields includes textStyle and textStyle.bold. Checked by the live
+	// steps "page setup (A4) and a redefined HEADING_2" and "read the
+	// redefined HEADING_2 back".
+	// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateNamedStyleRequest
 	if text, f := s.Text.body(); len(f) > 0 {
 		style["textStyle"] = text
 		fields = append(fields, "textStyle")

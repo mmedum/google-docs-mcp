@@ -10,10 +10,17 @@ diff in CI flags them.
 
 ### Changed
 
-- For contributors:
-  - CI fails a pull request that changes the tool surface, annotations included, unless a commit footer names each changed item. A break of something a release shipped needs `BREAKING CHANGE:`. Only the names before the first colon followed by white space in a footer's value count, separated by commas. A footer's value may run on over several lines, and a footer beside it, such as `Closes #12`, does not drop it; a `Token #value` footer acknowledges nothing. A refusal prints the footer that fixes it, and a gate that could not run says so.
-  - The schema diff lists each change by the part that moved, and counts a removed resource template as a break. A tool that breaks also lists every part of it that moved, its schemas included.
-  - `--dump-schemas` carries the server's instructions, the read-only server's too, and lists fixed resources and prompts once the server has any.
+- `--dump-schemas` carries the server's instructions, the read-only server's too, and lists fixed resources and prompts once the server has any.
+- For contributors: a pull request that changes the tool surface, annotations included, needs a commit footer naming each changed item; `CONTRIBUTING.md` gives the syntax.
+- For contributors: the schema diff lists each change by the part that moved, and fails on a removed resource template as on a removed tool.
+- For contributors: `make check` runs a docs gate. Decisions carry IDs in `docs/architecture.md`; cite one by ID, never by section number.
+- For contributors: a verified Google behavior goes in the comment at the code that depends on it, naming its live step or integration test.
+- For contributors: depguard refuses an import of `google.golang.org/api`; extend the wire types in `internal/gdocs` instead.
+- For contributors: `make live` runs the live driver; `LIVE_ARGS` passes flags to `go test`. `CONTRIBUTING.md` covers it.
+
+### Fixed
+
+- The server instructions said every write takes a mode; only `edit_document`, `format_document`, `edit_table`, `insert_object` and `layout_document` do.
 
 ## [3.2.0] - 2026-10-31
 

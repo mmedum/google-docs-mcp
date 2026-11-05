@@ -174,7 +174,9 @@ func (s *Service) applyRound(ctx context.Context, req EditRequest, result *EditR
 // batches before this one, and this one's. A batch that is itself a
 // round knows its call's only from req.own, and Google files a later
 // suggest-mode write under the first batch's suggestion without naming
-// it again (seen live 2026-10-09).
+// it again; no Google page documents this. Checked by the live step
+// "content with a table and an image, suggested", which fails when a
+// later batch warns about the call's own suggestion.
 func owned(req EditRequest, result *EditResult) []string {
 	return append(slices.Clone(req.own), result.SuggestionIDs...)
 }
@@ -278,7 +280,12 @@ func followupOps(pre *doc.Document, ro *resolvedOps, result *EditResult) []pendi
 		}
 		ids[fu.Kind] = id[1:]
 		// The content appends into the new segment, whose sole paragraph
-		// is blank; the insertion point fills it (see insertPoint.atBlank).
+		// is blank (a new footnote's holds one space); the insertion point
+		// fills it, so "# Title" content keeps its heading style (see
+		// insertPoint.atBlank). The reference does not say what a new
+		// segment holds. Checked by the live steps "add tab",
+		// "read the nested tab" and "create header and footer".
+		// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#CreateHeaderRequest
 		ops = append(ops, pending{EditOp{Seq: fu.Seq, Kind: plan.OpAppend, Fragment: fu.Fragment, Location: &Location{At: "end", Of: &Target{Tab: fu.Seg.TabID, Segment: id[0]}}}, fu})
 	}
 	return ops

@@ -22,12 +22,12 @@ import (
 // A Markdown file that Docs opens in place stays a text/markdown blob:
 // the Docs API reads it and refuses every write, and Drive serves and
 // replaces its bytes. Such a file is read from its bytes and edited as
-// the text it is, with the comment markup Docs keeps in it guarded
-// (architecture §7.5).
+// the text it is, with the comment markup Docs keeps in it guarded.
 
 const (
-	// maxUpload is the largest file written: Drive's ceiling for a
-	// simple upload is 5 MB.
+	// maxUpload is the largest file written: Drive's ceiling for the
+	// simple and multipart uploads this server sends is 5 MB.
+	// https://developers.google.com/workspace/drive/api/guides/manage-uploads
 	maxUpload = 5 << 20
 	// mdMaxRead is the largest file read.
 	mdMaxRead = 20 << 20
@@ -134,7 +134,7 @@ func (s *Service) isMarkdown(ctx context.Context, ref string) bool {
 }
 
 // wordUnsupported refuses on a Word file what only the Docs API does,
-// which refuses every write to one (spike G); nil for any other document.
+// which refuses every write to one; nil for any other document.
 func (s *Service) wordUnsupported(ctx context.Context, ref, what string) error {
 	if s.isWord(ctx, ref) {
 		return Errorf("unsupported", "this is a Word file (.docx), whose text this server writes into the file itself, "+

@@ -5,7 +5,7 @@
 // client would. It is a manual check, never part of CI: it writes to
 // real documents and costs real API calls.
 //
-//	make build && go test -tags=live ./internal/livecheck -v -timeout 20m
+//	make live
 //
 // Deletion steps run only with GDOCS_ENABLE_DESTRUCTIVE=true. The
 // scratch document is left behind on purpose and
@@ -17,6 +17,7 @@ package livecheck
 
 import (
 	"context"
+	"flag"
 	"github.com/mmedum/google-docs-mcp/v3/internal/redact"
 	"os"
 	"os/exec"
@@ -40,9 +41,9 @@ type driver struct {
 }
 
 // asksNobody is the client's answer to a question from the server, which
-// asks nobody (docs/architecture.md §12a): the driver is a client that
-// can be asked, so a question from any step fails the run. The question
-// is not logged, since it would quote the document; its length is.
+// asks nobody: the driver is a client that can be asked, so a question
+// from any step fails the run. The question is not logged, since it
+// would quote the document; its length is.
 func asksNobody(t *testing.T) func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
 	return func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
 		t.Errorf("the server asked the person a question of %d characters; it asks nobody", len(req.Params.Message))
@@ -67,11 +68,14 @@ func (d *driver) pendingIDs(label, doc string) []any {
 // pendingID is a suggestion's line in list_suggestions: "- <id> [<handle>] <kind>".
 var pendingID = regexp.MustCompile(`(?m)^- (\S+) \[`)
 
+// binFlag is the binary the driver runs; make live passes the one it built.
+var binFlag = flag.String("bin", "../../google-docs-mcp", "the google-docs-mcp binary to drive")
+
 // start builds nothing and assumes `make build`: the point is to drive
 // the binary a person would run.
 func start(t *testing.T) *driver {
 	t.Helper()
-	bin, err := filepath.Abs("../../google-docs-mcp")
+	bin, err := filepath.Abs(*binFlag)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +115,9 @@ func serverConfig(t *testing.T) config.Config {
 // text unredacted, so a step can parse the ids and URLs it needs out of
 // it — pass it through shown before logging it anywhere — along with the
 // structured result that write tools also carry, and whether the tool
-// refused, which is often the point of the step.
+// refused, which is often the point of the step. A redaction here would
+// corrupt what a step feeds back: Google refuses a scrubbed document URL
+// as invalid. Checked by the live step "insert rich link chip".
 func (d *driver) call(label, name string, args map[string]any) (string, map[string]any, bool) {
 	d.t.Helper()
 	res, err := d.cs.CallTool(d.ctx, &mcp.CallToolParams{Name: name, Arguments: args})

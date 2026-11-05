@@ -123,6 +123,11 @@ func (e *APIError) Unwrap() error {
 	case e.Status >= 500:
 		return ErrServer
 	case e.Status == 400 && strings.Contains(msg, "revision"):
+		// Google's answer to a batchUpdate whose requiredRevisionId is
+		// stale: 400 INVALID_ARGUMENT, "The required revision ID '…' does
+		// not match the latest revision." The reference gives only the
+		// 400. Checked by the integration test TestRawStaleRevision.
+		// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate#writecontrol
 		return ErrConflict
 	case e.Status == 400:
 		return ErrInvalid

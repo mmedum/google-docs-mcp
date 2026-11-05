@@ -12,9 +12,10 @@ import (
 	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
 )
 
-// The shapes spike F measured, written through the server: list items
-// next to existing ones must land at the levels the content gives them,
-// in the list they belong to, with no tab left in the text.
+// The shapes the TestRawBullets integration tests measure against the
+// API, written through the server: list items next to existing ones must
+// land at the levels the content gives them, in the list they belong
+// to, with no tab left in the text.
 const listContent = `# Lists
 
 - X
@@ -71,7 +72,7 @@ var listWant = []struct {
 func TestLiveLists(t *testing.T) {
 	d := start(t)
 	for _, mode := range []string{"direct", "suggest"} {
-		_, sc := d.okStruct(mode+": create", "create_document", map[string]any{
+		_, sc := d.okStruct(mode+": create the list document", "create_document", map[string]any{
 			"title": "google-docs-mcp live lists " + mode + " (safe to delete)", "content": listContent})
 		doc := str(sc, "id")
 		if doc == "" {

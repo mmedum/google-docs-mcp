@@ -7,7 +7,10 @@ import (
 )
 
 // CellLoc names one cell of a table by the table's start index and
-// zero-based row and column.
+// zero-based row and column. TableCellLocation has no tabId of its own:
+// the tab rides on the table's start location. Checked by the live step
+// "table ops".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#TableCellLocation
 type CellLoc struct {
 	Table Loc // the table's start index
 	Row   int
@@ -20,7 +23,8 @@ func (c CellLoc) json() map[string]any {
 
 // InsertTable inserts an empty rows×cols table at a location. The API
 // puts a paragraph boundary before the table, so the table occupies
-// [at+1, …).
+// [at+1, …). Checked by the integration test TestRawTablesInContent.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTableRequest
 func InsertTable(rows, cols int, at Loc) json.RawMessage {
 	return raw(map[string]any{"insertTable": map[string]any{"rows": rows, "columns": cols, "location": at.json()}})
 }
@@ -188,8 +192,12 @@ func UpdateTableColumnProperties(table Loc, columns []int, widthPt *float64, eve
 
 // UpdateTableRowStyle styles the named rows: a minimum height and
 // whether the row may break across pages. TableRowStyle.tableHeader is
-// in the schema but the API answers "Unallowed field" for it (confirmed
-// live, 2026-09-03); pinTableHeaderRows is how a header row is set.
+// in the schema, but the API answers 400 "Unallowed field: tableHeader"
+// for it, which the reference does not say; pinTableHeaderRows is how a
+// header row is set. Checked by the live steps "table ops" and "column
+// widths, row heights and cell borders".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateTableRowStyleRequest
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#TableRowStyle
 func UpdateTableRowStyle(table Loc, rows []int, minHeightPt *float64, preventOverflow *bool) json.RawMessage {
 	style := map[string]any{}
 	var fields []string
@@ -232,9 +240,11 @@ func DeletePositionedObject(objectID, tabID string) json.RawMessage {
 	return raw(map[string]any{"deletePositionedObject": req})
 }
 
-// InsertInlineImage inserts an image fetched from a public URL. Width
-// and height in points are optional; the API keeps the aspect ratio
-// when only one is given.
+// InsertInlineImage inserts an image Google fetches once from a public
+// URL. Width and height in points are optional; the API keeps the
+// aspect ratio when only one is given. Checked by the live steps "insert
+// image" and "content with an image Google cannot fetch".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertInlineImageRequest
 func InsertInlineImage(uri string, at Loc, widthPt, heightPt float64) json.RawMessage {
 	req := map[string]any{"uri": uri, "location": at.json()}
 	size := map[string]any{}
@@ -308,6 +318,10 @@ func DeleteFooter(footerID, tabID string) json.RawMessage {
 	return deleteSegment("deleteFooter", "footerId", footerID, tabID)
 }
 
+// deleteSegment names the tab with a top-level tabId, since deleteHeader
+// and deleteFooter, like deletePositionedObject, take no location to
+// carry one. Checked by the live step "delete header and footer".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#DeleteHeaderRequest
 func deleteSegment(kind, idField, id, tabID string) json.RawMessage {
 	req := map[string]any{idField: id}
 	if tabID != "" {
@@ -317,7 +331,10 @@ func deleteSegment(kind, idField, id, tabID string) json.RawMessage {
 }
 
 // InsertPerson inserts a people chip. The email is required; the name
-// is what the chip shows when set.
+// is what the chip shows when set. insertPerson, insertRichLink and
+// insertDate are each a request of their own, so every chip kind is
+// written through the API. Checked by the live step "insert person chip".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertPersonRequest
 func InsertPerson(name, email string, at Loc) json.RawMessage {
 	props := map[string]any{"email": email}
 	if name != "" {
@@ -327,7 +344,9 @@ func InsertPerson(name, email string, at Loc) json.RawMessage {
 }
 
 // InsertRichLink inserts a smart chip linking to a Google resource (a
-// Drive file, a Calendar event, a YouTube video).
+// Drive file, a Calendar event, a YouTube video). Checked by the live
+// step "insert rich link chip".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertRichLinkRequest
 func InsertRichLink(uri, title string, at Loc) json.RawMessage {
 	props := map[string]any{"uri": uri}
 	if title != "" {
@@ -349,7 +368,9 @@ var DateFormats = map[string]string{
 	"": "", "iso": "DATE_FORMAT_ISO8601", "full": "DATE_FORMAT_MONTH_DAY_FULL", "abbreviated": "DATE_FORMAT_MONTH_DAY_YEAR_ABBREVIATED", "month_day": "DATE_FORMAT_MONTH_DAY_ABBREVIATED",
 }
 
-// InsertDate inserts a date chip.
+// InsertDate inserts a date chip. Checked by the live step "insert date
+// chip".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertDateRequest
 func InsertDate(d DateSpec, at Loc) json.RawMessage {
 	props := map[string]any{"timestamp": d.Timestamp}
 	if d.TimeZoneID != "" {

@@ -13,9 +13,8 @@ import (
 )
 
 // A Markdown file that Docs opens in place is a Drive blob: the Docs API
-// reads it and refuses every write, and Drive serves and replaces its
-// bytes (spike D, architecture §7.5). These are the three calls that
-// need.
+// reads it and refuses every write, so Drive serves and replaces its
+// bytes through the calls below.
 
 // DownloadFile returns a file's content, for a file with binary content;
 // a Google Doc has none and is exported instead.
@@ -25,9 +24,14 @@ func (c *Client) DownloadFile(ctx context.Context, id string) ([]byte, error) {
 }
 
 // DownloadRevision returns one revision's content of a file with binary
-// content. Drive's guide says only revisions kept forever download; the
-// owner downloaded every unpinned revision live (spike D), and a refusal
-// comes back as Google's reason.
+// content. Drive's guide says only revisions kept forever download, which
+// is wrong for the owner: every unpinned revision downloads, and a refusal
+// comes back as Google's reason. Nothing pins one, since a pin on a
+// revision other than the head cannot be undone (400
+// illegalKeepForeverModification). Checked by the live step "diff the
+// first revision with now" and the integration tests
+// TestRawMarkdownFollowups and TestRawMarkdownEdges.
+// https://developers.google.com/workspace/drive/api/guides/manage-revisions
 func (c *Client) DownloadRevision(ctx context.Context, fileID, revisionID string) ([]byte, error) {
 	u := c.drive + "/files/" + url.PathEscape(fileID) + "/revisions/" + url.PathEscape(revisionID) + "?alt=media"
 	return c.doAccept(ctx, kindRead, http.MethodGet, u, nil, "*/*")
@@ -42,7 +46,11 @@ type NewFile struct {
 	Name string `json:"name"`
 	// MimeType is the file's type. A Google Workspace type with content
 	// of another type asks Drive to convert it on import: a Google Doc
-	// from text/markdown.
+	// from text/markdown. AppProperties survive the conversion, and
+	// SetAppProperties changes them after. Checked by the live steps "make
+	// a working copy", "the copy says what it is" and "write the copy back".
+	// https://developers.google.com/workspace/drive/api/guides/manage-uploads#import-docs
+	// https://developers.google.com/workspace/drive/api/guides/properties
 	MimeType      string            `json:"mimeType"`
 	AppProperties map[string]string `json:"appProperties,omitempty"`
 }
@@ -81,10 +89,15 @@ func (c *Client) CreateFile(ctx context.Context, meta NewFile, mediaType string,
 // UploadFile replaces a file's content with data, sent as mimeType.
 // Drive takes the media part's type as the file's own: a Markdown file
 // uploaded as text/plain becomes text/plain, which the Docs API then
-// refuses, so the caller passes the type the file has. Drive offers no
-// precondition (it ignores If-Match and serves no ETag), so a caller
-// checks the head revision itself just before. Every call is a new
-// revision, identical bytes included.
+// refuses, so the caller passes the type the file has; the upload guide
+// does not say an update retypes the file. Drive offers no precondition
+// (it ignores If-Match, serves no ETag, and v3 maps etag to "n/a"), so a
+// caller checks the head revision itself just before. Every call is a
+// new revision, identical bytes included. Checked by the live step "edit
+// it" and the integration tests TestRawMarkdownRewrite,
+// TestRawMarkdownEdges and TestRawMarkdownComments.
+// https://developers.google.com/workspace/drive/api/guides/manage-uploads
+// https://developers.google.com/workspace/drive/api/guides/v2-to-v3-reference
 //
 // A failure that leaves the outcome unknown is ErrAmbiguous: the upload
 // may have landed.

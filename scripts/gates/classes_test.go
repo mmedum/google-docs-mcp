@@ -14,8 +14,8 @@ func TestClassesGate(t *testing.T) {
 }
 
 // service.Classes is an unsorted literal, so a duplicate is almost never
-// adjacent to the value it repeats — which is the whole of what the
-// check used to be able to see.
+// adjacent to the value it repeats, and a check of neighbors alone
+// misses it.
 func TestHasDuplicate(t *testing.T) {
 	cases := []struct {
 		name string

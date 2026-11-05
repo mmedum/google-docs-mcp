@@ -19,20 +19,24 @@ import (
 
 // Word files (.docx). The Docs API reads one, its tracked changes as
 // suggestions and its comments as comments, and refuses every write to it
-// (spike G). So a write is made the way the file is stored: the ops
-// resolve against the Docs model, as on a Google Doc, handles, headings,
-// exact text and the overwrite guard alike, and each paragraph they reach
-// is found in the file by its place and its text. The change is made in
-// the file's XML (internal/ooxml), a suggestion as a tracked change and a
-// comment as a Word comment, and uploaded through Drive as one revision,
-// which Docs reads again within seconds (spike H).
+// with 400 "The document must not be an Office file". Checked by the
+// integration test TestRawDocx. So a write is made the way the file is
+// stored: the ops resolve against the Docs model, as on a Google Doc,
+// handles, headings, exact text and the overwrite guard alike, and each
+// paragraph they reach is found in the file by its place and its text.
+// The change is made in the file's XML (internal/ooxml), a suggestion as
+// a tracked change and a comment as a Word comment, and uploaded through
+// Drive as one revision, which Docs reads again within seconds.
 
 // wordElsewhere is where the rest of the tools' work goes.
 const wordElsewhere = "formatting, tables, images, layout and tabs need the file saved as a Google Doc (File > Save as Google Docs)"
 
 // docxReads is how many times a write looks for Docs to have read the
-// revision it uploaded, which took four seconds in spike H: once after
-// the wait a Markdown write takes, then a second apart.
+// revision it uploaded: once after the wait a Markdown write takes, then
+// a second apart. Docs reads an upload about four seconds after it lands,
+// and no reference documents the delay. Checked by the live step
+// "word: read it back", which reads straight after the edits, and by the
+// integration test TestRawDocxRevision.
 const docxReads = 8
 
 func (s *Service) isWord(ctx context.Context, ref string) bool {
@@ -44,7 +48,10 @@ func (s *Service) isWord(ctx context.Context, ref string) bool {
 func (s *Service) wordTime() string { return s.now().UTC().Format(time.RFC3339) }
 
 // wordMap is a Word file beside its Docs model: the paragraphs of the
-// Docs body, tables' included, in the order the file holds them.
+// Docs body, tables' included, in the order the file holds them. The Docs
+// body's paragraphs are the file's w:p elements in order, text for text,
+// which no reference states. Checked by the live step
+// "a sentence changed" and by the integration test TestRawDocxRevision.
 type wordMap struct {
 	f      *Fetched
 	file   *ooxml.File
@@ -77,7 +84,11 @@ func newWordMap(f *Fetched, file *ooxml.File) (*wordMap, error) {
 // Docs keeps such a cell, empty, and a Word file has none: Word writes a
 // cell spanning columns once (gridSpan), and only a row span's later rows
 // as cells of their own (vMerge), which Docs reads as the covered cells
-// under the span's first column.
+// under the span's first column. The integration test TestRawDocxModel,
+// run with GDOCS_DOCX_FIXTURE=merged.docx, rereads the model
+// TestWordMergedCells replays. A legacy horizontal merge (hMerge) is not
+// a span to Docs, which keeps those cells as cells of their own, so only
+// gridSpan's are passed over; no fixture holds an hMerge to recheck it.
 func spanned(b *doc.Block) bool {
 	c := b.Cell
 	return c != nil && c.Covered() && c.Col != c.MergedInto.Col

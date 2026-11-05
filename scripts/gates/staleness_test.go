@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -8,59 +10,127 @@ import (
 	"github.com/mmedum/google-docs-mcp/v3/internal/config"
 )
 
-// The changelog rule is the one with a scar: it used to fail on every
-// release pull request, because a release commit moves the entries out
-// of [Unreleased] and under the version it is about to tag, and CI runs
-// before that tag can exist. These cases pin both halves — an ordinary
-// commit must document itself, and a release must not be asked to
-// document itself twice.
-func TestChangelogSections(t *testing.T) {
-	const changelog = `# Changelog
+// The changelog fixtures: a released v0.9.0, a v0.9.1 with and without
+// entries, and an [Unreleased] section with and without them. This
+// repository has no 0.9 tag, so a git call that reads the wrong checkout
+// finds neither.
+const (
+	clReleased   = "## [0.9.0] - 2026-01-01\n\n### Added\n\n- The first tool.\n"
+	clNext       = "## [0.9.1] - 2026-02-01\n\n### Added\n\n- A second tool.\n\n"
+	clNextEmpty  = "## [0.9.1] - 2026-02-01\n\n"
+	clUnreleased = "# Changelog\n\n## [Unreleased]\n\n"
+	clWritten    = clUnreleased + "### Added\n\n- A second tool.\n\n"
+	clEmpty      = "Go source changed and CHANGELOG.md [Unreleased] has no entry; " +
+		"write one under [Unreleased], or under the version heading this release tags"
+)
 
-## [Unreleased]
-
-## [0.9.4] - 2026-09-05
-
-### Fixed
-- something real
-- something else
-
-## [0.9.3] - 2026-09-05
-
-### Added
-- older entry
-`
-	if got := entriesUnder(changelog, "## [Unreleased]"); got != 0 {
-		t.Errorf("[Unreleased] has %d entries, want 0 — a release commit leaves it empty", got)
-	}
-	if got := entriesUnder(changelog, "## [0.9.4]"); got != 2 {
-		t.Errorf("the pending version has %d entries, want 2", got)
-	}
-	if got := entriesUnder(changelog, "## [0.9.3]"); got != 1 {
-		t.Errorf("counting ran past the next heading: %d", got)
-	}
-	if got := entriesUnder(changelog, "## [1.0.0]"); got != 0 {
-		t.Errorf("a heading that is not there should count nothing, got %d", got)
-	}
-
-	// The first version heading is the one a release is preparing.
-	m := versionHeading.FindStringSubmatch(changelog)
-	if m == nil || m[1] != "0.9.4" {
-		t.Fatalf("first version heading = %v, want 0.9.4", m)
+// The CHANGELOG rule: a change to Go source is written up under
+// [Unreleased], or, on the release commit before its tag, under the
+// version that commit releases.
+func TestTheChangelogRule(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name          string
+		changelog     string
+		sourceChanged bool
+		// tagged are the versions that have a tag.
+		tagged []string
+		want   []string
+	}{
+		{"an undocumented source change", clUnreleased + clReleased, true, []string{"0.9.0"}, []string{clEmpty}},
+		{"a documented source change", clWritten + clReleased, true, []string{"0.9.0"}, nil},
+		{"the release commit before its tag", clUnreleased + clNext + clReleased, true, []string{"0.9.0"}, nil},
+		{"a release commit with nothing under its version", clUnreleased + clNextEmpty + clReleased, true,
+			[]string{"0.9.0"}, []string{"Go source changed and CHANGELOG.md [0.9.1], the untagged version this commit " +
+				"releases, has no entry; write one under [Unreleased], or under the version heading this release tags"}},
+		{"an undocumented source change after the release is tagged", clUnreleased + clNext + clReleased, true,
+			[]string{"0.9.0", "0.9.1"}, []string{clEmpty}},
+		{"prose and an indented bullet, which are no entry", clUnreleased + "Some prose.\n  - an aside\n\n" + clReleased, true,
+			[]string{"0.9.0"}, []string{clEmpty}},
+		{"no change to Go source", clUnreleased + clReleased, false, []string{"0.9.0"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := changelogRule(tc.changelog, tc.sourceChanged, func(v string) bool { return slices.Contains(tc.tagged, v) })
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("changelogRule() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestEntriesUnderIgnoresProse(t *testing.T) {
-	const changelog = `## [Unreleased]
+// What changelogRule is told comes from git: whether Go source differs
+// from the last tag, which is not always the commit before HEAD, and
+// whether a version is tagged. Each row is a repository whose v0.9.0 tag
+// is followed by one more commit.
+// Outside a git checkout the CHANGELOG rule has no tag to measure from.
+// It reached no verdict, so it says so and exits 2, as the docs gate does.
+func TestTheChangelogRuleNeedsAGitCheckout(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Chdir(dir)
+	put(t, dir, changelogPath, clUnreleased+clReleased)
+	_, err := checkChangelog()
+	if !errors.As(err, new(couldNotRun)) || exitCode(err) != 2 {
+		t.Errorf("got %v; want a git failure that could not run", err)
+	}
+}
 
-Some prose that is not an entry.
-  - an indented bullet inside a paragraph
+func TestTheChangelogRuleReadsGit(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		changelog string
+		// source and readme say which files the commit after v0.9.0
+		// changes, and later commits a change to the README alone after it.
+		source, readme, later bool
+		// tag tags that commit, and edit then changes Go source uncommitted.
+		tag, edit bool
+		want      []string
+	}{
+		{name: "an undocumented source change after the release is tagged", changelog: clUnreleased + clNext + clReleased,
+			source: true, tag: true, edit: true, want: []string{clEmpty}},
+		{name: "an undocumented source change two commits after the tag", changelog: clUnreleased + clReleased,
+			source: true, later: true, want: []string{clEmpty}},
+		{name: "the release commit before its tag", changelog: clUnreleased + clNext + clReleased, source: true},
+		{name: "a change to no Go source", changelog: clUnreleased + clReleased, readme: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := initRepo(t)
+			put(t, dir, "main.go", "package main\n")
+			put(t, dir, "README.md", "# Fixture\n")
+			put(t, dir, changelogPath, clUnreleased+clReleased)
+			mustGit(t, "add", "-A")
+			mustGit(t, "commit", "-q", "-m", "Release 0.9.0")
+			mustGit(t, "tag", "-a", "v0.9.0", "-m", "v0.9.0")
 
-## [0.1.0] - 2026-01-01
-- a real entry
-`
-	if got := entriesUnder(changelog, "## [Unreleased]"); got != 0 {
-		t.Errorf("prose and indented bullets are not entries, got %d", got)
+			if tc.source {
+				put(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+			}
+			if tc.readme {
+				put(t, dir, "README.md", "# Fixture\n\nMore words.\n")
+			}
+			put(t, dir, changelogPath, tc.changelog)
+			mustGit(t, "add", "-A")
+			mustGit(t, "commit", "-q", "-m", "The next change")
+			if tc.later {
+				put(t, dir, "README.md", "# Fixture\n\nA later change.\n")
+				mustGit(t, "commit", "-q", "-am", "A later change")
+			}
+			if tc.tag {
+				mustGit(t, "tag", "-a", "v0.9.1", "-m", "v0.9.1")
+			}
+			if tc.edit {
+				put(t, dir, "main.go", "package main\n\nfunc main() { main() }\n")
+			}
+
+			got, err := checkChangelog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("checkChangelog() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -129,83 +199,6 @@ func TestPatternsMatchTheRealShapes(t *testing.T) {
 	}
 }
 
-// The status rule, exercised over the states this repository cannot
-// reach. It always has a tag, so the branches that matter to a sibling
-// before its first release would otherwise ship green here and misfire
-// there — which is the same argument this file makes about every other
-// gate in it.
-func TestStatusProblems(t *testing.T) {
-	body := func(status, seventeen string) string {
-		return "# Architecture\n\n" + status + "\n\n## 1. Mission\n\ntext\n\n## 17. Open decisions\n\n" +
-			seventeen + "\n\n## 18. Evidence\n"
-	}
-	openDecision := "Something is undecided."
-	noDecision := "None. Everything is decided."
-	claimsOpen := "**Status:** v1.0.0 (2026-09-06). One design decision is open (§17)."
-	claimsShut := "**Status:** v1.0.0 (2026-09-06). Phases 0 to 4 are done."
-	// The denial, which contains the phrase the claim is detected by.
-	claimsNone := "**Status:** v1.0.0 (2026-09-06). No design decision is open (§17)."
-
-	cases := []struct {
-		name       string
-		status     string
-		seventeen  string
-		tag, next  string
-		wantSubstr string // "" means no problem
-	}{
-		{"released and current", claimsOpen, openDecision, "1.0.0", "1.0.0", ""},
-		{"the version about to be tagged", claimsOpen, openDecision, "0.9.5", "1.0.0", ""},
-		{"behind the tag", claimsShut, noDecision, "1.0.0", "1.0.0", ""},
-		{"stale version", "**Status:** v0.5.0.", noDecision, "1.0.0", "1.0.0", "says Status v0.5.0"},
-
-		// Before the first release: no tag, nothing under a version
-		// heading. None of these can happen in this repository.
-		{"unreleased and claims nothing", "This is phase 2.", noDecision, "", "", ""},
-		{"unreleased but claims a version", "**Status:** v0.1.0.", noDecision, "", "",
-			"there is no tag and no version heading to confirm it"},
-
-		// The half a badge cannot carry.
-		{"claims open while §17 says none", claimsOpen, noDecision, "1.0.0", "1.0.0",
-			"claims an open decision while §17 has none"},
-		{"claims none while §17 lists one", claimsShut, openDecision, "1.0.0", "1.0.0",
-			"claims no open decision while §17 lists one"},
-		{"denies one and §17 has none", claimsNone, noDecision, "1.0.0", "1.0.0", ""},
-		{"denies one while §17 lists one", claimsNone, openDecision, "1.0.0", "1.0.0",
-			"claims no open decision while §17 lists one"},
-
-		// git gave us nothing: the message must say so rather than
-		// rendering "the released tag is v" with nothing after it.
-		{"no tag but a heading exists", "**Status:** v0.5.0.", noDecision, "", "1.0.0",
-			"no released tag was found"},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := statusProblems(body(c.status, c.seventeen), c.tag, c.next)
-			joined := strings.Join(got, "\n")
-			switch {
-			case c.wantSubstr == "" && len(got) > 0:
-				t.Errorf("expected no problem, got:\n%s", joined)
-			case c.wantSubstr != "" && !strings.Contains(joined, c.wantSubstr):
-				t.Errorf("expected a problem mentioning %q, got:\n%s", c.wantSubstr, joined)
-			}
-		})
-	}
-}
-
-// A status line with no **Status:** at all is a problem once something
-// has shipped, and not before.
-func TestStatusProblemsWithNoStatusLine(t *testing.T) {
-	text := "# Architecture\n\nprose\n\n## 17. Open decisions\n\nNone.\n"
-	if got := statusProblems(text, "", ""); len(got) > 0 {
-		t.Errorf("before the first release a missing status line is fine, got: %v", got)
-	}
-	got := statusProblems(text, "1.0.0", "1.0.0")
-	if len(got) == 0 || !strings.Contains(strings.Join(got, "\n"), "has no **Status:** line") {
-		t.Errorf("after a release a missing status line is a problem, got: %v", got)
-	}
-}
-
 // The README's scope list against what login requests. The setup step is
 // followed exactly once, by somebody who cannot tell it failed until a
 // login is refused, which is why it needs a gate rather than a proofread.
@@ -265,7 +258,7 @@ func TestPermissionRuleToolsReadsOnlyThisServersRules(t *testing.T) {
 }
 
 // Every rule names a registered tool, and a README with no rule at all
-// fails too, since it would no longer say how to be asked.
+// fails too, since it would not say how to be asked.
 func TestPermissionProblems(t *testing.T) {
 	registered := []string{"delete_comment", "delete_tab", "get_document"}
 	for _, tc := range []struct {

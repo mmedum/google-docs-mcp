@@ -1,93 +1,161 @@
-# Security
+# Security model
+
+The threat model and the invariants the code holds.
+[`SECURITY.md`](../SECURITY.md) says how to report a vulnerability.
+
+It applies to one binary, a subprocess of your MCP client on your
+machine, with your own OAuth client and token, against Google's APIs
+only (D-01, D-11). It has no listener except while `login`
+waits, no telemetry and no update check.
 
 ## Trust boundaries
 
-- **The person** runs the binary under their own account and approves
-  tool calls in their MCP client.
-- **The MCP client** (Claude Code, Claude Desktop, Cursor) speaks JSON-RPC
-  over stdio. Stdout carries only protocol frames; logs go to stderr.
-- **Google** is the only network peer: `docs.googleapis.com`,
-  `www.googleapis.com` (Drive), `oauth2.googleapis.com` and
-  `accounts.google.com`. No telemetry, crash reporting or update checks.
+| Boundary | Crosses | Assumption |
+|---|---|---|
+| MCP client ↔ this server | An OS pipe | Both run as the same OS user, unauthenticated. Stdout carries only protocol frames (D-03). |
+| This server ↔ Google | TLS | API requests carry the token only to `googleapis.com` and its subdomains, `*.googleusercontent.com` and `docs.google.com` (D-11). Sign-in and the token refresh use the endpoints the OAuth client file names. |
+| This server ↔ disk | The file system | The config directory holds the profile and, without a keyring, the token file (D-67). Exports go only under `GDOCS_EXPORT_DIR` (D-24). |
+| Browser ↔ the login listener | The loopback interface, on a random port | Alive only while `login` waits. PKCE and `state` are checked on the callback (D-66). |
+| Document authors ↔ the model | Every text, comment and suggestion a tool returns | Written by other people, sometimes to steer an assistant. |
 
-## Credentials
+## What is worth stealing
 
-- OAuth Desktop-app client JSON is supplied by the deployer and read from
-  disk; it is never logged or copied.
-- The refresh token is stored in the OS keyring. When the keyring is
-  unavailable (no Secret Service on Linux, headless), it is written to a
-  file under the profile directory and a warning is printed. The server
-  asks for mode 0600, which Unix enforces; Windows has no POSIX
-  permission bits, so there the file is protected by the ACL it inherits
-  from the user's profile directory and nothing narrows it further —
-  prefer the keyring (Credential Manager) on that platform. The
-  `GDOCS_REFRESH_TOKEN` variable overrides both for automation.
-- **Logs carry no document data at any level.** The server's own lines
-  are startup and shutdown facts; per-call debug logging records the
-  method, the tool name, the outcome and the duration. Document ids,
-  titles and text never reach a log, so a debug log is safe to attach to
-  a bug report. A test fails the build if that stops being true — it
-  drives every registered tool and the conflict path, and it looks for
-  the id, the first six characters of the id, and the revision id, all
-  three of which a log line carried until this claim was audited against
-  the code in September 2026.
-- **`doctor` and `status` output is what a bug report carries, so it is
-  held to the same rule.** The promise above is about logs, and that is
-  narrower than it reads: the README asks people to paste `doctor`
-  output into an issue, which is a different surface, and until this was
-  audited that surface printed the signed-in account's address twice,
-  the title of whichever document was checked, and its revision id.
-  Those are gone, and the same masking now covers every line `doctor`
-  prints, errors included — the client-secret path reached the output a
-  second time inside `auth: read client secret <path>`, three lines
-  under the line that had been carefully masked, on the commonest
-  failure there is. The startup log line that records the resolved
-  account is masked too, since that log is the other thing a bug report
-  carries. The account line keeps the domain and drops the local part,
-  because the reason to read it is "am I signed in as the right
-  account?" and for someone with a work and a personal account the
-  domain is what answers that — keeping it is the deliberate half of the
-  trade. The client-secret line prints the path, with a Google client id
-  removed from the file name: nobody chose to print a client id, but the
-  Cloud console names the file it hands you after the client, so
-  printing where the secret lives printed the id along with it. The
-  document check reports counts rather than values, so there is no value
-  path for a later edit to widen.
-- **The live driver's transcript is redacted before it is written**, for
-  the same reason: it is pasted into issues and commit messages. Ids and
-  URLs are caught by shape; a revision is caught by shape where it is
-  written as `revision <id>` and by position in a revision listing,
-  which writes the id bare. A person's name has no shape,
-  so names are caught by position where this project's renderers put
-  one after a label, and an address is caught both ways, since
-  `userLabel` renders a person as `Name <address>`. A person chip prints
-  a name with no label before it, so the driver reads the account's
-  display name before any step can print a chip, and replaces that name
-  wherever it appears. `internal/redact` carries no build tag,
-  so the tests for it run in every `make check` rather than only when
-  someone runs the driver with credentials.
-- Scopes: `documents` and `drive` (or their read-only variants with
-  `GDOCS_READ_ONLY`). `drive` is required to reach documents the app did
-  not create; the narrower `drive.file` cannot.
-- `logout` revokes the token at Google and deletes it locally.
+- **The refresh token.** The `documents` and `drive` scopes read and
+  change every document the account can reach (D-68). It lives in the
+  OS keyring where there is one, and in an owner-only file where there
+  is not (D-67).
+- **Document content.** It passes through tool results to your client,
+  and to disk only under `GDOCS_EXPORT_DIR`.
+- **The documents themselves.** A direct edit changes what other people
+  wrote, and a deleted tab or comment does not come back through this
+  server.
 
-## What can go wrong and what limits it
+## Adversaries
 
-| Risk | Mitigation |
-|---|---|
-| The model edits the wrong passage | Targets are exact text, stable heading ids, or handles checked against the revision they came from. Every write is guarded by `requiredRevisionId`; a concurrent edit is re-planned once, then refused. |
-| Content anchored to comments, suggestions, images or footnotes is destroyed | Direct edits refuse to delete such ranges unless `force` is passed; `suggest` and `comment` modes delete nothing. |
-| A call made with nobody approving it | The server asks the person nothing; the client approves each call (`docs/architecture.md` §12a). claude.ai and Codex prompt by `destructiveHint`, which every write carries but the three that only add, VS Code for every tool not marked read-only, and Claude Code by the operator's `permissions.ask` rules, which the README gives. What holds whatever the client does: the deletes are unregistered unless enabled, the guard, the write mode, `dry_run`, and `review_suggestion` naming each suggestion it reviews, so one proposed after the list was read is never reviewed unseen. Work in the Docs editor not yet saved to a Markdown file is never written past, `force` or not, since no revision holds it. |
-| Destructive actions | Delete tools are **unregistered** unless `GDOCS_ENABLE_DESTRUCTIVE=true`, and once registered each call must repeat its target — `confirm_tab`, `confirm_comment_id` — or the server refuses it. `delete_comment` also takes `text_start`, how the text it deletes begins, which the server reads from Drive and compares, refusing `[stale]` when it differs. Registration is a deployer's decision made once; the repetition is checked in the server on every call, so no client setting skips the check. But the model types the repetition, so it is a witness that the call meant this target, not the person's approval. They also carry `destructiveHint`, which is advisory — the spec says clients treat tool annotations as untrusted, and a host in an auto-approve mode runs a registered tool without asking. No tool carries `requiresUserInteraction`. What this server controls is what it registers and what it refuses; the hints are a courtesy to clients that honor them. |
-| Runaway output | Reads are budgeted (`max_chars`, default 20 000) and cut at block boundaries. |
-| Regex denial of service | Go's RE2 engine, linear time. |
-| Secrets in the repository | gitleaks in pre-commit and CI with rules for Google client ids, secrets and refresh tokens; fixtures are synthetic. |
-| Identifiers in the repository, which are not secrets and which no secret scanner flags | `make leaks` fails the build on an address at a domain someone could own, a 21-digit account id, an OAuth client id, a user-content URL carrying an id, or a Drive id that does not look invented. It also refuses a binary file that is a compiled executable or over a megabyte: none of the rules above can read a binary, so what is asserted about one instead is that it is neither built nor large. `LEAKCHECK_HISTORY=1 go test ./scripts/gates` runs the same rules over every blob ever committed, since a tree scan cannot see what was cleaned up in a later commit. |
-| Document content in logs | Logs carry counts, durations, outcomes and method names. No ids — not even a prefix — no revisions, no titles, no text. `TestDebugLogsCarryNoDocumentData` drives every registered tool plus the conflict path and fails on any of them. |
-| A credential sent somewhere it should not go | Every request URL is checked against an allowlist of Google hosts before the token is attached, matched on `url.URL.Host`, so a host carrying a port matches nothing and is refused. This is not a formality: `ExportRevision` follows a download URL taken from a response body. |
-| A hung Google endpoint | Every API call carries `GDOCS_HTTP_TIMEOUT`, and so does the OAuth token refresh and the code exchange at login — the refresh happens inside the token source, on the client in its context, which is a separate place to put a deadline and was missing one. |
-| Arbitrary file writes | Exports are confined to `GDOCS_EXPORT_DIR`, and a format that writes a file is refused when it is unset. Each export is created exclusively, so it never overwrites a file already there and never writes through a symbolic link: a name already taken gains a counter. |
+**A collaborator writing to steer your assistant.** The server cannot
+stop a model being persuaded by a document's text or comments, so it
+limits what persuasion reaches. The delete tools are absent unless the
+deployer turns them on (D-54). A direct edit never deletes anchored
+content unforced (D-28), and the write mode is the person's (D-29).
+`review_suggestion` names each suggestion it reviews, so none proposed
+after the list was read is reviewed unseen (D-40). No tool changes the
+server's settings (D-59).
 
-## Reporting
+**A malicious MCP client, or a persuaded model driving an honest one.**
+It can call any registered tool as you, so registration is the control.
+The repeated target of a delete and `force` are witnesses the model
+writes, never your approval (D-56).
 
-See [SECURITY.md](../SECURITY.md).
+**Another person editing the same document.** An edit between the read
+and the write is caught by the revision guard (D-30), and work unsaved
+in an open editor is never written past (D-44).
+
+**A co-resident process.** It cannot finish a login without the PKCE
+verifier, and the token file is readable by your account alone.
+
+## Invariants the code holds
+
+A test or a gate holds each of these. A way to break one is a
+vulnerability.
+
+- **Stdout carries only JSON-RPC.** forbidigo, the smoke test and
+  `TestNothingPrintsOutsideTheBoundary` hold it (D-03).
+- **API credentials go only to Google's hosts, over HTTPS.**
+  `TestDefaultAllowlistSendsCredentialsOnlyOverHTTPSToGoogle` holds it,
+  a revision export's URL from a response body included (D-11).
+- **Logs carry no document id, revision, title, text or query, at any
+  level.** `TestDebugLogsCarryNoDocumentData` and
+  `TestTransportErrorsDoNotCarryTheURL` hold it (D-04).
+- **`doctor`, `status` and the startup line mask the account to its
+  domain and drop a client id.** `TestDoctorOutputHidesWhatItKnows`,
+  `TestMaskClientID` and `TestTheCollectorMasksTheAccount` hold it
+  (D-05).
+- **A direct edit never deletes a comment anchor, a suggestion, an
+  object or a footnote reference unless forced, and no write mode is
+  substituted for another.** `TestGuardBlocksDirect`,
+  `TestReplaceAllAndMergeAreGuarded` and
+  `TestSuggestModeRefusesUnsupportedRequests` hold it (D-28, D-29).
+- **Every write is guarded by the revision it was planned on, and one
+  that may have landed is never repeated.** `TestDryRunAndConflictRetry`,
+  `TestWriteRetriesOnlyOn429` and `TestWriteNetworkFailureIsAmbiguous`
+  hold it, and the integration test `TestRawStaleRevision` checks
+  Google's answer (D-30, D-61).
+- **Unsaved editor work in a Markdown file is never written past, `force`
+  included.** `TestMarkdownFileWaitsForTheEditor` and
+  `TestMarkdownFileKeepsASaveThatSlipsIn` hold it (D-44).
+- **The delete tools are absent without `GDOCS_ENABLE_DESTRUCTIVE`, and
+  each call repeats its target.** `TestListToolsAndSchemas`,
+  `TestDeletesNeedTheTargetRepeated` and
+  `TestDeleteCommentHoldsItsTextToTheWitness` hold it (D-54, D-56).
+- **Read-only mode registers the reads alone and asks for read-only
+  scopes.** `TestListToolsAndSchemas` and `TestScopesAgree` hold it
+  (D-55).
+- **The server asks the person nothing, the annotations are exact, and
+  no tool takes or writes its settings.**
+  `TestOnlyToolsThatAddSayTheyAreNotDestructive`,
+  `TestNoToolTakesAServerSetting` and
+  `TestNoToolCanWriteTheServersSettings` hold it, with forbidigo
+  (D-52, D-57, D-59).
+- **Exports stay in `GDOCS_EXPORT_DIR`, never over a file or through a
+  link.** `TestAnExportNeverOverwrites` and
+  `TestAnExportNeverWritesThroughALink` hold it (D-24).
+- **A login checks `state` and uses PKCE.**
+  `TestLoginRejectsBadStateAndDenial` holds it (D-66).
+- **The token file is owner-only, with a warning, and the environment's
+  token overrides both stores.** `TestFileFallbackWhenKeyringBroken` and
+  `TestEnvWins` hold it (D-67).
+- **Every HTTP call has a deadline, the token refresh included, and
+  every read a budget.** `TestTokenRefreshIsBounded` and
+  `TestBudgetAndContinue` hold it (D-63, D-18). A regex runs on RE2, in
+  linear time (D-34).
+- **Nothing in the repository identifies a real document, account or
+  organization.** `make leaks` and gitleaks hold it (D-06). The live
+  driver and the evals print only through the redactor, which
+  `make transcript` holds (D-07).
+
+## Not a vulnerability
+
+Do not report these as vulnerabilities. Open an ordinary issue if one
+surprises you.
+
+- **The client did not prompt.** Annotations are hints, and a client
+  can run a tool with nobody approving. A delete tool registered while
+  its switch is off is a vulnerability.
+- **What runs as you can act as you**, the token included.
+- **The scope reaches every document the account can.** `drive.file`
+  reaches only files the app created or the person opened through
+  Google's Picker, which a stdio server cannot show.
+- **A tool result is not masked.** It is your data, returned to you.
+- **A model following instructions in a document.** That is the client's
+  concern. Content that makes the server itself break an invariant is a
+  vulnerability.
+- **Someone else's code.** A flaw in Google's APIs goes to Google, and
+  one in a dependency to that project.
+
+## Dependency vulnerabilities
+
+`govulncheck` runs in `make check` and in CI, and fails when this
+server's code can reach a vulnerable symbol. A CVE in a dependency is a
+vulnerability here only then. It is fixed in a release whose CHANGELOG
+entry names the CVE or GHSA; otherwise the dependency is updated in the
+normal course.
+
+## What you are responsible for
+
+- **Your own OAuth client.** Use the client file the Cloud console gave
+  you, since sign-in sends the code and the token to the endpoints it
+  names. [`troubleshooting.md`](troubleshooting.md#tasks) says how to
+  rotate the token, revoke access and handle a suspected exposure.
+- **The switches you turn on.** `GDOCS_ENABLE_DESTRUCTIVE` registers
+  deletes, so leave it off for a client that runs with nobody watching.
+  `GDOCS_EXPORT_DIR` is a directory a model can write into. Use
+  read-only mode, logged in again, where reading is enough.
+- **Your client's approvals.** Give the deleting and reviewing tools an
+  `ask` rule, as the README shows.
+- **Where the token lives.** Keep a keyring available, and
+  `GDOCS_REFRESH_TOKEN` out of shared shells and logs. On Windows the
+  token file has no POSIX permission bits and takes the ACL of your
+  profile directory, so prefer Credential Manager there.
+- **What you paste.** `status`, `doctor` and a debug log are built to be
+  safe (D-04, D-05). A token, `token.json`, a client JSON and a tool
+  result are not.

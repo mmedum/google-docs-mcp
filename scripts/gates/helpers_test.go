@@ -7,8 +7,7 @@ import (
 )
 
 // mustModuleRoot is moduleRoot for a test, which wants a fatal rather
-// than an error. Four copies of this walk existed as test helpers before
-// the gates shared one.
+// than an error.
 func mustModuleRoot(t *testing.T) string {
 	t.Helper()
 	root, err := moduleRoot()
@@ -39,4 +38,20 @@ func initRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// mustGit runs git for a test, which wants a fatal rather than an error.
+func mustGit(t *testing.T, args ...string) {
+	t.Helper()
+	if _, err := gitOutput(args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// putAll writes each file's body to its path under root.
+func putAll(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for rel, body := range files {
+		put(t, root, rel, body)
+	}
 }

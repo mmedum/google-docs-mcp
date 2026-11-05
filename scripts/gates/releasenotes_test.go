@@ -81,6 +81,27 @@ func TestReleaseNotesStopsAtTheLinkFooter(t *testing.T) {
 	}
 }
 
+// A section runs to the link footer in the first column. A footnote is
+// no definition, and an indented line continues a list item: both belong
+// to the section they are in.
+func TestASectionEndsOnlyAtALinkDefinition(t *testing.T) {
+	const head = "## [1.0.0] - 2026-09-13\n\n- The thing.[^1]\n"
+	for _, tc := range []struct {
+		name, tail, want string
+	}{
+		{"a footnote", "\n[^1]: Only on Linux.\n", "- The thing.[^1]\n\n[^1]: Only on Linux."},
+		{"a definition in the first column", "\n[1.0.0]: https://example.com/v1.0.0\n", "- The thing.[^1]"},
+		{"a definition continuing a list item", "  [1]: https://example.com/issue/1\n",
+			"- The thing.[^1]\n  [1]: https://example.com/issue/1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sectionFor(head+tc.tail, "1.0.0"); got != tc.want {
+				t.Errorf("section = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // An empty [Unreleased] is the normal state of a released changelog.
 // Tagging it must fail rather than publish a release that says nothing.
 func TestReleaseNotesRefusesAnEmptySection(t *testing.T) {

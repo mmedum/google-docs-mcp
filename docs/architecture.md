@@ -1,1661 +1,2853 @@
-# Architecture — google-docs-mcp
+# Architecture
 
-**Status:** v3.2.0 (2026-10-31). Every tool that changes or removes what
-a document holds says `destructiveHint: true`, as the MCP schema reads
-`false` as only additive; the nine stay ungated. Comment text keeps to
-2048 bytes, now measured live on both paths, and a Google Doc's
-comment-mode proposal is held to it before anything posts. A named
-range's name is counted in UTF-16 units, Google's epoch reads as no
-time, and the README asks for the scope list on External apps only.
-The live driver passed. v3.1.1 (2026-10-24): 3.1.0's bundle work reviewed after its
-release by `/simplify`, `/code-review medium` and `/security-review`, with
-the family's bundle rules ported (§17a): the gate derives its settings
-from the server's registry, starts the server from the bundle's
-defaults, refuses `args` and overrides, holds each platform to its own
-file and the identity, and refuses a repeated key. The OAuth client
-file's text is the family's, a profile name is lowered A to Z alone,
-a variable of spaces alone is unset, and a relative `GDOCS_CONFIG_DIR`
-is refused. The live driver passed, its transcript read. v3.1.0
-(2026-10-24): the Claude Desktop bundle has the
-shape the sibling servers' bundles share: every setting another client
-sets, each off or empty by default as the server is, the shared file
-names, LICENSE and the README, and Google's privacy policy; the server
-is unchanged. v3.0.0 (released 2026-10-23, live run green). The server
-asks the person nothing, and the client approves each call (§12a).
-`review_suggestion` names each suggestion it reviews, `delete_comment`
-takes the start of the text it deletes, and `force` never writes past
-unsaved editor work. A Word file
-(.docx) is edited by writing the file itself, since the Docs API reads
-one and refuses every write to it: text, tracked changes and comments
-go into its XML and up through Drive (§7.6). Nested list items written
-next to a list land at their level, and `list_level` sets the level the
-content's list takes (§7.3). A Markdown
-file stored in Drive, which Docs edits in place, is read, edited and
-commented on as the text it is, through a write protocol that keeps the
-editor's unsaved work (§7.5), whether Drive types it `text/markdown` or
-the older `text/x-markdown`. A Google Doc working copy carries a live
-session's work back to the file, block by block. Comments and
-suggestions are generally available and detected per read rather than
-gated on a flag (§18). Since v2.0.1 a write that may have landed is
-reported as `[ambiguous_outcome]` instead of being repeated.
-Phases 0 to 4 are done (§16): auth, raw
-client, model, renderer, reads, search, create, export, editing with
-minimal diffs in all three modes, formatting, suggestion review, comment
-threads on both backends, revision history and diffs, tables, tabs,
-headers, footers, footnotes, images and chips, resources, and the agent
-evals. The tool surface covers every GA member of the Docs `Request`
-union plus the four comment and suggestion members it needs (GA since
-2026-09-30, §18). One design decision is open (§17): the
-rule by which Google discards a direct formatting change that collides
-with a pending suggested one, which six rounds of live probing did not
-settle. Every convention here was
-checked against primary sources; §18 lists what was confirmed, refuted,
-and changed.
+How `google-docs-mcp` is put together, and the decisions a contributor
+should not undo without a better reason than the one that put them here.
+Part 1 is the overview. Part 2, from [Decisions](#decisions), is one
+entry per decision, cited elsewhere by its D-ID. What was verified about
+Google lives in the comment at the code that depends on it, with the
+reference linked and the integration test or live step that checks it
+named.
 
-## 1. Mission and scope
+## Context
 
-A production-grade, Go, stdio MCP server that lets Claude work **inside a
-Google Doc** the way a careful colleague does: read it at the right
-granularity, edit it in place without destroying anything around the
-edit, propose changes as suggestions rather than overwrite, comment on
-specific passages, and handle tables, tabs, headers, footnotes and
-formatting. Single binary, per-user OAuth against the user's own Google
-account, Workspace or consumer.
+`google-docs-mcp` is a Model Context Protocol server for Google Docs.
+One Go binary runs as a subprocess of an MCP client and speaks MCP over
+stdio. It holds one person's OAuth refresh token and calls the Google
+Docs API and the Drive API over raw REST, with wire types of its own
+(D-01, D-08). Nothing is hosted.
 
-**The repository is self-contained and meant to be distributed.** Every
-deployer creates their own Google Cloud project and OAuth client; nothing
-deployer-specific is baked into the code, the repository, or the release
-artifacts (§13).
+The parties around the server:
 
-**Scope is one document, every capability.** In: locating a document by
-title, creating one, and everything that happens inside it, including its
-history (revisions, suggestions, comment threads). Out (**decided**):
-folder management, moving files, sharing, trashing, copying.
+- **The person** creates their own Cloud project and Desktop OAuth
+  client, signs in once with `google-docs-mcp login`, and every call
+  acts as them (D-01, D-66). They choose how a change lands: as a
+  suggestion, a direct edit or a comment (D-29).
+- **The deployer** decides what the server may do, through `GDOCS_*`
+  settings the client passes at start: read-only mode, the delete tools,
+  the default write mode, the export directory and the profile (D-24,
+  D-54, D-55, D-69, D-70). The deployer is usually the person, setting
+  up their own client.
+- **The client** approves each call by its own rules and draws its
+  prompt from the tool annotations. The server asks the person nothing
+  itself (D-52, D-57).
+- **The model** chooses the calls and their arguments, and never sees an
+  index (D-12). It can be wrong, so every write is guarded against
+  deleting what it did not mean to, and no tool lets it change the
+  server's settings (D-28, D-59).
+- **Other people** edit the same document. Their work arrives between a
+  read and a write, and their unsaved work in an open editor is never
+  written past (D-30, D-44).
 
-### Why build it (research summary, verified 2026-09-02)
+The server sends a credential only to Google, over HTTPS: the
+`googleapis.com` hosts, `docs.google.com`, and Google's content hosts
+under `googleusercontent.com`. Every URL is checked with its port before
+the token is attached, and there is no telemetry (D-11).
 
-- **Google's official Docs MCP** (`docsmcp.googleapis.com`, Developer
-  Preview) exposes two tools, `read_doc` and `update_doc`, that pass the
-  raw `documents.get` JSON and raw `batchUpdate` requests straight
-  through. It solves the plumbing and none of the hard part.
-- **The best open-source servers** (taylorwilsdon/google_workspace_mcp,
-  a-bonus/google-docs-mcp, piotr-agier/google-drive-mcp) make the model
-  compute UTF-16 indices itself, hand-roll markdown converters that
-  silently corrupt documents (a-bonus #149), anchor comments through the
-  Drive API where they never render inline (a-bonus #134), and none use
-  `writeControl`, suggestion mode, or return the ranges they changed.
-- Every request asks for compact JSON (`prettyPrint=false`), in the one
-  place that builds an HTTP request: a 150-page document is 7.44 MB
-  indented and 2.96 MB without it, and the indentation is retained memory
-  now that elements keep their bytes. Skipped for a request that is not
-  asking for JSON, because an export asks for bytes.
-- **The API moved in our favor in July 2026.** The Docs API now has
-  `writeControl.writeMode: SUGGEST` (every request in the batch becomes a
-  suggested edit), `insertComment` anchored to a real `Range`,
-  `acceptSuggestion`/`rejectSuggestion`, and a `commentsViewMode` on
-  `documents.get`. All of it is **Developer Preview** (§10). No
-  open-source server has built on it yet.
+It works on one document and everything inside it, its history included
+(D-02). That covers reading, finding, creating, exporting, editing as
+suggestions, directly or as comments, formatting, tables, tabs, headers,
+footers, footnotes, images, chips, named ranges, layout, comment
+threads, suggestions and revisions. A document may be a Google Doc, a
+Markdown file or a Word file. A Google Doc is read and written through
+the Docs API. A Markdown file in Drive, which Docs opens in place, is
+read and written as its own text (D-42). A Word file is read as a Google
+Doc and written as the file it is (D-49).
 
-### Non-goals
+The platform has gaps nothing here can close, so nothing here promises
+to close them. The Docs API cannot insert a chart or a table of
+contents, write an equation or a drawing, or fetch an image from a
+private address. It reads an old revision only as an export, never as
+structure. A comment made through Drive cannot be turned into a range or
+shown inline in the editor.
 
-- Not a general Drive client.
-- Not multi-tenant hosted. Stdio only (**decided**); the composition root
-  stays transport-agnostic so this can change later.
-- Not a WYSIWYG fidelity guarantee for markdown import. We convert what
-  we can prove and refuse the rest loudly (§7.4).
+It is not a Drive client (D-02), a hosted service (D-01), or a faithful
+converter between markdown and a document (D-26).
 
-## 2. Hard constraints from the platform
+It exists because the hard part of an AI working in a document is not
+the plumbing. Other servers make the model count UTF-16 indices,
+overwrite what they edit, and post comments that pin to nothing. This
+one keeps the index arithmetic on the server, edits by minimal diff,
+pins comments where Google allows, and lets the person choose how each
+change lands (D-12, D-27, D-29, D-38).
 
-| Constraint (verified against official docs) | Consequence |
-|---|---|
-| Indices are **UTF-16 code units**, per segment (body / header / footer / footnote each start at 0), shift after every mutation, and are only valid for the revision you read. | The model never sees or computes indices. Server owns index math; Go strings are UTF-8 so every offset goes through `utf16` conversion. |
-| `batchUpdate` is **atomic** and requests apply in order. | One batch per tool call where the call allows it; requests sorted by descending index. What can only follow a write goes in later batches, each reported and none rolled back (§7.3). |
-| `writeControl.requiredRevisionId` → 400 if the doc changed; the response returns the new revision id. | Every write is guarded by the revision it was planned against. |
-| Inserted text "will match the text immediately before the insertion index"; a newline copies the paragraph style "including lists and bullets" from the current paragraph. | Minimal-diff edits inherit surrounding formatting for free; the compiler sets explicit styles only where the content asks for them. |
-| Tabs: `includeTabsContent=true` returns `document.tabs[]`. Requests without `tabId` hit the first tab, except `replaceAllText` and named-range requests, which default to **all tabs**. | Always read with tabs; always set `tabId` or explicit `tabsCriteria`. |
-| Only `suggestionsViewMode=SUGGESTIONS_INLINE` yields indices valid for a later `batchUpdate`. | The canonical index space is the inline view. |
-| Every heading paragraph carries a stable, read-only `headingId`. | Sections are addressed by `headingId`. |
-| Deleting a range removes whatever is anchored inside it: comment anchors, suggestions, inline objects. Suggested deletions leave the text in place until accepted. | Overwrite guard (§7.3); suggestion mode is the safe default. |
-| Quotas: 300 reads/min/user, 60 writes/min/user (Docs). | Client-side token buckets below those limits; backoff honoring `Retry-After`. |
-| Scopes: `documents` is *sensitive*, `drive` is *restricted*, `drive.file` cannot reach documents the app didn't create or open. | We need `documents` + `drive`. Fine for a per-user OAuth app that each deployer owns; no central app, no Google verification. |
-| An **External** OAuth app in **Testing** gets 7-day refresh tokens. The rule is defined only for External apps; an **Internal** (Workspace) consent screen is exempt by construction. | The setup guide covers both: Internal for Workspace organizations, Testing with weekly re-login for consumer accounts (§10). |
-| Images: `insertInlineImage` needs a publicly fetchable URL. | URL only; no upload path. |
-| Preview features are missing from `google.golang.org/api/docs/v1` (the public discovery document has listed them since 2026-09, still marked Developer Preview), and importing that module pulls in gRPC, OpenTelemetry and the cloud auth stack. | Thin raw REST client with our own wire types in `internal/gdocs`; the generated module is not a dependency (§5). |
-| Claude Code truncates tool results above 25 000 tokens and warns at 10 000. | Reads are scoped and budgeted by default, with continuation handles. |
+## Quality goals
 
-### What the API cannot do (so we don't promise it)
+In priority order:
 
-Equations and drawings (read-only), charts, inserting a table of
-contents, reading the *structure* of an old revision (only exports),
-turning Drive-API comment anchors into ranges (opaque), rendering
-Drive-API comments inline in the UI, images from private URLs.
+1. **Nothing in a document is destroyed by accident.** A replace is a
+   minimal diff, so what is anchored to unchanged text survives. A
+   direct edit that would delete a comment anchor, a suggestion, an
+   object or a footnote reference is refused unless forced. Suggest and
+   comment modes delete nothing, and the delete tools exist only when
+   the deployer enables them (D-27, D-28, D-29, D-54).
+2. **Edits land where they were meant to, against the document as it was
+   read.** The model addresses content by exact text, heading id, handle
+   or named range, never by index. Every write is planned against one
+   revision and guarded by it (D-12, D-13, D-14, D-15, D-30). The unit
+   tests run against fakes that answer as Google documents, and the live
+   driver is what checks the beliefs those fakes encode (D-80, D-83).
+3. **The person decides how a change lands, and the server never decides
+   for them.** Suggest, direct or comment, with a configured default and
+   no silent substitution, on a Google Doc, a Markdown file or a Word
+   file (D-17, D-29).
+4. **Results say what happened.** A write reports what it touched and
+   the new revision. A write that may have landed is
+   `[ambiguous_outcome]` and is never repeated, and a later batch that
+   fails is reported, not rolled back (D-30, D-31, D-61).
+5. **The stream, the logs and the repository stay clean, and the surface
+   is a contract.** Stdout carries frames only, logs carry no document
+   data, transcripts are redacted, the repository holds nothing real,
+   and a released tool or field keeps working (D-03, D-04, D-06, D-07,
+   D-77).
 
-## 3. Requirements distilled from other servers' failures
+## Codemap
 
-1. Semantic targets resolved server-side; the model never touches
-   indices (taylorwilsdon #1030).
-2. Writes return what they touched and the new revision (#1031).
-3. Section-scoped, token-budgeted reads; never drop empty paragraphs
-   from a view that claims to be complete (#638, #1085, #1084).
-4. Markdown conversion tested per construct, failing loudly on what it
-   can't express (a-bonus #149).
-5. Tabs honored on every write (piotr-agier #114).
-6. Strict, boring JSON Schemas: flat structs with an `op`/`action` enum,
-   no `oneOf`, no vendor keywords, no dots in tool names.
-7. Comments that anchor (`insertComment`), Drive API as the
-   documented degraded fallback.
-8. Suggestion mode as a first-class write mode, plus accept/reject.
-9. Optimistic concurrency on every write.
-10. Dry run on every write.
+- `cmd/google-docs-mcp` is the program. With no subcommand it serves;
+  `login`, `logout`, `status` (text or `--json`), `doctor`, `--version`
+  and `--dump-schemas` are the rest. It names stdout and stderr once and
+  passes them down (D-03), masks the account in what `doctor` and
+  `status` print (D-05), and serves without credentials (D-71).
+- `internal/auth` runs Google's desktop flow on a loopback port with
+  PKCE, and holds the scope sets for full and read-only use. Its token
+  source refreshes on a bounded client of its own. It also inspects and
+  revokes a grant (D-63, D-66, D-68).
+- `internal/config` reads the `GDOCS_*` environment and the bound flags,
+  and validates them once at start. `config.Vars` is the registry of
+  every variable the server reads, which the staleness and `mcpb` gates
+  read. A removed setting still turned on is refused (D-53, D-69, D-70).
+- `internal/credentials` resolves the refresh token from the
+  environment, the OS keyring, or an owner-only file the server warns
+  about (D-67).
+- `internal/doc` is the parsed document model: tabs, segments, blocks
+  and runs with their UTF-16 indices, handles, sections derived from
+  headings, the anchored-content index, suggestion states read as
+  properties, and normalized text search. It has no network (D-12, D-14,
+  D-16, D-21).
+- `internal/doc/doctest` loads the synthetic fixture that tests in
+  several packages share, and builds `Large`, a long generated document
+  for the benchmarks (D-06).
+- `internal/evals` holds the agent evals, behind the `evals` build tag
+  and run by hand: Claude Code headless against a scratch document,
+  scored on the end state and the trace (D-84).
+- `internal/gapi` is the raw REST client for Docs and Drive. It holds
+  what every request shares: the host allowlist with the port, compact
+  JSON, the read, write and Drive-write limiters, deadlines, retries by
+  kind with `[ambiguous_outcome]` for a write that may have landed, the
+  classes of Google's failures read by reason, long-running exports and
+  whole-file uploads. Nothing here imports MCP. Its integration tests,
+  behind the `integration` build tag, probe Google directly (D-11, D-61,
+  D-62).
+- `internal/gdocs` holds the hand-written wire types for the Docs API,
+  every `suggested*` field included. It imports nothing from this
+  repository (D-08, D-09).
+- `internal/livecheck` is the live driver, behind the `live` build tag
+  and run by `make live`. Its untagged tests check that every line the
+  drivers print goes through the redactor (D-07, D-83).
+- `internal/markdown` turns markdown the model writes into a neutral
+  fragment, and refuses what the Docs API cannot express (D-26).
+- `internal/mdfile` works on a Markdown file as text: the editor's
+  comment markup parsed out and kept, exact-text find, edits that never
+  move a marker, the outline by slug, and the block merge for working
+  copies. It has no network (D-43, D-47).
+- `internal/ooxml` edits a Word file as it is stored: paragraphs lined
+  up with the Docs model, splices of `word/document.xml`, tracked
+  changes and Word comments (D-49, D-51).
+- `internal/plan` compiles ops and fragments into `batchUpdate`
+  requests: the minimal diff, the overwrite guard, ordering, lists,
+  tables, layout and the registry of op kinds. It owns every piece of
+  index arithmetic on the write path and has no network (D-27, D-28,
+  D-33).
+- `internal/redact` masks ids, addresses and names in what the drivers
+  write and in what `doctor` and `status` print. It has no build tag, so
+  its tests run in every `make check` (D-05, D-07).
+- `internal/render` writes every word a caller reads: markdown, plain
+  text, outlines and raw bytes, CriticMarkup and comment marks, budgets
+  and continuations, and the unified diff (D-18, D-20, D-22).
+- `internal/server` wires the MCP SDK: the server instructions, the
+  `gdocs://` resource templates, per-call debug logging, and the schema
+  dump through an in-memory session (D-04, D-76, D-79).
+- `internal/service` is where the rules live: the fetch cache and the
+  comments-view fallback, target resolution and handle memory, the write
+  path and its rounds, comments on both backends, suggestions, history,
+  export, search, and the Markdown and Word write protocols. It is where
+  a failure becomes a `[class]` tool error (D-17, D-30, D-31, D-38,
+  D-44, D-50, D-60, D-64).
+- `internal/tools` registers the MCP tools, each with its annotations,
+  under the read-only and delete switches. Handlers validate input, call
+  the service and shape the reply (D-19, D-54, D-55, D-57, D-59).
+- `internal/userconfig` stores non-secret per-profile state: the client
+  file's path, the account, and where the token went (D-70).
+- `internal/version` holds the version the build stamps in, with the
+  module's build info as a fallback.
 
-## 4. Core design bets
+Dependencies run one way. `tools` calls `service`, `service` calls
+`gapi`, and `gapi` decodes into `gdocs`. `service` also uses `plan`,
+`doc`, `render`, `markdown`, `mdfile` and `ooxml`; `plan` uses `doc` and
+`markdown`; `render`, `mdfile` and `ooxml` use `doc`. Nothing under
+`internal/gapi` imports MCP.
 
-1. **Edit, never overwrite.** A `replace` is compiled as the minimal
-   diff between the existing text and the new text, so unchanged spans,
-   their formatting, and anything anchored to them (comments,
-   suggestions, inline objects) survive. A planner guard refuses to
-   delete a range that contains comment anchors or pending suggestions
-   unless the call is in suggest mode or explicitly forced. Google's
-   version history records every batch under the OAuth user, so
-   provenance is preserved by construction.
-2. **The user chooses how changes land.** Every write takes
-   `mode: suggest | direct | comment`. `suggest` makes the batch a set of
-   tracked changes for a human to accept. `direct` edits the
-   text. `comment` does not touch the text at all: the proposed change is
-   posted as a comment anchored to the passage, or through Drive quoting
-   it where Google refuses the comments view. The default is configured per deployment
-   (`GDOCS_DEFAULT_WRITE_MODE`) and overridden per call when the person
-   asks for it; the server never silently substitutes one mode for
-   another.
-3. **Exact text first.** The primary target is an exact substring that
-   must match once, with `occurrence` and a scope to disambiguate. This
-   is the contract Anthropic's editor tool, Claude Code's Edit, Notion's
-   MCP and the Aider/OpenAI edit benchmarks converge on. Prose
-   normalization (smart quotes, NBSP, whitespace runs) makes it robust.
-4. **Stable IDs where Google gives them, short handles where it doesn't.**
-   Headings by `headingId`; other blocks by ordinal handles (`p12`,
-   `tbl3`) that the server remembers from the last read and re-checks.
-   Handles are shown in the outline and find results, opt-in on full
-   reads (they cost about a quarter more tokens).
-5. **One plan, one batch, one revision guard.** Fetch → resolve → compile
-   → sort → `batchUpdate` with `requiredRevisionId` → re-fetch → report.
-6. **Markdown for new content; in-place ops for existing content.**
-   Markdown is how Claude expresses text it writes. It is never used to
-   round-trip someone else's document: existing content is edited by
-   range, styled by explicit format ops, and read with style annotations
-   on request. `text` and `raw` views exist alongside markdown.
-7. **History is a first-class read.** Revisions, diffs between
-   revisions, suggestion lists, and full comment threads (including
-   resolved and replies) are Phase 2, not polish.
-8. **Raw REST with our own wire types.** Responses decode into
-   `internal/gdocs` structs that mirror the API's JSON; requests are
-   built by us and sent with an `oauth2`
-   transport. The generated `google.golang.org/api` module is not used:
-   it brings gRPC, OpenTelemetry and the cloud auth stack into a binary
-   that only needs JSON.
+Beside the packages, `scripts/gates` is every check the repository runs
+on itself, written in Go behind one registry (D-10, D-85), and
+`scripts/internal/livecover` reads the live driver's step names for the
+gates that check them. `testdata`
+holds the synthetic fixture, the renderers' goldens, and the API
+snapshots with their verdicts (D-06, D-09). `packaging/mcpb` holds the
+Claude Desktop bundle's manifest and launcher (D-93).
 
-## 5. Module layout
+## Request flow
 
-```
-cmd/google-docs-mcp/      main: login / logout / status / doctor subcommands, server default,
-                          --version, --dump-schemas
-internal/config/          GDOCS_* env with flags bound to the same names; typed enums; validated at start
-internal/credentials/     refresh token: OS keyring → 0600 file under os.UserConfigDir() with a logged
-                          warning (gh pattern) → GDOCS_REFRESH_TOKEN env override
-internal/userconfig/      non-secret pointer file: client_secret path, account email
-internal/auth/            loopback OAuth (127.0.0.1:<random>, PKCE), scope sets (full / readonly)
-internal/gdocs/           Docs API wire types (the JSON we read), no dependencies
-internal/gapi/            raw REST client: client.go (retry, limiter, slog), docs.go (get/batchUpdate),
-                          drive.go (about, files; later comments, revisions, export), errors.go
-                          (APIError + sentinel classes). No MCP imports.
-internal/doc/             model: parse docs.Document → Tree; UTF-16 index math; handles; Target → Range
-                          resolution; normalized text search; section derivation; anchored-content index
-internal/render/          Tree → markdown / text / outline; style annotations; CriticMarkup for
-                          suggestions; comment markers; budget + continuation
-internal/markdown/        goldmark AST → Fragment (neutral block/inline IR); unsupported-construct errors
-internal/plan/            ops + Fragment → batchUpdate requests: minimal diff, overwrite guard, compile,
-                          order, tables (multi-batch), format, dry-run diff
-internal/service/         orchestration: fetch → resolve → plan → apply → refetch; comments (two backends);
-                          suggestions; revisions/diff; export; search; per-document handle memory
-internal/server/          SDK wiring; schema dump via an in-memory client session
-internal/tools/           errors.go, then one file per area: read.go, edit.go, format.go, table.go,
-                          objects.go, tabs.go, comments.go, suggestions.go, history.go, export.go, drive.go
-internal/version/
-testdata/                 synthetic fixtures only (§14) + golden outputs
-docs/  scripts/  audit/
-```
+### A read
 
-Dependencies, all pinned: `modelcontextprotocol/go-sdk` v1.7.0 (with
-`google/jsonschema-go`), `golang.org/x/oauth2`, `zalando/go-keyring`,
-`golang.org/x/time/rate`; Phase 1 adds `yuin/goldmark` and a diff
-library (`sergi/go-diff`). Nothing else.
+A client calls `read_document` with a heading. The service asks Drive
+for the file's type once per document, so a Markdown or Word file takes
+its own path (D-42, D-49). A read of the same document within five
+seconds of the last one reuses it (D-64). Otherwise `documents.get` runs
+with every tab, in the inline suggestions view and with the comments
+view, and asks again without the view when Google refuses it (D-16,
+D-17). `gapi` checks the host, takes a token from the read limiter,
+applies the per-attempt deadline, and retries a transient failure with
+backoff (D-11, D-61, D-63).
 
-## 6. Document model (`internal/doc`)
+`doc` parses the response into tabs, segments and blocks, and the handle
+memory records what each handle points at (D-14). The scope resolves to
+a range of blocks, and `render` writes markdown under the budget, each
+block behind its handle, ending with where to continue (D-18). With
+`include_suggestions` a read of the synthetic fixture shows:
 
 ```
-Document
-  Tabs[]              id, title, index, parent, nesting; first tab is the default
-    Segments          body + headers{} + footers{} + footnotes{} (each its own index space)
-      Blocks[]        ordinal, handle, kind, start/end (UTF-16), style
-        Paragraph     namedStyle, headingId, bullet (listId, nesting), alignment,
-                      suggested paragraph-style and bullet changes,
-                      Runs[] (text, TextStyle, suggestion insert/delete ids,
-                      suggested text-style changes), inline objects, footnote refs
-        Table         rows × cols, Cell[r][c] → nested Blocks, merged spans
-        SectionBreak  section style
-        TOC           rendered read-only
-  FormatSuggestions   every pending suggestion that only restyles: id, target, the
-                      properties from its suggestion state, handle. A restyling
-                      adds and removes nothing, so no walk over insert/delete
-                      ids can find one (§18, #46)
-  Anchors             every comment range (comments view) / quoted-text match (Drive), suggestion range,
-                      inline object and footnote reference, indexed by segment range
-  Revision            revisionId of the fetch this tree came from
+[p2] # Background {h.bg}
+
+[p3] Revenue grew {--a lot--}{>>s:s1<<}{++**substantially**++}{>>s:s1<<} in Q3.
+
+[p4]
+
+[p5] - First point
+[p6]     - Nested point
 ```
 
-- Built from `documents.get?includeTabsContent=true&suggestionsViewMode=
-  SUGGESTIONS_INLINE&commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`. A
-  refusal of the comments view (`invalid` or `forbidden`) is retried
-  without it, and `Fetched.CommentsView` records which answer came back;
-  a refusal about the document fails the retry too. The only index space
-  we compute against.
-- Offsets the model sees are Unicode code points; the server converts to
-  UTF-16 at the boundary.
-- **Handles**: `p<n>` paragraphs, `tbl<n>` tables (cells `tbl3:r2c3`),
-  `sb<n>` section breaks, ordinal within the segment; prefixed outside the
-  first tab's body (`tab2/p12`, `header/p1`, `footnote3/p1`). Headings
-  also carry `heading_id`.
-- **Handle memory**: per document, the service keeps the revision id and
-  `handle → normalized text` of the last read in this process. Unchanged
-  revision → exact; changed revision → re-locate by stored text (unique
-  match required) → else `[stale]`. An unknown handle is `[unknown]` with
-  "read the section first". The stateless fingerprinted alternative
-  (`p12-7f3a`) is uglier and has no evidence behind it (§18).
-- **Sections** are derived: a heading owns everything up to the next
-  heading of the same or higher level in the same segment.
-
-## 7. Addressing, reading, writing
-
-### 7.1 Target (shared by every tool that points at content)
-
-```
-Target {
-  text:        "exact substring"; occurrence?: 1; within?: <heading_id | handle>
-  heading_id:  "h.abc123"; include_heading?: true
-  heading:     "Background"; heading_level?: 2; occurrence?: 1; include_heading?: true
-  handle:      "p12"
-  handles:     { from: "p12", to: "p15" }
-  cell:        "tbl3:r2c3"
-  named_range: "key finding"          (a name, or the id a read reports)
-  tab?:        <tab id or title>      (default: first tab)
-  segment?:    "body" | "header" | "footer" | "footnote:<n>"   (default: body)
-}
-Location { at: "start" | "end" | "before" | "after", of?: Target }
-```
-
-A named range is the one target that outlives an edit: Google moves it
-with the text it covers, so `create_named_range` now and `named_range` in
-a later call reach the same passage, where a handle is only valid for the
-revision it came from. A name several ranges share is refused as a target
-(the id names one), and `get_document` lists both.
-
-Text matching normalizes curly quotes, NBSP and whitespace runs on both
-sides. Errors carry the fix: `[ambiguous] "Q3" matches 4 times in the
-body; add occurrence or within`, `[stale] p12 was "…" when read and no
-longer exists; re-read the section`.
-
-### 7.2 Read path
-
-- `get_outline` → tabs, heading tree with `heading_id`, handles, block
-  counts, sizes. Cheap; called first.
-- `read_document` → `scope` (tab / heading_id / heading / handle range /
-  whole), `format` (`markdown` default, `text`, `raw`), `with_handles`
-  (default true; pass false to drop the prefixes), `with_styles`
-  (default false: annotates what a run sets on itself, e.g.
-  `{font: Arial 11pt, color: #c00}`, so other people's formatting is
-  visible before it is changed. Google reports only explicitly set run
-  properties, so this is exactly the deviation from what the paragraph
-  inherits — and the corollary is that inherited formatting is invisible
-  in a read: a heading whose `HEADING_2` definition is blue and centered
-  reads as plain markdown, which is what `get_document`'s named style
-  lines are for, once per tab instead of once per heading. Verified live),
-  `include_suggestions` (CriticMarkup `{++ins++}` / `{--del--}` with
-  `{>>s:<id> by author<<}`), `include_comments` (`{>>c:<id><<}` markers
-  plus a thread list), `max_chars` (default 20 000), returns
-  `revision_id` and `continue_from` when truncated.
-
-  ```
-  [p3] ## Background {h.k2x9}
-  [p4] Revenue grew {++substantially++}{--a lot--} in Q3. {>>c:AAAAB<<}
-  [p5]
-  [p6] - first bullet
-  [tbl1] | 3×4 table; cells tbl1:r1c1 … |
-  ```
-
-- `get_document` → identity, Drive metadata, counts, capabilities, and
-  per tab what no read of the text shows: page setup, floating objects,
-  named ranges, and the named style definitions (`named style HEADING_2
-  (3 paragraph(s)): Arial 16pt, bold, color #1a73e8, space above 18pt`).
-  Only the styles a paragraph of that tab carries are reported: the
-  others have no appearance in the tab to show, and this is the tool the
-  model calls first. The count covers every segment, headers and
-  footnotes included, because redefining a style changes the whole tab —
-  a wider base than `Stats.Paragraphs`, which counts bodies. Every value
-  the response carries is named, including `START` and 100%: a named
-  style inherits from the tab's `NORMAL_TEXT`, not from the API's
-  defaults, so single spacing is news when the body text is not.
-  Without this read `layout_document`'s `named_style` op was write-only:
-  it redefines a style for a whole tab, and nothing read the definition
-  back.
-- `find_in_document` → plain or regex (RE2) search → handles,
-  code-point offsets, ±80 chars of context.
-- `export_document` → pdf / docx / md / html / txt via Drive export; text
-  formats inline (budgeted), binary formats only under `GDOCS_EXPORT_DIR`.
-
-### 7.3 Write path (`internal/plan`)
-
-Every write tool takes ordered `ops[]`, `mode` (`suggest` | `direct` |
-`comment`; default from `GDOCS_DEFAULT_WRITE_MODE`), `dry_run`, optional
-`expect_revision`, and `force` (default false).
-
-**Modes.** `direct` applies the compiled requests. `suggest` applies the
-same requests with `writeMode: SUGGEST`; on a read where Google refused
-the comments view it is `[unavailable]` with comment or direct named
-instead, because a project the feature has not reached might apply the
-batch directly, which is the overwrite the person asked to avoid. `comment` compiles
-each op into a comment on the resolved range instead of a mutation:
-`replace` → "Proposed change:" plus the new text (with a word-level diff
-summary for long ranges), `delete` → "Proposed deletion", `insert` →
-anchored to the neighboring block with "Insert after this:", format ops
-→ "Proposed formatting: Heading 2". The comment is anchored by
-`insertComment`; where the comments view was refused, it is a Drive comment carrying the quoted
-text (§8). Nothing in the document changes in `comment` mode, so the
-guard below only reports.
-
-1. Fetch the tree (fresh). If `expect_revision` differs → `[conflict]`.
-2. Resolve every target to `Range{segment, tab, start, end}`. Any failure
-   fails the whole call before any API write.
-3. **Minimal diff.** For `replace`, diff the existing text of the range
-   against the new text at word granularity (character fallback for short
-   ranges) and emit `deleteContentRange` + `insertText` only for changed
-   hunks. Inserted hunks inherit the style of the preceding text
-   (documented API behavior); explicit markdown emphasis in the new
-   content is applied on top. When the replacement changes paragraph
-   structure (a paragraph becomes three bullets), the planner falls back
-   to whole-range replacement and says so.
-4. **Overwrite guard.** Every range scheduled for deletion is checked
-   against the anchor index. In `direct` mode, a range containing comment
-   anchors, pending suggestions, inline objects or footnote references is
-   refused: `[blocked] range contains 2 comment anchors (c:AAAAB, c:AAAAC)
-   and 1 suggestion; use mode: suggest or comment, narrow the target, or
-   pass force: true`. The person stays in control: Claude passes `force`
-   only when they have chosen direct editing knowing what is inside the
-   range. In `suggest` and `comment` modes nothing is deleted until a
-   human accepts, so the guard only reports.
-5. Compile the rest: markdown → Fragment → `insertText`,
-   `updateParagraphStyle`, `updateTextStyle` per run,
-   `createParagraphBullets` (compiled last; the API strips the nesting
-   tabs), `insertTable`. Lists follow the rules spike F measured (§18):
-   an inserted item that took the right bullet keeps it, and the rest
-   are rebuilt in windows whose levels count from the item before, which
-   a window takes in when it is deeper (`internal/plan/lists.go`). The
-   content's leading list continues the list item it is placed against,
-   at its level, unless `list_level` names one; a rebuilt item set apart
-   by hand gets its indents back, as does one bullets `none` takes out of
-   its list. Content written inside a paragraph merges its first item into
-   it, and that paragraph keeps its style, list item or not; the list
-   starts after it. Order by descending start index per segment;
-   overlapping ops rejected up front.
-6. `batchUpdate` with `writeControl.requiredRevisionId` (and
-   `writeMode: SUGGEST`). On revision conflict: re-fetch, re-resolve,
-   re-plan, retry once; a second conflict is `[conflict]`.
-7. Re-fetch; return `{ revision_id, mode, ops_applied, changes: [{op,
-   handles, preview}], suggestion_ids, warnings }`.
-
-Multi-batch ops: `insert_table` with data inserts the empty table,
-re-fetches and fills the cells. If the fill fails the empty table remains
-and the response says so.
-
-Content with tables or images runs in rounds, and the rounds are not
-atomic. The first batch writes the text with an empty paragraph, a slot,
-where each table or image goes. Later batches fill the slots one at a
-time, highest first, each against a fresh read. That read must be at the
-revision the previous batch's reply gave, or somebody else wrote in
-between and the slots, found by index, may have moved; the rest are then
-reported, not placed. It must also still show the slot where the text
-left it. An image goes into its slot. A table goes in
-at the newline of the paragraph before the slot, gets its cells as plain
-text through the `insert_table` fill, and a last batch deletes the empty
-paragraphs it leaves; the slot stays where the body ends or a table
-follows, since Docs needs a paragraph there (spike E, §18). Such content
-is the only op of its call, so nothing else in the first batch moves the
-slots, and it holds at most 10 tables and images. In suggest mode deleted
-text stays in place, so where it would share the last slot's paragraph
-(a replace of the whole body, a blank paragraph cleared of whitespace)
-the slot gets a newline of its own. A later batch of any call is not
-guarded against the suggestions its own earlier batches made. A table over 200 rows
-or 20 columns, or an image address over 2 kB, is refused before anything
-is written. A slot that cannot be filled is a warning naming the line of
-the content, and the text stays written. When the round failed, the
-warning says the empty paragraph is still there; when somebody else
-changed the document in between, it does not, since the slot's state is
-then unknown. A dry run lists the rounds without planning them.
-
-Dry run returns the resolved targets, the guard report, the kinds of
-request that would be sent (not the requests themselves: they carry
-UTF-16 indices, which the model never sees), the proposals in comment
-mode, and a rendered view of the region. Nothing is sent.
-
-### 7.4 Markdown coverage
-
-Headings 1–6, paragraphs, bold/italic/strikethrough/inline code, links
-(a URL, `#<heading id>` for a heading in the same tab, `#tab=<tab id>`),
-bullet and numbered lists (nested), hard breaks; task-list checkboxes are
-dropped and their text kept. Backslash escapes and entity references
-resolve in text and addresses, as CommonMark says, and not in code
-spans. An autolink keeps its text as typed, as goldmark renders one.
-goldmark keeps them in the source and resolves them only while writing
-HTML, so the parser resolves them through goldmark's own writer. A
-`<br>` is a paragraph break, as a read writes between a table cell's
-paragraphs; in a heading or list item, a line break. A read escapes
-each character content would take as markup, and no other: a backslash
-before punctuation, a space or the end, and the punctuation after one;
-an ampersand that starts a reference; a `*` or `_` that could open or
-close emphasis; every backtick, tilde and `[`; a `<` that could start a
-tag; and a line that starts like a list, heading, quote, rule or
-indented code. Code holding a backtick gets a longer fence. So text read
-and written back is unchanged, apart from up to three spaces at a
-paragraph's start and any at its end, which markdown drops. A
-randomized test holds it, plain, bold, code and in table cells. Fenced code → Courier-styled paragraphs.
-Tables and images go in the body between blocks, through an `insert`,
-`append` or `replace` (§7.3). Table cells are plain text. An image sits
-on a line of its own, with an http or https address Google fetches
-itself. Its alt text reaches only a comment-mode proposal, since
-`insertInlineImage` takes none. Refused with
-`[unsupported] <construct> at line N`: an image inside text or a list
-item (use `insert_object`), a table or image in a header, footer,
-footnote or table cell, HTML, block quotes, horizontal rules.
-
-What markdown cannot say goes through `format_document`: fonts, sizes,
-colors, alignment, spacing, indents, named styles on existing text,
-bullet presets, clearing formatting.
-
-### 7.5 Markdown files (`internal/mdfile`)
-
-Since 2026-10-05 Docs opens a Markdown file stored in Drive and edits it
-in place: the file stays a `text/markdown` blob (spike D, §18). The Docs
-API reads one — `documents.get` answers with a parsed model and the
-comments view — and refuses every write to it, suggestions and
-`insertComment` included, with 400 "The document must not be an Office
-file". The one write is a Drive media upload of the whole file, and an
-upload makes an editor that has the file open reload; no API writes
-through the editor's session. So a Markdown file is edited the way it is
-stored, as text, the server is what keeps that upload from being an
-overwrite (§15), and working on one together live goes through a working
-copy (below).
-
-**Which path.** The service asks Drive for a document's type once per id
-per session. A `text/markdown` file, or one Drive keeps under the older
-`text/x-markdown` (§18), takes the path below; everything else is a
-Google Doc, as before.
-
-**The bytes hold the comments.** A comment made in the editor is a
-marker on each side of its passage, `<!-- gdoc_comment_begin: c1 -->`
-and `<!-- gdoc_comment_end: c1 -->`, and an entry in a `gdoc_comments`
-YAML block between rules that must end the file. Drive cannot see these
-comments: `comments.list` leaves them out and `comments.get` on their id
-is 404. Text after the block turns it into body text, names and tokens
-included. `mdfile` parses that markup out and keeps it byte for byte.
-
-**Reads** come from the bytes, with the markup taken out: what the model
-reads is what its exact-text targets match and what the upload rewrites.
-The outline is the file's headings, each named by its GitHub slug
-(`lists`, `same-1`), which lasts as long as the heading's text; a
-section runs to the next heading of the same or a higher level. A long
-read continues from a line, `continue_from: L120`, or from a character
-in one longer than the budget, `L120:500`, so continuing always moves
-forward. No handles: a line or a slug says what a handle would. With `include_comments` a commented
-passage ends in `{>>c:<id><<}`, the threads coming from the Docs
-comments view and from Drive, which hold disjoint sets.
-
-**Writes** take the content ops (`insert`, `append`, `replace`,
-`delete`, `replace_all`) on targets by exact text, `heading_id` or
-`heading`; content is the file's own markdown and is written as given.
-Each op resolves against one read, a `replace` becomes the minimal diff
-of the old text against the new, and two ops may not reach the same text;
-insertions at one point land in op order, before anything replaced from
-there. Content placed between blocks gets the blank lines that keep it,
-and what follows, a block of its own. The edits are applied to the
-visible text with these rules for the markers, which are never deleted:
-inside a replaced range a begin marker moves before the new text and an
-end marker after it; at a replaced range's edges a marker stays outside
-it; and at an insertion point the new text goes outside a comment that
-begins or ends there. The result is parsed again and must carry the same
-markers and the same block, or the write is refused. Content holding the
-markup is refused, so no write can forge or end a comment.
-
-- **Guard.** A direct edit that would delete commented text, an image or
-  a footnote reference is `[blocked]` unless forced, and a forced one
-  warns of what it changes, as in a Google Doc (§7.3). The probe found a comment
-  survives an edit inside its passage, but the person did not ask for
-  their comment's text to change.
-- **Check, write, verify, repair** (`markdown_write.go`). Drive v3 has
-  no precondition: it serves no ETag and ignores `If-Match`, and
-  `version` moves on metadata changes too. And while a person has the
-  file open, their work is in the live session, which reaches the file
-  only when the editor saves: an upload four seconds after a save
-  overwrote it in spike D, and the editor took the upload. So every
-  write, edits, comments and write-backs alike:
-  1. reads the file and, with a `fields` mask (2 KB against 114 KB), the
-     live session's revision and comments. A comment the live session
-     holds on a passage and the file does not, a reply or a resolve the
-     file does not show, is a person's work not saved yet: the write
-     waits three seconds and tries again, twice, then is `[conflict]`.
-     `force` does not write past it: that work is in no Drive revision
-     yet, so nothing could bring it back (§12a);
-  2. plans, then reads `headRevisionId`, `md5Checksum` and the live
-     revision again just before the upload, and plans again if any moved;
-     `expect_revision` names a `headRevisionId`;
-  3. uploads, then finds in `revisions.list` the revision its upload
-     replaced. When it is not the one the plan was made on, somebody's
-     save landed in between: it is read from history and the change made
-     again on top of it, or, when the change no longer fits, the save is
-     put back and the write is `[conflict]`. Nothing is overwritten even
-     in the gap the checks cannot close;
-  4. after writing comment markup, waits for the live session to list
-     the new comments, and puts the bytes back if the Docs API can no
-     longer read the file at all.
-
-  Measured with a person (spike D, stage 5): the editor writes each
-  change into the file about two seconds after the live session has it
-  — typing, a comment, a reply, a resolve alike — so the three-second
-  wait outlasts a save. Text typed and not saved yet is not in the
-  comments view; the live revision catches it when it moves during a
-  write, and the history check catches a save of it that lands in the
-  gap.
-- **One upload per call, none for nothing.** Every upload is a Drive
-  revision, identical bytes included, so a call batches its ops and a
-  call that changes nothing uploads nothing. The upload is sent as the
-  file's own type, `text/markdown` or `text/x-markdown`: the media part's
-  type becomes the file's, and a `text/plain` one makes the Docs API
-  refuse the file. Revisions are not
-  pinned: a pin cannot be undone, 200 is the limit, and Drive keeps an
-  unpinned revision at least 30 days unless the file passes 100.
-- **Modes.** `direct` changes the text. `comment` writes each op as a
-  comment proposing it, on the passage it would change, and changes no
-  text. `suggest` is `[unavailable]`: Docs has no suggestion mode for
-  these files and the API takes none. The server never turns one mode
-  into another, so with the default `suggest` a write on a Markdown file
-  is refused until the person chooses.
-- **Comments written into the file.** `add_comment`, comment mode and a
-  reply to a comment the file keeps write the markup the editor writes:
-  markers around the passage and an entry, YAML double-quoted, under the
-  signed-in account's name. The editor shows such a comment, "From
-  imported document", and on a person's save keeps it and gives it a
-  token, which makes it Google's own (spike D, stage 3). Until then its
-  id changes each time the file is written. A resolve is never written:
-  `status: RESOLVED` in the bytes made every `documents.get` on the file
-  answer 500 until the bytes were put back, so the person resolves in
-  the editor. A comment needs a passage, and cannot be assigned.
-- **Front matter.** The editor rewrites front matter into a rule and a
-  `## key: value` heading when a person saves; reads and writes warn
-  when a file has front matter, and when it opens the way that rewrite
-  leaves it.
-- **Size.** Files over 5 MB, Drive's ceiling for a simple upload, are
-  read but not written.
-- **Search** keeps Google Docs as its default: a person who syncs a code
-  folder into Drive has hundreds of `README.md` files. `kind` reaches
-  Markdown files.
-
-Ops that need the Docs API — formatting, tables, objects, layout, tabs,
-footnotes, headers, named ranges, suggestion review — are `[unsupported]`
-on a Markdown file before anything is sent, saying the file is text.
-A path that forgets to branch on the kind stops in `fetch`, which
-refuses a Markdown file rather than serve its Docs model, whose handles
-no write could use.
-
-**Working copies** (`markdown_copy.go`, `mdfile.Merge`). For a person and
-Claude to type in one document together it has to be a Google Doc.
-`create_document` with `from_file` imports the file's text, front matter
-and comment markup left out, into a new Doc through Drive's Markdown
-import, and records in the Doc's `appProperties`, which only this OAuth
-client sees, the file and the revision it was made from. Everything this
-server does on a Google Doc then works live on the copy.
-`write_markdown_file` exports the copy as Markdown and merges it back
-into the file. Docs' export writes Markdown its own way — inline HTML as
-its text, `__x__` as `**x**`, table delimiters re-spaced, list items with
-trailing spaces, `&nbsp;` paragraphs — so the merge works on blocks
-(paragraphs whole, headings, list items, table rows, fenced code) under a
-normalization that takes those out: a block the copy did not change keeps
-the file's own text, separators and all. What the copy changed is the
-difference between the export and the revision the copy was made from;
-what the file changed since is the difference between that revision and
-now. A block changed on both sides is a conflict, refused unless `force`
-keeps the file's version. The result is applied as minimal edits under
-the guard and written by the protocol above, and the copy then records
-the revision it matches. When the base revision is gone from history,
-the write is refused unless forced, which writes the copy over the file
-block by block. An image placed in the copy has no address a Markdown
-file can use and is written empty, with a warning.
-
-
-### 7.6 Word files (`internal/ooxml`)
-
-The Docs API reads a Word file (`.docx`) stored in Drive: `documents.get`
-answers with a model, the file's tracked changes as suggestions and its
-comments as anchored comments in the comments view (`fromImportedDocument`).
-It refuses every write to one, with 400 "The document must not be an
-Office file" (spike G, §18). So a Word file is written the way it is
-stored, as with a Markdown file, but read as a Google Doc: reads,
-outlines, handles and the comments view all work, and `get_document` says
-`kind: word_file`.
-
-**Addressing.** An op resolves against the Docs model exactly as on a
-Google Doc, and the planner's checks run, the overwrite guard (§7.3)
-among them, without building requests. Without the comments view, which
-lists a Word file's comments, the guard learns the comments a change to
-whole paragraphs would cut out from the file's own markers; text changed
-inside a paragraph keeps them. `replace_all`, which has no request here,
-is one replace per match, as a regex one is everywhere; matches in
-headers, footers or footnotes, which no op here writes, are left with a
-warning, and one matching only there is refused. The body's
-paragraphs, tables' included, are the file's `w:p` elements in order:
-spike H found the two lists the same, text for text. A cell spanning
-columns is the exception: Docs keeps each cell it covers, empty, and the
-file has none, so those are passed over; a span of rows is a cell in
-each of its rows in both. Each paragraph an op
-reaches is checked to hold the same text in both, deleted text, tabs and
-a content control's text counted as Docs counts them; a difference means
-Docs has not read a revision yet or a person's edit has not reached the
-file, and the write waits and then refuses.
-
-**Writing** (`internal/ooxml`). `encoding/xml` cannot write a document
-back with its namespace prefixes, so the file is never re-encoded: edits
-are splices of `word/document.xml`, and a part not changed is copied from
-the zip untouched. A paragraph is runs; text replaced inside one takes the
-look of the text it replaces, and plain text changes by its minimal
-difference. Content of several paragraphs is new `w:p` elements between
-paragraphs; a heading takes the paragraph style the file names "heading
-N" (the name is the same in every language, the id is not), added when
-missing; a list item takes `numPr` with its level, continuing the list it
-is placed against, its own or the one its paragraph style numbers ("List
-Bullet"), or a list of its own, added to `numbering.xml` ahead of the
-cleanup mark Word for Mac may end that part with. A paragraph's
-list and level are each its own, else the nearest style's in its chain
-that sets it, the default paragraph style's for a paragraph naming none;
-its `numId` 0 takes it out of its style's list.
-Suggestions are tracked changes, `w:ins` and `w:del` under the account's
-name, a new paragraph's mark marked inserted, a deleted one's deleted; a
-tracked insertion goes inside a link, which may not go inside one (spike
-H). Comments are Word comments: range markers and a reference in the
-text, the text in `comments.xml`, which a file without one gets, with its
-content type and relationship. A change may not reach into a link from
-outside it, nor, in either mode, text a pending suggestion inserted or
-deleted, or a point inside it: written into the suggestion, a direct
-change would go with it when it is accepted or rejected. A tracked
-deletion of paragraphs leaves what a suggestion already deleted as it
-is. A field's code counts no unit, so a change across a field keeps it.
-
-**The write** follows §7.5's: the file, its Drive metadata and its Docs
-model are read together; the change is made and the result read back; just
-before the upload the file's head revision and checksum and the Docs
-revision must be where they were, or it is planned again; the file is
-uploaded whole as its own type, unless the change leaves it as it is; and
-the revision the upload replaced must
-be the one planned on, or that save is put back and the write is
-`[conflict]`. Then the write waits for Docs to read the new revision,
-which took four seconds in spike H, so the next read shows it.
-
-Formatting, tables, images, layout, tabs and reviewing suggestions are
-`[unsupported]` on a Word file, saying to save it as a Google Doc. So is
-more than one paragraph in place of text inside one, a newline in a
-`replace_all` replacement included, since a paragraph is not split in
-the file; replacing the whole paragraph by its handle writes several.
-`list_comments` lists the file's comments from the Docs view besides
-Drive's, which are disjoint sets; replying to, resolving or deleting one
-the file holds is done in the editor.
-
-## 8. Collaboration and history
-
-**Comments, two backends behind one tool surface.**
-
-| | Docs API (comments view) | Drive API v3 |
-|---|---|---|
-| list | `documents.get` with `commentsViewMode` → threads plus the tab's `commentAnchors` map (anchor id → ranges) → handles | `comments.list` (replies, resolved state, `includeDeleted` opt-in) → `quotedFileContent`; server matches the quote to a block, best effort |
-| add | `insertComment` with a Range → anchored in the UI | `comments.create` with `quotedFileContent` → **unanchored** in the UI (stated in the description and in `warnings`) |
-| reply / resolve / reopen | `replies.create` with `action` (one backend for thread operations; `addCommentReply` adds nothing for replies). A suggestion's thread is the exception: Drive cannot see it, so a reply there is `addCommentReply` with `suggestionId` | `replies.create` with `action`; no reply on a suggestion's thread |
-| delete | gated, `comments.delete` / `replies.delete` | gated |
-
-`list_comments` always lists through the Drive API, which carries every
-reply with author, time and action, resolved and deleted state for every
-deployment, and locates each thread through the comments view's anchors
-when the fetch carried them, else by its quoted text (a quote that matches once).
-Resolved threads are included by default, deleted ones on request.
-Resolution is reversible (`reopen`); deletion is gated. A Markdown file
-is the exception (§7.5): Drive cannot see the comments the editor keeps
-in the file, so its listing is the Docs comments view plus Drive's own
-list, which hold disjoint sets, and an editor comment is read-only to
-every API. The guard, reads
-with `include_comments` and the listing share one located thread list
-per fetch.
-
-**Suggestions.** `list_suggestions` renders pending suggestions with
-author and handles (GA), of kind `insert`, `delete`, `replace`,
-`structure` or `format`. A `format` suggestion changes only formatting:
-it inserts and deletes nothing, so it is found through the
-`suggested*Changes` maps rather than through the suggestion ids on runs,
-and it reports what it restyles (`text: bold`, `paragraph: alignment`)
-from its suggestion state — never from the style beside it, which the
-API fills with every inherited property. Reads mark one as CriticMarkup
-`{==text==}{>>s:<id> suggests bold<<}`: a highlight, because nothing was
-added or removed. A direct formatting change over a property a pending
-suggestion already sets comes back with a warning (§18). `review_suggestion`
-(`action: accept | reject`, each suggestion by id) goes to Google whatever the
-read said; `mode: suggest` needs the comments view (§7), except on a Word
-file, where a suggestion is a tracked change in the file (§7.6). In SUGGEST mode the API refuses `AddDocumentTab`,
-`CreateNamedRange`, `DeleteFooter`, `DeleteHeader`, `DeleteNamedRange`,
-`DeleteTab`, `UpdateDocumentTabProperties`, `UpdateTableColumnProperties`,
-and cannot suggest document-format or header/footer settings; the planner
-rejects those ops up front with the reason.
-
-**Revisions.** `list_revisions` (Drive: id, time, last modifying user;
-Drive may omit older revisions of busy documents); `diff_revisions`
-exports `text/markdown` or `text/plain` at two revisions through
-`files.download` with `revisionId` (a long-running operation whose
-content URL must stay on a Google host; `files.export` takes no revision)
-and returns a line-level unified diff, budgeted at hunk boundaries.
-`read_document` accepts `revision` for a markdown or text view of an old
-revision (export path; no handles, no scoping). Drive revision ids are a
-different id space from the Docs `revision_id` concurrency token; the tool
-descriptions say so. Google keeps version history automatically for every
-batch the server sends; restoring an old revision is an explicit `replace`
-of the body from an export, never implicit.
-
-## 9. Tool surface
-
-snake_case verb–noun, no dots. Claude Code prefixes `mcp__<server>__`.
-"Gated" = registered only with `GDOCS_ENABLE_DESTRUCTIVE=1`. No tool sets
-`_meta["anthropic/requiresUserInteraction"]` (§12a). `GDOCS_READ_ONLY=1`
-registers only readOnly rows and requests readonly scopes.
-
-| Tool | Purpose | Annotations | Phase |
-|---|---|---|---|
-| `search_documents` | Locate a Doc by title or content (Drive search restricted to Docs, or with `kind` to Markdown files or both); returns id, title, kind, modified, owner | readOnly | 1, 2.3 |
-| `get_document` | Title, tabs, revision, owner, counts, capabilities (comments view, available write modes, configured default); per tab the page setup, floating objects, named ranges and the named style definitions its paragraphs carry | readOnly, idempotent | 0, 4 |
-| `get_outline` | Heading tree with `heading_id`, handles, sizes | readOnly | 0 |
-| `read_document` | Scoped, budgeted markdown/text/raw view; `with_styles`; `revision_id` | readOnly | 0 |
-| `find_in_document` | Text/regex search → handles + context | readOnly | 1 |
-| `export_document` | pdf/docx/md/html/txt; writes a local file, so it is a non-destructive write that read-only mode still registers | destructive=false | 1, 2.0 |
-| `create_document` | Title, optional markdown body; `kind: markdown_file` makes a `.md` file, `from_file` a working copy of one (§7.5) | destructive=false | 1, 2.3 |
-| `edit_document` | ops: `insert`, `append`, `replace`, `delete`, `replace_all`, `insert_break`, `insert_footnote`, `create_header`, `create_footer`, `delete_header`, `delete_footer`, `create_named_range`, `delete_named_range`, `replace_named_range`; mode / dry_run / expect_revision / force | destructive*, idempotent=false | 1, 2, 4 |
-| `format_document` | ops: `text_style`, `paragraph_style`, `bullets`, `clear_formatting` | destructive* | 1 |
-| `list_suggestions` | Pending suggestions with handles, authors and the replies on their threads | readOnly | 1 |
-| `review_suggestion` | accept / reject / discard (discard is author-only), each suggestion named by the id `list_suggestions` shows; dry_run | destructive* | 1, 4, 2.0, 3.0 |
-| `list_comments` | Full threads: replies, resolved, deleted, assignee, quoted text, handles | readOnly | 2 |
-| `add_comment` | Anchored to a Target, or quoted through Drive where the comments view is refused; no target = document-level; dry_run | destructive=false | 2, 2.0 |
-| `reply_comment` | `action: reply \| resolve \| reopen \| edit` (edit rewrites a comment or one reply, author-only); `suggestion_id` replies on a suggestion's thread | destructive* | 2, 4 |
-| `delete_comment` | Gated; a thread or one reply; `confirm_comment_id`; `text_start`, how the text it deletes begins, read and compared; dry_run | destructive | 2, 2.0, 3.0 |
-| `list_revisions`, `diff_revisions` | History; `read_document` takes `revision` | readOnly | 2 |
-| `edit_table` | ops: `insert_table`, `set_cells`, `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `merge_cells`, `unmerge_cells`, `style_cells`, `style_columns`, `style_rows`, `pin_header_rows`; a grid change puts the ops after it on that table in their own batch | destructive* | 2, 4 |
-| `insert_object` | `action: insert \| replace \| delete`; insert takes `kind: image \| person \| rich_link \| date` at a Location, replace swaps an image's source, delete removes an object by id (the only way to remove a floating one) | destructive* | 2, 4 |
-| `layout_document` | ops: `page`, `section`, `section_break`, `named_style` | destructive* | 4 |
-| `manage_tabs` | `action: add \| rename \| move`; always direct (the API refuses tab requests in SUGGEST mode) | destructive* | 2 |
-| `delete_tab` | Gated; child tabs go with it; `confirm_tab`; dry_run | destructive | 2, 2.0 |
-| `write_markdown_file` | Merge a working copy back into its Markdown file, block by block (§7.5); conflicts refused unless forced; unsaved editor work never written past; dry_run | destructive* | 2.3, 3.0 |
-
-\* Marked destructive, as every write that changes or removes what is
-there is: the MCP schema reads `destructiveHint: false` as "the tool
-performs only additive updates". Not gated: these register without
-`GDOCS_ENABLE_DESTRUCTIVE` and take no confirm. The layers
-this server controls are the write mode the person chose, the overwrite
-guard, `dry_run`, read-only mode, and not registering the destructive
-tools at all. Client-side approval is **not** one of them: whether a call
-is put to the person is the client's decision and its permission mode, so
-a host running in an auto-approve mode may invoke any registered tool
-without asking. The server asks nobody itself (§12a), and annotations are
-hints the spec says clients treat as untrusted. Design as though every
-registered tool can be called unattended.
-`replace_all` always carries explicit `tabsCriteria`. With `regex` it
-sends no `replaceAllText` at all: the server finds the matches itself,
-with `find_in_document`'s RE2 matcher over each paragraph, and plans
-each as a replace (a delete when it expands to nothing), up to 500. The
-pattern decides case, a match covers text only (never a chip, break or
-unknown element), a table of contents is skipped, a group the
-replacement names must exist, and no match at all is `[not_found]`.
-
-**Resources** (Phase 3). Three templates, all `text/markdown`, for
-clients that attach a document as context instead of calling a tool:
-`gdocs://{document}` (every tab's body under one 400 000-character
-budget, tabs separated by `<!-- tab N "title" -->`, a closing comment
-naming where `read_document` continues), `gdocs://{document}/outline`
-(the `get_outline` text) and `gdocs://{document}/tabs/{tab}`. They carry
-no handles, suggestions or comments; the read tools remain the way to
-scope, budget and target. No static resource list (that would be a Drive
-listing) and no subscriptions (Google offers no push; polling would spend
-the read quota). A document that does not exist is the spec's
-resource-not-found error; other failures carry the `[class] message`.
-
-Results: a client may show the model a result's text **or** its
-structured form (Claude Code 2.1 shows only `structuredContent` when
-both are present; the spec makes the text the backwards-compatible
-form). So read tools (`get_document`, `get_outline`, `read_document`,
-`find_in_document`, `search_documents`, `export_document`,
-`list_suggestions`, `list_comments`, `list_revisions`,
-`diff_revisions`) return a **text block only**, with the revision,
-block count and continuation in a header comment; write tools return
-both, and their JSON carries everything their text does, the rendered
-preview included. Measured in the Phase 3 evals (§14).
-
-## 10. Auth, enrollment, config, process model
-
-- **Google account and Cloud project.** Each deployer runs this server
-  under a Google Cloud project they own. The project may be shared with
-  other tools the deployer runs, but this server always gets its own
-  OAuth client so its tokens can be revoked independently. Setup,
-  documented in the README and verified by `doctor`: create or pick the
-  project; enable the Google
-  Docs API and Google Drive API; configure the OAuth consent screen
-  (**Internal** for a Workspace organization, which avoids the 7-day
-  token expiry; **External + Testing** with the user added as a test user
-  for consumer accounts, with weekly `login`); on an External app, add the
-  four scopes, which an Internal one does not need listed; create
-  a **Desktop app** OAuth client; download its `client_secret.json`; run
-  `google-docs-mcp login --client-secret <path>`.
-- **No enrollment.** Suggestion mode, anchored comments and
-  accept/reject were Developer Preview until Google made them generally
-  available on 2026-09-30 (§18); no deployer enrolls anything.
-- **OAuth flow**: Google's documented desktop flow, loopback
-  `127.0.0.1:<random port>` with PKCE (OOB has been blocked since 2023).
-- **Refresh token storage**, in the order `gh` uses: OS keyring; on error
-  (no session bus, no secret service, headless) a 0600 file under
-  `os.UserConfigDir()/google-docs-mcp/` with a stderr warning;
-  `GDOCS_REFRESH_TOKEN` env overrides both. Backends: Secret Service on
-  Linux, Keychain on macOS, Credential Manager on Windows.
-- Scope sets: `full` = `documents` + `drive`; `readonly` =
-  `documents.readonly` + `drive.readonly`. A missing-scope 403 becomes
-  `[forbidden] missing scope …; re-run google-docs-mcp login`.
-- **Config**: `GDOCS_*` env is the source of truth; each setting also has
-  a flag bound to the same name. Settings: `GDOCS_LOG_LEVEL`,
-  `GDOCS_LOG_FORMAT`, `GDOCS_DEFAULT_WRITE_MODE`
-  (`suggest` | `direct` | `comment`, default `suggest`), `GDOCS_READ_ONLY`,
-  `GDOCS_ENABLE_DESTRUCTIVE`, `GDOCS_EXPORT_DIR`, `GDOCS_HTTP_TIMEOUT`,
-  `GDOCS_PROFILE` (named config directory, so a person with two Google
-  accounts runs two server entries). Operational flags: `--version`,
-  `--dump-schemas`. `GDOCS_PREVIEW` and `--preview` are accepted,
-  ignored and logged as deprecated, so an existing configuration starts.
-- **Startup**: refresh the access token once (the scope-agnostic
-  credential check). On failure log to stderr and **keep serving**; every
-  tool then returns `[auth] … run google-docs-mcp login`. `doctor` does the
-  full interactive check: token age, consent type, scopes, the comments
-  view (a `documents.get` with `commentsViewMode` on a doc id you pass),
-  quota headroom.
-- **Transport**: stdio (**decided**).
-
-## 11. Reliability
-
-- Retries: reads retry on 429/5xx/network with exponential backoff and
-  jitter, cap 30 s, max 5, honoring `Retry-After`. Writes retry only on
-  429; a 5xx or a network failure is an unknown outcome,
-  `[ambiguous_outcome] the write may have been applied; read …
-  before trying again` — a different word from `[ambiguous]`, which means the target
-  matched several things. One asks the caller to choose, the other to go
-  and look.
-- Rate limits: per-process token buckets (reads 4/s burst 20, writes
-  0.8/s burst 5).
-- Timeouts: per-call context from the MCP request; `GDOCS_HTTP_TIMEOUT`
-  default 60 s, 120 s for exports.
-- Caching: none for correctness; a 5-second coalescing cache keyed by
-  (docId, revisionId). Writes always re-fetch.
-- Logging: `slog` to stderr, text or JSON. Stdout carries only JSON-RPC.
-- Performance (Phase 3). Everything derived from one fetch is derived
-  once: the handle memory, the located comment threads, and per segment
-  a searchable text (every paragraph's normalized characters in one
-  string, so a text target or a quoted comment is one `strings.Index`
-  pass; a match maps back to indices through a byte offset per
-  paragraph, not per rune) and a sorted anchor list. Handles and cells
-  are map lookups, list numbers are assigned at parse time, and word
-  counts never build strings. `make bench` over `doctest.Large` (about
-  150 pages: 6 400 body blocks, 130 tables, 300 comments, 200
-  suggestions, 100 footnotes), one machine, 2026-09-03:
-
-  | per fetch | | per call, document cached | |
-  |---|---|---|---|
-  | JSON decode | 43 ms | section read | 0.10 ms |
-  | parse | 11 ms | text target | 0.07 ms |
-  | locate 300 quoted comments | 43 ms | `find_in_document` | 3.3 ms |
-  | locate 300 anchored comments | 6.8 ms | outline | 4.2 ms |
-  | two-op dry run | 22 ms | whole body as markdown | 8.0 ms |
-  | handle memory | 0.00002 ms | budgeted read (20 k chars) | 0.19 ms |
-
-  Measured against the same fixture before the work, in one session: a
-  cached section read was 145× slower, the outline 4×, a text target
-  40×, `find_in_document` 15×, locating quoted comments 10×, a dry run
-  3×. What remains per write is the fetch itself.
-
-## 12. Confidentiality, security, safety
-
-**Nothing internal leaves the owner's machine or enters the repository**
-(**decided**).
-
-- The repository never contains organization names, document ids or
-  URLs, account emails, Cloud project ids, OAuth client ids or secrets,
-  or content from real documents. There is no default project or client
-  baked in; the binary is useless until a deployer supplies their own.
-  The repository shares no code with other projects. Fixtures under `testdata/` are synthetic, generated
-  by a script from lorem text, never recorded from real documents.
-  gitleaks runs in pre-commit and CI, as in the sibling repos, with rules
-  for Google doc-id and client-id shapes added.
-- The server talks only to Google: `*.googleapis.com`, plus the
-  `docs.google.com` export URL that `files.download` hands back for an
-  old revision (checked against an allowlist before credentials are
-  sent). No telemetry, no crash reporting, no update checks.
-- Logs never contain document text, comment text, titles, or search
-  queries at `info`; at `debug` they are redacted to lengths and hashes.
-  Request ids and revision ids are logged; document ids are logged
-  truncated.
-- Exports are written only under `GDOCS_EXPORT_DIR`, path-cleaned, and
-  never over a file already there: each is created exclusively
-  (`O_EXCL`), so a name already taken, by an earlier export or by a
-  symbolic link, gains a counter (`-2`, up to 100, then `[blocked]`), and
-  nothing is written through a link. Nothing else touches the filesystem except the
-  credential store and userconfig.
-- Destructive tools are not registered unless
-  `GDOCS_ENABLE_DESTRUCTIVE=1`; annotations are hints the client may not
-  trust (spec), which is why the gate is server-side.
-- The refresh token lives in the keyring or a 0600 file (warned); the
-  client secret file is user-owned and never logged. `logout` deletes and
-  revokes.
-- Regex search is Go `regexp` (RE2, linear time). Inputs are validated
-  before any API call; validation failures are tool errors
-  (`isError: true`), which the SDK produces from a returned `error`. The
-  `[class]` prefix is our convention; the actionable message is what the
-  guidance asks for.
-
-## 12a. Per-call approval is the client's
-
-From 3.0.0 the server asks the person nothing. From 2.0.0 to 2.4.0 it
-put a form with no fields to the person, through MCP form elicitation,
-before seven writes: `delete_tab`, `delete_comment`,
-`review_suggestion` with `all`, a forced `edit_document`, `edit_table`
-or `insert_object`, and a forced `write_markdown_file`. This section
-said six; it missed `write_markdown_file`. The maintainer removed the
-question from every server of the family on 2026-10-22, and approved
-this server's port on 2026-10-23 (§15):
-
-- The specification puts consent to each tool call on the host, and
-  never makes a server's elicitation a consent control: the client
-  gathers the answer "from the user or other sources".
-- Few widely used servers ask the person themselves, and those that do
-  each pick their own scope.
-- Clients answered the question with nobody there (a Claude Code
-  `Elicitation` hook once installed, Codex in full access), did not draw
-  it (by open user reports, Claude Code's VS Code extension and Claude
-  Desktop's Code tab), left it hanging (Cowork), or cut its message to
-  three lines. No client's permission rules match it.
-- People stop reading prompts they see often.
-- A client remembers approval per tool, never per argument, so a risky
-  variant carried as an argument rides along unseen once its tool is
-  always allowed.
-
-What stays is what holds on every client:
-
-1. **Registration.** `delete_tab` and `delete_comment` exist only with
-   `GDOCS_ENABLE_DESTRUCTIVE`, and `GDOCS_READ_ONLY` registers the reads
-   alone. A client that runs with nobody watching gets neither delete.
-2. **The retyped target.** `confirm_tab` and `confirm_comment_id` repeat
-   what the call deletes, checked in the server. The model types it, so
-   it is a witness that the call meant this target, never the person's
-   approval; it is stricter than the standard's `confirm: true` (§17b).
-3. **Guards and witnesses.** The overwrite guard and `force` (§7.3), the
-   write mode the person chose, `expect_revision`, the revision a review
-   is pinned to, and a Markdown file's conflict check and editor check
-   (§7.5).
-4. **`dry_run`** on every write.
-5. **Annotations.** `destructiveHint` is true on every write but the
-   three that only add (`create_document`, `add_comment`,
-   `export_document`), so a client that prompts by it, as claude.ai and
-   Codex do, prompts for the deletes and for every edit. VS Code ignores `destructiveHint` and prompts on every tool
-   without `readOnlyHint`, which only the nine reads carry. No tool
-   carries Claude Code's `anthropic/requiresUserInteraction`, which is
-   for an unrecoverable delete of a whole container, a permanent delete
-   past a trash, or a public share. Version history keeps a deleted
-   tab's text. A deleted comment cannot be restored, but it is one item
-   of many, deleted many in a row, where a prompt on every call goes
-   unread; the standard keeps the mark off such deletes.
-   In Claude Code the operator decides with `permissions.allow` and
-   `ask`; the README gives `ask` rules, and the staleness gate holds each
-   name there to the registered tools.
-6. **What a client's prompt shows.** A client's prompt shows the call's
-   arguments. Where the question said what an argument meant, the
-   argument now carries it: `review_suggestion` takes each suggestion by
-   the id `list_suggestions` showed, and `all` is gone, so a suggestion
-   proposed after the list was read is never reviewed unseen.
-   `delete_comment` takes `text_start`, how the text it deletes begins
-   as `list_comments` shows it: the thread's comment, or the reply's.
-   The question showed that text; the comment is read before the
-   delete, a dry run included, and a `text_start` that is not how the
-   text begins is `[stale]`. At least 20 characters, or the whole of a
-   shorter text, with whitespace folded as the listing folds it. `force`
-   stays a boolean; its warnings name what each forced op destroys, and
-   `dry_run` shows them first.
-
-Two writes changed with the question. `force` no longer writes past
-work in the Docs editor that has not reached a Markdown file yet: that
-work is in no Drive revision, so nothing could bring it back, and the
-write is `[conflict]` until the editor saves or the person closes the
-file. What `force` still writes past, a conflict, a missing base or the
-guard, the file's previous revision keeps. And a forced op in a later
-batch, after a grid change in the same call was written, is refused on
-every client, where it used to be refused only for a client that could
-ask: a dry run never plans a later batch, so nothing showed what the op
-destroys. It runs as a call of its own, after a dry run.
-
-`GDOCS_REQUIRE_PROMPT`, which refused the asking writes on a client that
-could not ask, went with the question. A configuration that still turns
-it on, or sets it to anything but off, is refused at start: ignoring it
-would allow what its owner set it to stop. That makes 3.0.0 a major
-release.
-
-The model never widens its own reach: no tool takes one of the server's
-settings as an input, and no code a tool reaches imports the packages
-that write the profile, the token or the sign-in, or sets an environment
-variable (`TestNoToolTakesAServerSetting`,
-`TestNoToolCanWriteTheServersSettings`). The server tests call every
-tool through a client that can be asked and fail any call that asks, and
-`forbidigo` refuses the SDK's `Elicit` and the input requests a result
-can carry.
-
-`add_comment` with an assignee and comment mode post to named people,
-which are ordinary writes; whether Google notifies an assignee is not
-established. `replace_all` is bounded to one tab, and the guard holds it
-like any other direct delete.
-
-## 13. Distribution and setup
-
-The server is published for other people to run against their own Google
-accounts. That sets these requirements:
-
-- **Artifacts.** goreleaser builds for linux, macOS and Windows on amd64
-  and arm64, with checksums; `go install
-  github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest` as the
-  second path. A Docker image is not a v1 target: the loopback OAuth flow
-  and the keyring both assume the user's desktop. Homebrew tap later.
-- **Client configuration** documented for Claude Code (`claude mcp add
-  --transport stdio google-docs -e GDOCS_… -- google-docs-mcp`), Claude
-  Desktop (`claude_desktop_config.json`) and Cursor (`mcp.json`). All
-  three pass only `command`, `args` and `env`, which is why config is
-  env-first.
-- **Claude Desktop bundle.** Each release carries a `.mcpb` with the
-  family's layout: `server/google-docs-mcp-darwin` (universal),
-  `server/google-docs-mcp.exe` (amd64, which Windows on arm64 runs under
-  emulation), `server/google-docs-mcp-linux-amd64`,
-  `server/google-docs-mcp-linux-arm64` and `server/launch-linux.sh`, with
-  `LICENSE` and `README.md` at the root. It asks for what a person sets
-  in another client's configuration: the OAuth client file, the profile,
-  read-only, the destructive switch, the default write mode and the
-  export folder, each under its variable's name without `GDOCS_`,
-  lowercased. The OAuth client file is optional: left empty, the server
-  uses the client `login` recorded for the profile, and a file picked
-  there must be that same client, since the refresh token belongs to it.
-  `gates mcpb` derives what the bundle asks for from `config.Vars`, every
-  variable the server reads: logging, the timeout, the deprecated preview
-  switch, the config directory and the refresh token are left out, each
-  with its reason, the removed prompt setting is left out because config
-  marks it removed, and the gate fails on a variable with no verdict, on
-  a reason for one the server does not read, and on an `env` key that is
-  no setting. Each switch is a boolean whose default is the JSON
-  boolean the server defaults to, false, and every other key defaults to
-  `""`, which the server reads as unset, as it reads spaces alone. No
-  default holds a `${...}` reference, which the host expands and the
-  gate would not. The gate starts the server's
-  own `config.Load` from the environment the defaults give it and refuses
-  any field that differs from an unconfigured start, naming it. Claude
-  Desktop approves each tool, and a person can set a tool to always
-  allow, so a switch left off is the one guard a bundle install keeps
-  (§18). Every setting passes by `env`: `mcp_config.args` is `[]`, and a
-  platform override carries neither `env` nor `args`, since the host
-  replaces the base's with an override's (§18). No combination of the
-  switches is refused: read-only leaves the destructive switch nothing to
-  register and the default write mode nothing to apply to, so those
-  fields say so. The gate starts every set of the switches and holds the
-  refused ones to a declared list, which is empty, both ways. The profile
-  field gives `config.ProfileRule` and the default write mode field
-  `config.WriteModeRule`, the words the server refuses another value
-  with. Every command starts with `${__dirname}/` and names a staged
-  program, never the license or the README, each platform runs the file
-  staged for it, `entry_point` is the file the default command runs, and
-  the platforms, the server's name and `binary` are held to the staged
-  table and the code. The gate, the packer and the registry entry start
-  from one function, which reads the manifest once and refuses a key
-  repeated in one object, two that differ in case alone included, since
-  the gate's decode merges those and the host does not; the packer
-  refuses a version that is not semver, holds the manifest it stamps to
-  the vendored schema, and fails a bundle that does not close. The
-  manifest names Google's privacy policy and declares no `tools` list,
-  which would be display only and wrong for most installs, since two
-  settings change what registers.
-- **Setup guide** in the README, per-deployer, in the order `doctor`
-  checks it: Cloud project → APIs → consent screen (Internal vs Testing)
-  → Desktop OAuth client → `login` → `doctor`.
-- **Versioning.** Semantic versions; `CHANGELOG.md` in Keep a Changelog
-  form; the schema-dump diff in CI classifies tool removals, renames,
-  removed output fields and required-field additions as breaking (major
-  after 1.0, minor before).
-- **Documentation set.** README (setup, tool catalog, safety model),
-  `docs/architecture.md` (this file), `docs/configuration.md`,
-  `docs/security.md` (threat model, scopes, what is stored where),
-  `CONTRIBUTING.md`, `SECURITY.md` (reporting), `CHANGELOG.md`. License:
-  Apache-2.0 (already in the repository).
-- **Support matrix.** Keyring backends per platform with the file
-  fallback; `os.UserConfigDir()` paths; Windows paths in export-dir
-  handling; CI runs the unit suite on all three platforms.
-- **Nothing deployer-specific ships.** No client id, no project id, no
-  account, no document ids, no telemetry endpoint (§12).
-
-## 14. Testing
-
-- **Unit, table-driven, no network**: parser on synthetic fixtures
-  (multi-tab, tables, nested lists, headers/footnotes, suggestions,
-  emoji/surrogate pairs, combining marks, empty paragraphs); index-math
-  property tests; minimal-diff tests (unchanged spans keep their
-  offsets); overwrite-guard tests; renderer and planner golden files;
-  markdown fragment tests per construct plus the refusal list; text
-  normalization cases.
-- **Schema-dump gate**: `--dump-schemas` via an in-memory client
-  session; CI diffs against the previous tag.
-- **Integration** (`//go:build integration`, `GDOCS_TEST_FOLDER_ID` in a
-  scratch folder, never a real working document): creates a document per
-  test, applies ops, reads back, asserts, trashes. Includes the preview
-  checks (suggest mode visible in the UI, anchored comments), run
-  manually until enrollment exists in CI.
-- **Stdio smoke**: initialize, list tools, `get_document` on a scratch id.
-- **Agent evals** (`internal/evals`, `-tags=evals`, Phase 3): thirteen tasks
-  through Claude Code headless (`claude -p` with only this server's
-  tools), each against a scratch document the harness seeds through the
-  server, scored on the end state read back through the server and on
-  the tool-call trace. Run 2026-09-03 with the default model: 13/13
-  pass, 2–6 tool calls per task, about $3 in total. What they found:
-  Claude Code shows the model only a result's `structuredContent` when
-  one is present, so reads looked like metadata until the read tools
-  went text-only (the four affected tasks fell from 17, 7, 8 and 22 tool
-  calls to 4, 2, 4 and 4); a new footnote's paragraph holds a space, so
-  the follow-up now replaces it instead of appending after it; every
-  task starts with Claude Code's own tool lookup (`ToolSearch
-  select:mcp__gdocs__…`) and no task called a tool that does not exist,
-  so the snake_case verb_noun names are found by name; the model asked
-  for `with_handles` on three of four reads and never for `format:
-  text` once reads were visible, targeted by text and by handle equally,
-  used no dry runs for one-op edits, and stopped at the overwrite guard
-  and explained it instead of forcing. Re-run 2026-09-05 as the Go port
-  (`internal/evals`, `-tags=evals`): 13/13 again, $2.90, 2–8 calls a
-  task, with the same shape of trace. Four tasks were then added that
-  score a refusal rather than a success — a document that is not there,
-  a suggestion asked for with the preview off, a write against a
-  read-only server, and an edit against a revision the document has
-  left — because the wording of an error was otherwise the one
-  model-facing surface with no evidence behind it. Seventeen tasks;
-  16/16 when the first three landed, at $3.38, and the conflict task
-  scored 5/5 on its first run in three calls. The
-  refusals steer: told suggestion mode is unavailable the model used
-  comment mode and said so, and told `[not_found]` it quoted the class
-  back and stopped in two calls rather than hunting.
-- **Live driver** (`internal/livecheck`, `-tags=live`): every tool and
-  every op kind against one scratch document, through the binary over
-  stdio as a client drives it, with the steps that must be refused
-  asserting their refusal. Manual, never CI. Run 2026-09-05 as the Go
-  port. Last run 2026-09-06 for v1.0.0: 109 steps with
-  `GDOCS_PREVIEW=true`, 107 with it off, every failure an intended
-  refusal, and both transcripts scanned afterwards for an address, a
-  document URL, a resource id and a revision id — none present. `TestCoverage` in the same package makes
-  the coverage rule a check rather than a comment: it reads the
-  package's own source and fails when a registered tool has no step or
-  an op kind never appears as an `op`.
-- **Identifier scan** (`make leaks`): a gate over every tracked
-  file, enforcing §12's rule that nothing identifying anybody is
-  committed. gitleaks cannot: a document id, an address, a client id and
-  a 21-digit subject are not secrets. Every rule is an allow-list, since
-  a deny-list naming what to look for would be the disclosure.
-- **Surface completeness**: `server.toolArgs` holds one call's arguments
-  for every registered tool, and `TestEveryToolHasArgs` fails when a tool
-  has no entry. The debug-logging guarantee drives that whole table, so
-  it cannot shrink to the tools someone thought of when it was written.
-
-## 15. Confirmed decisions and their consequences
-
-| Decision | Consequence in the design |
-|---|---|
-| Deployer-owned Cloud project (may be shared with other tools) with a dedicated OAuth client; the repository is isolated and distributed for other people | §10, §13; setup guide covers Workspace (Internal) and consumer (Testing) accounts; no baked-in identifiers |
-| Enroll in Developer Preview (superseded 2026-10-03: the features are GA, §18) | Spike A first; `mode: suggest` default; anchored comments; accept/reject |
-| Edits happen live in shared documents; never overwrite; full history | Minimal-diff replace, overwrite guard, history tools in Phase 2, comment threads complete by default |
-| The person chooses how changes land: suggestion, direct edit, or comment | `mode` on every write with a configured default; `comment` mode works where the comments view is refused; no silent downgrades |
-| Paragraph handles: short labels remembered by the server (option A) | `p12`-style handles with per-document handle memory (§6) |
-| Markdown for new content only; existing content edited in place | `with_styles` reads, format ops, no whole-document round trips |
-| One document, every capability; no folder/move/share/trash/copy | Tool table trimmed; `search_documents` is locate-only |
-| A Markdown file in Drive is a document too, edited as the text it is (2026-10-14). Bet 6 forbade round-tripping a Doc through markdown, which loses what markdown cannot say; minimal edits to a Markdown file's own bytes are no round trip, and are bet 1 applied to text | §7.5: reads from the bytes, the content ops by minimal diff with the comment markup guarded, one Drive upload per call; the server's first Drive content write |
-| Working on a Markdown file together goes through a working copy (2026-10-14): no API writes through an open editor's session, and every upload makes the editor reload | §7.5: `create_document from_file` and `write_markdown_file`, a block merge that keeps the file's own text where the copy did not change it; direct writes check, write, verify and repair |
-| The server asks the person nothing; per-call approval is the client's; `GDOCS_REQUIRE_PROMPT` removed and refused unless off (the maintainer, 2026-10-22 for the family; this port approved 2026-10-23) | §12a; a major release, 3.0.0: a client that could not make the asking writes before can, and `review_suggestion` and `delete_comment` take a new required input |
-| No tool carries `requiresUserInteraction` (2026-10-23) | §12a: version history keeps a deleted tab's text; a deleted comment cannot be restored, but it is one item of many, deleted many in a row, which the standard keeps the mark off. The README's `permissions.ask` rules are how Claude Code asks |
-| `force` never writes past unsaved Docs-editor work on a Markdown file (2026-10-23) | §7.5, §12a: `[conflict]` until the editor saves; what else `force` writes past, the file's previous revision keeps |
-| `review_suggestion` takes the ids `list_suggestions` shows; `all` is gone (2026-10-23) | §12a: the argument carries what the question showed |
-| `delete_comment` takes `text_start`, how the text it deletes begins (2026-10-23) | §12a: the argument carries the text the question showed, read and compared, `[stale]` when it differs |
-| `force` stays a boolean; the retyped `confirm_tab` and `confirm_comment_id` stay (2026-10-23) | §12a, §17b |
-| Stdio only | No HTTP auth design |
-| Nothing internal in the repo or in logs | §12 |
-
-## 16. Delivery phases
-
-Each phase ends in a tagged release and waits for an explicit "go".
-
-**Phase 0 — skeleton and spikes (v0.0.1).** Scaffolding and gates
-(Makefile, golangci, govulncheck, go-licenses, gitleaks, goreleaser, CI).
-`login/logout/status/doctor`, raw client, parser, renderer,
-`get_document`, `get_outline`, `read_document`. Spikes:
-
-- **A. Preview**: done 2026-09-03 (see §18). Suggestion mode, anchored
-  comments, the comments view and reject all work, and the owner
-  confirmed in the Docs UI that the suggestion shows as a tracked change
-  and the comment is pinned to its sentence.
-- **B. Index math and minimal diff**: golden set for emoji, nested
-  bullets, tables, footnotes; hunk-level replace keeps comment anchors.
-- **C. Markdown fidelity**: whether Drive `files.create` converts
-  `text/markdown` (the upload guide says yes, the import table doesn't
-  list it), and a construct matrix for `create_document`.
-
-**Phase 1 — core editing (v0.1.0).** `edit_document` with minimal diff,
-the guard and all three modes (`comment` via the Drive backend until
-preview lands), `format_document`, `find_in_document`,
-`search_documents`, `create_document`, `export_document`,
-`list_suggestions`, `review_suggestion`; revision guard, dry run, suggest
-mode if A passed.
-
-**Phase 2 — collaboration, history, structure (v0.2.0).** Done
-2026-09-03: comments (both backends), revisions and diff, tables, tabs,
-headers/footers/footnotes, images and chips. A table inserted with data is
-filled in a second batch once it exists (found by the index the insertion
-named); the tab that `add` creates gets its content the same way.
-
-**Phase 3 — evals and polish (v0.3.0 → v1.0.0).** Done 2026-09-03:
-resources (`gdocs://<id>`), performance on large documents, the §17a
-cleanups, and the agent evals with the two fixes they forced (§14).
-
-**Phase 4 — the rest of the API surface (v0.4.0).** Done 2026-09-03. The
-`Request` union was diffed against what the planner emits (the union
-taken from the discovery document, `docs.googleapis.com/$discovery/rest?version=v1`,
-not from the reference page's prose), and everything missing was added.
-All 40 GA members are now emitted. Of the eight Developer Preview members
-beside them the server emits four — `insertComment`, `acceptSuggestion`,
-`rejectSuggestion`, `deleteSuggestion` — and deliberately not the other
-four (`addCommentReply`, `updateCommentPost`, `deleteComment`,
-`deleteCommentReply`), because every thread operation goes through the
-Drive API, which is GA and serves deployments without preview enrollment.
-What was added:
-
-- **Page and section layout.** A new `layout_document` tool: `page`
-  (`updateDocumentStyle`), `section` (`updateSectionStyle`),
-  `section_break` (`insertSectionBreak`) and `named_style`
-  (`updateNamedStyle`). Layout is its own tool rather than more ops on
-  `format_document`, which styles one passage: the two have almost no
-  arguments in common, and a flat op struct holding both would double
-  that schema. Lengths are points everywhere, and `get_document` names
-  the standard page sizes on the way back so the model need not
-  recognize 612×792.
-- **Column and row sizing.** `edit_table` gains `style_columns`
-  (`updateTableColumnProperties`, fixed or evenly distributed) and
-  `style_rows` (`updateTableRowStyle`: least height and page-break
-  behavior, but not `tableHeader`, which the API refuses — see §18).
-  `pin_header_rows` remains the way to repeat a header row.
-- **Images.** `insert_object` gains `action: replace` (`replaceImage`)
-  and `action: delete`. Delete is where the model of an object matters:
-  an inline object lives in a run, so it goes with a range delete the
-  overwrite guard can inspect (minus its own image anchor, which the op
-  names); a floating one has no range at all and goes by id
-  (`deletePositionedObject`). Before this a floating image could not be
-  removed through the server.
-- **Named ranges.** `create_named_range`, `delete_named_range` and
-  `replace_named_range` on `edit_document`, plus `named_range` as a
-  Target (§7.1). This is the one durable anchor the API offers, and it
-  answers what handles cannot: coming back to a passage in a later call.
-  `replace_named_range` overwrites every range the name covers, so the
-  guard is shown what all of them hold; `delete_named_range` forgets the
-  name and leaves the text, so it is not guarded.
-- **Comments and suggestions.** `reply_comment` gains `action: edit`
-  (Drive `comments.update` / `replies.update`), and `review_suggestion`
-  gains `discard` (`deleteSuggestion`, preview). The Docs preview
-  equivalents of the comment edits were refused in favor of the Drive
-  path, per the existing rule that thread operations use one backend.
-
-**What "everything" means here.** Every GA member of the `Request` union
-is emitted, and every field of those requests that the API accepts on a
-write. Text style: bold, italic, underline, strikethrough, small caps,
-baseline, size, family, both colors, links. Paragraph style: named
-style, alignment, content direction, spacing mode, line spacing, space
-above and below, all three indents, keep-with-next, keep-lines-together,
-widow and orphan control, page break before, shading, and all five
-borders. Table cell style: background, content alignment, per-side
-padding and all four borders. Column and row properties as in Phase 4.
-
-What is left out is only what the **discovery document** marks read-only,
-so no client can set it: `tabStops` and `headingId` on a paragraph,
-`rowSpan` and `columnSpan` on a cell (a merge is what changes those), and
-`TableRowStyle.tableHeader`, which the schema lists and the API refuses
-(§18). Those are read and reported, never sent.
-
-Borders take a shorthand — `1pt solid #cccccc`, `none` to clear, tokens
-in any order, defaulting to 1pt solid black for the parts left out —
-because a flat field per part would be fifteen schema entries for
-paragraph borders alone and twelve more for cells. A width of zero reads
-back as no border, which is what Google means by the empty border object
-it returns for an edge that is not drawn.
-
-**v1.0.0, released 2026-09-06.** The two gates this section set were
-use in anger and a further eval round with another client. Neither was
-met as written, and both were retired deliberately rather than left to
-lapse.
-
-*Use in anger* was waiting on one outside user's report, which had been
-waiting on a message nobody had sent. It is a gate on somebody else's
-clock, and holding a version number against it taught nothing: the
-report is worth having whether the tag says 0.9 or 1.0.
-
-*A further eval round with another client* became one round on the same
-client. The 17 tasks were re-run on the released code — 17/17, 59/59
-checks — but through Claude Code again, because the second client is
-Claude Desktop, which cannot be driven headlessly, and a third is not
-installed. Half a gate met honestly is better than a whole one claimed;
-the clause is retired rather than quietly ignored.
-
-What replaced them is narrower and enforceable: the version promise is
-written down in the README with its exclusion named — the prose of a
-tool's text output, because it is written for a model and will be
-reworded when a model reads it badly. A second, the Developer Preview
-features, went when Google made them generally available (§18). The schema diff in CI is what holds the rest.
-
-**2.0.0 — asking the person (2026-09-30).** §12a. The module path moves
-to `/v2`: a caller that runs unattended under `GDOCS_REQUIRE_PROMPT`, or
-through a client that declines, is now refused where it used to write.
-`delete_tab`, `delete_comment`, `review_suggestion` and `add_comment`
-gain `dry_run`, and `export_document` is annotated as the local write it
-is. The questions, the signed state and `quoted()` are ported from the
-sibling that last fixed them.
-
-**3.0.0 — the client decides (2026-10-23).** §12a. The question goes,
-and with it `GDOCS_REQUIRE_PROMPT`, refused at start when on; the module
-path moves to `/v3`. `review_suggestion` takes ids only,
-`delete_comment` takes the start of the text it deletes, `force` stops
-at unsaved editor work, and no tool carries `requiresUserInteraction`.
-An export no longer overwrites a file or follows a link (§12). The live
-run before the release drove every tool through a client that can be
-asked and fails on any question; none was put.
-
-## 17. Open decisions
-
-**When exactly does Google drop a direct formatting change?** A direct
-`updateTextStyle` over a property a pending suggestion already sets is
-sometimes accepted and applied and sometimes accepted and discarded, and
-six rounds of live probing (§18, spike B) did not find the rule: bold
-over a suggested bold is dropped, an alignment over the same suggested
-alignment is dropped, but a font size set to exactly the value a pending
-suggestion names does land. Nothing in the reference, the suggestions
-how-to or the issue tracker describes the behavior at all. Until it is
-known the server warns and names the suggestion rather than refusing,
-because a refusal would block the writes that work. Worth reporting
-upstream; the probe is in the repository so the answer can be rechecked
-when Google changes it.
-
-The one that stood here — that `make check` and CI did not run the same
-things, so fourteen build-tagged files compiled only on a maintainer's
-machine — is closed by the parity gate in `scripts/gates`. The choice
-recorded here was between adding four `-tags` lines to the workflow and
-building the gate; the gate won, because the four lines close today's
-instance and leave the mechanism, and the mechanism is that the two lists
-live in different files and you are only ever editing one of them.
-
-## 17a. Deferred cleanups
-
-Findings from the Phase 1 review that were judged right but too wide to
-apply at once, kept here so they are not forgotten. Done in Phase 2: one
-block-range resolver (`resolveBlocks`) serves `ResolveScope` and
-`ResolveTarget`, so handles are validated against the last read on both
-paths; comment threads are located once per `Fetched` and shared by the
-guard, `read_document include_comments` and `list_comments`. Done after
-v0.3.0, and nothing is left open:
-
-- **Several grid changes on one table per call.** `chainStructural`
-  splits a call: everything goes in the first batch until an op changes a
-  table's grid, and from then on every op addressed in that table's rows,
-  columns or cells waits for a batch of its own against a fresh read. So
-  `insert_rows` then `set_cells r2c3` writes the cell the caller means,
-  in the grid the insertion left. A dry run lists the held-back ops the
-  way it lists other follow-ups and says it cannot resolve them, since
-  the grid they name does not exist yet; what does not depend on that
-  grid (a number below one, a malformed cell name) is still refused
-  before anything is written. The planner keeps its one-change-per-table
-  check as an assertion that the service split correctly. Comment mode
-  does not split, because every op must reach the proposals.
-- **`list_comments` text.** `render.Thread` is now the renderer's model
-  of a comment thread, and `render.Mark` is a located one; the full
-  listing and the one-line summary under a read come from the same code,
-  and the service adds only the count line above it.
-- **`get_document` text.** `Info.text()` in the service; nothing is
-  shaped in the tool layer any more.
-- **One read-side paragraph-style type.** `doc.ParagraphStyle` holds
-  alignment, line spacing, space above and below, both indents,
-  keep-with-next and page-break-before; `doc.Paragraph` and
-  `doc.NamedStyleDef` embed it, and `parseParagraphStyle` fills it for
-  both, so a paragraph now carries everything its style says rather than
-  the two fields the renderer happened to need. This is also what
-  answering "does this run deviate from its named style?" will need —
-  the gap docs/development.md describes. Embedding keeps `p.Alignment`
-  and the rest reading as before at every call site.
-
-**The family-rules review, 2026-10-24.** `/simplify` (one agent over
-reuse, simplification, efficiency and altitude), `/code-review medium`
-and `/security-review` ran over `v3.0.0..family-rules`. Each fix has a
-test that failed on the code before it.
-
-- **Code review.** The live driver read `GDOCS_ENABLE_DESTRUCTIVE` with
-  its own `os.Getenv` and parse, so ` true` registered the deletes and
-  the driver skipped them. It now reads `config.Load`, the profile
-  included, and a scan refuses any `os.Getenv` or `os.LookupEnv` of a
-  server variable. The README said the bundle covered both
-  architectures everywhere; Windows carries amd64, which arm64 runs
-  under emulation. A relative `GDOCS_CONFIG_DIR` is refused at start.
-  `writeEntries` packs the entries it is given, not the global list.
-  One floor, `config.VarsFloor`, holds every walk over `Vars`, and one
-  pattern, `config.NamePattern`, is what a name is to the scan and the
-  staleness gate.
-- **The family's fixes from the sibling reviews of the same day.**
-  `fieldDiff` reports a differing unexported field beside named ones,
-  and compares a pointer by what it holds. `repeatedKeys` takes two keys
-  that differ in case alone as one, quotes a key a dot or a bracket
-  would make ambiguous, and refuses a document it cannot walk. A run of
-  a `+` chain that another operand follows ends in a prefix, not a
-  name. Outside `internal/config` a name is spelled from config's
-  constants, and `config.DefaultProfile` is the one default profile. A
-  default holding `${` is refused. `modulePath` reads a tab, a trailing
-  comment and a quoted path. The registry entry reads the manifest
-  through `committedManifest`.
-- **Simplify.** The packer refuses a version that is not semver.
-  `Var.Default`, which only a test read, is gone. Two tests that
-  repeated the gate's rows are deleted, and the packer's keeps one row.
-- **Security review.** No finding at confidence 8 or above. One note
-  was acted on: a switch defaulting to the text `"false"` passed, since
-  it reaches the server as false. A switch's default is now a JSON
-  boolean.
-
-Kept, each with its reason:
-
-- `docs/configuration.md` and the README type the settings the bundle
-  asks for by hand. Low; a check for it belongs to the family.
-- `auth` honors `token_uri` from the OAuth client JSON. It predates the
-  range, and hardening it is family work, not this release's.
-- The empty `bundleRefused`, `Load` and `EnvVars` stay as the family
-  decided them.
-
-## 17b. Deviations from the shared standard
-
-Recorded with the port of the standard's §3, 2026-10-23. The rest of
-§3 is held as written.
-
-| The standard says | Here | Why |
-|---|---|---|
-| Deletes take `confirm: true` | `delete_tab` takes `confirm_tab` and `delete_comment` takes `confirm_comment_id`, each repeating the target, refused when it does not match | A stricter witness than a boolean: the call names what it deletes twice. The model sets either, so neither is approval (§12a). Kept rather than changed, since a required boolean would be a second breaking input for nothing gained |
-
-## 18. Evidence log: conventions checked, changed, or rejected
-
-Verified 2026-09-02/03 against primary sources. "Inherited" means the
-convention was carried over from the author's earlier MCP servers and was
-checked rather than assumed.
-
-| Convention | Verdict | Effect |
-|---|---|---|
-| A commit footer's value is one line, and a paragraph holding a line that is not `Token: value` is not a footer block | Refuted by Conventional Commits 1.0.0, read 2026-11-02: item 8, "Each footer MUST consist of a word token, followed by either a `:<space>` or `<space>#` separator"; item 10, "A footer's value MAY contain spaces and newlines, and parsing MUST terminate when the next valid footer token/separator pair is observed" | `schema-ack` reads a footer paragraph as one whose first line starts a footer, with either separator. Inside it, a line that starts a footer ends the value before it, and any other line continues that value, so a wrapped value counts, and a `Closes #12` footer beside it does not drop it. A `Token #value` footer counts toward the block but acknowledges nothing: item 12 writes `BREAKING CHANGE` with a colon and a space. A wrapped line that itself reads `word: ` starts a new footer, as item 10 says. |
-| How far the live session runs ahead of the Markdown file (spike D, stage 5) | Measured live with a person and a watcher reading once a second: typing, a comment, a reply and a resolve each reached the file 1.7–2 s after the live session showed them, a comment with its anchor; the editor's own resolve, carrying its token, left the file readable | The pending check waits 3 s, longer than a save takes. |
-| An upload is safe while a person has the Markdown file open (spike D, stage 3) | Refuted live: an upload four seconds after the editor saved overwrote that save (the write had read the file just before it), and the editor took the upload; the save stayed in Drive's history | Every write checks the live session, re-checks just before uploading, and repairs from history afterwards (§7.5). |
-| A comment written into a Markdown file's bytes is a real comment (spike D, stages 3–4) | Confirmed live with a person: the editor shows it on its passage, "From imported document", under the name the bytes give, and a person's save keeps it and gives it a token. A reply written into the bytes shows too, on an imported comment and on one with a token. YAML double-quoted scalars read back exactly | `add_comment`, comment mode and replies on a Markdown file write the markup. |
-| A resolve can be written into a Markdown file's bytes (spike D, stage 4) | Refuted live: `status: RESOLVED`, with a `RESOLVE` reply or without, made every `documents.get` on the file answer 500 "Internal error encountered." until the bytes were put back | Never written; the person resolves in the editor. |
-| A Doc imported from Markdown can carry where it came from (spike D, stage 4) | Confirmed live: `files.create` with the Docs type and `appProperties`, media `text/markdown`, converts and keeps the properties; `files.update` changes them. Its Markdown export is Docs' dialect | The working copy and its block merge. |
-| The comments view can be read cheaply (spike D, stage 4) | Confirmed live with a condition: a `fields` mask (revisionId, comments, the tabs' commentAnchors) gave 2.4 KB against 114 KB, and only with `includeTabsContent=true`; without it, 400 "Comments view mode may only be specified if tabs content is also requested." | The live-session check on every write. |
-| The Docs API edits a Markdown file Docs opens in place (spike D, 2026-10-13/14) | Refuted live: `documents.get` on a `text/markdown` file answers 200 with a model and the comments view, and every `batchUpdate` — direct, `SUGGEST`, `insertComment` — is 400 "The document must not be an Office file". `files.export` is 403 `fileNotExportable`. A third-party tool measured the same refusal | §7.5: such a file is read from its bytes and written by a Drive upload. |
-| Comments on a Markdown file are Drive comments (spike D) | Refuted live: a comment made in the editor is markers in the bytes plus an end-of-file `gdoc_comments` block; Drive's `comments.list` omits it and `comments.get` and `replies.create` on its id are 404; the Docs comments view lists it. Removing either part, or text after the block, unanchors it; putting the bytes back re-anchors it; text after the block shows the block as body text | The markup is parsed out of reads and guarded on writes; `list_comments` reads the Docs view as well as Drive. |
-| A Drive upload of a Markdown file keeps its comments (spike D) | Confirmed live when the markers and the block are kept: a line inserted elsewhere moved the anchor with the text, and an edit inside the quoted passage grew it. Docs re-parses an upload within about five seconds and writes nothing back; only a person's save rewrites the file | The write path keeps the markup byte for byte and re-parses its own output to prove it. |
-| Drive offers a precondition on uploads (spike D) | Refuted live and in the reference: no ETag on `alt=media`, `If-Match` with a made-up value answered 200 and wrote; v3 maps `etag` to "n/a"; `version` moves on metadata changes too. `md5Checksum` is the MD5 of the bytes and `headRevisionId` changes on every upload, identical bytes included | Best-effort check of `headRevisionId` and `md5Checksum` before uploading; nothing is uploaded for a call that changes nothing. |
-| A media update keeps a file's type (spike D) | Refuted live: a media part sent as `text/plain` retyped a Markdown file `text/plain`, a metadata `mimeType` change did not put it back, and a `text/markdown` media part did; `application/octet-stream` kept the type. The Docs API refuses a `text/plain` `.md` with 400 | Uploads are sent as `text/markdown`. |
-| Old revisions of a blob download only when kept forever (Drive revisions guide) | Refuted live for the owner: all eleven unpinned revisions downloaded through `revisions.get?alt=media` and `files.download`. Pinning a non-head revision could not be undone (400 `illegalKeepForeverModification`), and the limit is 200 per file | Old revisions of a Markdown file are read through `revisions.get`; nothing is pinned. |
-| Markup written through Drive makes a comment (spike D) | Confirmed live: markers and a block entry without a token made an anchored thread in the Docs view, `fromImportedDocument: true`, its author the name the bytes gave, a new id on every re-parse, gone when the bytes no longer held it | Content may not hold the markup. Whether the editor shows such a comment, and keeps it on a save, needs a person. |
-| Docs can suggest on a Markdown file (Docs Help 18289341, Workspace Updates 2026-10-05) | No source says so; both list open, edit, comment and collaborate, and the API refuses a `SUGGEST` batch | `suggest` is `[unavailable]` on a Markdown file. |
-| Asking the person works against Google (2026-09-30; **superseded 2026-10-22**, the server asks nobody, §12a) | Confirmed live: the live driver, now a client that can be asked, declined a `delete_comment` (refused, the comment still listed), then accepted it (deleted); a forced `delete_rows` over a pending suggestion, two `delete_tab` calls and `review_suggestion` with `all` each asked once and went through on accept; the four new dry runs left the revision where it was | The driver answers every question and fails a step that should have asked and did not. |
-| An empty form is a valid elicitation, and the SDK skips structured output for a result that asks (2026-09-30; moot since 2026-10-22, §12a) | Adopted from the siblings that verified them: the specification's schema puts no minimum on `properties`; go-sdk v1.8.0 `mcp/server.go` does not marshal the output when `InputRequests` is set | `asked` returns the input request with a zero output. |
-| `blocked` is part of the error vocabulary (2026-09-30) | Refuted: the guard returned `[blocked]` through an `Error` literal the `classes` gate does not scan, so the class was emitted and documented nowhere | Listed in `service.Classes`, with what it asks the reader to do. |
-| `export_document` is read-only (2026-09-30) | Refuted: it writes a file under `GDOCS_EXPORT_DIR` | Annotated a non-destructive write; read-only mode still registers it, since it changes nothing in Google. |
-| An export is written as §12 says: under the directory, nothing overwritten, no symbolic link followed (§12, since Phase 1) | **Refuted 2026-10-23** by a survey of the code, not by an incident. `os.WriteFile` truncated the earlier export of the same document without a word, and followed a symbolic link at the export's name to wherever it pointed; cleaning the path kept the name inside the directory, never what the name pointed at | Each export is created with `O_EXCL`: a name already taken, a link included, gains a counter up to 100, then `[blocked]`. `TestAnExportNeverOverwrites` and `TestAnExportNeverWritesThroughALink` hold it. |
-| Exact-text targets (Anthropic text editor tool; Claude Code Edit; Notion MCP `update_content`; Aider: removing line numbers took GPT-4 Turbo from 20% to 61%; OpenAI `apply_patch`) | Confirmed | `text` is the primary target; normalization added (SWE-Edit brittleness). |
-| Google `headingId` is stable | Confirmed (Docs API reference) | Sections by `heading_id`. |
-| Inserted text inherits the preceding text's style; newline copies paragraph style incl. bullets | Confirmed (InsertTextRequest reference) | Minimal-diff replace is safe for formatting. |
-| Fingerprinted block handles | No evidence; Anthropic advises against cryptic ids | Plain ordinals + server memory; open in §17. |
-| Per-block handle prefix on every read | Confirmed costly (≈ +27% tokens for `[b12-7f3a] `, ≈ +15% for `[p12] `) | Opt-in. |
-| Markdown in/out | Mixed (Anthropic: measure it; Google added md export for this use) | Markdown for new content; in-place ops for existing; evaluated in Phase 3. |
-| CriticMarkup for suggestions | Confirmed convention (MultiMarkdown-6); used by the adeu docx MCP | Kept. |
-| Preview program terms | Confirmed (program FAQ) | In-organization use allowed; README states others need their own enrollment. |
-| Preview features work as documented (spike A, 2026-09-03, live against a scratch document in an enrolled project) | Confirmed: `commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED` accepted; `writeMode: SUGGEST` returns `suggestionResponses[].createdSuggestionIds` and the inline view carries the id on the run; `insertComment` with a `range` returns a `commentThread`; `rejectSuggestion` removes the suggestion. Response shapes differ from the reference page: a comment thread has `commentId`, `anchorId`, `headPost{postId, content, contentHtml, author{displayName, me, user}, createTime, updateTime, commentAction}`, `status` (OPEN) and `plainTextQuote`, with **no range**; a suggestion thread has `suggestionId`, `headPost`, `status`, `summaryText` ("Add: …") and `summaryHtml`, also without a range. | Phase 2 maps comments to blocks by `plainTextQuote` (plus `anchorId` when the UI exposes it) and maps suggestions to ranges through the inline run ids, not through the thread objects. The `comments`/`suggestions` keys are absent until one exists. |
-| Keyring with env-only fallback (inherited) | Refuted as precedent: `gh` falls back to a 0600 file; `gcloud` uses plaintext files; go-keyring has no fallback | Keyring → file (warned) → env. |
-| Loopback + PKCE OAuth (inherited) | Confirmed (Google native-app guide; OOB blocked since 2023-01-31) | Kept. |
-| 7-day refresh tokens only for sensitive scopes (my claim) | Refuted: any External app in Testing | Internal consent screen. |
-| Env-only configuration (inherited) | Mixed: all three clients pass only `env`; github-mcp-server binds flags and env | Env source of truth plus bound flags. |
-| Server-side read-only mode and destructive gating (inherited) | Confirmed (github-mcp-server; spec: annotations untrusted) | Kept. `requiresUserInteraction` was on the gated tools until 2026-10-23, when it came off (§12a). |
-| `requiresUserInteraction` makes a client prompt before running a gated tool, so it counts as a safety layer (implied by listing "per-call approval" among the layers) | Refuted: the hint is advisory. The spec already says clients treat tool annotations as untrusted. **Corrected 2026-10-23** (code.claude.com/docs/en/mcp, re-read): the reason given here, that an auto-approve mode runs a marked tool without prompting, is wrong for Claude Code from v2.1.199, which prompts for a marked tool in every interactive mode, auto and bypassPermissions included, and denies it where no prompt can be drawn. No other client reads the mark, so the verdict stands | §9 no longer lists client approval as a layer. What the server controls is what it registers and what it refuses, so a tool that must not run unattended must be unregistered, not annotated. |
-| snake_case verb_noun names (inherited) | Mixed: spec allows more; GitHub mixes styles; Anthropic says measure. Measured in the Phase 3 evals: 13 tasks, 15 tool lookups by name, no call to a tool that does not exist | Kept. |
-| Per-block handle prefix opt-in (§7.2) | Evals: the model asked for `with_handles` on three of four reads and targeted by handle as often as by text | Flipped to default on (the owner's call, 2026-09-03): the flag is a per-read cost of about 15%, the round trip it saves is a whole read, and an edit targets handles. `with_handles: false` drops them. |
-| A blank paragraph is one whose text is empty (my first fill rule) | Refuted in review: a paragraph holding only an image, a footnote reference or a page-number field also renders as no text, and filling it would delete that content with no guard (an insertion never populates anchors) | Blank means every run is text and the text is whitespace. |
-| A new footnote starts empty (my assumption) | Refuted live: `createFootnote` yields a paragraph holding one space, so an append after it left a blank line the model then deleted | The follow-up replaces a blank first paragraph. |
-| `[class] message` errors (inherited) | Project choice; spec requires only `isError` | Kept as convention. |
-| Parallel tool registry for `--dump-schemas` (inherited) | Refuted as necessary: in-memory client session lists wire schemas | Dropped. |
-| go-sdk leaves `Content` alone with an object `Out` | Confirmed in `mcp/server.go` v1.7.0 | Both forms reach the wire. |
-| Clients show the model the text block as well as `structuredContent` (my assumption behind "markdown plus a small `Out`") | Refuted by the agent evals (2026-09-03): Claude Code 2.1.259 shows only `structuredContent` when present, so scoped reads looked like metadata; the model said so ("returned only metadata … so I fell back to the whole-document markdown resource") and probed `find_in_document` with `.+` to see text | Read tools return text only (go-sdk emits neither output schema nor structured content for an `any` output); write tools' JSON includes the preview. |
-| Exit on failed startup probe (inherited) | No guidance; GitHub server doesn't probe; Claude Code shows "failed to connect" and the model never sees why | Keep serving with `[auth]` errors; `doctor` for humans. |
-| `cmd/` + `internal/`, no `pkg/` (inherited) | Confirmed (go.dev; Russ Cox) | Kept. |
-| `dry_run` on write tools (inherited) | Mixed: community precedent; not a substitute for client approval | Kept; safety rests on guard, gating, approval. |
-| Smart chips cannot be inserted through the API (my assumption) | Refuted (Request reference, 2026-07-07): `insertPerson`, `insertRichLink`, `insertDate` are GA members of the request union | `insert_object` covers images and all three chip kinds. |
-| `tabId` sits inside `Location`, `Range` and `TableCellLocation` (my assumption) | Mostly confirmed: `TableCellLocation` has none, the tab rides on `tableStartLocation`; `deleteHeader`/`deleteFooter`/`deletePositionedObject` take a top-level `tabId` | Builders match; `CellLoc` carries the table location. |
-| `insertTable` leaves an empty paragraph before the table (my assumption) | Refuted: a newline is inserted at the index and the table starts at index + 1, so a mid-paragraph index splits the paragraph | Block-boundary insertions use the previous paragraph's last index so the table follows the block; the leftover newline becomes the paragraph after the table. |
-| Preview comment threads carry no range (spike A) | Refined: the range lives in `DocumentTab.commentAnchors[anchorId].ranges` | Threads are located through the anchor map first, quoted text second. |
-| Reply, resolve and reopen through the preview (`addCommentReply`, `commentAction`) | Confirmed to exist, but `replies.create` with `action: resolve \| reopen` is GA and serves every deployment | One Drive path for thread operations; the preview is used only where it adds anchoring. |
-| Drive comment anchors written by third parties are positioned by the editor (a-bonus #134 hope) | Refuted (manage-comments guide: "Google Workspace editor apps treat these comments as un-anchored comments") | Drive-backend comments quote the text and say they are unanchored. |
-| An old revision can be exported with `files.export?revisionId` (my assumption) | Refuted: `files.export` takes only `mimeType`; `files.download` (POST, long-running operation) takes `revisionId` and `mimeType` for Docs | `ExportRevision` polls the operation and fetches the content URL, refusing non-Google hosts. |
-| `revisions.list` is complete for Docs (my assumption) | Refuted: "might be incomplete for files with a large revision history, including frequently edited Google Docs" | `list_revisions` says so in its output and description. |
-| `deleteTab` fails when the tab has children (my assumption) | Refuted: child tabs are deleted with it | `delete_tab` warns; a document keeps at least one tab. |
-| `comments.*` need the `fields` parameter (Drive guide) | Confirmed for comments (an omitted `fields` is an error); the replies pages list no parameters | Sent on every call. |
-| `TableRowStyle.tableHeader` can be set, since it is in the schema | Refuted live (2026-09-03): `updateTableRowStyle` answers `400 INVALID_ARGUMENT: Unallowed field: tableHeader`, though `minRowHeight` and `preventOverflow` in the same request are accepted | `style_rows` carries neither the field nor a flag for it; `pin_header_rows` is how a header row is set, and the op's "changes nothing" message says so. A schema field is not proof the field mask accepts it. |
-| `DocumentStyle.background` takes the color object `colorJSON` builds, as `TextStyle.foregroundColor` does (my assumption) | Refuted (discovery document): `foregroundColor` is an `OptionalColor` — `{color: {rgbColor}}` — but `background` is a `Background`, whose own `color` field is that `OptionalColor`, so the payload nests one level deeper | `background` is built as `{"color": <OptionalColor>}`; caught in review before any live call, since a wrong shape fails the whole atomic batch. |
-| A section's type can be changed on an existing section | Refuted (discovery document): `SectionStyle.sectionType` is **"Output only"**; only `insertSectionBreak` sets it | `section` neither sends nor accepts `section_type`; passing it is refused with the reason, and the type is chosen by the `section_break` that made the section. |
-| A field mask names only the leaves it changes (as `updateTextStyle` does) | Refined for `updateNamedStyle`: the reference says "to update the text style to bold, set `fields` to include `text_style` **and** `text_style.bold`" — the mask is rooted at the named style, so the parent counts too. **Confirmed live** (2026-09-03) through the HTML export: after redefining `HEADING_2`, both headings render as `<h2 style="…color:#1a73e8;font-size:18pt;padding-top:20pt…">` without either being styled individually | The mask carries `textStyle` and `paragraphStyle` beside each leaf. A redefined named style is invisible to `with_styles` (it moves the paragraph default too), so `get_document` reports the definitions themselves (§7.2) and `export_document format: html` checks how they resolve — see docs/development.md. |
-| `TableRowStyle.minHeight` and `SectionType: ONE_COLUMN \| TWO_COLUMN \| THREE_COLUMN` (a summary of the reference page) | Refuted against the discovery document (`docs.googleapis.com/$discovery/rest?version=v1`, 2026-09-03): the field is `minRowHeight` (with `preventOverflow` and `tableHeader` beside it), and `insertSectionBreak` takes only `CONTINUOUS` or `NEXT_PAGE` — columns are `SectionStyle.columnProperties` | Wire names taken from the discovery document, not from a prose summary; columns are set on the section, not by its type. |
-| `updateCommentPost`, `deleteComment`, `deleteCommentReply`, `deleteSuggestion` in the Docs API | Confirmed present but **Developer Preview only** (Request reference); Drive `comments.update` and `replies.update` are GA | Editing a comment goes through Drive like every other thread operation; only `deleteSuggestion`, which has no Drive equivalent, is preview-gated. |
-| The comment and suggestion features left Developer Preview when their shapes appeared in the public discovery document (2026-09) | **Refuted 2026-09-27.** The discovery document (revision 20260921) publishes `commentsViewMode`, `WriteControl.writeMode`, the comment and suggestion requests and the thread types, but every one of them is still labeled "[Developer Preview]". The `documents.get` reference, the suggestions guide (updated 2026-09-03) and the preview program page still list them as preview, and the Docs release notes carry no GA entry after the 2026-07-07 preview launch. Requests carry no preview marker (no header, no label): access comes from the Cloud project's enrollment. A live probe with `GDOCS_PREVIEW=false` from the maintainer's enrolled project got every call accepted — `commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`, `writeMode: SUGGEST` for text and style, an anchored `insertComment`, and accept, reject and delete of a suggestion — so the flag only decides what this server sends; it proves nothing about a project that is not enrolled. | `GDOCS_PREVIEW` keeps gating all of it: suggestion mode, anchored comments, the comments view on `documents.get`, and `review_suggestion`. Re-check when the "[Developer Preview]" labels leave the discovery document or the release notes announce GA. |
-| The comment and suggestion features are generally available, so `GDOCS_PREVIEW` can go (the Google Workspace Developer Preview Program's announcement, 2026-10-02) | **Confirmed from documentation 2026-10-03, not live.** The Docs API release notes list "Generally Available" on 2026-09-30: "You can now programmatically read, create, and manage comments and suggestions in Google Docs". The suggestions guide (updated 2026-09-30) labels nothing preview. The Workspace Updates post says available to every Workspace and personal account, no admin control, with "Gradual rollout (up to 15 days for feature visibility) starting on September 30, 2026"; only Google's own hosted Docs MCP server keeps comments in preview. The discovery document (revision 20260928, two days before GA) still labels every one of these fields and requests "[Developer Preview]". A live probe would prove nothing from the maintainer's project, which is enrolled (row above), and no unenrolled project was set up for one. | `GDOCS_PREVIEW` and `--preview` are deprecated and ignored; the default write mode is `suggest`. Because the verdict rests on documentation and a rollout, the server detects instead of trusting: every read asks for the comments view and, refused with `invalid` or `forbidden`, asks again without it (§5). That read's `CommentsView` decides whether a comment is pinned or goes through Drive, and suggestion mode is refused on a read without it, since a project the feature has not reached might apply a SUGGEST batch directly. `review_suggestion` is not gated: a refusal there destroys nothing. The `preview` capability and status field stay one release, mirroring the detection. The cost: every read now carries the document's comment threads, which only preview deployments paid for before; on a heavily commented document that is a real share of each `documents.get`, unmeasured. Re-check when the discovery document drops the labels; the `api-fields` exceptions written against them stay until then. |
-| `deleteSuggestion` is the same as `rejectSuggestion` (my assumption) | Refuted: reject declines a suggestion and any editor may; delete removes it and returns 403 to anyone but its author | Exposed as a third action, `discard`, with the author rule in its description. |
-| A named range can serve as a durable target where a handle cannot | Confirmed (NamedRange reference: Google keeps the range with its content across edits) | `named_range` is a Target (§7.1); a name several ranges share is refused as a target, since a target must mean one range. |
-| A fragment inserted into an empty paragraph keeps that paragraph's style (Phase 1 `Inline` rule) | Refuted by the follow-up path: a new header, footer, footnote or tab starts as one empty paragraph, so `# Title` content came out as normal text; an inline insertion into a non-empty paragraph must still keep its style | `FragmentOptions.Fill`: an empty paragraph takes the fragment's style. |
-| Per-paragraph text matching is fast enough (my assumption) | Refuted on the 150-page fixture: rebuilding normalized units per paragraph per search made a text target 22 ms and 300 quoted comments 384 ms; one normalized string per segment with `strings.Index` and a unit-offset table brought them to 0.6 ms and 38 ms | `Fetched.text` (§11). |
-| `TabProperties.index` is the tab's 0-based position among its siblings, so a requested 1-based position converts with `-1` (the API reference, applied to both add and move) | **Refuted for `move`, live 2026-09-03.** For `add` the index is 0-based as documented, but a move inserts the tab at that index with the tab *still in its old slot* and removes it afterwards, so moving one later lands it a place short, and moving it to the very next position does nothing while reporting success. Four probes: 3→1 gave 1; 1→3 gave 2; 2→3 gave 2; 4→2 gave 2 | `moveTabRequest` raises the index by one when the tab is moving later within the same parent (`siblingIndex`). Moving earlier, and moving under a different parent, are unchanged. The bug hid because every earlier test moved a tab to position 1, where the two readings agree. |
-| `read_document with_styles` shows a run's formatting | Confirmed, and sharpened live 2026-09-03: Google returns only the properties a run sets itself, so the annotation already *is* the deviation from what the run inherits. A read of a document whose `HEADING_2` had just been redefined blue, centered and single-spaced annotated nothing at all | No per-run comparison to build (an earlier plan of mine, dropped). Inherited formatting is reported once per tab by `get_document` instead of once per paragraph. |
-| Giving the MCP SDK a logger logs whole JSON-RPC frames, so debug logging leaks documents (my assumption, and the reason the logger was attached only at debug) | Refuted by reading go-sdk v1.7.0, 2026-09-05: the SDK logs at exactly two call sites — a transport-level `jsonrpc2 internal error` and one handler warning — and never a frame. The conditional stays anyway, because at info the SDK adds two lines of session chatter per session to every client's log file | Per-call logging is ours: `logCalls` middleware records method, tool name, outcome and duration at debug, which is [OWASP's "when, where, who and what"](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) without the payload — its exclusion list covers tokens and personal data, and a person's document is both. `TestDebugLogsCarryNoDocumentData` fails the build if a log line ever carries the fixture's id, title or text, so the bug form can ask for a debug log without asking the reporter to audit it. A handler wrapper to floor the SDK's own level was written and thrown away: twenty lines to suppress two, where a conditional already existed. |
-| `errors.Is(err, io.EOF)` catches the end of a stdio session | Refuted, reproduced 2026-09-05: the SDK reports a closed connection as JSON-RPC **-32004** with the EOF only as message text (`server is closing: EOF`), so `errors.Is` never matched and the process exited **1** on an ordinary client disconnect — which a host reports as a crash. The smoke test could not see it because it slept before closing stdin, and with the sleep the exit is 0 | `clientWentAway` matches `jsonrpc.Error` codes -32004 and -32003; `jsonrpc.Error` is a public alias of the SDK's internal wire type, so the code is comparable without sniffing message text. The smoke test closes stdin abruptly as a second case, and fails against the previous binary. |
-| Scrubbing a result where it is read keeps the transcript clean (the live driver's port to Go) | Refuted on the port's first run, 2026-09-05: the driver's `call` returned the scrubbed text, so a step that parsed the document URL out of `get_document` fed `https://docs.google.com/document/d/<scratch>/edit` back to `insertRichLink` and Google answered `400 The URL is invalid`. The Python it was ported from scrubbed in the print helper, so the fault arrived with the port | Scrubbing lives in `shown`, the one helper every transcript line goes through; a step parses the untouched text. A redaction on the read path corrupts whatever the caller feeds back. |
-| The host allowlist's port handling is incidental — `googleHost` could take `url.URL.Hostname()` and drop the port as noise | Checked 2026-09-05 after a sibling server hit the other side of it: it is passed `Host`, port and all, so `docs.googleapis.com:8443` matches nothing and the request is refused. Fail-closed is the right direction here and not a formality — `ExportRevision` follows the `downloadUri` out of an operation's **response body** with the access token attached, so this check decides whether a credential leaves the machine | Pinned: the test covers ports on allowed hosts, and the comment says not to switch to `Hostname()`. Where a check that governs token egress is going to be wrong, it should be wrong toward refusing. |
-| HTTP status is enough to classify a Google error; the reason string refines it at most (the mapping's shape since Phase 0 — status first, one reason-based exception for scopes) | Refuted 2026-09-05 against the [Drive error guide](https://developers.google.com/workspace/drive/api/guides/handle-errors), after the google-drive-mcp session hit the same class of bug from the other side: Drive answers throttling with **403** — `rateLimitExceeded`, `userRateLimitExceeded`, `sharingRateLimitExceeded`, `dailyLimitExceeded` — and prescribes exponential backoff for it. Reading the status first made those `[forbidden]`, so a throttled read was never retried and the model was told to go looking for permissions that do not exist. The same page lists 403 reasons on our own surface that mean "cannot", not "may not": `downloadRestrictedForRevision`, `fileNotExportable`, `storageQuotaExceeded`, `appNotAuthorizedToFile` | `throttled` classifies the four quota reasons as `ErrRateLimited` before the generic 403, and `once` makes them transient so reads back off (writes still repeat only on 429 or 503, which prove nothing was applied). Every reason now appears in `APIError.Error()`, so a refusal the classifier cannot improve on still reaches the model with Google's own word for it. No reason has been *observed* live on this surface — the change is what the documented reasons mean, not a bug seen in the wild. |
-| The write-retry rule ("only 429 and 503, which prove nothing was applied") covers every write | Refuted in review 2026-09-05: the guard tested `k == kindWrite`, and Drive writes carry their own kind (`kindDriveWrite`, added for a separate rate limiter), so creating a comment or a reply was retried on **any** 5xx — a 500 arriving after Drive had created the comment left two. The classification change above would have widened it to throttling 403s as well. Neither was ever observed; the test that would have caught it existed only for document batches | The guard is `k != kindRead`, and the new test drives `CreateComment` through 403/500/503/429 (it fails against the old guard on exactly the 403 and the 500). A rule stated for "writes" is tested through every kind of write. |
-| A 503 on a write proves nothing was applied, so writes may repeat on 429 or 503 (the rule since Phase 0, restated in the row above) | Refuted 2026-10-01 against Google's [`google/rpc/code.proto`](https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto), which says of `UNAVAILABLE` that it is "not always safe to retry non-idempotent operations". A repeated `batchUpdate` that had landed fails its `requiredRevisionId` check, and the edit path re-plans once on a conflict, so the edit could apply twice; `documents.create` and `comments.create` have no guard and duplicate outright. Every other 5xx on a write was `[server] … retry shortly`, which invites the same duplicate by hand. Not observed live | Writes repeat only on 429. A 5xx or network failure on a write is `ErrAmbiguous`, `Class` checks it first so the wrapped server or network error cannot win, and the model is told the write may have been applied and to read before trying again. `TestWriteRetriesOnlyOn429`, `TestDriveWriteRetriesOnlyOn429` and `TestDeleteAfterServerErrorIsNotRepeated` hold it. |
-| A transport error is safe to log because `do` logs the redacted path | Refuted 2026-10-01: net/http wraps every transport failure, a canceled call included, in a `*url.Error` whose text is the whole URL, so the debug log and the error carried a search's `q=` and the document id. Found by test, not observed in a log | `once` replaces the `*url.Error` with its operation, the redacted path and the cause before anything reads its text. `TestTransportErrorsDoNotCarryTheURL` drives a reset, an `oauth2:` failure and a cancel. |
-| A security document is a description of the code (implicit in keeping one) | Refuted 2026-09-05 by auditing §12 and docs/security.md line by line against the code, after a sibling server found its own security page promising a deadline the code did not keep. Two claims here were false in opposite directions: the page said "logs carry ids (truncated), revisions" in one row and "no document data at any level" in another, and the code did the first — `ShortID` put six characters of the id and the whole revision id into debug lines, and the conflict path logged an id at info. The test that was supposed to hold the guarantee passed because it searched for the *whole* id, and because the service's logger was not the logger it read | Ids are gone from every log line, including the path (`/v1/documents/…/x`); `ShortID` is documented as filename-only. The test reads the service's logger too, drives the conflict path, and looks for the id, its first six characters, and the revision. It catches two leaks against the previous code. Where the two rows disagreed, the stronger one is now true rather than the weaker one being written down. |
-| The wire types can be kept in step with the API by reading them carefully | Refuted by the whole of #46. The types had drifted 40 fields from the discovery document — the suggestion field that started the issue, and 39 more nobody had counted — and the repository already had an evidence-log row saying the types had drifted, which is a document, not a control. | The `api-fields` gate in `scripts/gates`, the method gate's pair of files one level down: the discovery document's schemas and properties in `testdata/api-fields.json`, one hand-written row per exception in `testdata/api-fields.tsv`, and the modeled side read out of `internal/gdocs` with `go/ast`, embedded tags promoted. Three directions fail: a published property nothing models, a modeled field nothing publishes, and a struct in `internal/gdocs` that matches no schema and has no row saying why. Judging the 39 against "if a tool writes it, the types must carry it" added 16 fields — twelve of `SectionStyle`, a table's column widths, a row's pinned-header flag — and wrote off 23 read-only ones with reasons. Proven to bite: dropping `SectionStyle.marginTop` fails the gate. |
-| `format: raw` returns the Docs API's JSON, as its tool schema says | Refuted on 2026-09-12, by the same issue. `render.Raw` marshaled `internal/gdocs` structs, so the one read whose whole job is to show what Google said could only ever show the fields this server already models — and it silently dropped the rest. That is not a corner case: nine types model fewer fields than the API publishes, 39 in total, worst of them `SectionStyle` at 14 (every margin, `columnProperties`, `pageNumberStart`). It is also how #46 came to be filed against the write path: the raw read had dropped the field proving the write had worked, so the reporter read an empty `textStyle` as a no-op. | `StructuralElement` keeps the bytes it decoded from (`UnmarshalJSON` plus `RawJSON()`), and `render.Raw` returns those, compacted, falling back to marshaling the types for an element built in Go. `Block.Wire` had exactly one consumer, so the change is one field, one method and one branch — smaller than modeling the 39 fields, and it ends the class rather than one instance. Measured on a 150-page document: retained bytes are 1.03× the body (the nested elements inside table cells account for 8%, and `format: raw` never reads them), decode 28 → 41 ms, heap 7.7 → 11.2 MB. That document is prose-heavy, and the figure is not a bound: an element's bytes are held again inside every ancestor's, so a deeply table-nested document retains its cells once per level of nesting. The 8% is what that costs on this fixture, not what it can cost. Paid for by asking Google to stop indenting: `prettyPrint=false` on `documents.get` takes the same document from 7.44 MB to 2.96 MB on the wire, verified live. |
-| Counting the types a name-matching gate compares is enough to notice one leaving the comparison | Refuted 2026-09-13 by reading the gate's own numbers. `api-fields` skipped any struct whose name no published schema shared, and guarded that with a floor of 80 against a real 104 — two dozen types could leave the comparison before the count complained, and the six that had already left (five Developer Preview comment shapes and the `SuggestedStyle` embeddable) were invisible from the day the gate was written. A repo-wide rename of `gdocs.SectionStyle` took its fourteen properties out of the comparison and the gate printed ok. The evidence-log row above said the count made a rename impossible to miss, which is the same shape of mistake the gate exists to catch: a claim with nothing testing it. | The comparison runs in three directions, the third over the structs rather than the schemas: every struct carrying a JSON tag matches a published schema, is named by an `alias` row, or has a `local` row saying it models none. A rename now fails on the renamed type itself, so the floor is gone rather than raised. The same pass checks a row against what it describes — an `out` row for a property Google has withdrawn or one the types have since grown, an `extra` row for a field now published — because a stale row is a verdict nobody re-read. Proven by mutation: deleting the third direction, deleting the staleness pass, or restoring the old search that honored rejected rows each turns a test red. |
-| The wire types need only the `suggested*Ids` fields, because a suggestion is an insertion or a deletion | Refuted live on 2026-09-12 (issue #46, spike B in `internal/gapi/rawsuggest_integration_test.go`). A `SUGGEST`-mode `updateTextStyle` records a `suggestedTextStyleChanges` entry keyed by suggestion id, and `internal/gdocs` had no field for it — nor for the other fifty-nine `suggested*` fields the discovery document lists across twenty-two types. So the suggestion existed and every read this server offers said it did not: `format: raw` re-marshals our own types and dropped it, `list_suggestions` walked insert/delete ids and answered "0 pending suggestion(s)" in the same session where the write had returned a suggestion id, and `include_suggestions` and `with_styles` showed nothing. The report was filed as a silent write no-op; the write had worked. | All sixty-one `suggested*` fields, taken from the discovery document rather than typed by hand, and a `SuggestedStyle` embeddable for the ten inline elements that carry a text style. The properties come from the `*SuggestionState` pair, walked by reflection over the API's own `<property>Suggested` convention: reading the style instead reports a suggestion to change nine properties where a person asked for one, because the style is the style as it would be *after* accepting. |
-| A text-style suggestion state on a run is a restyling, and a run's `textStyle` is its style (the `Run` model) | **Refuted 2026-10-03**, live and against the reference. A suggested insertion whose text was given a style (the planner's `fields: "*"` reset, a markdown `**bold**`, a later direct restyle) carries a `suggestedTextStyleChanges` entry under its own insertion id; a suggested replace gets one from Google with no style request at all. The reference describes the entry's `textStyle` as "only includes the changes made in this suggestion … their new values", with "inherited text styles … represented as unset fields". So `{}` with ten flags means the ten properties become inherited, and the run's own `textStyle` in `SUGGESTIONS_INLINE` is the style it inherited from its neighbor: read in `PREVIEW_SUGGESTIONS_ACCEPTED`, plain text inserted after bold "Alpha" is plain, `**x**` is bold, and a direct italic over the pending insertion is italic and not bold, while the inline view called every one of them bold (`TestRawSuggestedReset`, `TestRawDirectOverPendingReset`, `TestRawAcceptedView`). The only property not marked was link. Read as a restyling the entry listed every suggested edit as "(text: background, …, font)". A direct restyle over pending inserted text lands, folded into that entry, so it is no collision. The reference's "only includes the changes" holds for these entries and not for a restyling of existing text: a suggested bold on italic "Alpha" came back with every property filled in, `italic: false` among them on text the accepted preview keeps italic, so for restylings only the state is trustworthy, as `suggestedProps` already says (`TestRawDirectOverPendingBold`). A direct restyle with the same property and value as the insertion's own entry lands too: direct bold over a suggested `**x**` is bold once accepted, direct bold off plain. | `Run.suggestions` applies the entry under the run's own insertion id to its style (masked properties, unset meaning inherited, matched by API name like `suggestedProps`) and keeps only other suggestions' entries as restylings. Reads, previews, `list_suggestions` and `guardRestyle` all follow from that. Closed #83, which dropped the entry instead and hid the bold of `**x**` inserted after bold text. One split stays unexplained: in a paragraph already holding a suggestion and a comment, the reset arrived under a second id, and is then reported as the restyling it is. Paragraphs do not share the problem: a paragraph inserted as a suggestion with `# Heading` carries `HEADING_1` in its own `paragraphStyle` in the inline view, with no `suggestedParagraphStyleChanges`, and the accepted preview agrees (`TestRawSuggestedHeading`), so paragraph, bullet and cell carriers are left as they are; table cells and rows inserted as suggestions are unprobed. The same probe shows Google filing the ten-flag text entry on an inserted paragraph's run with no text-style request at all. |
-| A direct formatting change over a pending suggested formatting change applies normally | Refuted, then only half-explained. Verified live 2026-09-12: suggesting bold and then setting bold directly leaves the run unbolded, and suggesting alignment `CENTER` then setting `CENTER` directly leaves the paragraph unaligned — the batch is accepted and its reply is empty. This, not the suggested insertion the issue blamed, is what made step 3 of #46 look like a no-op: it was step 2 having succeeded. But the rule is not "the same property": a font size suggested at 20pt and then set directly to 20pt *does* land, and an alignment set to a value the suggestion does not name lands too. A suggested insertion turned out to be irrelevant — a direct restyling of one applies whether the range covers the inserted run exactly, part of it, or straddles it and real text. | `guardRestyle` in `internal/plan` **warns** and names the suggestion and the property, in direct mode only. Not a refusal: the observed rule is inconsistent, so refusing would block writes that work. What the person needs either way is the thing `ops_applied` cannot tell them — that a pending suggestion is sitting on the property they just set. Worth reporting upstream; left open in §17. |
-| A comment beside a version keeps it pinned (the fix after the cosign 3 failure) | Refuted twice over: this repository had `goreleaser-action` pinned by SHA and asked for `~> v2`, and a sibling narrowed the same value to `~> v2.18.0` and recorded that in its evidence log **as the fix**, with a comment saying which half of the pin mattered. A `~>` value resolves to the highest match, so both still floated | The `pins` gate in `scripts/gates`: every action a full commit SHA, every tool version exactly one version, and a failure when it finds no workflows or no versions at all. Verified against `~> v2`, `~> v2.18.0`, `latest` and `v2`. A rule a comment cannot hold is a rule that needs a test. |
-| Gates are small enough to live in shell scripts | Refuted by their own failures, 2026-09-05: the coverage floor's package list was hand-written and silently stopped covering a new package; the staleness rule failed on the release pull request it guards; and the coverage floor ran only on Linux in CI because the other runners' bash could not be relied on. A sibling server had already moved its gates into one tested Go program, and its two gate bugs this week were the same two shapes | `scripts/gates` holds them, with tests: derived lists rather than typed ones, a floor on how much each read before it reports nothing, and every platform in CI. No shell is left: the stdio smoke test and the schema-diff worktree driver were the last two, and `make check` runs on the Windows runner, where bash is a dependency rather than a given. |
-| The Windows runner runs the same commands as the others (implicit in a three-platform matrix) | Refuted 2026-09-05, the moment the coverage floor stopped being Linux-only: the default shell there is PowerShell, and it turned `-coverprofile=cov.out` into a file named `cov`. Every Windows run for as long as the matrix has existed produced a profile under a name no step referred to, and nothing noticed because the only step that read it was skipped on Windows. The same run also showed `internal/userconfig` at 78.9% there against 93% elsewhere, from a test that skipped rather than clearing `%AppData%` | `shell: bash` on the test job, so one line means one thing on three runners; the userconfig test runs everywhere. A platform in the matrix that no gate reads is a platform nobody is testing. |
-| The error classes are a closed vocabulary of ten, stated in §9 and in a comment on `gapi.Class` (the design's oldest model-facing claim) | Refuted 2026-09-05 while comparing this server's conventions with two siblings': the code emitted **fifteen**, four of which — `unknown`, `stale`, `unavailable`, `unsupported` — appeared in no document, and `ambiguous` carried two unrelated meanings, a target matching several things and a write whose outcome is unknown. Those two ask the caller to do opposite things. The vocabulary lived in comments in two packages, so nothing could disagree with it | `service.Classes` is the whole list with what each class asks the reader to do; `gapi.Classes` is the client's half and is asserted to be a subset; the `classes` gate scans every `Errorf` literal in `internal/` and fails on a class that is not listed, on a listed class nothing emits, and on a scan that reads too few files to be looking at anything. The write-outcome class is `ambiguous_outcome` now. |
-| The API client's `Timeout` bounds every HTTP call the server makes | Refuted 2026-09-05, from the google-chat-mcp session's review: a token refresh happens inside the oauth2 token source, on the client in the *context*, and nothing put one there — so it ran on `http.DefaultClient`, which has no timeout. A token endpoint that accepts and never answers would hang the first tool call for the life of the process. The signal context made it interruptible, not bounded | `auth.boundHTTP` puts a client carrying `GDOCS_HTTP_TIMEOUT` in the context for the refresh and for `login`'s code exchange; the test hangs a listener and fails against the version without the fix. |
-| A SHA on an action pins the release (applied after the cosign 3 failure to `cosign-release` and `syft-version`) | Incomplete, found 2026-09-05: `goreleaser-action` was pinned by SHA and then asked for `~> v2`, so the tool that decides what the artifacts *are* still floated. The same blind spot existed in a sibling repository, so it was the sweep that was partial, not one line | `version: "v2.18.0"`. The rule is now stated as its own row: a SHA pins the wrapper, and every tool a wrapper installs needs its own version. |
-| A hand-written list of packages under a coverage floor stays current | Refuted 2026-09-05: a package added under `internal/` was under no floor until someone edited the script, silently — the opposite of what a floor is for. Deriving the list from `go list ./internal/...` immediately caught `internal/userconfig` at 75.4%, whose error paths had never been tested | The list is derived and the exemptions are written down with reasons (a build helper, fixtures, wire types, a test-only package). userconfig is at 93.0%. |
-| A test that drives a tool or two proves a guarantee about the server | Refuted for the logging guarantee: `TestDebugLogsCarryNoDocumentData` named the tools it drove, so a tool added later was exempt until someone remembered — the same hole the sibling repo found in its own copy of the test, and the same shape as the live driver's coverage rule and the write-retry guard. A guarantee stated over a set has to be tested over the set | `server.toolArgs` is one call's arguments per tool, `TestEveryToolHasArgs` keeps it complete, and the logging test drives all of it. Whether a call succeeds against the fake does not matter — a refusal is logged too, and a refusal is where a message is most tempted to quote the document. |
-| Pinning every action to a full commit SHA pins the build | Refuted by the first release after doing it, 2026-09-05: `cosign-installer` and `sbom-action/download-syft` do not *do* something, they *install* something, and the SHA pins only the wrapper. The cosign it fetched moved to 3, where `--bundle` "has moved from optional to required" (v3.0.1 release notes, re-read 2026-09-06 after a sibling found this row overstated), and the release died at signing with "create bundle file: open : no such file or directory". The notes say nothing about `--output-signature` or `--output-certificate`; this row and `.goreleaser.yaml` both called them dropped, which was a claim neither had checked. The pin read as complete, which is what made it dangerous | `cosign-release` and `syft-version` are pinned beside the SHAs, and the signature is now a Sigstore bundle. Where an action installs a tool, the tool is a build dependency and needs its own pin. |
-| Pinning actions to a major tag (`@v7`) is enough | Refuted by GitHub's hardening guide, verified 2026-09-05: "Pinning an action to a full-length commit SHA is currently the only way to use an action as an immutable release" — a tag is mutable by anyone who can write to that repository ([Security hardening for GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions)) | Every action is pinned to a full SHA with the version in a trailing comment, which is also what OpenSSF Scorecard's Pinned-Dependencies check scores. Dependabot updates SHAs and keeps the comment in step. |
-| Declaring `permissions` once at the top of a workflow is least privilege | Refined, same sources: Scorecard's Token-Permissions wants the top level read-only and write raised per job ([Scorecard checks](https://github.com/ossf/scorecard/blob/main/docs/checks.md)) | `release.yml` is `contents: read` at the top; the one job that publishes raises `contents: write`, `id-token: write` and `attestations: write`. CI was already read-only. |
-| A checkout leaves its token on disk for later steps, harmlessly | Rejected: nothing in these workflows pushes with it, and GitHub's guide treats persisted credentials as avoidable exposure | `persist-credentials: false` on every checkout. |
-| Tests and vulnerability scanning are enough static analysis | Refuted by Scorecard's SAST check, which names CodeQL explicitly | A `codeql` workflow runs on pushes, pull requests and weekly, so a rule added after a merge still reaches old code. |
-| Signing artifacts is one decision | Split, and both halves are done for different readers: Sigstore keyless signatures over `checksums.txt` (a person verifying a download) and GitHub build provenance attestations (a machine checking that this workflow and commit produced the file). Scorecard's Signed-Releases looks for `.asc`, `.minisig` or `.intoto.jsonl` assets and will not see either, which is a limitation of the check, not of the release | Kept as is; the README documents `gh attestation verify` and `cosign verify-blob`. |
-| Scorecard's Branch-Protection tier 5 (two reviewers, code-owner approval, admins included) is the target | Rejected for a single-maintainer repository: two reviewers cannot exist, and a rule that must be bypassed on every merge teaches people to bypass rules | Pull requests required with CI green as the gate; the review count is the part that does not apply. Revisit if the project gains maintainers. |
-| `ParagraphStyle.tabStops` is a field the tools should expose (implied by "implement everything") | Refuted by the discovery document, 2026-09-03: "The list of tab stops is not inherited. This property is read-only." The same holds for `headingId` and a cell's `rowSpan`/`columnSpan` | Read and reported, never sent. §16 lists the read-only set, so "not implemented" is not confused with "not possible". |
-| Resource templates with a shared prefix shadow each other (my worry) | Refuted in go-sdk v1.7.0: a template matches through an anchored RFC 6570 regexp in which `{var}` excludes `/`, so `gdocs://{document}` does not match `gdocs://id/outline`; an unmatched URI is resource-not-found (code -32602 since SEP-2164) | Three templates registered side by side; handlers parse the URI themselves. |
-| Pinning `shell: bash` on the steps that need it fixes the Windows runner (applied 2026-09-05, after PowerShell turned `-coverprofile=cov.out` into a file called `cov`) | Incomplete, found 2026-09-06: a sibling repository took the coverage half of that finding and skipped the shell half, reasoning that a shell fix applies to a shell gate and its own gate was Go. Its Windows job then failed with `open cov.out: The system cannot find the file specified` — the mangling is on the `run` line, not on the gate. Verified against GitHub's workflow-syntax reference: `defaults.run` applies to every `run` step in the workflow, a job-level block overrides it and a step's own `shell` overrides both; none of them reach a `uses:` step; and an explicit bash runs as `bash --noprofile --norc -eo pipefail {0}` where the implicit non-Windows default is `bash -e {0}`, so pinning it also turns `pipefail` on for Linux and macOS | `defaults: run: shell: bash` at workflow level in all three workflows rather than per step: the runner hands every `run` block to a shell, so this is not a property of steps that look shell-ish, and a default set at that level is inherited by a job somebody adds later. `TestWorkflowsPinTheShell` asserts the block in every workflow and asserts a floor on how many files it read, because the block is unforgettable inside a file and entirely forgettable in the next one. A matrix job whose work happens inside a `uses:` step is outside what any of this promises. |
-| The pins check covers every tool a wrapper installs, because `versionKeys` names them | Refuted 2026-09-06 while checking whether anything was out of date: the list carried `gitleaks-version`, which is not an input `gitleaks-action` has ever had — it reads `GITLEAKS_VERSION` from the environment instead. The key had never matched a line, so gitleaks was the one wrapper-installed tool the check did not cover, and the list read as though it did. The action's README settles the smaller question: its default is "a hard-coded version number" rather than `latest`, so the SHA did already pin the scanner — this is a hole in the *check*, not a floating dependency like the cosign one | `GITLEAKS_VERSION: "8.30.1"` named in `ci.yml` so which scanner ran is a line in the workflow rather than a constant inside a five-megabyte bundle, and the key corrected in `versionKeys`, which now matches five versions rather than four. The floor counts what was found rather than trusting the list, which is the only reason this was visible at all. |
-| Redacting a transcript by shape covers what needs covering, and a hand-written table of rendered lines is a fair test of it | Refuted twice on 2026-09-06. First on scope: an id, a URL and an address have a shape, but a person's name has none, and `userLabel` renders an owner as `Name <address>` into `get_document`, `list_revisions` and `search_documents` — so the transcript carried the signed-in account's own name on every run. Names can only be caught by **position**, which works here because this project's own renderers wrote every one of them. Then on the test: the table of positions was typed rather than taken from the renderers, and had already drifted — it asserted that a comment line's trailing timestamp survives, when `threadLine` always appends the quote and body, so the rule preserving that timestamp could never fire on real output, and `list_suggestions` was a fifth position the redactor's own comment did not name | Five positions, each case in `internal/redact/redact_test.go` taken from the renderer's format string. A person is redacted to end of line and the tail goes with them — a display name has no reliable terminator, and stopping at the first `(` to save a timestamp left the organization in `Ann Petersen (Acme Corp)`. That cost is asserted in a test of its own rather than left as a remark. The redactor moved to a file with no build tag so `make check` runs its tests; the coverage exemption that hid it is gone, and an exemption naming a package `go list` does not return is now a test failure — which is how the stale `internal/evals` entry beside it was found. |
-| A gate over the repository sees the repository | Refuted 2026-09-06: `leakcheck` enumerated with `git ls-files`, which lists the index, so a file that existed but had never been staged was outside the scan entirely. A working tree carrying an address at a real domain passed `make check`; the same file failed the moment it was staged. The gate's own name says *committed*, and the thing it needs to catch is the file about to be. The same read also skipped rather than failed when `git ls-files` errored | `--cached --others --exclude-standard`, so the scan covers what the next `git add -A` would sweep in, and a failure to list is fatal. Two more gates now hold the redactor's funnel, which was true only by habit: `TestDriversDoNotPrint` walks the syntax of both driver packages and refuses `fmt.Print*`, and `TestEveryPlaceAPersonIsWrittenIsKnown` counts the person-writing sites in the renderers, so a new one fails the build rather than quietly reaching a pasted transcript. Both were watched to fail before being trusted. |
-| The identifier scan reads every file it enumerates | Refuted 2026-09-06, an hour after the row above: it enumerated correctly and then skipped any file holding a NUL byte, because the rules are regexes over text. So an 8 MB `gates` binary — `go build ./scripts/gates` drops one at the root under the directory's name, and `git add -A` swept it in — passed the gate, `make check` and eight green CI checks, carrying 66 `/home/mark/...` paths because it was built without `-trimpath`. The diff stat was the only witness. The history scan skipped it for the same reason, so neither half could see it. A sibling has three of them on a public `main`, 18 MiB packed against 447 KiB for all the source | The scan says what it can about a file it cannot read: `leaks` refuses a binary that starts with an executable's magic number (ELF, PE, Mach-O, fat Mach-O) or exceeds a megabyte, and it refuses it while the file is still untracked, so it fails before `git add -A` can sweep it in. Watched against a real `go build` output at the root, and watched to pass with the rule removed. Deliberately not overridable by a marker comment: a binary cannot carry one, and the way past should be an edit somebody reviews |
-| A check written to catch a hand-maintained list going stale is itself safe from that | Refuted three times in one change, 2026-09-06. The redaction gates were reviewed and each had grown its own typed list: the sources of tool text named four functions and missed `okStruct` and all six of the eval harness's, so the rule was inert over the package its own comment claimed to cover; the person-field census said `Email` where the Drive wire type says `EmailAddress`, so the four reads inside `userLabel` — the one function that renders an address, and the function the sibling assertion exists to guard — were invisible to it; and the driver directories were two, while a third build-tagged driver printed a document URL outside them. Two of the three had drifted before the commit landed | Sources of tool text are the transitive closure of whatever reaches the SDK's `CallTool`; person fields are read from the wire and model type declarations, with the derivation itself asserted to contain `EmailAddress` and `Author`; the coverage floor derives its zero-statement exemptions from `go list` so two hand entries deleted themselves. A closure over *assignment* was tried for the person fields and rejected — it propagated through names like `User` until it counted fifteen hundred reads, which is recorded here because the failed attempt is the part that transfers. |
-| `changelog.disable` is how you stop goreleaser inventing a commit list when you pass your own `--release-notes`, and a `release.footer` will still wrap it | Half refuted, 2026-09-13, and the half that was wrong was wrong in a way a summary of the documentation would never have caught — it took reading goreleaser v2.18.1. **`changelog.disable` is fatal here**: it is evaluated in the changelog pipe's `Skip`, which runs before `Run`, so `ctx.ReleaseNotes` is never assigned and the file named by `--release-notes` is never opened. The body collapses to header plus footer. `google-chat-mcp` carries `disable: true` **and** passes `--release-notes` in the same workflow, and its release page is a footer with nothing above it — the bug shipped and nobody read the page. **The footer half was the opposite of what was first written here**: `internal/pipe/release/body.go` renders `{{ Header }}{{ ReleaseNotes }}{{ Footer }}` from `Config.Release.Header` and `Config.Release.Footer`, on every path, `--release-notes` included. The early return in the changelog pipe skips only `ctx.ReleaseFooterFile`/`ReleaseFooterTmpl`, which are the `--release-footer` *flags* — a different pair with confusingly similar names, and the reason the first reading of this went the wrong way | `gates release-notes` prints the `CHANGELOG.md` section for the tag and nothing else — the sibling servers' command, adopted rather than reinvented, after a separate `scripts/relnotes` binary had been built here and thrown away for being a fifth answer to a solved question. The footer stays in `.goreleaser.yaml` where it works, one shared wording per server. The `changelog:` block is deleted rather than disabled. A tag whose section is missing or empty fails the release rather than publishing silence, asserted in `scripts/gates`, along with the link-footer stop. The lesson worth keeping is not about goreleaser: a documentation summary said header and footer were "reasonable to infer" as composable and the source said one of them is not, so the config was briefly built on the inference — verify at the source, and prefer the sibling's *observed behavior* over any reading, because chat's empty release page was the evidence that settled it |
-| The sibling with the tidiest README is the one to copy | Half refuted, 2026-09-13. `google-chat-mcp` has the best *skeleton* — the shortest intro and the only correct tail, `Security → Code of conduct → License`, each a line linking its own file, License last as the standard-readme spec requires — and it is the one repository of six holding every file GitHub's community profile names. But measured against GitHub's own "About READMEs", it answers three of the five questions it lists and misses two that a sibling already answered: *why the project is useful* (docs' `Why another Google Docs MCP`) and *where users can get help* (docs' `Reporting a problem`). standard-readme also requires a `Contributing` section, which chat buries inside `Development`, and asks for a description under 120 characters, which all six exceeded — 152 to 273 | One skeleton across all six repositories, taken from chat's shape and completed from the sources rather than from any one sibling: short description under 120 characters, then `Why`, `Install`, `Set up`, `Connect a client`, `Tools`, `Safety`, `How it works`, `Getting help`, `Versioning`, `Development`, `Documentation`, `Contributing`, `Security`, `Code of conduct`, `License`. No table of contents: standard-readme asks for one over 100 lines, and GitHub now renders an outline menu from the headings, so a hand-maintained copy of the heading list is a fact that can go stale for no gain. `Licence` becomes `License`, which names the `LICENSE` file and the `Apache-2.0` identifier. Prose was British until 2026-09-25, when every repository moved to American English |
-| The bundle manifest's `$schema` is pinned because it names a versioned file | **Half refuted, 2026-09-17, against the published schemas.** The filename pins the FORMAT; the REF pins the bytes, and this one named `main` — a branch upstream can amend under a document that claims to conform to it. Fetched `mcpb-manifest-v0.2`, `v0.3` and `v0.4`, which are served, and `v0.5`, which is not; the copy at tag `v2.1.2` is byte-identical to `main` today, which is the argument for the tag rather than against it. 0.4 is not adopted: its only difference from 0.3 is a `uv` value in the `server.type` enum, and this bundle's type is `binary` | `$schema` names the tag, and the gate holds the whole URL — upstream's path at a full release tag or a commit SHA. An allow-list, because refusing the branch NAMES passes a partial tag like `v2.1`, which upstream re-points as it releases. Plus a floor under `manifest_version`, which is the claim the others cannot make: 0.2 beside a 0.2 schema is stale and self-consistent |
-| A 200 from an `insertComment` batch means the comment exists | Refuted 2026-10-08 against Docs discovery revision 20261006, not observed live: `BatchUpdateDocumentResponse.commentUpdateState` can be `ALL_FAILED_UNKNOWN_REASON`, "All requested comment updates failed". The response was decoded and the field never read, so `add_comment` reported `comment  posted` with an empty id, and comment mode reported its ops applied with no comment ids | `batchUpdate` refuses that state as `[server]`: every batch carrying a comment carries nothing else, so nothing was written and asking again is safe. A reply that names no comment thread is `[ambiguous_outcome]`, pointing at `list_comments` before a second post. |
-| A regex replace should use the API's `searchByRegex` | Declined 2026-10-09. `SubstringMatchCriteria.searchByRegex` is published (Docs discovery 20261006), but nothing says which regex flavor Google runs, whether `replaceText` expands groups, or how a match treats a chip or an image. The overwrite guard has to know every range a replace touches, and it could only guess Google's matches | `replace_all` with `regex` is expanded by the server into one replace per match, found with Go's RE2 over each paragraph's index-aligned text, the matcher `find_in_document` already uses. A match is confined to a paragraph, an empty match and a replacement that would copy an object as text are refused, and the guard, suggest mode and the minimal diff apply to each match as to any replace. |
-| Index-aligned text needs only the runs the parser builds | Refuted 2026-10-09 by a schema Google added. `ParagraphElement.dropdown` arrived between the 2026-09-26 and 2026-10-06 discovery documents; the parser had no case for it, returned nothing, and `alignedSlice` concatenated the runs it had, so every offset after a dropdown in that paragraph moved one place. A regex `find_in_document` reported the wrong offset, and the regex `replace_all` written that day computed its ranges from the same text, so it would have replaced one character early (`TestARegexReplaceAfterAChipHitsItsOwnRange` shows `[10,14)` against Google's `[11,15)`). Exact-text targets were safe: `appendUnits` places each character at its run's own index | A dropdown is a chip run showing its selected option. `alignedSlice` fills any index gap between runs with placeholders, so an element Google adds later costs a missing label, not a shifted range. |
-| A destructive tool should carry both `requiresUserInteraction` and the server's own question | Refuted 2026-10-09, after the owner was asked twice for one delete. No source recommends two hard gates for one call. The MCP spec puts confirmation on the client ("Clients SHOULD prompt for user confirmation on sensitive operations"); GitHub's `delete_repository` (PR #3076) and Supabase's destructive SQL confirm with `destructiveHint` plus a form elicitation, and neither sets the mark; Claude Code's documentation scopes the mark to "tools whose permission prompt is itself the point, such as a consent or access-grant step" | The mark is sent per client: present when the request's capabilities show no form elicitation, absent otherwise, on a tool that asks before every write. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to refuse the call before it reached the server. Not chosen: a typed confirmation, which would stop Codex in full-access mode accepting an empty form unseen, at the cost of a slower answer in every other client. **Superseded 2026-10-22:** the server asks nobody and no tool carries the mark (§12a). |
-| Sending the mark per client leaves every client either the mark or a question | Refuted 2026-10-09 by a review of the same change in google-mail-mcp. On protocol 2026-07-28 capabilities travel per request, so a client can declare form elicitation to `tools/list` and none to `tools/call`, and get neither the mark nor a question. The same review found no test that the mark is dropped from a copy of the tool, not from the server's own | Recorded as a known limit. It gives a misbehaving client nothing it lacked, since such a client answers the server's question itself and can accept without a person. **Moot since 2026-10-22:** no question and no mark (§12a); `GDOCS_REQUIRE_PROMPT` and the test went with them. |
-| `assigneeEmailAddress` is a field of Drive's `Comment`, so any call that returns a comment can ask for it | **Refuted live 2026-10-09**, on the first live run after `list_comments` started reading it. `comments.get` and `comments.list` serve it; `comments.create` and `comments.update` answer 400 "Invalid field selection assignee_email_address" when the `fields` mask names it, so `add_comment` without the comments view and `reply_comment` `edit` failed outright. The discovery document gives no hint of the split | Reads ask for `CommentFields`; create and update ask for `commentWriteFields`, the same set without the assignee. `TestOnlyACommentReadAsksForTheAssignee` holds the split with a fake that answers as Drive did. |
-| Tables and images in content should be placed by index arithmetic in one batch | Declined 2026-10-09 after spike E, live (`internal/gapi/rawtable_integration_test.go`). The arithmetic exists: an empty table is 2 + rows×(1+2×cols) long and cell (r,c) starts at table + 3 + r×(1+2×cols) + 2c, checked at 2×2, 1×2 and 1×1 only. Placement: `insertTable` at a paragraph's newline starts the table one past it and leaves the old newline as an empty paragraph after the table; at a paragraph's start it leaves an empty paragraph before the table; at `endOfSegmentLocation` one after. `deleteContentRange` over the empty paragraph after a table is accepted when text follows. An inline image at the start of an empty paragraph sits alone in it. In `SUGGEST` mode `insertTable`, text into a cell and `insertInlineImage` are accepted as suggestions | Rounds instead (§7.3), each against a fresh read, so nothing rests on a formula checked at three sizes. Partial results are reported, not rolled back. |
-| A `batchUpdate` reply's revision is the revision the next read reports | Confirmed live 2026-10-09: across the content rounds of one live run, every read after a write carried the revision that write's reply gave, and no round saw another | A round runs only on a read at the revision the previous batch's reply gave; any other means somebody else wrote in between (§7.3). |
-| Each suggest-mode batch names the suggestions it creates | Refuted live 2026-10-09: the five batches of one suggest-mode content call (text, image, table, fill, tidy) were all filed under the first batch's suggestion, and only the first reply named it. The fill then warned once per cell that its range held a suggestion: the call's own | Later batches carry the suggestions their call made so far, and the guard leaves those out. |
-| A suggest-mode delete of an empty paragraph the same call suggested leaves a suggested deletion | Refuted live 2026-10-09: the read after a suggest-mode content call showed no empty paragraph around the suggested table, and rejecting its one suggestion restored the section exactly | The tidy round needs nothing of its own in suggest mode. |
-| An image address Google cannot fetch fails at the request | Confirmed live 2026-10-09: `insertInlineImage` with an address that answers 404 is refused whole, 400 INVALID_ARGUMENT "The provided image was not found." | A round that places one fails alone: a warning names the image's line, and its text and empty paragraph stay. |
-| A Markdown file is typed `text/markdown` (what v2.3.0 assumed, telling one from a Google Doc by that type alone) | **Refuted live 2026-10-14.** A file created as `text/x-markdown`, the type older tables give a `.md`, kept that type in Drive. `documents.get` read it exactly as it read a `text/markdown` control made the same minute from the same bytes, `# Probe` as `HEADING_1`, and a direct `batchUpdate` was 400 `FAILED_PRECONDITION` "The document must not be an Office file", the refusal a `text/markdown` file gets. A media update sent as `text/x-markdown` kept that type, and `documents.get` then read the new text. `text/x-web-markdown`, another alias, is not one: `documents.get` answered it 400 `INVALID_ARGUMENT`, as it does a `text/plain` `.md`. v2.3.0 took a `text/x-markdown` file for a Google Doc, so every write to it failed | `gapi.IsMarkdownMimeType` takes both types for the path a file takes and for `search_documents`' kinds, and an upload is sent as the file's own type so it is not retyped |
-| Every name in a transcript sits in a position a rule knows, because this project's renderers wrote them all | Refuted 2026-10-09 by reading two live transcripts: a person chip printed the account's display name as `@Name` in markdown and bare in a plain-text read, six times a run, with no label before it for a rule to find | The driver reads the account's display name from `get_document` before any step can print a chip, and `redact.Names` replaces it wherever it appears. The eval traces were redacted as encoded JSON, where a newline is `\n` and no line rule fires, so the owner line kept its name; `redact.TranscriptJSON` now redacts each string. |
-| `deleteContentRange` takes an empty range as a no-op | Refuted live 2026-10-09: "Invalid requests[1].deleteContentRange: The range should not be empty", and the batch it was in was refused whole. A replace over an empty table cell with content of more than one paragraph sent one, so every cell of an `insert_table` fill stayed empty | A replace deletes only a range that holds something; the test simulator refuses an empty one as Google does. |
-| `createParagraphBullets` turns the leading tabs of every paragraph in its range into nesting (what the planner assumed) | **Refuted live 2026-10-21** (spike F, after nested list items were seen landing at the wrong level). It does not re-nest a paragraph that already has a bullet, leaving the tab as text and the level as it was (a new preset it does apply to that paragraph's list, which keeps `format_document`'s bullets op working), and inserted paragraphs take the bullet of the paragraph at the insertion point (InsertTextRequest says so). So content inserted before, into or in place of a list item came out that way, in direct and suggest mode alike. The lists guide: "You can't adjust the nesting level of an existing bullet. Instead, you must delete the bullet, set the leading tabs in front of the paragraph, and then create the bullet again." Two other projects saw the skip live (mcp-gee-sweet #524, gdoc `listnest.py`) | A list item whose inherited bullet has the right level and kind keeps it; every other run is rebuilt: bullets deleted, indent cleared, tabs, the list made (§7.3, `internal/plan/lists.go`). |
-| Leading tabs give absolute levels | Refuted live (spike F, 30 probes): a level is the level of the list item just before the range plus the tabs beyond the fewest in the range, and the range joins that item's list when the presets match (documented: "added to that preceding list"). So a run can start neither deeper nor shallower than the item before it: a lone tabbed item came out at level 0, and a top-level item after a level-1 one at level 1, also when appended after a list that ends on a nested item. A numbered run does not join a bulleted list, nor a list made from another preset (a checklist, arrows), which the server tells by the glyphs of a list's first three levels, measured for five presets; a new list does not take in the items after it, so one made at the top of a numbered list split it and restarted its numbering | gdoc's window, measured there and here: a temporary empty paragraph pins the fewest tabs to none so a window can start deeper than its base; a window takes in the items before it, rebuilt at their own levels, until the one before is no deeper; a right inherited bullet is kept, so no list is split. The content's leading list continues the list it is placed against, at its level, when their kinds match, and starts its own otherwise. |
-| `deleteParagraphBullets` leaves a plain paragraph | Refuted live (spike F): it keeps the removed level's indent, as documented ("visually preserved by adding indent"), and a bullet made over it adds its own: a list after a paragraph, inserted into a nested list, had the right levels at 72 and 108pt, and the paragraph kept 36pt. Not reproduced where the list joined the one before it | Every bullet deletion is followed by clearing `indentStart` and `indentFirstLine` back to the named style: rebuilding a list, dropping a bullet a new paragraph took, and `format_document`'s bullets `none`, whose paragraphs Google would leave indented as if still in the list. An item indented by hand gets its own indents back after the clear. |
-| Which bullet a replacement's paragraphs take | Measured live (spike F): the replaced block's while its deletion is only suggested; the next block's once a direct deletion removed it; the block before's on a segment's last block, whose newline goes, the merged paragraph keeping the first paragraph's style | The planner picks the inherited bullet by layout and mode. |
-| The Docs API refuses to read a Word file (.docx) (community reports, 2024–2025: 400 "This operation is not supported for this document") | **Refuted live 2026-10-21** (spike G, a synthetic file). `documents.get` answers 200 with the model: a Word tracked insertion and deletion read as suggestions (`suggestedInsertionIds`, `suggestedDeletionIds`, ids `suggestIdImport…`), a Word comment as an anchored comment in the comments view (`fromImportedDocument: true`, its author kept). Every `batchUpdate`, direct or `SUGGEST`, is 400 FAILED_PRECONDITION "The document must not be an Office file". Drive's `comments.list` on the file is empty; a comment made through Drive's `comments.create` lands there but not in the Docs comments view. A copy converted to a Google Doc keeps the suggestions and the comment, and its .docx export holds `w:ins`, `w:del` and the comment | A Word file takes no Docs API write. What only the Docs API does (formatting, tables, images, layout, `manage_tabs`, `review_suggestion`, a reply on a suggestion) refuses it up front, a dry run included, saying to save it as a Google Doc; text, suggestions and comments are written into the file and uploaded through Drive (§7.6). A comment not pinned to a passage still goes through Drive, as before. |
-| A Word file's paragraphs in the Docs model are the file's `w:p` elements, in order | Confirmed live 2026-10-21 (spike H) for a Google Doc exported as .docx: 15 paragraphs on each side, tables' cells included, the same text in the same order | Ops resolve against the Docs model and reach the file's paragraphs by order, each checked to hold the same text, a difference waited out and then refused (§7.6). |
-| A paragraph setting `numId` 0 is out of the list its style numbers (ISO/IEC 29500-1, numId: "A value of 0 for the val attribute shall never be used to point to a numbering definition instance, and shall instead only be used to designate the removal of numbering properties at a particular level in the style hierarchy (typically via direct formatting)" — <https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.numberingid>) | Confirmed live 2026-10-22 on a synthetic file: a paragraph in a numbered style with its own `numId` 0 reads in Docs with no bullet; the server had read it as an item of the style's list | A list written against such a paragraph is a list of its own (`ooxml.File.ListOf`). |
-| Docs reads a Word table's merged cells as the file holds them | Refuted live 2026-10-22 for column spans, on the synthetic `internal/ooxml/testdata/merged.docx`: Docs read 20 paragraphs where the file holds 16, the four extra exactly the empty covered cells right of a span's first column (`gridSpan`); the covered cells under a span of rows matched the file's own `vMerge` cells | The paragraph map passes over a covered cell right of its span's first column (`spanned`, `internal/service/docx.go`). |
-| A Word paragraph's list and level come together, from its own `numPr` or else its style's | Refuted live 2026-10-22 on synthetic files: Docs takes the list and the level each from the nearest that sets it. A style setting only `ilvl`, based on a numbered style, is at that level of its base's list; a paragraph setting only `numId` is at its style's level; a paragraph naming no style is numbered as the default paragraph style is. Setting only `ilvl` on the paragraph, and `numId` 0, read as expected | `ooxml.File.ListOf` resolves the two apart, through `basedOn` and the default paragraph style. |
-| A legacy horizontal merge (`hMerge`) reads in Docs as a column span | Refuted live 2026-10-22 on a synthetic file: Docs kept the merged cells as cells of their own, each with its paragraph, as the file holds them | Only a `gridSpan`'s covered cells are passed over in the paragraph map. |
-| Docs reads a revision of a Word file uploaded through Drive | Confirmed live (spike H): about four seconds after the upload, with Word tracked changes as suggestions, a new paragraph with `ilvl` 1 at level 1 of its list, and a Word comment anchored | A write waits for Docs to read the revision it uploaded, so the next read shows it. |
-| A Docs suggestion id names a Word tracked change | Refuted live (spike H): the ids are `suggestIdImport<uuid>_<n>`, the uuid new on every revision and `n` not the `w:id`; adjacent changes by one author at one time share one | Reviewing a Word file's suggestions would go by position; it is not offered, and refused saying so. |
-| A tracked insertion may wrap a link | Refuted live (spike H): with `w:hyperlink` inside `w:ins`, Docs read the paragraph without the link's text; with `w:ins` inside `w:hyperlink` it read it | A tracked insertion goes inside the link (`internal/ooxml`). |
-| The server should confirm a write with the person itself, through MCP form elicitation | **Refuted 2026-10-22** for the family on documents and source, rechecked 2026-10-23 against the most-used servers and clients. The specification (`server/tools`, 2025-06-18 to 2026-07-28) puts consent to each call on the host; `client/elicitation` lets the client answer "from the user or other sources". Claude Code documents that an `Elicitation` hook answers with no dialog, Codex in full access accepts a form with no fields by itself, open user reports have Claude Code's VS Code extension and Claude Desktop's Code tab decline it unseen and Cowork leave it hanging, and no client's permission rules match it | §12a: the server asks nobody. Registration, the retyped target, the guards, the witnesses and `dry_run` stay; `review_suggestion` carries the ids the question used to show, and `delete_comment` the start of the text. The rows above on asking and on the mark describe what this replaces. |
-| claude.ai, Codex and VS Code all prompt by `destructiveHint` (the family's assumption until 2026-10-23) | **Refuted for VS Code 2026-10-23**, at source: VS Code ignores `destructiveHint` and prompts on every tool not marked `readOnlyHint: true`. Codex prompts by `destructiveHint` in its default `auto` mode, and claude.ai and ChatGPT document that it decides their prompts. Each remembers an approval per tool, never per argument | `readOnlyHint` only on the nine reads, which change nothing; `destructiveHint` on the two deletes, and since 2026-10-31 on every write that changes or removes. The README says what each client prompts for. |
-| `destructiveHint: false` fits any write the guard keeps from deleting more than was asked | **Refuted 2026-10-31.** The MCP schema (2025-11-25), `ToolAnnotations`: "If false, the tool performs only additive updates", and the default is true. An edit, a restyle, a resolved thread or a renamed tab changes what is there, whatever the guard allows | Every write says true but `create_document`, `add_comment` and `export_document`, which add. `add_comment` stays false on a Markdown or Word file too: the upload carries the whole file, but the guard refuses it when the file moved since the read. The nine that flip stay ungated, with no confirm. `TestOnlyToolsThatAddSayTheyAreNotDestructive` holds it. This reverses the reading in the rows above |
-| A comment's text may be 2048 bytes, counted in bytes | **Confirmed live 2026-10-31** (`internal/gapi/rawlimits_integration_test.go`); no reference states either limit. The Docs API's insertComment refuses more than 2048 bytes: "content must not exceed 2048 UTF-8 code units". Drive's comments.create and replies.create take 4096 bytes, 2048 é or 1024 emoji, and refuse one more with 403 `commentLengthLimitExceeded` | A comment takes either path, as the comments view allows, and a reply on a suggestion's thread goes through the Docs API, unmeasured, so all comment text keeps to 2048 bytes, a plain reply's included. A Google Doc's comment-mode proposal is held to it too, refused for its op before anything posts; a Word file's is written into the file and is not. A refusal says a letter outside ASCII is two bytes or more |
-| A named range's name is counted in characters | **Refuted.** The Docs discovery document (revision 20261026), `CreateNamedRangeRequest.name`: "no more than 256 characters, measured in UTF-16 code units". Confirmed live 2026-10-31 (`internal/gapi/rawlimits_integration_test.go`): a name of 128 emoji was taken and one of 129 refused | The plan counts UTF-16 units, so an emoji counts as two |
-| Google writes a time it does not have as the Unix epoch | Seen live in the sibling Chat server on 2026-10-31: an administrator's read of a space answered `1970-01-01T00:00:00Z` for a time it lacked. Not seen yet from Docs or Drive | Every time a Docs or Drive read carries decodes through `gdocs.Time`, which reads the epoch as no time. A date chip's timestamp is the document's own content and is left as written |
-| A scope must be on the consent screen to be granted | **Refined 2026-10-31.** Google's configure-oauth-consent guide (updated 2026-09-03): "you only need to list scopes for apps used by people outside your Google Workspace organization", and for internal apps "scopes aren't listed on the consent screen". Confirmed live the same day on an Internal app, whose token held scopes its Data Access page does not list | The README asks for the scope list on External apps only |
-| A bundle install has a second approval behind the server, as Claude Code's ask rules are | **Refuted 2026-10-24** on the docs and the reference host, for the family's §10b; Claude Desktop itself not probed, and no page names desktop extensions. anthropics/mcpb v2.1.2 and `70fe3b34` declare `tools` for display, and `src/` reads it only in `init`; v2.1.2 `src/shared/config.ts` passes a boolean to `env` as "true" or "false". claude.com/docs/connectors/getting-started: "Select Allow once to continue, or Always allow to skip the prompt for that tool from now on". claude.com/docs/connectors/building/review-criteria: readOnlyHint and destructiveHint "determine auto-permissions in Claude" | Every switch the bundle asks for is a boolean defaulting to the server's own default, off. `gates mcpb` starts the server's `config.Load` from the environment the defaults give it and refuses any field that differs from an unconfigured start, naming it. The bundle declares no `tools` list (§13). |
-| A bundle's optional setting the person leaves blank reaches the server empty | **Refuted 2026-10-24** on the reference host: anthropics/mcpb v2.1.2 `src/shared/config.ts` builds its variables from the defaults and the person's values, and leaves one it does not have as written, so an optional key with no default reaches `env` as the text `${user_config.x}`. The 3.0.0 bundle gave each of its three keys a default, so it was not affected; without one, the export folder would reach the server as that text, which it refuses as not an absolute path | Every optional key has a default, and `gates mcpb` refuses one without. The environment the defaults give the server must configure it as no environment does, which `TestVarsDescribeWhatBuildDoes` holds for each setting's default and for `""`, and `TestASettingOfSpacesIsUnset` for spaces alone, the two variables read outside Define included. |
-| `privacy_policies` is optional for a bundle | **Refuted 2026-10-24** on the specification: anthropics/mcpb `MANIFEST.md`, "Required when the extension connects to external services (first- or third-party) that process user data"; added in manifest_version 0.2, and enforced by neither the schema nor `mcpb validate` | The manifest names https://policies.google.com/privacy, which answered 200 on 2026-10-24, and `gates mcpb` refuses an empty list. |
-| Any `command` the specification shows runs from the bundle | **Refined 2026-10-24** on the specification and the reference host, for the family's §10b; Claude Desktop not probed. anthropics/mcpb v2.1.2 `MANIFEST.md` gives a binary the relative command `server/my-server` and says `${__dirname}` "is replaced with the absolute path to the extension's directory"; `src/shared/config.ts` substitutes variables in `command` and resolves no path. The specification never says what a relative command is resolved against | `gates mcpb` requires every command to start with `${__dirname}/` and name a staged program, as the committed manifest's do, and refuses a relative or absolute one; 3.1.0's gate stripped a leading `/` and passed `/server/x`. |
-| A platform override's `env` and `args` are merged into `mcp_config`'s | **Refuted 2026-10-24** on the reference host, for the family's §10b; Claude Desktop not probed. anthropics/mcpb v2.1.2 `src/shared/config.ts` L118-120: `result.args = platformConfig.args \|\| result.args` and `result.env = platformConfig.env \|\| result.env`, and it substitutes `${user_config.x}` into the whole configuration, `args` included | An override's `env` or `args`, an empty one included, replaces the base's, so the settings would not reach that platform, and an argument such as `--enable-destructive=true` would reach the server past every check on `env`. `gates mcpb` refuses any `env` or `args` on an override and an argument in `mcp_config.args`, and keeps the base's `"args": []`, refusing it missing or null. |
+The tool returns that text as its one content block, with the revision
+in a header line (D-19, D-20).
+
+### A guarded write
+
+A client calls `edit_document` to replace a sentence in direct mode. The
+service reads the document fresh, checks `expect_revision` if one is
+given, and resolves every target before anything is sent; one that fails
+fails the call (D-13, D-30). `plan` takes the minimal diff of the old
+text against the new (D-27) and checks every range it would delete
+against the anchor index. A comment anchor, a suggestion, an object or a
+footnote reference inside one refuses the op `[blocked]` unless forced
+(D-28). The rest compiles to requests: inserted markdown becomes text,
+styles, lists and empty slots for tables and images, ordered by
+descending index so that earlier requests do not move later ones (D-33).
+A dry run stops here and reports what would be sent (D-35).
+
+`batchUpdate` carries `requiredRevisionId`, and `writeMode: SUGGEST` in
+suggest mode (D-29). A conflict reads again and plans again, once
+(D-30). Tables and images in the content, and ops after a table's grid
+changes, follow in later batches, each against a fresh read at the
+revision the last reply gave (D-31, D-32). The reply carries the new
+revision, the ops applied, previews and warnings, as text and JSON
+(D-19). A 5xx or a network failure on the batch is
+`[ambiguous_outcome]`, and the server never sends it again (D-61).
+
+### A write to a Markdown or Word file
+
+The Docs API reads a Markdown file and a Word file and refuses every
+write to either, so Drive's type for the file picks another path (D-42,
+D-49). The service reads the file's bytes with Drive's head revision and
+checksum, together with the live editing session's revision and comments
+for a Markdown file, or the Docs model for a Word file. A person's work
+in an open editor that has not reached the file yet makes the write
+wait, then refuse (D-44).
+
+The change is planned in `mdfile` or `ooxml` under the same overwrite
+guard. A Markdown file's comment markup is kept byte for byte, and a
+suggestion on a Word file becomes a tracked change (D-43, D-51). Just
+before the upload the head revision, the checksum and the live revision
+are read again, and the write plans again if any moved. The file is
+uploaded whole as its own type, once, or not at all when nothing changed
+(D-45). Then the server finds the revision its upload replaced. If that
+is not the one it planned on, someone's save landed in between. On a
+Markdown file the change is made again on top of that save where it
+still fits. Otherwise the save is put back and the write is `[conflict]`
+(D-44). A Word write then waits for Docs to read the revision it
+uploaded, so the next read shows it (D-50).
+
+## Invariants
+
+- Stdout carries only MCP JSON-RPC frames (D-03).
+- No log line carries a document id, a revision, a title, text or a
+  query (D-04).
+- Nothing in the repository comes from a real document, account or
+  deployment (D-06).
+- Nothing the live driver or the evals print reaches a transcript
+  unredacted (D-07).
+- No generated Google client is imported (D-08), and every published
+  method and modeled field has a written verdict (D-09).
+- A credential goes only to Google's hosts over HTTPS, checked with the
+  port (D-11).
+- The model never sees or computes an index (D-12).
+- A handle is checked against the revision it came from (D-14).
+- A direct edit never deletes anchored content unless forced (D-28).
+- The server never substitutes one write mode for another (D-29).
+- Every write to a Google Doc is guarded by the revision it was planned
+  on (D-30).
+- A write is repeated only on 429, and one that may have landed is never
+  repeated (D-61).
+- Unsaved work in an open editor is never written past, `force` included
+  (D-44).
+- A write never forges or ends a comment in a Markdown file's markup
+  (D-43).
+- The server asks the person nothing (D-52).
+- The delete tools exist only when the deployer enables them (D-54), and
+  each repeats its target (D-56).
+- No tool takes or writes one of the server's settings (D-59).
+- A released tool, argument or output field keeps working until a major
+  release (D-77).
+- `make check` and CI run the same gates (D-85).
+
+## Cross-cutting concerns
+
+**Errors.** Every tool error is a tool result in the form
+`[class] message`, and the class tells the caller what to do next. The
+vocabulary is closed and declared in `service.Classes` in
+`internal/service/service.go`, with what each class asks the reader to
+do. `gapi.Classes` is the client's part of it. `make classes` fails on a
+class the code emits and the list lacks, and on one the list holds and
+nothing emits. `ambiguous`, a target matching several things, and
+`ambiguous_outcome`, a write that may have landed, ask for opposite
+things. Google's reason is read before its status (D-60, D-62).
+
+**Concurrency with people.** A revision guards every write to a Google
+Doc (D-30). Drive offers no precondition on an upload, so a write to a
+Markdown or Word file checks, writes, verifies and repairs. The live
+session and the Docs model say when a person's work has not reached the
+file yet (D-44, D-50).
+
+**Comments on two backends.** Docs pins a comment to a range where the
+comments view answers, and Drive carries every thread operation. A
+Markdown file's editor comments live in its bytes, and a Word file's in
+its XML. One located thread list per fetch serves the guard, reads with
+comments and the listing (D-38, D-39, D-43, D-51, D-65).
+
+**Budgets.** Every read is scoped and budgeted and says where to
+continue (D-18). The resources share one budget across a document's tabs
+(D-76), and a regex replace stops at 500 matches (D-34).
+
+**Configuration and registration.** The environment is the source, a
+flag mirrors each variable, and a profile holds one account (D-69,
+D-70). Read-only mode and the delete switch decide what registers, and
+read-only mode also narrows the scopes `login` asks for (D-54, D-55,
+D-68). A removed setting that restricted something is refused at start
+(D-53). The full list is in [configuration.md](configuration.md).
+
+**Reliability.** Limiters keep reads, document writes and Drive writes
+below Google's quotas. Every attempt has a deadline, the token refresh
+included, and retries follow the kind of request (D-61, D-63). A
+five-second cache coalesces reads and never decides correctness, and
+everything derived from one fetch is derived once (D-64, D-65).
+
+**Logging.** `slog` writes to stderr, and a line carries the method, the
+tool, the outcome and the duration (D-03, D-04). `doctor`, `status` and
+the startup line mask the account (D-05). The threat model is in
+[security.md](security.md).
+
+**Testing.** Unit tests run without a network on synthetic fixtures,
+against fakes that answer with the errors Google documents (D-80). The
+coverage floor holds every package `go list` finds under `internal/`,
+each exemption with its reason (D-81). A guarantee stated over the tools
+is tested over every registered tool (D-82). The integration tests in
+`internal/gapi` probe Google directly and leave their scratch documents
+behind. The live driver drives the built binary over stdio through every
+tool and op kind before a release, and the agent evals score a model
+doing real tasks (D-83, D-84). Green unit tests prove only what the
+fakes believe; the live driver is what tests the belief. How to run both
+is in [CONTRIBUTING.md](../CONTRIBUTING.md#the-live-run).
+
+**The surface as a contract.** `--dump-schemas` lists the tools as a
+client sees them, the schema diff compares that dump with the last tag,
+and a pull request that changes the surface names each changed item in a
+commit footer (D-77, D-78, D-79).
+
+**Documentation.** A decision lives once, in part 2 here. What was
+verified about Google lives in the comment at the line that depends on
+it: the behavior, the reference link, where the reference is wrong or
+silent, and the integration test or live step that checks it. The docs
+gate holds every D-ID citation to an entry, every Held by cell to
+something that exists, and the codemap to the tree. The staleness gate
+holds the README, [configuration.md](configuration.md) and the CHANGELOG
+to the code.
+
+**Distribution.** A release is built from a tag, signed for people and
+attested for machines (D-90, D-91). Each release carries a Claude
+Desktop bundle whose settings derive from the server's own registry,
+every switch off by default (D-93, D-94). Releasing is in
+[release.md](release.md), and fixing a symptom in
+[troubleshooting.md](troubleshooting.md).
+
+## Decisions
+
+| ID | Decision | Status | Held by |
+| --- | --- | --- | --- |
+| D-01 | One stdio binary per person, signed in to their own Google account through their own OAuth client; nothing is hosted | accepted | smoke, review |
+| D-02 | The scope is one document and everything inside it, its history included; folders, moves, sharing, trash and copies are out | accepted | review |
+| D-03 | Stdout carries only MCP JSON-RPC frames, and logs go to stderr through slog | accepted | forbidigo, smoke, TestNothingPrintsOutsideTheBoundary, TestTheJSONIsExactlyOneValue |
+| D-04 | Logs carry method, tool, outcome and duration, never an id, a revision, a title, text or a query | accepted | TestDebugLogsCarryNoDocumentData, TestTransportErrorsDoNotCarryTheURL, TestAPermissionDenialDoesNotRepeatTheAccount |
+| D-05 | What doctor, status and the startup line print masks the account to its domain and drops a client id | accepted | TestDoctorOutputHidesWhatItKnows, TestMaskAddress, TestMaskClientID, TestTheCollectorMasksTheAccount |
+| D-06 | Nothing from a real document, account or deployment enters the repository; fixtures are synthetic, and two scanners hold it | accepted | leaks, TestLeaksGate, TestRulesCatchPlantedIdentifiers, TestLeaksCatchesAPlantedAddress, TestLeaksCatchesAPlantedBinary, TestHistoryCarriesNoIdentifiers |
+| D-07 | A transcript the live driver or the evals write goes through one redactor, which carries no build tag | accepted | transcript, TestDriversDoNotPrint, TestEveryPlaceAPersonIsWrittenIsKnown, TestTranscriptKeepsPeopleAndDocumentsOut, TestTranscriptLeavesNothingIdentifying, TestTranscriptJSON |
+| D-08 | Own wire types over raw REST: no generated client, and no code from another project | accepted | depguard, api-fields |
+| D-09 | Every method Google publishes, and every field of a type this server models, has a verdict | accepted | api-coverage, api-fields, TestAPICoverageGate, TestAPIFieldsGate, TestFieldProblems, TestAnAliasBringsASchemaIntoTheComparison |
+| D-10 | Everything the repository runs on itself is Go, in one `scripts/gates` program | accepted | review |
+| D-11 | The server talks only to Google's hosts over HTTPS, matched with the port before a credential is attached | accepted | TestDefaultAllowlistSendsCredentialsOnlyOverHTTPSToGoogle, TestExportRevision |
+| D-12 | The model never sees or computes a UTF-16 index; the server converts at the boundary | accepted | TestUTF16, TestCompileFragmentUTF16, review |
+| D-13 | Exact text is the primary target: normalized on both sides, matching once, narrowed by occurrence or within | accepted | TestResolveTargetText, TestNormalizeAndWords |
+| D-14 | Headings are addressed by headingId and other blocks by short handles the server remembers per document and re-checks | accepted | TestHandleMemoryStaleness, TestStaleHandleOnWrite, TestTabLookupAndHandles, TestShiftedHandlesWarning |
+| D-15 | A named range is the one target that outlives an edit, and a name several ranges share is refused as a target | accepted | TestNamedRangeTarget, TestNamedRangeOps, TestReplaceNamedRangeIsGuarded |
+| D-16 | A document is read with every tab in the inline suggestions view, the one index space, and every write names its tab | accepted | TestGetDocumentDecodesAndSendsParams, review |
+| D-17 | Every read asks for the comments view and, refused, asks again without it; that read decides pinning and suggest mode | accepted | TestFetchFallsBackWhenCommentsViewRefused, TestFetchDoesNotHideDocumentErrors, TestInfoCommentsViewRefused |
+| D-18 | Reads are scoped and budgeted by default and say where to continue | accepted | TestBudgetAndContinue, TestReadWholeBudget, TestRawBudgetCutsAtElementBoundaries |
+| D-19 | Read tools return a text block only; write tools return text and a structured result that carries everything the text does | accepted | TestReadToolsAreTextOnly |
+| D-20 | Reads mark suggestions as CriticMarkup and comments as markers | accepted | TestCommentMarks, TestRestyleUsesHighlightNotInsertion, TestMarkdownGolden |
+| D-21 | A suggestion is read from its suggestion state, never from the style beside it | accepted | TestSuggestedStyleReadsTheStateNotTheStyle, TestSuggestedInsertionTakesItsOwnStyle, TestEverySuggestionStateFieldIsNamedByItsTag, TestListSuggestionsSeesAFormattingSuggestion, live |
+| D-22 | `format: raw` returns the bytes Google sent | accepted | TestRawReturnsTheAPIsBytes, TestRawFallsBackToTheWireTypes, TestCompactJSONOnEveryRequest |
+| D-23 | get_document reports what no read of the text shows, the named style definitions included | accepted | TestInfo, TestNamedStyleDescription, TestNamedStyles |
+| D-24 | A binary export is written only under GDOCS_EXPORT_DIR, created exclusively, never over a file or through a link | accepted | TestAnExportNeverOverwrites, TestAnExportNeverWritesThroughALink, TestFileName |
+| D-25 | Markdown is for new content; existing content is edited in place and never round-tripped | accepted | review |
+| D-26 | The markdown parser converts what it can prove and refuses the rest, naming the construct and its line | accepted | TestUnsupported, TestReadProseParsesBackAtRandom, TestReadTextWritesBackUnchanged, TestEscapesAndReferences |
+| D-27 | A replace is the minimal word-level diff of the old text against the new | accepted | TestMinimalEdits, TestPlanReplaceMinimal, TestAlignedMinimalDiffPastObjects |
+| D-28 | A direct edit that would delete comment anchors, suggestions, objects or footnote references is refused unless forced | accepted | TestGuard, TestGuardBlocksDirect, TestReplaceAllAndMergeAreGuarded, TestDeleteRowsGuardAndSegments |
+| D-29 | The person chooses how changes land, suggest, direct or comment, and the server never substitutes one mode for another | accepted | TestEditSuggestAndModes, TestCommentMode, TestCommentModeProposals, TestSuggestModeRefusesUnsupportedRequests |
+| D-30 | Every write is planned against one revision and guarded by it, re-planned once on a conflict, and reports what it touched | accepted | TestDryRunAndConflictRetry, TestSuggestRecheckedOnConflict, TestExpectRevisionRecheckedOnConflict, TestBatchUpdateBodyAndWriteControl, TestRawStaleRevision |
+| D-31 | Content with tables or images is written in rounds, each against a fresh read at the revision the last reply gave | accepted | TestEmbedsPlacedInRounds, TestEmbedFailuresAreReported, TestEmbedRefusals, TestCompileFragmentSlotLimits, live |
+| D-32 | Ops addressed in a table after a grid change wait for a batch of their own against a fresh read | accepted | TestGridChangesChain, TestAForcedOpInALaterBatchIsRefused |
+| D-33 | A list item keeps a right inherited bullet, and the rest are rebuilt in windows that count levels from the item before | accepted | TestCompileFragmentListLevels, TestPlanListLevel, TestBulletsNoneKeepsHandIndents, live |
+| D-34 | A regex replace is expanded by the server into one replace per match, found with RE2 within a paragraph | accepted | TestRegexReplaceAllReplacesEachMatch, TestRegexReplaceAllIsGuardedAndRefused, TestARegexMatchAcrossAChipIsRefused, TestAReplacementNamingAMissingGroupIsRefused |
+| D-35 | A write that takes dry_run resolves, plans and reports, and sends nothing | accepted | TestDryRunAndConflictRetry, TestEmbedsDryRun, TestDryRunListsFollowups, live |
+| D-36 | A direct formatting change over a property a pending suggestion sets is warned about, not refused | accepted | TestDirectFormatWarnsOnACollidingSuggestion, TestClearFormattingCollidesWithEverySuggestedProperty, live |
+| D-37 | Every GA request of the Docs API and every field it accepts on a write is emitted; a read-only field is reported, never sent | accepted | api-coverage, api-fields, TestKindRegistryCoversEveryTool |
+| D-38 | A comment is pinned through insertComment where the comments view answered, else posted through Drive quoting the text and said to be unanchored | accepted | TestAddComment, TestPreviewAnchorsLocateComments, TestListCommentsLocatesAndRenders |
+| D-39 | Thread operations go through Drive's comment API, one backend; a reply on a suggestion's thread is the exception | accepted | TestReplyAndDeleteComment, TestReplyToASuggestionsThread, TestCommentEditAndSuggestionDiscard |
+| D-40 | review_suggestion takes each suggestion by the id list_suggestions showed | accepted | TestReviewNamesEverySuggestion, TestAReviewNamesASuggestionOnce |
+| D-41 | History is read through Drive revisions and exports at a revision; restoring is an explicit replace | accepted | TestListRevisions, TestDiffRevisionsAndReadRevision, TestExportRevision |
+| D-42 | A Markdown file in Drive is a document, read from its bytes and written by an upload of the whole file | accepted | TestMarkdownFileReadIsItsText, TestMarkdownFileEditUploadsAMinimalChange, TestMarkdownFileUnderTheOlderType, TestMarkdownFileStopsAtTheDocsModel, live |
+| D-43 | A Markdown file's comment markup is read out, kept byte for byte, and never forged or ended by a write | accepted | TestParseSeparatesTheMarkup, TestApplyKeepsMarkersWhereTheTextIs, TestApplyRefusesMarkup, FuzzParseApply |
+| D-44 | A Markdown write checks the live session, re-checks before uploading and repairs from history; force never writes past unsaved editor work | accepted | TestMarkdownFileWaitsForTheEditor, TestMarkdownFilePlansAgainWhenTheEditorMoves, TestMarkdownFileKeepsASaveThatSlipsIn, TestMarkdownFileConcurrency, live |
+| D-45 | A call uploads once, and not at all when nothing changed, as the file's own type, and pins no revision | accepted | TestMarkdownFileUploadsNothingForNoChange, TestUploadFileSendsTheBytesAsTheGivenType, TestMarkdownFileRetypedIsRefused |
+| D-46 | A comment written into a Markdown file uses the editor's markup, and a resolve is never written | accepted | TestMarkdownFileComments, TestMarkdownFileAddComment, TestAddReply |
+| D-47 | Working on a Markdown file together goes through a Google Doc working copy, merged back block by block | accepted | TestCreateWorkingCopy, TestWriteBackCarriesTheCopysChanges, TestWriteBackConflicts, TestWriteBackWithoutItsBase, FuzzMerge |
+| D-48 | Search finds Google Docs by default, and kind reaches Markdown files | accepted | TestSearchKinds |
+| D-49 | A Word file is read as a Google Doc and written as its own file, by splices of the bytes it read | accepted | TestWordEditDirect, TestBytesCopiesUntouchedParts, TestWordRefusesDocsOnly, FuzzEdit, live |
+| D-50 | An op reaches a Word file's paragraphs by order, each checked to hold the text the Docs model shows | accepted | TestWordStale, TestWordMergedCells, TestWordCoveredCell |
+| D-51 | On a Word file a suggestion is a tracked change and a comment a Word comment, under the account's name | accepted | TestReplaceTracked, TestComment, TestWordEditSuggest, TestWordComments |
+| D-52 | The server asks the person nothing; the client approves each call | accepted | forbidigo, TestWriteToolsEndToEnd, live |
+| D-53 | GDOCS_REQUIRE_PROMPT is refused at start unless off, and GDOCS_PREVIEW is ignored with a warning | accepted | TestTheRemovedRequirePromptIsRefusedUnlessOff, TestPreviewIsDeprecated |
+| D-54 | The delete tools register only with GDOCS_ENABLE_DESTRUCTIVE | accepted | TestListToolsAndSchemas, TestFullSurfaceRegistersEverything |
+| D-55 | Read-only mode registers the reads alone and asks for read-only scopes | accepted | TestListToolsAndSchemas, TestScopesAgree |
+| D-56 | A delete repeats its target, and delete_comment how the text it deletes begins | accepted | TestDeletesNeedTheTargetRepeated, TestDeleteCommentHoldsItsTextToTheWitness |
+| D-57 | destructiveHint is true on every write but the three that only add, and readOnlyHint is on the reads alone | accepted | TestOnlyToolsThatAddSayTheyAreNotDestructive |
+| D-58 | No tool carries requiresUserInteraction | accepted | TestListToolsAndSchemas |
+| D-59 | No tool takes one of the server's settings, and no code a tool reaches can write them | accepted | TestNoToolTakesAServerSetting, TestNoToolCanWriteTheServersSettings |
+| D-60 | Errors are tool results, `[class] message`, from one closed vocabulary | accepted | classes, TestClassesGate, TestToolErrorsAreResultsNotProtocolErrors, TestGoogleErrorsReachTheModel |
+| D-61 | Reads retry transient failures; a write repeats only on 429, and a 5xx or network failure on one is `[ambiguous_outcome]` | accepted | TestWriteRetriesOnlyOn429, TestDriveWriteRetriesOnlyOn429, TestDeleteAfterServerErrorIsNotRepeated, TestWriteNetworkFailureIsAmbiguous, TestReadRetriesThenSucceeds |
+| D-62 | A Google error is classified by its reason before its status | accepted | TestErrorClassification, TestThrottling403RetriesOnRead, TestThrottlingReasonSpellings, TestErrorMessageCarriesTheReason |
+| D-63 | Every HTTP call has a deadline, the token refresh and the login code exchange included | accepted | TestTokenRefreshIsBounded, TestContextCancellation |
+| D-64 | A five-second cache coalesces fetches of a document, and a write always fetches again | accepted | TestFetchCacheAndHandles |
+| D-65 | Everything derived from one fetch is derived once | accepted | TestLargeFixtureIsConsistent, bench, review |
+| D-66 | Sign-in is Google's desktop flow on a loopback port with PKCE | accepted | TestLoginHappyPath, TestLoginRejectsBadStateAndDenial, TestLoginTimeoutAndCancel |
+| D-67 | The refresh token goes to the OS keyring, else an owner-only file with a warning, and the environment overrides both | accepted | TestEnvWins, TestFileFallbackWhenKeyringBroken, TestKeyringSaveRemovesStaleFile |
+| D-68 | The scopes are documents and drive, or their read-only pair | accepted | TestScopesAgree, review |
+| D-69 | Configuration is the environment, each variable with a bound flag, read through config and validated once at start | accepted | staleness, TestEnvThenFlagPrecedence, TestEveryVariableTheCodeNamesIsInEnvVars, TestEveryReaderOfAVariableGoesThroughConfig, TestASettingOfSpacesIsUnset |
+| D-70 | A profile per Google account, each with its own client, token and account | accepted | TestProfileRule, TestPathsAndRoundTrip |
+| D-71 | The server always starts; without a working credential every tool answers `[auth]`, and doctor is the check for people | accepted | TestAuthFailureSurfacesAsAuthClass, smoke |
+| D-72 | Tool names are snake_case verb_noun with no dots | accepted | review |
+| D-73 | Schemas are flat structs with an op or action enum, with no unions and no vendor keywords | accepted | review |
+| D-74 | Page and section layout is a tool of its own | accepted | TestLayoutToolEndToEnd, review |
+| D-75 | A border is one shorthand value | accepted | TestBorderShorthand |
+| D-76 | Three `gdocs://` resource templates carry a document as markdown; there is no static list and no subscription | accepted | TestResources |
+| D-77 | The released tool surface is a contract the schema diff holds; the prose of a text output is not part of it | accepted | schema-diff, TestSchemaDiffBreaksOnALostOutputField, TestUndeclaredBreaks |
+| D-78 | A change to the tool surface names each changed item in a commit footer | accepted | schema-ack, TestSchemaAckNeedsEveryItemNamed, TestARefusalNamesTheFooterThatFixesIt |
+| D-79 | The schema dump is what an in-memory client session lists | accepted | TestDumpSchemas, TestDumpSchemasListsEverythingAClientIsTold |
+| D-80 | Unit tests are network-free on synthetic fixtures, and a fake answers with the errors Google documents | accepted | review |
+| D-81 | The coverage floor holds every package `go list` derives, and each exemption names its reason | accepted | cover, TestEveryExemptionNamesARealPackage, TestEveryExemptionHasAReason |
+| D-82 | A guarantee stated over the tools is tested over every registered tool | accepted | TestEveryToolHasArgs, TestDebugLogsCarryNoDocumentData |
+| D-83 | The live driver drives every tool and op kind through the binary over stdio; it is run by hand, never in CI | accepted | live, TestCoverage |
+| D-84 | Agent evals score whether a model can do the job through the tools; they are run by hand | accepted | TestEvals, live |
+| D-85 | `make check` and CI run the same gates | accepted | parity, TestParityGate, TestParityCatchesDivergence, TestParityHoldsThePullRequestGates |
+| D-86 | Every action is pinned to a full commit SHA, and every tool an action installs to one exact version | accepted | pins, TestPinsGate, TestUnpinnedTools, TestEveryActionIsClassified, TestPinsHoldTheMakefileToCI |
+| D-87 | CI runs on Linux, macOS and Windows, and every `run` step in bash | accepted | pins, TestPinsShell, review |
+| D-88 | A workflow is read-only at the top, raises write per job, and keeps no checkout token | accepted | review |
+| D-89 | CodeQL runs on pushes, pull requests and weekly | accepted | review |
+| D-90 | A tag is the whole release, and its notes are that version's CHANGELOG section | accepted | release-notes, TestReleaseNotesTakesOnlyItsOwnVersion, TestReleaseNotesRefusesAnEmptySection |
+| D-91 | A release is signed for people and attested for machines | accepted | review |
+| D-92 | Changes reach main through a pull request with CI green; no second reviewer is required | accepted | review |
+| D-93 | Each release carries a Claude Desktop bundle in the layout the sibling servers share, its settings derived from config.Vars | accepted | mcpb, TestBundleVarsAreDerivedFromTheSettings, TestThePackedBundleLayout, TestTheCommittedManifestIsValid |
+| D-94 | A bundle install starts the server as an unconfigured start does, every setting passed by env | accepted | mcpb, TestTheConfigDiffNamesTheFieldsThatDiffer, TestTheBundleSettingsRefuseEachBreak, TestVarsDescribeWhatBuildDoes |
+| D-95 | The server asks the person before a risky write, through form elicitation | rejected | — |
+
+### D-01 One stdio binary per person, signed in to their own Google account through their own OAuth client; nothing is hosted
+
+The server is one Go binary that a client starts as a subprocess and
+talks MCP to over stdio. It holds one person's refresh token and calls
+Google as that person, through an OAuth client that person created.
+Nothing is hosted, and there is no shared deployment.
+
+Each person creates their own Cloud project, enables the Docs API and
+the Drive API, and creates a Desktop app OAuth client. Nothing
+deployer-specific is built into the code, the repository or a release,
+so a copy of the binary does nothing until someone supplies their own
+client. The reason is reach. A `drive` token opens every document its
+owner can open (D-68), and per-person sign-in keeps every call inside
+that person's own access, with the token in their own keyring (D-67).
+
+Rejected: a hosted, multi-tenant server, which would hold many people's
+tokens; a Docker image, since the loopback sign-in (D-66) and the
+keyring assume the person's desktop; Google's own Docs MCP server, whose
+tools pass the raw `documents.get` JSON and `batchUpdate` requests
+through and leave the index arithmetic to the model.
+Cost: each deployer creates a Cloud project and a Desktop OAuth client
+before the first `login`. Any External app in Testing gets refresh
+tokens that expire after seven days, whatever its scopes, so a consumer
+account signs in again each week
+([token expiration](https://developers.google.com/identity/protocols/oauth2#expiration)).
+An Internal app in a Workspace organization is exempt.
+
+### D-02 The scope is one document and everything inside it, its history included; folders, moves, sharing, trash and copies are out
+
+The scope is one document and everything inside it: reading, finding,
+creating, exporting, editing, formatting, tables, tabs, headers,
+footers, footnotes, objects, chips, named ranges, layout, comment
+threads, suggestions and revisions. Locating a document by title or
+content is in scope too, because every task starts there. Folder
+management, moves, sharing, trash and copies are out.
+
+The hard part of working in a document is inside it: index arithmetic,
+edits that keep what is anchored around them, and suggestions a person
+reviews. A server that also organized files would split its tools
+between two jobs, and a person who runs google-drive-mcp beside it would
+get two tools for one act. This server uses the Drive API only where a
+document needs it: search, comment threads, revisions, exports, and the
+uploads that write a Markdown or Word file (D-39, D-41, D-42, D-49).
+
+Rejected: a general Drive client; folder management, moves, sharing,
+trash and copies, which are operations on a file rather than on a
+document.
+Cost: `search_documents` only locates a document. Moving, sharing or
+copying one takes another tool, such as google-drive-mcp.
+
+### D-03 Stdout carries only MCP JSON-RPC frames, and logs go to stderr through slog
+
+Stdout carries only MCP JSON-RPC frames, and every log line goes to
+stderr through `slog`. A client reads each line of stdout as a frame, so
+one stray print breaks the session, often with no message a person can
+read.
+
+Only `main` names the process's streams. It passes stdout and stderr
+down once, and every other package takes an `io.Writer` or a logger, so
+nothing below `cmd/google-docs-mcp` reaches stdout by accident.
+`forbidigo` refuses `fmt.Print*` and `os.Stdout`, and
+`TestNothingPrintsOutsideTheBoundary` holds `main.go` to its few
+writers. `status --json` writes exactly one JSON value. The `smoke` gate
+drives the built binary over stdio twice, the second time closing stdin
+the moment the last byte is written, because a client that goes away
+mid-call must be an ordinary exit and not a crash.
+
+Rejected: a logging library with a sink of its own, which writes
+wherever it was built to; a log level switch, since one print at the
+wrong level still breaks the stream.
+Cost: every package below `main` takes its writer as a parameter.
+`scripts/`, maintainer tooling run at a terminal, is outside the
+`forbidigo` rule.
+
+### D-04 Logs carry method, tool, outcome and duration, never an id, a revision, a title, text or a query
+
+A log line carries the method, the tool name, the outcome and the
+duration. It never carries a document id or any part of one, a revision
+id, a title, a document's or a comment's text, or a search query, at any
+level. Per-call logging is this server's own middleware, at debug.
+
+A debug log is what a bug report asks for, and a person should be able
+to attach one without auditing it. A document is both personal data and
+possibly confidential, which
+[OWASP's logging guidance](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)
+keeps out of logs, and when, where, who and what need none of it. A
+transport failure's error text is the whole URL, query included, so the
+client replaces it with the operation, the path with its ids taken out,
+and the cause before anything reads it.
+`TestDebugLogsCarryNoDocumentData` drives every registered tool and the
+conflict path, and fails on the fixture's id, its first six characters,
+its revision, its title or its text (D-82).
+
+Rejected: ids truncated at debug, which still name the document; a
+handler wrapper to raise the SDK's own log level, twenty lines to
+suppress two lines of session chatter that a conditional already keeps
+out.
+Cost: a log cannot say which document a failure concerned, so a report
+names the tool and the time instead.
+
+### D-05 What doctor, status and the startup line print masks the account to its domain and drops a client id
+
+`doctor`, `status` and the startup log line show the signed-in account
+as its domain alone, `…@example.com`. A client-secret path is printed
+with any Google client id taken out of the file name. `doctor` reports
+counts about the document it checks, never its title or revision, and
+its errors are masked the same way.
+
+Their output is what a bug report carries: the README asks people to
+paste `doctor` output into a public issue, and the startup line is in
+the log they attach. The domain stays because it answers the question a
+person reads that line for, whether the work account or the personal one
+is signed in. The client id goes because the Cloud console names the
+file it hands out after the client, so printing where the secret lives
+would print the id along with it. A failure to read the client file
+quotes its path, which is why the errors pass through the same mask.
+
+Rejected: dropping the domain as well, which leaves a person with two
+accounts unable to tell which one is signed in; printing the
+client-secret path as given.
+Cost: the domain is printed, which says which organization the person
+belongs to.
+
+### D-06 Nothing from a real document, account or deployment enters the repository; fixtures are synthetic, and two scanners hold it
+
+Nothing from a real document, account or deployment enters the
+repository: no organization names, document ids or URLs, account
+addresses, Cloud project ids, OAuth client ids or secrets, and no text
+from a real document. Fixtures are synthetic. `testdata/sample.json` is
+written by hand, and `doctest.Large` generates a long document from
+lorem text. Nothing deployer-specific ships either, so the binary works
+only with a client someone supplies (D-01).
+
+The repository is public, and a pushed commit cannot be taken back. Two
+scanners hold the rule. gitleaks, in pre-commit and CI, catches secrets:
+client secrets and refresh tokens. The `leaks` gate catches identifiers,
+which are not secrets and which no secret scanner flags: an address at a
+domain someone could own, a 21-digit account id, a client id, a
+user-content URL or a Drive id that does not look invented. Every rule
+is an allow-list. The gate reads untracked files too, so it fails before
+`git add -A` sweeps one in. It refuses a compiled executable or a binary
+over a megabyte, since no text rule can read one.
+
+Rejected: a deny-list of what to look for, which would itself be the
+disclosure; gitleaks alone, which cannot see a document id or an
+address; scanning only the index; a marker comment that lets a binary
+through.
+Cost: the history scan runs only with
+`LEAKCHECK_HISTORY=1 go test ./scripts/gates`, outside `make check`. A
+binary over a megabyte cannot be committed.
+
+### D-07 A transcript the live driver or the evals write goes through one redactor, which carries no build tag
+
+Everything the live driver and the agent evals write to a transcript
+goes through `internal/redact`, which masks document ids and URLs,
+revision ids, addresses and people's names. The package carries no build
+tag, so its tests run in every `make check`, while the drivers it serves
+run only by hand.
+
+Transcripts are pasted into issues and commit messages. An id, a URL and
+an address have a shape, so a pattern finds them. A name has none, so a
+person is caught by position, after the labels this project's renderers
+write. A person chip prints a name with no label before it, so the
+driver reads the account's display name before any step can print a
+chip, and that name is replaced wherever it appears. Redaction happens
+where a line is shown, never where a result is read: a step parses the
+untouched text, since a scrubbed URL fed back to Google is refused. The
+`transcript` gate, `TestDriversDoNotPrint` and
+`TestEveryPlaceAPersonIsWrittenIsKnown` keep every printed line on that
+one path.
+
+Rejected: scrubbing a result where it is read, which corrupts what a
+step feeds back; redacting by shape alone, since a name has none; a
+typed table of positions, which drifts from the renderers; finding
+person fields by following assignments, which spreads through names like
+`User` until nearly every read counts.
+Cost: a person is redacted to the end of the line, and what follows goes
+with them, because a display name has no reliable end.
+
+### D-08 Own wire types over raw REST: no generated client, and no code from another project
+
+The server calls the Docs API and the Drive API over raw REST. Requests
+are built by hand, and responses decode into wire types written in
+`internal/gdocs` and `internal/gapi`. No generated Google client is
+imported, and the repository shares no code with another project.
+
+The generated `google.golang.org/api` module brings gRPC, OpenTelemetry
+and the cloud auth stack into a binary that needs JSON over HTTPS,
+`golang.org/x/oauth2` and a rate limiter. Hand-written types carry the
+fields this server reads and sends, and hand-built requests keep every
+call under the server's own control: the host check, the limiters, the
+retries and the deadline (D-11, D-61, D-63). `depguard` refuses an
+import of `google.golang.org/api`, with the reason in its message.
+
+Rejected: the generated `google.golang.org/api` module, for the
+dependencies it brings and the control it takes over each request.
+Cost: hand-kept types drift from the API as Google adds fields, and a
+field the types lack is dropped from every decode. The `api-fields` gate
+holds them to the discovery document (D-09).
+
+### D-09 Every method Google publishes, and every field of a type this server models, has a verdict
+
+Every method the Docs API and the Drive API publish has a verdict, used
+or left out with a reason, and every field of a type `internal/gdocs`
+models is modeled or written off with a reason. The `api-coverage` gate
+holds the methods to `testdata/api-methods.json` and
+`testdata/api-coverage.tsv`. The `api-fields` gate holds the fields to
+`testdata/api-fields.json` and `testdata/api-fields.tsv`.
+
+A method nobody judged is a feature nobody chose to leave out. A
+published field the types lack is dropped from every decode, so a read
+cannot show it and a write cannot set it. Careful reading does not keep
+hand-written types in step; a gate does. `api-fields` fails on a
+published property nothing models, a modeled field nothing publishes,
+and a struct that matches no published schema and has no row saying why.
+It also fails on a row that does not match the types as they are. A
+field is judged by one rule: if a tool writes it, the types carry it.
+
+Rejected: a floor under the number of schemas matched, which a rename
+stays above; the verb and path kept in the hand-written file; refetching
+the discovery documents in CI, a check that fails when Google is slow.
+Cost: `make api-diff` refetches the snapshot by hand, so a field Google
+adds is seen only when someone runs it. The Drive types are inline
+anonymous structs, which `api-fields` cannot match by name.
+
+### D-10 Everything the repository runs on itself is Go, in one `scripts/gates` program
+
+Every check the repository runs on itself is Go: one `scripts/gates`
+program, behind one registry of commands. The Makefile and CI call it,
+and the pre-commit hooks call a `make` target or `go`. There is no shell
+script.
+
+Checks written as scripts failed where nobody looked. A hand-written
+package list stopped covering a package added later, a rule failed on
+the very pull request it guards, and a check ran only on Linux because
+the other runners' shells could not be relied on. A check in Go derives
+its inputs from the code, holds a floor on how much it read before it
+reports nothing wrong, and runs the same on the three platforms CI uses
+(D-87). The one registry is what the usage text, the dispatch and the
+`parity` gate read, so they cannot drift apart (D-85).
+
+Rejected: shell scripts; a separate program for one job, such as release
+notes, beside the one that already answers it (D-90).
+Cost: a one-line check is a Go function. A workflow's `run:` step is
+still a shell line, which is why every workflow pins bash (D-87).
+
+### D-11 The server talks only to Google's hosts over HTTPS, matched with the port before a credential is attached
+
+The server sends a credential only over HTTPS, and only to Google:
+`googleapis.com` and its subdomains, `*.googleusercontent.com` and
+`docs.google.com`. Every URL is checked before the token is attached,
+matched on the host with its port, so `docs.googleapis.com:8443` matches
+nothing and is refused. There is no telemetry, crash reporting or update
+check.
+
+The check decides whether a credential leaves the machine, and not every
+URL is one the server built. An old revision's export follows a download
+URL taken from a long-running operation's response body (D-41), and the
+token goes with the request. A check on `url.URL.Hostname()` would drop
+the port and pass a host it never meant to. Where a check that governs
+where a token goes is wrong, it should be wrong toward refusing. The
+allowlist governs the API client; sign-in and the token refresh go to
+the endpoints the OAuth client file names (D-66).
+
+Rejected: matching on `url.URL.Hostname()`, which drops the port;
+telemetry, crash reporting and update checks, which would send something
+somewhere else.
+Cost: a Google host reached on an explicit port is refused.
+
+### D-12 The model never sees or computes a UTF-16 index; the server converts at the boundary
+
+The model never sees or computes a UTF-16 index. It addresses content by
+exact text, heading id, handle or named range (D-13, D-14, D-15), and
+the offsets it does see, in find results, are Unicode code points. The
+server converts at the boundary, and `internal/plan` owns every piece of
+index arithmetic on the write path.
+
+The Docs API counts in UTF-16 code units. The body, each header, each
+footer and each footnote is its own index space starting at zero, and
+every index shifts after each change and holds only for the revision it
+was read at
+([document structure](https://developers.google.com/workspace/docs/api/concepts/structure)).
+Go strings are UTF-8, and a model counts in neither. A server that
+leaves the arithmetic to the model puts text one place off after an
+emoji or an accented letter, and an index taken from a stale read lands
+in the wrong place.
+
+Rejected: the model computing indices, as other open-source Docs servers
+have it.
+Cost: a dry run lists the kinds of request a write would send, not the
+requests, since those carry indices (D-35).
+
+### D-13 Exact text is the primary target: normalized on both sides, matching once, narrowed by occurrence or within
+
+An edit's primary target is an exact passage of text. It must match
+once, after both sides are normalized: curly quotes, non-breaking spaces
+and runs of whitespace compare equal to their plain forms. `occurrence`
+picks one of several matches, and `within` narrows the search to a
+section or a block. A text matching several places is `[ambiguous]`, and
+the message lists where.
+
+Other editing tools converge on exact text: Anthropic's text editor
+tool, Claude Code's Edit, Notion's MCP `update_content` and OpenAI's
+`apply_patch` each take an exact old string. Aider measured line numbers
+in edit targets as harmful, and removing them took GPT-4 Turbo from 20%
+to 61% on its benchmark. Exact text also states what the model believes
+is there, so a passage that changed since the read fails to match rather
+than being overwritten. The live step "direct edit" targets by exact
+text.
+
+Rejected: line numbers or positions in an edit target.
+Cost: a passage that repeats needs `occurrence` or `within`, and a model
+that quotes loosely gets `[not_found]`, with a pointer to
+`find_in_document`.
+
+### D-14 Headings are addressed by headingId and other blocks by short handles the server remembers per document and re-checks
+
+A heading is addressed by its `headingId`, which Google keeps stable.
+Every other block is addressed by a short handle: `p12` for a paragraph,
+`tbl3` for a table and `tbl3:r2c3` for one of its cells, `sb1` for a
+section break. Handles count from the start of their segment, with a
+prefix outside the first tab's body, such as `tab2/p12` or `header1/p1`.
+Reads show them by default, and `with_handles: false` drops them.
+
+The server remembers, per document, the revision and the text of each
+handle from the last read in this process. At the same revision a handle
+resolves exactly. At a later one it is found again by its remembered
+text, which must match once, or it is `[stale]`. A handle never read is
+`[unknown]`, with a pointer to read the section first. One resolver
+serves reads and writes, so both check handles alike. Handles are on by
+default because the agent evals showed the model asking for them on most
+reads and targeting by handle as often as by text. The live steps "read
+without handles" and "read after create" read both ways.
+
+Rejected: fingerprinted handles such as `p12-7f3a`, which are harder to
+read and have no evidence behind them; handles off by default on full
+reads.
+Cost: a handle holds only for the revision it came from, and handles
+cost about 15% more tokens per read.
+
+### D-15 A named range is the one target that outlives an edit, and a name several ranges share is refused as a target
+
+A named range is the one target that outlives an edit. Google keeps a
+named range with the content it covers as the document changes
+([NamedRange](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#NamedRange)),
+so a passage named in one call is reached by `named_range` in a later
+one, where a handle holds only for its revision (D-14). `edit_document`
+creates, deletes and replaces named ranges, and `get_document` lists
+them.
+
+A target must mean one range. A name that several ranges share is
+refused as a target, and the range id `get_document` reports names one.
+`replace_named_range` writes every range the name covers, so the
+overwrite guard sees what all of them hold (D-28). `delete_named_range`
+forgets the name and leaves the text, so it is not guarded. A name is
+counted in UTF-16 units, as the API counts it. The live steps "edit
+through the named range" and "replace the named range's content" use
+one.
+
+Rejected: picking the first of several ranges that share a name, which
+edits a passage the caller may not have meant.
+Cost: `replace_named_range` overwrites every range the name covers,
+which the guard shows before a direct write lands.
+
+### D-16 A document is read with every tab in the inline suggestions view, the one index space, and every write names its tab
+
+A document is always read with every tab's content and in the inline
+suggestions view, and every write names the tab it touches.
+`documents.get` is called with `includeTabsContent=true` and
+`suggestionsViewMode=SUGGESTIONS_INLINE`, and the inline view's indices
+are the one index space this server computes against.
+
+Only the inline view gives indices a later `batchUpdate` accepts
+([suggestions](https://developers.google.com/workspace/docs/api/how-tos/suggestions)),
+so planning on any other view puts a write at the wrong offsets once a
+suggestion is pending. Tabs are where a document's content can hide.
+Without `includeTabsContent` a read returns the first tab alone, and a
+request without `tabId` reaches the first tab, except `replaceAllText`
+and the named-range requests, which reach every tab
+([tabs](https://developers.google.com/workspace/docs/api/how-tos/tabs)).
+Servers that ignore tabs edit the wrong one. So every location and range
+the planner builds carries its `tabId`. The live step "read with styles"
+reads a change planned below pending suggestions back on its target.
+
+Rejected: reading the first tab alone, which leaves content out; reading
+in a view with suggestions accepted or hidden, whose indices a write
+cannot use.
+Cost: `replace_all` always sends explicit `tabsCriteria`, since
+`replaceAllText` defaults to every tab, and a pending suggestion's text
+is part of every read's index space.
+
+### D-17 Every read asks for the comments view and, refused, asks again without it; that read decides pinning and suggest mode
+
+Every read asks `documents.get` for the comments view,
+`commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`. If Google refuses it as
+invalid or forbidden, the read asks again without it, and a refusal
+about the document itself fails both times. Whether the view came back
+decides two things for that read. A comment is pinned through the Docs
+API or posted through Drive (D-38), and suggestion mode is allowed or
+refused `[unavailable]` (D-29).
+
+Comments and suggestions in the Docs API are generally available
+([release notes](https://developers.google.com/workspace/docs/release-notes)),
+but they reached projects in a staged rollout, and the discovery
+document labels the fields Developer Preview. So the server detects what
+each project gets instead of trusting an announcement or a flag. A
+project the feature has not reached might apply a `SUGGEST` batch as a
+direct edit, the overwrite the person asked to avoid. The live steps
+"suggest edit" and "add comment" use what the view opens.
+
+Rejected: a setting that gates the features, since a deployer cannot
+know what Google enabled for their project; joining the Developer
+Preview; trusting the announcement, or the shapes appearing in the
+discovery document, without detecting.
+Cost: every read carries the document's comment threads, a share of each
+`documents.get` nobody has measured. Issue #107 asks to re-check
+general availability from a project that never joined the preview, and
+to measure a read with and without the view.
+
+### D-18 Reads are scoped and budgeted by default and say where to continue
+
+Every read is scoped and budgeted by default, and says where to
+continue. `read_document` takes a scope, a tab, a heading, a range of
+handles or the whole body, and a character budget, `max_chars`, 20 000
+by default and 400 000 at most. It cuts at a block boundary and returns
+`continue_from`, which resumes there. `diff_revisions`,
+`export_document`'s inline formats and the resources are budgeted the
+same way (D-76).
+
+Claude Code warns when a tool result passes 10 000 tokens and cuts it at
+25 000 ([MCP output limits](https://code.claude.com/docs/en/mcp)). A cut
+the server did not make leaves the model reading half a paragraph, with
+no way to ask for the rest. A budget applied at a block boundary, with a
+continuation, keeps every read whole and resumable. A view that claims
+to be complete keeps every block, empty paragraphs included, because a
+model edits what it was shown. The live step "a budgeted read" reads
+one.
+
+Rejected: dropping empty paragraphs from a view that claims to be
+complete, which makes the read disagree with the document it describes.
+Cost: a long document takes several reads, each a `documents.get` unless
+the five-second cache answers it (D-64).
+
+### D-19 Read tools return a text block only; write tools return text and a structured result that carries everything the text does
+
+A read tool returns one text block and no structured result. A write
+tool returns a text block and a structured result, and its JSON carries
+everything the text does, the rendered preview included. The read tools
+are `get_document`, `get_outline`, `read_document`, `find_in_document`,
+`search_documents`, `export_document`, `list_suggestions`,
+`list_comments`, `list_revisions` and `diff_revisions`. Each puts the
+revision and any continuation in a header line.
+
+A client may show the model a result's text or its structured form, not
+both. Claude Code shows only `structuredContent` when a result has it,
+so in the agent evals a scoped read with a small structured result
+looked like metadata, and the model fell back to reading the whole
+document. The MCP specification makes the text the backwards-compatible
+form
+([structured content](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#structured-content)).
+go-sdk emits neither an output schema nor structured content for a tool
+whose output type is `any`, which is how a read declares itself. A
+write's result is small, and its fields are what a caller acts on, so it
+carries both forms.
+
+Rejected: markdown plus a small structured result on reads, which Claude
+Code shows as the structured part alone.
+Cost: read tools carry no output schema, so a client cannot validate a
+read's shape.
+
+### D-20 Reads mark suggestions as CriticMarkup and comments as markers
+
+A read marks pending suggestions in CriticMarkup and comments with
+markers. With `include_suggestions`, an insertion reads `{++text++}` and
+a deletion `{--text--}`, each followed by `{>>s:<id><<}`. A suggestion
+that only restyles reads as a highlight,
+`{==text==}{>>s:<id> suggests bold<<}`, because nothing was added or
+removed. With `include_comments`, a commented passage ends in
+`{>>c:<id><<}`, and its thread is listed below the content.
+
+A model has to see what is pending before it edits around it, in the
+text it reads, at the place it applies. CriticMarkup is an existing
+plain-text convention for tracked changes, which MultiMarkdown 6 reads
+and other document servers use, so the marks mean something without a
+legend. The ids in the marks are what `review_suggestion` and
+`reply_comment` take (D-40). The live steps "read with suggestions" and
+"read the suggested table and image" read them back.
+
+Rejected: showing pending suggestions and comments only through their
+own tools, which leaves a read presenting text as if nothing were
+pending; a markup of this server's own.
+Cost: a read with marks is longer, and its text is not the document's
+text until the marks are taken out, so both are off by default.
+
+### D-21 A suggestion is read from its suggestion state, never from the style beside it
+
+A pending suggestion is read from its suggestion state, never from the
+style beside it. A suggestion that only restyles inserts and deletes
+nothing, so it is found through the `suggested*Changes` maps on runs,
+paragraphs and cells, not through the suggestion ids on inserted or
+deleted text. What it changes comes from its `*SuggestionState` flags.
+The wire types carry every `suggested*` field the discovery document
+publishes.
+
+The style in a suggested change is the style as it would be after
+accepting, every property filled in, so reading it reports a change to
+every property where a person asked for one
+([SuggestedTextStyle](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#SuggestedTextStyle)).
+A suggested insertion also carries an entry under its own id, which says
+the style the inserted text takes, its flags marking the properties it
+inherits. The server applies that entry to the run's style and reports
+only other suggestions' entries as restylings. The integration tests
+TestRawSuggestedStyle, TestRawSuggestedReset and TestRawAcceptedView
+check both readings, and the live step "list_suggestions" lists a
+style-only suggestion.
+
+Rejected: walking insertion and deletion ids alone, which cannot find a
+restyling; reading the style, which reports every inherited property;
+dropping an insertion's own entry, which hides the bold of text inserted
+after bold text.
+Cost: one case stays unexplained, a reset filed under a second
+suggestion id. Issue #109 covers it, together with suggested
+insertions in table cells and rows, which no test probes.
+
+### D-22 `format: raw` returns the bytes Google sent
+
+`read_document` with `format: raw` returns the JSON Google sent for each
+element in scope, compacted, not the server's own types marshaled again.
+Each structural element keeps the bytes it was decoded from, and an
+element built in Go falls back to marshaling its type.
+
+A raw read is the one read whose whole job is to show what Google said.
+Marshaled from the wire types, it would show only the fields this server
+models and silently drop the rest, so a field proving that a write had
+worked would be invisible. Keeping the bytes ends that class of gap
+rather than one instance of it, at the cost of one field, one method and
+one branch. Every request asks for compact JSON, `prettyPrint=false`
+([system parameters](https://cloud.google.com/apis/docs/system-parameters)),
+which takes a long document's response to well under half its indented
+size and pays for the retained bytes. The integration test
+TestPrettyPrintFalseIsAccepted checks that, and the live step "read
+format raw" reads one.
+
+Rejected: modeling every field Google publishes so a marshal could show
+it, which keeps a raw read one step behind each field Google adds.
+Cost: an element's bytes are held again inside every ancestor's, so a
+document nested deeply in tables retains its cells once per level of
+nesting.
+
+### D-23 get_document reports what no read of the text shows, the named style definitions included
+
+`get_document` reports what no read of the text shows. Per tab, that is
+the page setup, floating objects, named ranges, and the definition of
+each named style a paragraph in the tab uses, every value named:
+`named style HEADING_2 (3 paragraph(s)): Arial 16pt, bold, color #1a73e8, space above 18pt`.
+Standard page sizes come back by name, so the model need not recognize
+612×792.
+
+Google reports only the properties a run or a paragraph sets itself, so
+`with_styles` on a read shows exactly where text departs from what it
+inherits. The other side of that is that inherited formatting is
+invisible: a heading whose named style is blue and centered reads as
+plain markdown. Without the definitions, redefining a named style with
+`layout_document` would be a write nothing reads back. One line per
+style per tab costs far less than a comparison on every run. A
+definition's count covers every segment, headers and footnotes included,
+since redefining a style changes the whole tab. The live step "read the
+redefined HEADING_2 back" checks it.
+
+Rejected: comparing each run against its named style on every read,
+which repeats per paragraph what one line per tab says.
+Cost: inherited formatting is invisible in a read of the text, so a
+model that needs it calls `get_document`.
+
+### D-24 A binary export is written only under GDOCS_EXPORT_DIR, created exclusively, never over a file or through a link
+
+`export_document` returns `md`, `txt` and `html` inline, budgeted, and
+writes `pdf`, `docx`, `odt`, `rtf` and `epub` as a file under
+`GDOCS_EXPORT_DIR`, and only there. Each file is created exclusively,
+with `O_EXCL`, so an export never replaces a file already there and
+never writes through a symbolic link at its name. A name already taken
+gains a counter, `-2` and up. With the directory unset, a format that
+writes a file is refused `[unavailable]`.
+
+The export is the one tool that writes to the person's disk, and a model
+chooses its arguments. Cleaning the path keeps the name inside the
+directory but not what the name points at, and an ordinary write
+truncates whatever was there. Creating exclusively makes choosing the
+name and creating the file one step. The file is new, so the tool is
+annotated as a write that only adds (D-57). It stays registered in
+read-only mode, since it changes nothing in Google (D-55).
+
+Rejected: `os.WriteFile`, which truncates an earlier export and follows
+a link; treating the export as read-only, which hides a local write from
+a client's prompt.
+Cost: after 100 taken names an export is `[blocked]` until earlier
+exports are moved, and read-only mode still registers `export_document`.
+
+### D-25 Markdown is for new content; existing content is edited in place and never round-tripped
+
+Markdown is how the model writes new content: an insert, an append or a
+replace takes markdown, and the server compiles it into requests.
+Existing content is never rewritten through markdown. It is edited by
+range, styled by explicit format ops, and read with style annotations on
+request (D-23).
+
+A Google Doc holds what markdown cannot say: fonts, colors, spacing,
+comments anchored to a passage, suggestions, chips and objects.
+Exporting someone else's document to markdown and writing it back would
+drop all of it, while a minimal diff of the text a call replaces keeps
+everything outside the change (D-27). A Markdown file in Drive is a
+different case: its bytes are markdown, so a minimal edit of them is no
+round trip (D-42). The live step "direct edit" inserts markdown content
+beside a minimal-diff replace.
+
+Rejected: round-tripping a document through markdown, which loses
+everything markdown cannot express.
+Cost: what markdown cannot say goes through `format_document`: fonts,
+sizes, colors, alignment, spacing, indents, named styles on existing
+text, bullet presets and clearing formatting.
+
+### D-26 The markdown parser converts what it can prove and refuses the rest, naming the construct and its line
+
+The markdown parser converts what it can prove the Docs API can express
+and refuses the rest. A refusal is `[unsupported]`, naming the construct
+and its line with a hint, before anything is written. The parser takes
+headings, paragraphs, emphasis, inline code, links, nested lists, hard
+breaks, fenced code, and tables and images between blocks (D-31). It
+refuses HTML blocks, block quotes and horizontal rules, and an image
+inside text or a list item, which `insert_object` places instead.
+
+A converter that degrades silently corrupts a document in a way nobody
+sees until later, and the person finds the damage after the write. A
+refusal costs one more call, with the reason in hand. Every construct
+has a test. Text read and written back is unchanged, which a randomized
+test holds, because a read escapes exactly the characters that markdown
+would take as markup.
+
+Rejected: a guarantee of WYSIWYG fidelity, which no conversion between
+the two formats can keep; a converter that drops what it cannot express
+without saying so, as other open-source servers' converters do.
+Cost: HTML, block quotes and rules are refused, and a task-list checkbox
+is dropped while its text is kept.
+
+### D-27 A replace is the minimal word-level diff of the old text against the new
+
+A `replace` is compiled as the minimal diff of the old text against the
+new. Only the changed hunks become `deleteContentRange` and `insertText`
+requests, grouped to word-sized pieces by a semantic cleanup. Unchanged
+spans keep their formatting and everything anchored to them: comments,
+suggestions and objects. When the replacement changes the paragraph
+structure, such as one paragraph becoming three list items, the planner
+replaces the whole range, and the result says the op was not minimal.
+
+A server that overwrites the range it edits deletes every comment
+anchored inside it and every suggestion a person left there. Inserted
+text takes the style of the text before it, and a newline copies the
+paragraph's style "including lists and bullets"
+([InsertTextRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTextRequest)).
+So a minimal diff inherits the surrounding formatting with no style
+requests at all. Google's version history records every batch under the
+signed-in account, so what changed and who changed it stays visible. The
+live step "direct edit" checks it.
+
+Rejected: replacing the whole range, which loses what is anchored to
+unchanged text.
+Cost: a replace that changes paragraph structure falls back to the whole
+range, and the overwrite guard then reports what that range holds
+(D-28).
+
+### D-28 A direct edit that would delete comment anchors, suggestions, objects or footnote references is refused unless forced
+
+A direct edit that would delete a range holding comment anchors, pending
+suggestions, inline objects or footnote references is refused
+`[blocked]` unless the call passes `force`. The refusal names what is
+inside, such as
+`range contains 2 comment anchors (c:AAAAB, c:AAAAC) and 1 suggestion`,
+and the ways forward: suggest or comment mode, a narrower target, or
+`force`. A forced op's warnings name what it destroys, and a dry run
+shows them first. In suggest and comment modes nothing is deleted until
+a person accepts, so the guard only reports.
+
+Deleting a range removes whatever is anchored inside it, and a model
+replacing a sentence does not know that a colleague's comment sits on
+it. The guard checks every range scheduled for deletion against the
+anchors of the read the write was planned on, the minimal diff's hunks
+included (D-27). The same guard holds a Markdown file's commented
+passages and a Word file's comments (D-43, D-50). `force` is for a
+person who chose direct editing knowing what the range holds.
+
+Rejected: relying on suggest mode alone to protect what is anchored,
+which leaves direct mode free to delete it; a guard that only warns,
+which a model reads past.
+Cost: `force` stays a boolean that a model can pass. Its warnings, and a
+dry run before it, are what show what it destroys.
+
+### D-29 The person chooses how changes land, suggest, direct or comment, and the server never substitutes one mode for another
+
+Each edit takes `mode`: `suggest`, `direct` or `comment`. `suggest`
+sends the batch with `writeMode: SUGGEST`, so each change is a
+suggestion a person accepts or rejects. `direct` edits the text.
+`comment` changes nothing and posts each op as a comment on the passage
+it would change: a replace as "Proposed change:" with the new text, a
+delete as "Proposed deletion". The deployer sets the default with
+`GDOCS_DEFAULT_WRITE_MODE`, `suggest` unless set, and a call overrides
+it when the person asks.
+
+The person decides how a change lands, and a mode they did not choose is
+a change they did not approve. So the server never substitutes one:
+where a mode cannot work, it refuses and names the modes that can.
+Suggest mode is `[unavailable]` on a read without the comments view
+(D-17) and on a Markdown file, for which Docs offers no suggestions
+(D-42). A request the API refuses in `SUGGEST` mode, such as adding a
+tab, deleting a header or creating a named range, is refused for its op
+before anything is sent. The live step "suggest edit" writes one.
+
+Rejected: sending suggest where the comments view was refused, which a
+project the feature has not reached might apply directly.
+Cost: with the default `suggest`, a write to a Markdown file is refused
+until the person chooses direct or comment, and `manage_tabs` always
+writes directly.
+
+### D-30 Every write is planned against one revision and guarded by it, re-planned once on a conflict, and reports what it touched
+
+Every write is planned against one fresh read and sent with that read's
+revision as `writeControl.requiredRevisionId`. `expect_revision`, when
+given, is checked against the read before anything is sent. If someone
+edits between the read and the write, Google refuses the batch, and the
+server reads again, resolves every target again, plans again and sends
+once more. A second conflict is `[conflict]`. A write reports the new
+revision, the ops applied, previews of what changed and any warnings.
+
+Google answers a stale `requiredRevisionId` with 400 INVALID_ARGUMENT,
+"The required revision ID '…' does not match the latest revision."
+([WriteControl](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate#writecontrol));
+the reference documents only the 400. The integration test
+TestRawStaleRevision checks it. A batch is atomic, and every target is
+resolved before anything is sent, so a call fails whole or plans whole.
+A model that gets back the revision and what changed can check its own
+edit without reading the document again.
+
+Rejected: writing without a revision guard, which lets a stale plan land
+on text a person just changed; re-planning until a write lands, which
+can loop against an active editor.
+Cost: what can only follow a write, such as filling a table it inserted,
+goes in later batches, each against a fresh read, each reported and none
+rolled back (D-31, D-32).
+
+### D-31 Content with tables or images is written in rounds, each against a fresh read at the revision the last reply gave
+
+Content holding tables or images is written in rounds. The first batch
+writes the text with an empty paragraph, a slot, where each table or
+image goes. Later batches fill the slots one at a time, highest first,
+each against a fresh read. That read must be at the revision the
+previous batch's reply gave, and must still show the slot where the text
+left it. Otherwise somebody else wrote in between, and the rest are
+reported, not placed. Such content is the only op of its call, so
+nothing else in the first batch moves the slots.
+
+An image goes into its slot. A table goes in at the newline of the
+paragraph before the slot, is filled, and a last batch deletes the empty
+paragraphs it leaves, except where Docs needs one. The reference
+documents only part of where `insertTable` puts a table
+([InsertTableRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTableRequest)),
+and the integration test TestRawTablesInContent checks the placement.
+The live steps "content with a table and an image, suggested" and
+"content with an image Google cannot fetch" drive both outcomes.
+
+Rejected: placing every table and image by index arithmetic in one
+batch, which rests on a formula for a table's length checked at a few
+sizes only.
+Cost: the rounds are not atomic. A round that fails leaves the text
+written and its empty paragraph, with a warning naming the content's
+line. One call holds at most 10 tables and images, a table at most 200
+rows and 20 columns, and an image address at most 2 kB.
+
+### D-32 Ops addressed in a table after a grid change wait for a batch of their own against a fresh read
+
+After an op changes a table's grid, every later op in the same call
+addressed in that table's rows, columns or cells waits for a batch of
+its own, planned against a fresh read. So `insert_rows` then `set_cells`
+on `r2c3` writes the cell the caller means, in the grid the insertion
+left. `chainStructural` in `internal/service/followup.go` makes the
+split before the ops are resolved, keyed by the table handle as written,
+one round per grid change. A round that fails stops the rest, since they
+were numbered for a grid that never came about. Comment mode does not
+split: nothing is applied, and every op must reach the proposals. The
+planner keeps its rule of one grid change per table per batch as a check
+that the split was made. The live step "three grid changes on one table:
+a batch each, renumbered between" drives it against Google.
+
+Rejected: numbering a later op against the grid as read, which reaches
+the wrong row once rows are inserted before it; refusing a second grid
+change on one table, which leaves the caller to split the call by hand.
+Cost: a dry run cannot resolve the held-back ops, since the grid they
+name does not exist yet, so it lists them and says so. What does not
+depend on that grid, a row numbered below one or a malformed cell name,
+is still refused first. A forced op in a later batch is refused
+`[blocked]`, because no dry run showed what it destroys, so it runs as a
+call of its own.
+
+### D-33 A list item keeps a right inherited bullet, and the rest are rebuilt in windows that count levels from the item before
+
+An inserted list item that took the right bullet keeps it, and every
+other run of list items is rebuilt in a window. A rebuild deletes the
+bullets, clears the indent, writes a tab for each level above the
+window's base and makes the list again. When the item before is deeper
+than the window, the window takes in the items before it, at their own
+levels, until one is not. The content's leading list continues the list
+it is placed against, at its level, unless `list_level` names one.
+
+The rules are Google's, and its references state them only in part. An
+inserted paragraph takes the bullet of the paragraph at the insertion
+point
+([InsertTextRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTextRequest)).
+`createParagraphBullets` skips a paragraph that already has one, and a
+level changes only by deleting the bullet and making it again
+([lists](https://developers.google.com/workspace/docs/api/how-tos/lists)).
+A list counts its levels from the item just before it, which no
+reference says. The integration tests TestRawBullets and
+TestRawBulletsWindow check these, and the live steps "an item after a
+nested one gains a child" and "back to the top after a nested item by
+list_level" drive them. `internal/plan/lists.go` holds the details.
+
+Rejected: leading tabs and `createParagraphBullets` alone, which leave
+an item that already has a bullet at its old level; tabs read as
+absolute levels, which a list counted from the item before cannot start.
+Cost: `deleteParagraphBullets` leaves the removed level's indent, so
+every bullet deletion clears the indent back to the named style, and an
+item indented by hand gets its own indents put back.
+
+### D-34 A regex replace is expanded by the server into one replace per match, found with RE2 within a paragraph
+
+A `replace_all` with `regex` sends no `replaceAllText`. The server finds
+the matches itself, with the RE2 matcher `find_in_document` uses, over
+each paragraph's index-aligned text in one tab. It plans each match as a
+replace, or as a delete where the replacement expands to nothing, so the
+overwrite guard, suggest mode and the minimal diff apply to each match
+as to any replace (D-27, D-28). A match never crosses a paragraph and
+covers text only, never a chip, a break or an element the server does
+not model. A table of contents is skipped, the pattern decides case, a
+group the replacement names must exist, and no match at all is
+`[not_found]`. The live steps "regex replace_all" and "read after the
+regex replace" read Go's expansion back.
+
+The reason is the guard, which has to see every range a replace touches.
+Google does not document which regex flavor `searchByRegex` runs,
+whether its replacement expands groups, or how a match treats a chip or
+an image
+([ReplaceAllTextRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#ReplaceAllTextRequest)).
+
+Rejected: the API's `searchByRegex`, whose matches the guard could only
+guess.
+Cost: a match stays within one paragraph, and a call replaces at most
+500 matches in a tab, refusing a wider pattern.
+
+### D-35 A write that takes dry_run resolves, plans and reports, and sends nothing
+
+A write that takes `dry_run` resolves every target, plans the change,
+runs the guard and reports, and sends nothing to Google. The report
+gives the changes it would make, the guard's warnings, the kinds of
+request it would send, the proposals in comment mode, a rendered view of
+the region and the later batches it would run. It names request kinds
+rather than requests, because a request carries UTF-16 indices, which
+the model never sees (D-12). A delete, a comment or a review names what
+it would act on, after the same lookup and checks the write makes.
+
+The tools that take it are `edit_document`, `format_document`,
+`edit_table`, `insert_object`, `layout_document`, `review_suggestion`,
+`write_markdown_file`, `add_comment`, `delete_comment` and `delete_tab`.
+The live driver calls every tool whose schema takes `dry_run`, fails on
+one it has no call for, and checks with the live step "revision after
+the dry runs" that the document did not move.
+
+Rejected: a dry run as a substitute for the client's approval, since the
+model decides whether to send one (D-52).
+Cost: a dry run never plans a later batch, whose grid or slots do not
+exist yet (D-31, D-32). `create_document`, `reply_comment`,
+`manage_tabs` and `export_document` take none, so they cannot be
+previewed; issue #105 proposes `dry_run` on each, with a test that a
+dry run sends nothing.
+
+### D-36 A direct formatting change over a property a pending suggestion sets is warned about, not refused
+
+In direct mode, a formatting change over a property that a pending
+suggestion on the same range already sets comes back with a warning
+naming the suggestion and the property. It is applied, not refused.
+`guardRestyle` in `internal/plan/ops.go` makes the check.
+
+Google's behavior here is not one rule, and the reference says nothing
+of it
+([UpdateTextStyleRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateTextStyleRequest)).
+Bold set directly over a suggested bold leaves the run unbolded, and the
+same holds for a paragraph alignment: the batch is accepted, the reply
+is empty, and nothing changes. A font size set to exactly the size a
+suggestion names does land, and so does an alignment to a value the
+suggestion does not name. The integration tests
+TestRawSuggestedStyleSameProperty and TestRawSuggestedStyleValue check
+both sides, and the live step "direct change to the suggested property"
+drives it. What the person needs either way is to learn that a
+suggestion sits on the property they set, which `ops_applied` cannot
+tell them.
+
+Rejected: refusing the change, which would block the writes that land.
+Cost: the warning fires on every collision, the ones that land included,
+since the rule is not known. Issue #106 asks for more properties to
+be probed until the rule is found and reported to Google, so the warning
+can name only the changes Google drops.
+
+### D-37 Every GA request of the Docs API and every field it accepts on a write is emitted; a read-only field is reported, never sent
+
+The planner emits every generally available member of the Docs API's
+`Request` union, and every field those requests accept on a write,
+except the comment-thread requests Drive serves (D-39). The union and
+its fields are taken from the discovery document,
+`https://docs.googleapis.com/$discovery/rest?version=v1`, never from the
+reference page's prose. A field the discovery document marks read-only
+is read and reported, never sent: `tabStops` and `headingId` on a
+paragraph, a cell's `rowSpan` and `columnSpan`, and
+`SectionStyle.sectionType`, which only `insertSectionBreak` sets. The
+live step "a section's type is read-only" checks that the server refuses
+one.
+
+A field in the schema is not proof the API takes it.
+`updateTableRowStyle` answers `tableHeader` with 400 "Unallowed field:
+tableHeader", which the reference does not say
+([UpdateTableRowStyleRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateTableRowStyleRequest)),
+so `pin_header_rows` is how a header row is set.
+`testdata/api-coverage.tsv` holds a verdict for every published method,
+`testdata/api-fields.tsv` for every published field of a modeled type
+(D-09), and `TestKindRegistryCoversEveryTool` holds each op kind to its
+tool.
+
+Rejected: sending a field the discovery document marks read-only, which
+fails the whole atomic batch; taking wire names from the reference
+page's prose.
+Cost: a request member or field Google adds is emitted only once someone
+adds it, and `make api-diff`, which refetches the discovery documents,
+runs by hand.
+
+### D-38 A comment is pinned through insertComment where the comments view answered, else posted through Drive quoting the text and said to be unanchored
+
+A comment on a passage is pinned to its range through the Docs API's
+`insertComment` when the read that resolved the target carried the
+comments view (D-17). Otherwise it goes through Drive's
+`comments.create`, quoting the passage, and the result says it is
+unanchored. A comment with no target is on the document as a whole and
+goes through Drive. An assignee needs a pinned comment; without one, the
+comment posts with a warning that it was not assigned.
+
+Pinning is the point, because a comment on its passage is how a person
+reviews a change in place
+([InsertCommentRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertCommentRequest)).
+Drive cannot pin one in a Google Doc: "Google Workspace editor apps
+treat these comments as un-anchored comments"
+([manage comments](https://developers.google.com/workspace/drive/api/guides/manage-comments)).
+The live steps "add comment" and "document-level comment" drive both
+paths.
+
+Rejected: anchoring through Drive's comment anchors, which the editor
+does not position for another app; refusing a comment where the comments
+view is refused, which leaves the person no comment at all.
+Cost: a comment posted through Drive sits on the document, not on its
+passage. Whether Google notifies an assignee, as the editor does, is not
+established; issue #110 asks for a check with a second account and a
+line in the tool description either way.
+
+### D-39 Thread operations go through Drive's comment API, one backend; a reply on a suggestion's thread is the exception
+
+Every thread operation goes through Drive's comment API: listing,
+replying, resolving and reopening through `replies.create` with its
+`action`, editing a comment or a reply, and deleting one.
+`list_comments` always lists through Drive, which carries every reply
+with its author, time and action, and the resolved and deleted state, on
+every deployment. Each thread is located in the document through the
+comments view's anchors when the read carried them, else by its quoted
+text, matching once.
+
+One backend gives every thread one behavior, whichever path posted it,
+and Drive's calls are generally available
+([replies.create](https://developers.google.com/workspace/drive/api/reference/rest/v3/replies/create)).
+The live steps "reply", "resolve", "reopen" and "edit a comment" drive
+them.
+
+A reply on a suggestion's thread is the exception. Drive cannot see
+those threads, so `reply_comment` with `suggestion_id` sends the Docs
+API's `addCommentReply`, which needs the comments view. The live step
+"reply on a suggestion's thread" drives it.
+
+Rejected: the Docs API's own thread requests, `addCommentReply` on a
+comment thread, `updateCommentPost`, `deleteComment` and
+`deleteCommentReply`, which would give one act two paths.
+Cost: a reply on a suggestion's thread takes plain replies only. Its
+length limit is unmeasured, so it is held to the 2048 bytes
+`insertComment` takes; issue #111 asks for the limit to be measured
+the way the comment limits are.
+
+### D-40 review_suggestion takes each suggestion by the id list_suggestions showed
+
+`review_suggestion` takes each suggestion by the id `list_suggestions`
+showed, and `ids` is required. The server reads the document fresh,
+lists what is pending at that revision, and refuses an id that is not
+pending as `[not_found]`. An id named twice is reviewed once, since
+Google refuses a second review of one suggestion and that would fail the
+whole batch. `expect_revision` pins the review to the revision the
+caller read.
+
+A client's prompt shows the call's arguments, so the ids are what a
+person approving the call sees, and a suggestion proposed after the list
+was read is never reviewed unseen. `accept` applies a suggestion and
+`reject` declines it, as any editor may; `discard` removes it, and
+Google allows only its author to
+([DeleteSuggestionRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#DeleteSuggestionRequest)).
+The live steps "list the suggestions to accept" and "accept every
+pending suggestion" pass the ids a listing showed.
+
+Rejected: `all`, which would accept or reject suggestions nobody listed.
+Cost: accepting every pending suggestion means listing them and passing
+each id. `ids` is a required input, so relaxing it later is a schema
+change a client must follow.
+
+### D-41 History is read through Drive revisions and exports at a revision; restoring is an explicit replace
+
+History is read through Drive. `list_revisions` lists a document's
+revisions, newest first, with the time and who changed it.
+`diff_revisions` exports Markdown or plain text at two revisions and
+returns a line-level unified diff, budgeted at hunk boundaries.
+`read_document` with `revision` reads one old revision as Google's
+export of the whole document. Restoring an old revision is an explicit
+`replace` of the body from an export, never a call of its own.
+
+The Docs API reads only the document as it is, so an old revision's
+structure cannot be read at all. Only an export reaches one, and only
+Drive's `files.download` takes a `revisionId` for a Google Doc, since
+`files.export` takes a MIME type alone
+([files.download](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/download)).
+The download is a long-running operation whose content URL must stay on
+a Google host (D-11). The live steps "read an old revision" and "diff
+revisions" drive it.
+
+Rejected: an implicit restore, which would overwrite what people wrote
+since without anyone choosing it.
+Cost: Drive's list "might be incomplete for files with a large revision
+history", busy Google Docs among them, and the result says so
+([revisions.list](https://developers.google.com/workspace/drive/api/reference/rest/v3/revisions/list)).
+An old revision reads without handles or scoping, and Drive's revision
+ids are a different space from the Docs `revision_id` a write is guarded
+by.
+
+### D-42 A Markdown file in Drive is a document, read from its bytes and written by an upload of the whole file
+
+A Markdown file stored in Drive, which Google Docs opens and edits in
+place, is a document here. The service asks Drive for a file's type once
+per id, and `text/markdown` or the older `text/x-markdown` takes the
+Markdown path; `get_document` says `kind: markdown_file`. Such a file is
+read from its bytes and written by a Drive media upload of the whole
+file. Its text is what the model reads, what an exact-text target
+matches and what an upload rewrites. Its outline is its headings, each
+named by a slug, and a long read continues from a line.
+
+The Docs API reads such a file, comments view included, and refuses
+every write to it, `SUGGEST` and `insertComment` included, with 400 "The
+document must not be an Office file"
+([batchUpdate](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate)).
+The integration tests TestRawMarkdownFile and TestRawMarkdownFollowups
+check it. A minimal edit to the file's own bytes is no round trip
+through Markdown (D-25); it is the minimal diff applied to text (D-27).
+
+Rejected: the Docs API, which refuses every write to such a file;
+refusing the file because Markdown is for new content only.
+Cost: every upload makes an editor that has the file open reload. An op
+only the Docs API performs, such as formatting, tables or tabs, is
+`[unsupported]` before anything is sent. A file over 5 MB, Drive's
+ceiling for a simple upload, is read but not written.
+
+### D-43 A Markdown file's comment markup is read out, kept byte for byte, and never forged or ended by a write
+
+A Markdown file's comments live in its bytes: a marker on each side of
+the passage, `<!-- gdoc_comment_begin: c1 -->` and its end, and an entry
+in a `gdoc_comments` YAML block that must end the file.
+`internal/mdfile` parses that markup out and keeps it byte for byte. A
+read shows the text without it, and every edit is applied to that
+visible text under fixed rules. A marker is never deleted. Inside a
+replaced range a begin marker moves before the new text and an end
+marker after it. At a replaced range's edge a marker stays outside it,
+and new text at an insertion point goes outside a comment that begins or
+ends there. The result is parsed again and must carry the same markers
+and the same block, or the write is refused.
+
+No Google page documents the markup. Drive cannot see these comments,
+which the integration test TestRawMarkdownComments checks. Content
+holding the markup is refused `[invalid]`, so no write can forge or end
+a comment, which the live step "forged comment markup" checks.
+`FuzzParseApply` holds the rules.
+
+Rejected: letting the model edit the raw bytes, where a replace could
+delete or move a marker and unanchor a person's comment.
+Cost: `list_comments` reads the Docs comments view as well as Drive's
+list, since the two hold disjoint sets.
+
+### D-44 A Markdown write checks the live session, re-checks before uploading and repairs from history; force never writes past unsaved editor work
+
+Every write to a Markdown file checks, writes, verifies and repairs.
+Before planning, it reads the file and, through a `fields` mask, the
+live session's revision and comments. A comment, reply or resolve the
+live session holds and the file does not is a person's unsaved work, so
+the write waits three seconds and tries again, twice, then is
+`[conflict]`. Just before the upload it reads the head revision, the
+checksum and the live revision again, and plans again if any moved.
+After the upload it finds in `revisions.list` the revision its upload
+replaced. If that is not the one the plan was made on, a save landed in
+between. The save is read from history and the change made again on top
+of it, or, when the change does not fit, the save is put back and the
+write is `[conflict]`.
+
+Drive offers no precondition on an upload: it serves no ETag, ignores
+`If-Match`, and moves `version` on metadata changes too
+([v2 to v3](https://developers.google.com/workspace/drive/api/guides/v2-to-v3-reference)).
+A person's work in the editor reaches the file only when the editor
+saves, and an upload a few seconds after a save overwrites it. The
+integration tests TestRawMarkdownAfterDocs and TestRawMarkdownWithPerson
+check both.
+
+Rejected: uploading while a person has the file open, unchecked; a Drive
+precondition, which does not exist.
+Cost: unsaved editor work holds a write through two three-second waits.
+`force` never writes past it, since that work is in no Drive revision
+yet and nothing could bring it back.
+
+### D-45 A call uploads once, and not at all when nothing changed, as the file's own type, and pins no revision
+
+A call to a Markdown file batches its ops into one upload, and a call
+that changes nothing uploads nothing. The upload is sent as the file's
+own type, `text/markdown` or `text/x-markdown`, and pins no revision.
+
+Every upload is a Drive revision, identical bytes included, so one call
+makes at most one. The media part's type becomes the file's: a part sent
+as `text/plain` retypes a Markdown file, which the Docs API then
+refuses, and the upload guide does not say an update retypes a file
+([manage uploads](https://developers.google.com/workspace/drive/api/guides/manage-uploads)).
+The integration tests TestRawMarkdownRewrite and TestRawMarkdownEdges
+check both, and the live step "edit it" drives an upload. A pin on a
+revision other than the head cannot be undone, Drive answering 400
+`illegalKeepForeverModification`, and a file keeps at most 200 revisions
+forever
+([manage revisions](https://developers.google.com/workspace/drive/api/guides/manage-revisions)).
+
+Rejected: pinning the revision a write replaces, which cannot be undone;
+a `text/plain` media part, which retypes the file.
+Cost: Drive keeps an unpinned revision at least 30 days unless the file
+passes 100 revisions, so the way back from a write can expire. The
+result names the revision before the write, which `diff_revisions`
+reads.
+
+### D-46 A comment written into a Markdown file uses the editor's markup, and a resolve is never written
+
+`add_comment`, comment mode and a reply to a comment a Markdown file
+keeps all write the markup the Docs editor writes: markers around the
+passage and an entry under the signed-in account's name, its strings
+YAML double-quoted. The editor shows such a comment, "From imported
+document", and on a person's save keeps it and gives it a token, which
+makes it Google's own. A resolve, a reopen or an edit is never written;
+the person does those in the editor.
+
+The markup is the only comment such a file can carry, since the Docs API
+refuses `insertComment` on it and Drive cannot see the editor's comments
+(D-42, D-43). `status: RESOLVED` written into the bytes makes every
+`documents.get` on the file answer 500 "Internal error encountered."
+until the bytes are put back. The integration tests
+TestRawMarkdownWithPerson and TestRawMarkdownBuild check both. The live
+steps "comment on a passage" and "reply in the file" check that the Docs
+view lists what was written, and "resolve in the file" checks the
+refusal. After writing markup the server waits for the live session to
+list it, and puts the bytes back if the Docs API then cannot read the
+file.
+
+Rejected: writing `status: RESOLVED`, which breaks every read of the
+file.
+Cost: a comment written here needs a passage and cannot be assigned.
+Until a person saves in the editor, its id changes each time the file is
+written.
+
+### D-47 Working on a Markdown file together goes through a Google Doc working copy, merged back block by block
+
+For a person and the model to type in one Markdown file together, the
+work goes through a Google Doc working copy. `create_document` with
+`from_file` imports the file's text, without its front matter or comment
+markup, into a Doc through Drive's Markdown import
+([import](https://developers.google.com/workspace/drive/api/guides/manage-uploads#import-docs)).
+It records the file and the revision it was made from in the Doc's
+`appProperties`, which only this OAuth client sees
+([properties](https://developers.google.com/workspace/drive/api/guides/properties)).
+Everything the server does on a Google Doc then works live on the copy.
+
+`write_markdown_file` exports the copy as Markdown and merges it into
+the file by blocks: paragraphs, headings, list items, table rows and
+fenced code. A block the copy did not change keeps the file's own text,
+since Docs' export rewrites Markdown its own way. The result is written
+as minimal edits under the guard, by the protocol of D-44. No API writes
+through an editor's live session, and every upload makes an open editor
+reload (D-42). The live steps "make a working copy", "the copy says what
+it is" and "write the copy back" drive the round trip.
+
+Rejected: writing through an open editor's session, which no API offers.
+Cost: a block changed in both the copy and the file is a conflict,
+refused unless `force` keeps the file's version. A base revision gone
+from history needs `force` too. An image placed in the copy has no
+address a Markdown file can use, so it is written empty with a warning.
+
+### D-48 Search finds Google Docs by default, and kind reaches Markdown files
+
+`search_documents` finds Google Docs by default. `kind: markdown_file`
+reaches Markdown files, under either Drive type, and `kind: any` reaches
+both. The query is Drive's search restricted by MIME type, with trashed
+files left out, and it locates a document; everything else happens
+through the other tools (D-02).
+
+A person who syncs a code folder into Drive holds hundreds of
+`README.md` files, which would bury the documents a search means. So
+Markdown files are found when the model asks for them, and the tool
+description says how. The live steps "search by title" and "search for
+Markdown files" drive both kinds.
+
+Rejected: Markdown files in the default results, where a synced code
+folder drowns the documents.
+Cost: a model looking for a Markdown file must pass `kind`. No kind
+reaches a Word file, which is opened by its id or URL.
+
+### D-49 A Word file is read as a Google Doc and written as its own file, by splices of the bytes it read
+
+A Word file (`.docx`) in Drive is read as a Google Doc and written as
+its own file. The Docs API reads one with handles, headings and the
+comments view, its tracked changes as suggestions and its comments as
+anchored comments, and `get_document` says `kind: word_file`. It refuses
+every write to one with 400 "The document must not be an Office file",
+which the integration test TestRawDocx checks. So `edit_document` and
+the comment tools make their change in the file's XML and upload it
+whole through Drive, under the protocol a Markdown file uses (D-44).
+
+`internal/ooxml` never re-encodes the file. `encoding/xml` cannot write
+a document back with its namespace prefixes as they were, so every edit
+is a splice of `word/document.xml`, and a part not changed is copied
+from the zip untouched. A heading takes the paragraph style the file
+names "heading N", a name that is the same in every language where the
+id is not. A list item takes `numPr`, continuing the list it is placed
+against. `FuzzEdit` holds the splices, and the live step "word: read it
+back" reads a write back through Docs.
+
+Rejected: re-encoding with `encoding/xml`, which rewrites the namespace
+prefixes; a Docs API write, which Google refuses.
+Cost: formatting, tables, images, layout, tabs and reviewing suggestions
+are `[unsupported]`, saying to save the file as a Google Doc. A comment
+the file holds is replied to, resolved or deleted in the editor.
+
+### D-50 An op reaches a Word file's paragraphs by order, each checked to hold the text the Docs model shows
+
+An op on a Word file resolves against the Docs model as on a Google Doc,
+handles, headings, exact text and the overwrite guard alike (D-28). It
+then reaches the file's paragraphs by order. The Docs body's paragraphs,
+tables' included, are the file's `w:p` elements in the same order, text
+for text, which no reference states; the integration test
+TestRawDocxRevision checks it. Each paragraph an op reaches is checked
+to hold the same text in both, deleted text, tabs and a content
+control's text counted as Docs counts them. A difference means Docs has
+not read a revision yet, or a person's edit has not reached the file, so
+the write waits and then refuses `[conflict]`.
+
+A cell spanning columns is the exception. Docs keeps each cell the span
+covers, empty, and the file has none, so those are passed over. A span
+of rows is a cell in each of its rows on both sides, and Docs reads a
+legacy `hMerge` as cells of their own. The integration test
+TestRawDocxModel rereads the model `TestWordMergedCells` replays, and
+the live step "a sentence changed" writes through the map.
+
+Rejected: reaching a Word file's paragraphs by position alone,
+unchecked, which writes into the wrong paragraph when Docs has read a
+different revision than the file holds.
+Cost: after an upload the write waits for Docs to read the new revision,
+about four seconds, so the next read shows it.
+
+### D-51 On a Word file a suggestion is a tracked change and a comment a Word comment, under the account's name
+
+On a Word file a suggestion is a Word tracked change and a comment a
+Word comment, both under the signed-in account's name. A suggested
+insertion is `w:ins` and a deletion `w:del`, a new paragraph's mark
+marked inserted and a deleted one's deleted. A comment is range markers
+and a reference in the text, with its text in `comments.xml`, which a
+file without one gets with its content type and relationship. Docs reads
+a tracked change as a suggestion and a Word comment as an anchored
+comment, so a suggest-mode or comment-mode write shows in Docs as it
+does on a Google Doc. The integration test TestRawDocxRevision checks
+both, and the live steps "word: a comment" and "word: list the comments"
+drive a comment.
+
+A change may not reach into a link from outside it, nor, in either mode,
+into text a pending suggestion inserted or deleted. Written into the
+suggestion, a direct change would go with it when it is accepted or
+rejected. A tracked insertion goes inside a link, since Docs drops the
+link's text when the link sits inside `w:ins`.
+
+Rejected: reviewing a Word file's suggestions, which would go by
+position, since Docs names a tracked change `suggestIdImport<uuid>_<n>`
+with a uuid that changes on every revision.
+Cost: `review_suggestion` refuses a Word file, saying to save it as a
+Google Doc, so its tracked changes are reviewed in the editor.
+
+### D-52 The server asks the person nothing; the client approves each call
+
+The server asks the person nothing. Whether a call is put to a person is
+the client's decision and its permission mode, and the server adds no
+question of its own. `forbidigo` refuses the SDK's `Elicit` and the
+input requests a result can carry, so no code can ask. The server tests
+call every tool through a client that can be asked and fail any call
+that asks, and the live driver does the same.
+
+The MCP specification puts consent to each tool call on the host
+([tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)).
+What holds on every client is what the server controls: what it
+registers (D-54, D-55), the retyped target (D-56), the write mode the
+person chose (D-29), the overwrite guard and `force` (D-28),
+`expect_revision` (D-30), a Markdown file's conflict and editor checks
+(D-44), and `dry_run` (D-35). A client remembers an approval per tool,
+never per argument, so a risky variant carried as an argument rides
+along unseen once its tool is always allowed.
+
+Rejected: asking the person through form elicitation (D-95);
+`requiresUserInteraction` beside the question, two hard gates on one
+call.
+Cost: a host in an auto-approve mode may call any registered tool
+without asking. So every registered tool is designed as callable
+unattended, and `GDOCS_ENABLE_DESTRUCTIVE` stays off for a client nobody
+watches.
+
+### D-53 GDOCS_REQUIRE_PROMPT is refused at start unless off, and GDOCS_PREVIEW is ignored with a warning
+
+`GDOCS_REQUIRE_PROMPT` is a removed setting. Set to anything but `false`
+it is refused at start, naming what to do instead: leave
+`GDOCS_ENABLE_DESTRUCTIVE` off for a client that runs with nobody
+watching. `false`, its old default, and unset are accepted.
+`GDOCS_PREVIEW` and `--preview` are accepted, ignored and logged as
+deprecated, so a configuration that still sets them starts.
+
+`GDOCS_REQUIRE_PROMPT` refused the writes that asked the person on a
+client that could not ask, and the server asks nobody (D-52). Ignoring
+it would quietly allow what its owner set it to stop. `GDOCS_PREVIEW`
+gated comments and suggestions, which are generally available and
+detected per read (D-17), so the switch decides nothing and restricts
+nothing. `config.Vars` marks the removed setting, so the bundle gate
+leaves it out of what the bundle asks for.
+[configuration.md](configuration.md) lists both.
+
+Rejected: ignoring `GDOCS_REQUIRE_PROMPT`, which would allow what it was
+set to stop; refusing `GDOCS_PREVIEW`, which would stop a server whose
+setting restricts nothing.
+Cost: `--require-prompt` is not a flag, so one left in a client's
+arguments stops the server at start.
+
+### D-54 The delete tools register only with GDOCS_ENABLE_DESTRUCTIVE
+
+`delete_tab` and `delete_comment` register only when the deployer sets
+`GDOCS_ENABLE_DESTRUCTIVE=true`, and the service refuses a delete
+without it too. Read-only mode leaves the switch nothing to register.
+`--dump-schemas` dumps the full surface, the deletes included, so the
+schema diff holds them like any other tool.
+
+The control has to be the server's. Annotations are hints, and the MCP
+specification tells clients to treat them as untrusted unless the server
+is trusted
+([tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)).
+A client may approve every call of a tool once and never ask again, so a
+tool that must not run unattended is one the server does not register. A
+deleted tab's text stays in version history, but a deleted comment
+cannot be restored.
+
+Rejected: relying on `destructiveHint` or `requiresUserInteraction` to
+make a client ask first, which clients treat as advisory.
+Cost: the switch turns on both deletes for every call that server entry
+takes, so it stays off for a client that runs with nobody watching.
+
+### D-55 Read-only mode registers the reads alone and asks for read-only scopes
+
+With `GDOCS_READ_ONLY=true` the server registers the reads,
+`export_document` and the resources alone, and `login` asks for
+`documents.readonly` and `drive.readonly`. The service refuses a write
+as `[forbidden]` as well, so no path reaches one. `export_document`
+stays registered because it writes a local file under `GDOCS_EXPORT_DIR`
+and changes nothing in Google (D-24).
+
+A read-only server is one a deployer can run for a client nobody
+watches, or for a person who wants answers and no edits. A read-only
+token makes that hold at Google too: a missed check in the server still
+cannot write, because the grant does not allow it
+([Docs scopes](https://developers.google.com/workspace/docs/api/auth)).
+`TestListToolsAndSchemas` holds the registered set, and
+`TestScopesAgree` holds the README's scope list to what `login` asks
+for.
+
+Rejected: registering the writes and refusing them per call, which
+offers the model tools it can never use; full scopes in read-only mode,
+which leave the grant wider than the server.
+Cost: a token granted read-only cannot write, so turning read-only off
+needs a fresh `login`. `export_document` registers in read-only mode, so
+a read-only server still writes files under the export directory.
+
+### D-56 A delete repeats its target, and delete_comment how the text it deletes begins
+
+A delete names its target twice. `delete_tab` takes `confirm_tab` and
+`delete_comment` takes `confirm_comment_id`, each repeating what the
+call deletes, and refused when it does not match. `delete_comment` also
+takes `text_start`: how the text it deletes begins, as `list_comments`
+shows it, the thread's comment or the reply's. The comment is read
+before the delete, a dry run included, and a `text_start` that is not
+how the text begins is `[stale]`. It carries at least the first 20
+characters, or the whole of a shorter text, with whitespace folded as
+the listing folds it.
+
+A client's prompt shows the call's arguments, so the repeated target and
+the start of the text are what a person approving the call reads.
+Retyping an id is a different act from setting a boolean, which a model
+supplies as easily as it omits. The check lives in the server, the half
+a client cannot skip as it can skip an annotation.
+
+Rejected: a `confirm: true` boolean, a second breaking input for nothing
+gained.
+Cost: the model types the witness, so it shows the call meant this
+target and is never the person's approval (D-52). A comment delete needs
+a listing first, since the start of the text comes from `list_comments`.
+
+### D-57 destructiveHint is true on every write but the three that only add, and readOnlyHint is on the reads alone
+
+`destructiveHint` is true on every write except `create_document`,
+`add_comment` and `export_document`, which only add: a new document, a
+new comment, or a new file in the export directory. `readOnlyHint` is on
+the reads alone, which change nothing. The writes marked destructive
+that are not gated register without `GDOCS_ENABLE_DESTRUCTIVE` and take
+no confirm; `delete_tab` and `delete_comment` say destructive too.
+
+The MCP schema defines `destructiveHint: false` as "the tool performs
+only additive updates", with true as the default
+([ToolAnnotations](https://modelcontextprotocol.io/specification/2025-11-25/schema#toolannotations)).
+An edit, a restyle, a resolved thread or a renamed tab changes what is
+there, whatever the guard allows. Clients prompt by these hints:
+claude.ai and Codex in its default mode by `destructiveHint`, VS Code on
+every tool without `readOnlyHint`. `add_comment` stays false on a
+Markdown or Word file, though the upload carries the whole file, because
+the guard refuses it when the file moved since the read.
+`TestOnlyToolsThatAddSayTheyAreNotDestructive` holds the set.
+
+Rejected: `destructiveHint: false` on a write the overwrite guard keeps
+from deleting more than was asked, which the schema's definition does
+not allow.
+Cost: claude.ai and Codex prompt for every edit, and VS Code for every
+tool not marked read-only, `export_document` included.
+
+### D-58 No tool carries requiresUserInteraction
+
+No tool carries Claude Code's
+`_meta["anthropic/requiresUserInteraction"]` mark. In Claude Code the
+operator decides with `permissions.allow` and `permissions.ask` rules.
+The README gives `ask` rules, and the staleness gate holds each tool
+they name to a registered one.
+
+Anthropic scopes the mark to tools whose permission prompt is itself the
+point, such as a consent step, and Claude Code prompts for a marked tool
+on every call, in every interactive mode
+([Claude Code MCP](https://code.claude.com/docs/en/mcp)). Neither delete
+here is that. Version history keeps a deleted tab's text. A deleted
+comment cannot be restored, but it is one item of many, often deleted
+many in a row, where a prompt on every call goes unread. Only Claude
+Code reads the mark, so it is a hint, and the control is that the
+deletes are not registered unless the deployer turns them on (D-54).
+
+Rejected: the mark on the gated tools, a prompt per item; the mark sent
+only to a client that declares no form elicitation, which a client
+escapes by declaring its capabilities differently per request.
+Cost: a deleted comment cannot be restored, and a Claude Code user who
+wants a prompt before one adds the README's `ask` rule.
+
+### D-59 No tool takes one of the server's settings, and no code a tool reaches can write them
+
+No tool takes one of the server's settings as an input, nested ones
+included, and no code a tool reaches can write them. The packages behind
+the tools import none of `internal/userconfig`, `internal/credentials`
+and `internal/auth`, which write the profile, the token and the sign-in,
+and none sets an environment variable. `TestNoToolTakesAServerSetting`
+reads the settings from the flags `config.Define` registers and fails on
+a tool input of the same name. `TestNoToolCanWriteTheServersSettings`
+follows the imports from `internal/tools` rather than a typed list.
+
+Only the operator changes what the server may do, outside the
+conversation. A model can be persuaded by what a document says, and a
+call that could name its own export directory, default write mode or
+destructive switch would move a limit the operator set. Holding the rule
+by the import graph checks a package added later without anyone
+remembering to.
+
+Rejected: a tool input that adjusts a setting for one call, such as the
+export directory, which a persuaded model could point anywhere.
+Cost: changing a setting means restarting the server with a different
+environment, from the client's configuration.
+
+### D-60 Errors are tool results, `[class] message`, from one closed vocabulary
+
+Every failure a tool reports is a tool result with `isError` set and the
+text `[class] message`, never a JSON-RPC error. The class comes from one
+closed vocabulary, `service.Classes` in `internal/service/service.go`,
+where each class says what it asks the reader to do. `gapi.Classes` is
+the client's half and is held to be a subset. The `classes` gate scans
+every class literal in `internal/` and fails on a class not listed, on a
+listed class nothing emits, and on a scan that read too little. The
+message carries the fix, such as "add occurrence or within" or "re-read
+the section".
+
+The MCP specification asks only for `isError`, so that a model sees the
+failure and can correct itself
+([tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools));
+the class is this server's convention. It tells the model what to do
+before it reads the sentence. `ambiguous` and `ambiguous_outcome` are
+different words because they ask for opposite things: one to choose
+between candidates, the other to go and look what happened. The live
+step "a stale revision" checks that a refusal reads `[conflict]`.
+
+Rejected: a vocabulary kept in comments in two packages, which nothing
+could check; one word for both meanings of `ambiguous`, which makes a
+duplicate write look like a bad argument.
+Cost: a class added to the code fails the build until it is listed with
+what it asks the reader to do.
+
+### D-61 Reads retry transient failures; a write repeats only on 429, and a 5xx or network failure on one is `[ambiguous_outcome]`
+
+Reads retry a transient failure, a 429, a 5xx, a throttling 403 or a
+network failure, with exponential backoff and full jitter, at most five
+attempts and 30 seconds a wait, honoring `Retry-After`. A write repeats
+only on 429, which proves nothing was applied. A 5xx or a network
+failure on a write is `[ambiguous_outcome]`: the write may have been
+applied, so read before trying again. The rule covers every kind of
+write, Drive's comment writes and uploads as well as document batches.
+
+Google's `code.proto` says of `UNAVAILABLE` that it is "not always safe
+to retry non-idempotent operations"
+([code.proto](https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto)).
+A repeated `batchUpdate` that had landed fails its revision check and is
+planned again, so an edit could apply twice, and `documents.create` and
+`comments.create` have no guard and duplicate outright.
+`[ambiguous_outcome]` is classed before the server or network error it
+wraps, so neither wins. `TestWriteRetriesOnlyOn429` and
+`TestDriveWriteRetriesOnlyOn429` hold both write paths.
+
+Rejected: repeating a write on 503; a retry guard keyed to document
+batches alone, under which a comment write repeats after a 500 and posts
+twice.
+Cost: a write Google failed with a 5xx is reported rather than retried,
+so the model reads before trying again, a call more than a retry would
+take.
+
+### D-62 A Google error is classified by its reason before its status
+
+A Google error is classified by its reason before its status. A 403
+whose reason is `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is a missing scope,
+`[forbidden]` with a message to run `login` again. A 403 whose reason is
+`rateLimitExceeded`, `userRateLimitExceeded` or
+`sharingRateLimitExceeded` is `[rate_limited]` and backs off on a read.
+`dailyLimitExceeded` is `[rate_limited]` without a retry, since waiting
+does not refill a daily quota. Only then does a 403 mean `[forbidden]`.
+Both spellings of a reason, camelCase in the legacy envelope and
+UPPER_SNAKE in an `ErrorInfo` detail, fold to one key. Every reason
+appears in the error text, so a refusal the classifier cannot improve on
+still reaches the model in Google's own word.
+
+Drive answers throttling with 403 rather than 429 and prescribes
+exponential backoff for it
+([handle errors](https://developers.google.com/workspace/drive/api/guides/handle-errors)).
+Read by status first, a throttled read is `[forbidden]`, never retried,
+and the model goes looking for a permission that is not missing. The
+same guide lists 403 reasons that mean "cannot", such as
+`fileNotExportable`, which stay `[forbidden]` with Google's reason
+quoted.
+
+Rejected: the status first, which makes throttling a permission error.
+Cost: the throttling reasons come from Drive's guide, and nothing here
+can make Google send one, so only the fakes test the mapping.
+
+### D-63 Every HTTP call has a deadline, the token refresh and the login code exchange included
+
+Every HTTP call the server makes runs under a deadline. Each attempt
+against Google's APIs carries `GDOCS_HTTP_TIMEOUT`, 60 seconds unless
+set. The token refresh and `login`'s code exchange run on a bounded
+client of their own, and a revision export polls its operation a bounded
+number of times.
+
+The refresh happens inside the oauth2 token source, on whatever client
+the context carries, not on the API client. With none there it runs on
+`http.DefaultClient`, which has no timeout, so a token endpoint that
+accepts a connection and never answers would hang the first tool call
+for the life of the process. `auth.boundHTTP` puts a client with a
+timeout in the context for both calls
+([oauth2.HTTPClient](https://pkg.go.dev/golang.org/x/oauth2#HTTPClient)).
+`TestTokenRefreshIsBounded` hangs a listener and fails without it, and
+`TestContextCancellation` holds the per-attempt deadline.
+
+Rejected: the signal context alone, which interrupts a hung call but
+does not bound one.
+Cost: an attempt that outlasts the deadline counts as a network failure,
+so a read tries again and a write is `[ambiguous_outcome]` (D-61), even
+when Google would have answered.
+
+### D-64 A five-second cache coalesces fetches of a document, and a write always fetches again
+
+Fetches of one document within five seconds share one read. The cache is
+keyed by the document id, and an entry older than five seconds is
+evicted on the next fetch. A write never plans from the cache: it
+fetches the document again, and checks the caller's handles against the
+read the caller saw (D-14).
+
+The cache coalesces, and decides nothing. A model often reads an
+outline, then a section, then finds a passage, all within seconds, and
+three `documents.get` calls for one unchanged document spend the read
+quota for nothing. Correctness comes from the revision guard on every
+write (D-30), never from what a read remembers, so a stale cached read
+can make a read late but cannot make a write wrong. A write also drops
+the document's entry once it lands. `TestFetchCacheAndHandles` holds the
+window: a read inside it is served from the cache, and one after it, or
+after an invalidation, fetches again.
+
+Rejected: caching for correctness, such as planning a write against a
+cached read, which would write against a document somebody else may have
+changed.
+Cost: a read inside the window does not show a change somebody else made
+a moment before it.
+
+### D-65 Everything derived from one fetch is derived once
+
+Everything this server derives from one fetch is derived once, on first
+use, and shared by every caller of that fetch. That covers the handle
+memory, the located comment threads, and per segment the searchable text
+and the sorted list of what a deletion could destroy. The searchable
+text is every paragraph's normalized characters in one string, so a text
+target or a quoted comment is one substring search, and a match maps
+back to indices through an offset per paragraph.
+
+A call can resolve several targets, run the guard and render a read from
+the same document. Built per use, each of those walks the document
+again, and the cost grows with the document's size times the number of
+uses. The overwrite guard, `read_document` with comments and
+`list_comments` share one located thread list, so the three can never
+disagree about where a comment is. `make bench` measures these paths
+over `doctest.Large`, a generated document of about 150 pages, and
+`TestLargeFixtureIsConsistent` holds that fixture to its own shape.
+
+Rejected: matching text paragraph by paragraph, which rebuilt the
+normalized text on every search and made locating quoted comments scale
+with the comments times the paragraphs.
+Cost: what remains per write is the fetch itself. `make bench` is not in
+`make check`, so nothing fails when a path starts to scale with the
+document's size again.
+
+### D-66 Sign-in is Google's desktop flow on a loopback port with PKCE
+
+`google-docs-mcp login` signs in through Google's flow for desktop apps.
+It listens on 127.0.0.1 on a random port, sends the browser to Google
+with a PKCE challenge, and exchanges the code that comes back for a
+refresh token. The client file must be a Desktop app client; a web
+client is refused.
+
+Google documents this flow for installed applications and blocks the
+out-of-band flow, which had the person paste a code back
+([OAuth for installed apps](https://developers.google.com/identity/protocols/oauth2/native-app)).
+The loopback redirect keeps the code on the person's machine, PKCE keeps
+it useless to anything that intercepts it. `TestLoginHappyPath`,
+`TestLoginRejectsBadStateAndDenial` and `TestLoginTimeoutAndCancel` hold
+the flow, its state check and its bounded wait.
+
+Rejected: the out-of-band flow, which Google blocks; a web client with a
+hosted callback, which needs a server somebody runs (D-01).
+Cost: over SSH the browser and the listener sit on different machines,
+so the person forwards the port by hand. The `token_uri` and `auth_uri`
+of the client file are used as given, falling back to Google's endpoints
+only when missing, so a tampered file could send the code and the token
+elsewhere. Issue #114 asks whether to pin both to Google's endpoints
+or refuse any other host.
+
+### D-67 The refresh token goes to the OS keyring, else an owner-only file with a warning, and the environment overrides both
+
+The refresh token goes to the OS keyring: Secret Service on Linux,
+Keychain on macOS, Credential Manager on Windows, under the profile's
+name. When the keyring fails, as it does on a headless machine with no
+session bus, the token goes to a file under the profile directory with
+mode 0600, and the server warns on every use. `GDOCS_REFRESH_TOKEN`
+overrides both, for automation.
+
+A keyring is where a desktop keeps a secret, and the person's own login
+unlocks it. A server that refused to run without one would not run on a
+headless machine or in a container. Failing over to an owner-only file
+with a warning is what `gh` does, and the warning keeps the weaker store
+from passing unnoticed. `logout` revokes the token and deletes it from
+both stores. `TestEnvWins`, `TestFileFallbackWhenKeyringBroken` and
+`TestKeyringSaveRemovesStaleFile` hold the order.
+
+Rejected: falling back to the environment alone, which leaves a headless
+machine without a working `login`; a plaintext file with no warning.
+Cost: on Windows the file has no POSIX mode bits, so it is protected
+only by the access control it inherits from the person's profile
+directory.
+
+### D-68 The scopes are documents and drive, or their read-only pair
+
+`login` asks for `documents` and `drive`, or `documents.readonly` and
+`drive.readonly` in read-only mode (D-55). Nothing else is requested,
+and the README lists the scopes `login` asks for.
+
+The server works on any document the person names, created by anyone.
+`drive.file` reaches only the files the app created or was handed
+through a picker, so it cannot open a document somebody shared. `drive`
+is what reaches every document the person can open, and what search,
+comments, revisions and file uploads use
+([Docs scopes](https://developers.google.com/workspace/docs/api/auth),
+[Drive scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)).
+A token missing a scope makes Google answer 403, which the server
+reports as `[forbidden]`, saying the credentials lack a scope and to run
+`login` again. `TestScopesAgree` holds the README's scope list to the
+code.
+
+Rejected: `drive.file`, which cannot reach documents the app did not
+create.
+Cost: `documents` is a sensitive scope and `drive` a restricted one.
+That is fine for a per-person app that is never published, and it is why
+each person brings their own OAuth client (D-01).
+
+### D-69 Configuration is the environment, each variable with a bound flag, read through config and validated once at start
+
+Configuration is the environment. Every setting is a `GDOCS_*` variable
+with a flag of the same name bound to it, and a flag given on the
+command line wins. Every reader goes through `config.Lookup`, which
+reads a value of spaces alone as unset, and validation runs once at
+start. A relative `GDOCS_CONFIG_DIR` or `GDOCS_EXPORT_DIR` is refused
+there, as is a value outside a setting's rule.
+
+Claude Code, Claude Desktop and Cursor pass a stdio server only a
+command, its arguments and its environment, so the environment is what
+every client can set. A bound flag serves a person running the binary by
+hand. One registry, `config.Vars`, records every variable `Define`
+reads; the staleness gate holds docs/configuration.md to it and the
+bundle gate derives its settings from it (D-93).
+`TestEveryReaderOfAVariableGoesThroughConfig` refuses a read of a server
+variable anywhere else, `TestEveryVariableTheCodeNamesIsInEnvVars`
+refuses one the registry lacks, and `TestASettingOfSpacesIsUnset` holds
+the spaces rule.
+
+Rejected: configuration by environment alone, with no flag to set it
+from a terminal; a configuration file, which no client passes.
+Cost: a bad setting stops the server before it serves, so the client
+shows it failing to connect and the reason is only on stderr.
+
+### D-70 A profile per Google account, each with its own client, token and account
+
+A profile is one Google account's configuration. `GDOCS_PROFILE` names
+it, and each profile keeps its own OAuth client file path, refresh token
+and account. The default profile lives in the server's configuration
+directory, and any other under `profiles/<name>/` below it. The keyring
+entry is filed under the profile's name.
+
+A refresh token belongs to the OAuth client that issued it, and a token
+reaches one account's documents. A person with a work and a personal
+account runs two server entries, each with its own profile, so neither
+call can reach the other account's documents by mistake. A profile name
+is lowercase letters, digits, `-` and `_` (`config.ProfileRule`), since
+it becomes a directory and a keyring account on every platform.
+`TestProfileRule` and `TestPathsAndRoundTrip` hold the rule and the
+layout.
+
+Rejected: one server holding several accounts and choosing per call,
+which would let a tool argument decide whose access a call uses (D-59).
+Cost: two accounts are two server entries in the client's configuration,
+each with its own `login`.
+
+### D-71 The server always starts; without a working credential every tool answers `[auth]`, and doctor is the check for people
+
+The server always starts. With no refresh token, a token Google rejects,
+or a client file that will not load, it logs a warning to stderr and
+serves anyway, and every tool answers `[auth]` saying to run
+`google-docs-mcp login`. At start it checks the token once, off the
+startup path. `doctor` is the check for people: it reports what
+docs/configuration.md lists, the credentials, the token exchange, the
+granted scopes, the Drive API and, given a document, the Docs API and
+the comments view.
+
+A server that exits on a failed credential check is shown by the client
+as "failed to connect", and the model never learns why. Serving the
+error keeps the reason where the model can read it and pass it on: one
+command to run. `TestAuthFailureSurfacesAsAuthClass` holds the tool
+side, and the smoke gate starts the binary with no credentials.
+
+Rejected: exiting on a failed startup probe, which hides the reason from
+the model.
+Cost: a deployment with no working login looks healthy until the first
+call. A bad setting still stops the server at start (D-69), since no
+tool could answer for it.
+
+### D-72 Tool names are snake_case verb_noun with no dots
+
+Tool names are snake_case verb_noun with no dots: `get_document`,
+`edit_table`, `review_suggestion`. Claude Code prefixes each with
+`mcp__<server>__`, and the names stay readable after it.
+
+The MCP specification allows more characters than this, and clients
+differ in what they accept. A name made of lowercase words and
+underscores is accepted everywhere, and a model finds a tool by the name
+it would guess for the act, and the agent evals' traces show whether it
+finds it (D-84). A name says what it acts on in Docs terms, so a person
+running this server beside a Drive or Sheets server sees which one a
+call goes to.
+
+Rejected: dots or other separators in a name, which some clients refuse
+and which make a prefixed name ambiguous.
+Cost: no test checks the pattern, so a name is held to it in review. A
+released name can only change in a major release (D-77).
+
+### D-73 Schemas are flat structs with an op or action enum, with no unions and no vendor keywords
+
+Every input schema is a flat struct. A tool that does several kinds of
+thing takes an `op` or an `action` field naming the kind, with every
+field of every kind beside it, and each field's description says which
+kinds take it. No schema uses `oneOf`, `anyOf` or a vendor keyword.
+
+Every client reads a flat object of plain types the same way. A union or
+a vendor keyword is read differently from client to client, and the
+servers before this one failed there. A flat struct is also what the
+schema dump and the schema diff compare field by field (D-77). The
+server checks per kind what the schema cannot say: a `replace_all`
+without find text, an `insert_table` past its row or column limits, or a
+`create_named_range` without a name is `[invalid]` before anything is
+sent.
+
+Rejected: `oneOf` unions per op, and vendor keywords, which not every
+client reads.
+Cost: a schema lists fields a given op ignores, and which fields an op
+needs lives in the descriptions and the server's checks rather than in
+the schema. No test checks the shape, so it is held in review.
+
+### D-74 Page and section layout is a tool of its own
+
+Page and section layout is the `layout_document` tool, apart from
+`format_document`. Its ops are `page` (`updateDocumentStyle`), `section`
+(`updateSectionStyle`), `section_break` (`insertSectionBreak`) and
+`named_style` (`updateNamedStyle`). Lengths are points throughout, and
+`get_document` names a standard page size on the way back, so a model
+need not recognize 612×792 as US Letter.
+
+`format_document` styles one passage: a target and the text or paragraph
+properties to set. Layout acts on a whole tab or section, and shares
+almost no argument with it. Flat schemas carry every field of every op
+side by side (D-73), so the two in one tool would double that tool's
+schema and offer a model page margins beside a passage's font. A named
+style redefines a style for the whole tab, so it sits with layout, and
+`get_document` reports the definitions back (D-23).
+`TestLayoutToolEndToEnd` drives every op through the server.
+
+Rejected: more ops on `format_document`, which would double its schema.
+Cost: a change of a passage's look and a page's look are two tools, and
+a model asked for both makes two calls.
+
+### D-75 A border is one shorthand value
+
+A border is one shorthand value: a width, a dash style and a color in
+any order, such as `1pt solid #cccccc`, or `none` to clear it. A part
+left out takes 1pt, solid or black. One value sets all four edges, and a
+field per edge sets one. A read reports an edge with no width as no
+border.
+
+The Docs API draws an edge only when its width, dash style and color are
+all set, so a caller who sets one part gets nothing drawn without the
+defaults. Google answers an edge that is not drawn with an empty border
+object, which a read reports as no border rather than as `0pt solid`. A
+field per part of every edge would multiply the properties of
+`format_document`, `edit_table` and `layout_document`, which a flat
+schema pays for in every call (D-73). `plan.ParseBorder` reads the
+value, and `TestBorderShorthand` holds its forms and refuses a malformed
+one.
+
+Rejected: a field per part of each edge, which multiplies the schema's
+properties.
+Cost: changing one part restates the others. Setting only a color on a
+2pt dotted edge draws it 1pt and solid.
+
+### D-76 Three `gdocs://` resource templates carry a document as markdown; there is no static list and no subscription
+
+The `gdocs://` resource templates carry a document as markdown, for a
+client that attaches a document rather than calling a tool:
+`gdocs://{document}`, its `/outline`, and `/tabs/{tab}`. The whole
+document is every tab's body in order, cut at the read tools' largest
+budget. There is no static resource list and no subscription, and a
+resource carries no handles, suggestions or comments.
+
+A static list of resources would be a Drive listing, which belongs to a
+Drive server (D-02). A subscription needs a push from Google, which the
+Docs API does not offer, and polling for one would spend the read quota.
+Targeting, budgets and handles are the read tools' job, so a resource is
+the plain text a client can attach. go-sdk matches a template through an
+anchored RFC 6570 expression in which `{document}` excludes `/`, so no
+template shadows another
+([resource.go](https://github.com/modelcontextprotocol/go-sdk/blob/v1.8.0/mcp/resource.go)).
+A document that does not exist is the specification's resource-not-found
+error, and the live driver reads all three templates and one naming a
+document that does not exist. `TestResources` holds the templates.
+
+Rejected: a static resource list, which would be a Drive listing;
+subscriptions, which Google offers no push for.
+Cost: a resource cannot be scoped, budgeted or targeted, so a model that
+needs any of that calls `read_document`.
+
+### D-77 The released tool surface is a contract the schema diff holds; the prose of a text output is not part of it
+
+The released tool surface is a contract. Removing or renaming a tool or
+a resource template, making an argument required, or removing an output
+field is a breaking change, which only a major release may make. The
+`structuredContent` a tool returns is covered; the prose of its text
+output is not.
+
+A client is written against the surface, and it breaks when the surface
+moves without notice. `make schema-diff` builds the binary, dumps its
+schemas (D-79) and compares them with the last tag's. A break fails it
+unless the CHANGELOG declares it in a `**Breaking:**` entry naming the
+item in backticks, under a version that raises the major. The text
+output is written for a model, and is reworded when a model reads it
+badly, so it stays outside the promise. The README states the promise
+and the exclusion. `TestSchemaDiffBreaksOnALostOutputField` and
+`TestUndeclaredBreaks` hold the diff.
+
+Rejected: a stability promise gated on an outside user's report or on
+evals through a second client, neither of which a check can hold.
+Cost: an output field keeps its place until a major release, even one
+that means nothing. Issue #108 tracks removing the deprecated
+`preview` fields of `get_document`'s capabilities and `status --json` at
+the next major.
+
+### D-78 A change to the tool surface names each changed item in a commit footer
+
+A pull request that changes the tool surface names each changed item in
+a commit footer. A `SCHEMA-CHANGE:` footer names an item that changed
+without breaking, and a `BREAKING CHANGE:` footer one that breaks.
+Annotations count, since a flipped `destructiveHint` changes whether a
+client asks the person. `schema-ack` compares the pull request's head
+with its merge-base, and runs only on a pull request.
+
+The schema diff (D-77) says what changed; a footer says somebody meant
+it. A footer is read as Conventional Commits defines one
+([1.0.0](https://www.conventionalcommits.org/en/v1.0.0/#specification)):
+a value may wrap over lines, a line that starts another footer ends it,
+and a `Token #value` footer counts toward the block but acknowledges
+nothing. The names are the list before the value's first colon and
+space, and a name is a whole token, so `add_comment` does not name
+`add_comments`. `TestSchemaAckNeedsEveryItemNamed` and
+`TestARefusalNamesTheFooterThatFixesIt` hold the rule and its message.
+
+Rejected: a footer value read as one line, which drops a wrapped list; a
+`Token #value` footer that acknowledges, which has no description to
+tell from names.
+Cost: a change to the surface fails CI until a commit it adds names
+every changed item, so a fix-up commit may exist only to carry a footer.
+
+### D-79 The schema dump is what an in-memory client session lists
+
+`--dump-schemas` prints what a client is told: the tools, the resource
+templates, the fixed resources and the prompts, as an MCP client session
+lists them from a server in memory. The dump is of the whole registrable
+surface, every switch on, beside the read-only server's instructions.
+
+The SDK has no public way to enumerate what a server registered, and a
+second registry kept for the dump would describe what someone remembered
+to add rather than what the wire carries. Asking the server through a
+real session gives the schemas exactly as the SDK serializes them. A
+tool behind a switch can lose a field like any other, so the dump starts
+the server under `tools.FullSurface`, which turns on every switch
+`Register` reads. `TestDumpSchemas` and
+`TestDumpSchemasListsEverythingAClientIsTold` hold the dump, and
+`TestFullSurfaceRegistersEverything` holds that no combination of
+switches registers a tool the full surface does not.
+
+Rejected: a parallel tool registry for the dump, which can drift from
+what is registered.
+Cost: `FullSurface` must name every switch `Register` reads, and a
+switch added without it fails `TestFullSurfaceRegistersEverything`.
+
+### D-80 Unit tests are network-free on synthetic fixtures, and a fake answers with the errors Google documents
+
+Unit tests touch no network. A document comes from the synthetic fixture
+`testdata/sample.json`, loaded through `internal/doc/doctest`, or from
+the generated `doctest.Large`. Google is a fake behind the `gapi`
+interface or an `httptest` server, and a fake answers an error the way
+Google documents it: the status, the reason string and the message.
+
+The code branches on Google's reason, not its status. A 403
+`userRateLimitExceeded` means slow down, and a 403
+`storageQuotaExceeded` means the Drive is full
+([Drive errors](https://developers.google.com/workspace/drive/api/guides/handle-errors)).
+A fake with a plausible invented reason tests the invention, and one
+that refuses with no reason agrees with a bug by omission, since it
+cannot reach the branch that is missing. So a fake's error is copied
+from Google's documentation or a recorded answer, with the source beside
+it.
+
+Rejected: an invented reason or message in a fake, which tests the
+invention rather than Google.
+Cost: a fake encodes a belief about Google, and green unit tests prove
+only what the fakes believe. The integration tests and the live driver
+are what check the belief (D-83).
+
+### D-81 The coverage floor holds every package `go list` derives, and each exemption names its reason
+
+Each package under `internal/` clears a statement-coverage floor on its
+own, on Linux, macOS and Windows. The list of packages is what
+`go list ./internal/...` returns, so a package is under the floor from
+its first commit. A package is exempt only by name, with its reason:
+`internal/doc/doctest` is fixtures and `internal/gdocs` is wire types.
+
+An average lets a well-tested package hide an untested one. A
+hand-written list omits a package silently, and the omission looks
+exactly like a package that does not exist. An exemption naming a
+package the list does not return is worse than none, since it reads as a
+considered choice and exempts nothing. `make cover` runs the floor,
+which `TestEveryExemptionNamesARealPackage` and
+`TestEveryExemptionHasAReason` hold to the tree.
+
+Rejected: a hand-written list of packages under the floor.
+Cost: the tests measure `-coverpkg=./internal/...`, so `cmd/` is outside
+the floor, and the program's own paths are held by the smoke gate and
+its tests alone.
+
+### D-82 A guarantee stated over the tools is tested over every registered tool
+
+A guarantee stated over the tools is tested over every registered tool,
+never over a list someone wrote. `toolArgs` in `internal/server`'s tests
+holds one call's arguments for every tool, and `TestEveryToolHasArgs`
+fails when a registered tool has no entry.
+`TestDebugLogsCarryNoDocumentData` drives that whole table and fails if
+a log line carries the fixture's id, title or text (D-04).
+
+A test that names the tools it drives proves the guarantee for those
+tools. A tool added later is exempt until somebody remembers, and
+nothing says so. Driving the registered set makes a new tool part of the
+guarantee the day it is registered. Whether a call succeeds against the
+fake does not matter: a refusal is logged too, and a refusal is where a
+message is most tempted to quote the document.
+
+Rejected: a test that names the tools it drives, which shrinks to the
+tools someone thought of.
+Cost: adding a tool costs a `toolArgs` entry, a live step (D-83) and a
+row in the README's tool table, which the staleness gate checks, and
+each fails loudly when it is missing.
+
+### D-83 The live driver drives every tool and op kind through the binary over stdio; it is run by hand, never in CI
+
+`make live` drives the built binary over stdio, as a client does,
+against the signed-in account: every registered tool and every op kind,
+on scratch documents it creates. A step that must be refused asserts its
+refusal, so a green run means the guards fired as well as the writes
+landed. The driver is a client that can be asked, and fails the run if
+the server asks anything (D-52). Every line it prints goes through the
+redactor (D-07).
+
+Unit tests run against fakes written from what Google is believed to do,
+and only a run against Google tests the belief. `TestCoverage`, in the
+same package, reads the driver's own source and fails when a registered
+tool has no step or an op kind never appears as an `op`, so the rule is
+a check rather than a comment. It is run by hand, never in CI: it writes
+to a real account and spends its quota.
+
+Rejected: the coverage rule as a comment in the driver, which nothing
+holds.
+Cost: a run writes to the person's own Drive, needs
+`GDOCS_ENABLE_DESTRUCTIVE=true` for the delete steps, and leaves its
+scratch documents behind for the person to delete.
+
+### D-84 Agent evals score whether a model can do the job through the tools; they are run by hand
+
+The agent evals score whether a model can do a job through these tools.
+`TestEvals`, under the `evals` build tag in `internal/evals`, runs each
+task as a subtest: it seeds a scratch document through the server, runs
+Claude Code headless with this server's tools alone, and checks the end
+state read back through the server and the trace of tool calls. Some
+tasks score a refusal: what the model does with `[not_found]`, a
+read-only server or a stale revision. They run by hand.
+
+Unit tests and the live driver show the tools work; they cannot show a
+model understands them. The evals measure what a model makes of a result
+and an error message, the one surface written for a model. They are the
+evidence behind read tools returning text alone (D-19), and the trace
+shows whether the model forced past the guard or explained it. Each
+trace goes through the redactor before it is written (D-07).
+
+Rejected: running the evals in CI, which would need a signed-in account,
+the `claude` CLI and model usage on every pull request.
+Cost: each task spends model usage, so a change that reads worse to a
+model can pass `make check` and wait for the next eval run to show it.
+
+### D-85 `make check` and CI run the same gates
+
+`make check` and CI run the same gates. `scripts/gates` keeps one list
+of its commands, and each says whether it is a gate. `make parity` reads
+that list, the Makefile's `check` target and `ci.yml`, and fails on a
+gate one of them runs and the other does not. It also fails when a
+`vet -tags=` pass in the Makefile is missing from CI, and refuses to
+compare lists it could not read.
+
+The two lists live in different files, and a person edits one of them at
+a time. When they drift, the build-tagged files compile only where
+somebody runs `make check` by hand. The comparison is by command, since
+`make cover` runs `gates coverage` and the target's name appears in no
+workflow. `schema-ack` is the stated exception: it measures from a pull
+request's merge-base, so it runs in CI on a pull request and nowhere
+else. `TestParityCatchesDivergence` plants the drift in each direction,
+and `TestParityHoldsThePullRequestGates` holds the exception.
+
+Rejected: adding the missing `vet -tags=` lines to the workflow by hand,
+which fixes one drift and leaves the mechanism.
+Cost: a gate is added in one change to the registry, the Makefile's
+`check` target and `ci.yml`, or `make parity` fails.
+
+### D-86 Every action is pinned to a full commit SHA, and every tool an action installs to one exact version
+
+Every action a workflow uses is pinned to a full commit SHA, with its
+version in a trailing comment. Every tool an action installs is pinned
+to one exact version beside it: goreleaser, cosign, syft, gitleaks and
+golangci-lint. The `pins` gate fails on a tag, a range or `latest`, on
+an installer whose inputs it has not classified, and when it finds no
+workflows or no versions to read. The Makefile runs golangci-lint,
+govulncheck and go-licenses at the versions CI pins, and the gate fails
+when a copy drifts, so `make check` runs what CI runs.
+
+A tag is mutable by anyone who can write to the action's repository, and
+a full SHA is the only way to use an action as an immutable release
+([GitHub's hardening guide](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions)).
+A SHA pins the wrapper, not what it installs: an installer that fetches
+the newest major changes what signing needs while the SHA stays put. A
+`~>` range resolves to the highest match, so it floats too.
+`TestPinsGate`, `TestUnpinnedTools`, `TestEveryActionIsClassified` and
+`TestPinsHoldTheMakefileToCI` hold the rules.
+
+Rejected: a major tag such as `@v7`, which its owner can move; a `~>`
+range, which resolves to the newest match.
+Cost: Dependabot proposes the bumps weekly, for Go modules and actions,
+and each one goes through a pull request that CI judges.
+
+### D-87 CI runs on Linux, macOS and Windows, and every `run` step in bash
+
+CI runs the build, the tests with the race detector and the coverage
+floor on Linux, macOS and Windows. Every workflow sets bash as the shell
+for every `run` step at the workflow level, and the `pins` gate checks
+that the block is there (`TestPinsShell`).
+
+A suite that passes on one machine has passed on one machine. The
+Windows runner's default shell is PowerShell, which turns
+`-coverprofile=cov.out` into a file called `cov`, so the same line means
+different things on different runners. Set at the workflow level, the
+shell reaches a job somebody adds later, where a per-step setting
+reaches only the steps that remembered it. An explicit bash runs as
+`bash --noprofile --norc -eo pipefail`, so a command failing in a
+pipeline fails the step everywhere
+([workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defaultsrunshell)).
+
+Rejected: `shell: bash` per step, which a new job or step forgets.
+Cost: `pipefail` is on for Linux and macOS too, and the setting never
+reaches a `uses:` step. No gate holds the platforms in the matrix:
+`make parity` compares gates, not runners.
+
+### D-88 A workflow is read-only at the top, raises write per job, and keeps no checkout token
+
+Every workflow starts with read-only permissions, or none, at the top. A
+job that needs to write raises that permission in its own block: the
+release job raises `contents`, `id-token` and `attestations`, and CodeQL
+raises `security-events`. Every checkout sets
+`persist-credentials: false`.
+
+A permission granted at the top reaches every job, including one added
+later that needs none of it. Raising it per job keeps a compromised or
+mistaken step to what its own job needed, which is what OpenSSF
+Scorecard's Token-Permissions check asks for
+([Scorecard checks](https://github.com/ossf/scorecard/blob/main/docs/checks.md#token-permissions)).
+No workflow pushes with the checkout's token, so leaving it on disk for
+later steps is exposure with no use.
+
+Rejected: permissions declared once at the top of a workflow; a checkout
+token left on disk for later steps.
+Cost: a job that needs a write carries a `permissions` block of its own,
+and no gate checks either rule, so both are held in review.
+
+### D-89 CodeQL runs on pushes, pull requests and weekly
+
+CodeQL analyzes the Go code on every push to `main`, on every pull
+request, and weekly. The weekly run is what reaches code that has not
+changed: a query CodeQL adds after a merge still runs over it.
+
+Tests check what the code was written to do, and `govulncheck` checks
+the dependencies against known vulnerabilities. Neither looks for a
+class of defect in the code itself, such as an unchecked path or an
+injection. Static analysis does, and OpenSSF Scorecard's SAST check
+names CodeQL for it
+([Scorecard checks](https://github.com/ossf/scorecard/blob/main/docs/checks.md#sast)).
+The workflow starts read-only and raises `security-events` for the
+analysis job alone (D-88).
+
+Rejected: tests and vulnerability scanning as the whole of static
+analysis.
+Cost: every pull request waits for a CodeQL build and analysis beside
+CI, and the weekly run reports on `main` with nobody's change in it.
+
+### D-90 A tag is the whole release, and its notes are that version's CHANGELOG section
+
+Pushing a `v*` tag is the whole release. The release workflow builds the
+archives, the bundle and the checksums, signs and attests them (D-91),
+and publishes a release that is not a draft. Its notes are that
+version's section of `CHANGELOG.md`, which `gates release-notes` prints
+and passes to goreleaser. A tag with no section, or an empty one, fails
+the release. The steps are in [release.md](release.md).
+
+A release that waits on a manual step goes missing when the step is
+forgotten, and a draft nobody publishes is that. The CHANGELOG entry is
+written for a person deciding whether to upgrade, where a list of commit
+subjects is written for the code's authors. goreleaser keeps no
+`changelog` block, because `changelog.disable` is read before the notes
+file is opened and leaves the body empty
+([changelog.go](https://github.com/goreleaser/goreleaser/blob/v2.18.1/internal/pipe/changelog/changelog.go)).
+`TestReleaseNotesTakesOnlyItsOwnVersion` and
+`TestReleaseNotesRefusesAnEmptySection` hold the notes.
+
+Rejected: `changelog.disable`, which empties the release body; a draft
+release, which waits for a step nobody may take.
+Cost: tags are pushed one at a time, since GitHub drops the tag events
+past the third in one push, and the workflow can be run by hand against
+a tag when one is dropped.
+
+### D-91 A release is signed for people and attested for machines
+
+A release is signed for people and attested for machines. The checksum
+file carries a keyless Sigstore signature, as a bundle tied to the
+release workflow's identity, so a person can check a download with
+`cosign verify-blob`. Every archive, the Claude Desktop bundle and the
+checksum file carry a GitHub build provenance attestation, which
+`gh attestation verify` checks against this workflow and commit. Every
+archive also ships an SBOM.
+
+The two answer different questions. A signature over the checksums says
+the files are the ones the release workflow published, with no private
+key to hold or leak. Provenance says which workflow, commit and runner
+built each file. The bundle is attested in its own right, since its row
+in the checksum file is a claim about that file rather than about the
+bundle. The README gives both commands.
+
+Rejected: the asset formats OpenSSF Scorecard's Signed-Releases check
+looks for, `.asc`, `.minisig` or `.intoto.jsonl`, which would add a key
+or a format nobody here verifies with.
+Cost: Scorecard's Signed-Releases check sees neither the Sigstore bundle
+nor the attestations, so it scores the releases as unsigned.
+
+### D-92 Changes reach main through a pull request with CI green; no second reviewer is required
+
+Changes reach `main` through a pull request, with CI green on Linux,
+macOS and Windows, the maintainer's own changes and release commits
+included. No second reviewer's approval is required.
+
+`main` is released code: every version on the releases page is built
+from a tag on it. A pull request is where CI judges a change before it
+lands, and a direct push skips that. A rule requiring a second reviewer
+cannot be met by a repository with one maintainer, and a rule that has
+to be bypassed on every merge teaches people to bypass rules. The rule
+is set in GitHub's repository settings, and `CONTRIBUTING.md` says how a
+change travels.
+
+Rejected: OpenSSF Scorecard's Branch-Protection tier 5, two reviewers
+and code-owner approval with administrators included, which a
+single-maintainer repository cannot meet.
+Cost: a change merges on its author's review and CI alone, so a defect
+CI cannot see reaches `main` unless the author's own review catches it.
+
+### D-93 Each release carries a Claude Desktop bundle in the layout the sibling servers share, its settings derived from config.Vars
+
+Each release carries a Claude Desktop bundle, a `.mcpb`, in the layout
+the sibling servers' bundles share, google-sheets-mcp's among them:
+`server/google-docs-mcp-darwin` (a universal binary),
+`server/google-docs-mcp.exe`, `server/google-docs-mcp-linux-amd64`,
+`server/google-docs-mcp-linux-arm64` and `server/launch-linux.sh`, with
+`LICENSE` and `README.md` at the root. What it asks for at install is
+derived from `config.Vars`: every variable the server reads, less a
+removed one and less each that `bundleLeftOut` names with its reason,
+asked under the variable's name without `GDOCS_`, lowercased.
+
+Opening a bundle installs the server and asks for its settings, where
+the alternative is a hand-edited configuration file. A setting added to
+the server is asked for until the manifest asks for it or a reason is
+written, so the bundle cannot fall behind. `make mcpb` holds the
+committed manifest to the files the packer stages and to the
+specification, which requires a privacy policy of a server that sends
+user data to a service
+([MANIFEST.md](https://github.com/anthropics/mcpb/blob/v2.1.2/MANIFEST.md)).
+The gate, the packer and the registry entry read the manifest through
+one function, which refuses a key repeated in one object, case aside.
+
+Rejected: a `tools` list, which hosts show for display only and which is
+wrong for most installs, since read-only mode and the destructive switch
+change what registers; `$schema` at a branch, which upstream can change
+under the manifest.
+Cost: Windows carries amd64 only, which Windows on arm64 runs under
+emulation. Issue #113 covers the settings table that
+docs/configuration.md and the README type by hand, which can drift from
+`config.Vars`.
+
+### D-94 A bundle install starts the server as an unconfigured start does, every setting passed by env
+
+A bundle install starts the server exactly as an unconfigured start
+does. Every switch is a boolean defaulting to false, and every other
+setting defaults to `""`, which the server reads as unset. No default
+holds a `${...}` reference. Every setting reaches the server through
+`env`: `mcp_config.args` is `[]`, a platform override carries neither
+`env` nor `args`, and every command starts with `${__dirname}/` and
+names a staged program.
+
+Claude Desktop approves each tool, and a person can set a tool to always
+allow
+([Claude connectors](https://claude.com/docs/connectors/getting-started)),
+so a switch left off is the one guard a bundle install keeps.
+`make mcpb` starts the server's own `config.Load` from the environment
+the defaults give it and refuses any field that differs from an
+unconfigured start, naming it. The reference host leaves a blank
+optional field as the text `${user_config.x}` and replaces the base's
+`env` and `args` with an override's
+([config.ts](https://github.com/anthropics/mcpb/blob/v2.1.2/src/shared/config.ts#L118-L120)).
+The profile and default write mode fields give the rules the server
+refuses another value with. `TestTheConfigDiffNamesTheFieldsThatDiffer`,
+`TestTheBundleSettingsRefuseEachBreak` and
+`TestVarsDescribeWhatBuildDoes` hold it.
+
+Rejected: an optional key without a default; `env` or `args` on a
+platform override; a relative command; a switch defaulting to the text
+`"false"`.
+Cost: a person turns each switch on by hand after install. Issue #112
+asks to install the bundle in Claude Desktop itself on each platform,
+since the host's handling rests on the reference host and Claude's docs.
+
+### D-95 The server asks the person before a risky write, through form elicitation
+
+The server could confirm a risky write itself. Before a delete or a
+forced write, it would put a form with no fields to the person through
+MCP form elicitation, and write only on an accept. It is declined: the
+server asks the person nothing (D-52).
+
+The MCP specification puts consent to each tool call on the host, and
+lets a client answer an elicitation "from the user or other sources"
+([elicitation](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation)).
+Clients answer such a question with nobody there: a Claude Code
+`Elicitation` hook accepts it with no dialog, and Codex in full access
+accepts a form with no fields by itself. Others never draw it, and no
+client's permission rules match it. A client remembers an approval per
+tool, never per argument, so a risky variant carried as an argument
+rides along unseen once its tool is always allowed. People stop reading
+prompts they see often. `forbidigo` refuses the SDK's `Elicit`.
+
+Rejected: confirming writes through elicitation; Claude Code's
+`requiresUserInteraction` mark sent per client beside the question; a
+setting that refuses the asking writes on a client that cannot ask.
+Cost: a client running with nobody watching makes every registered
+write, so `GDOCS_ENABLE_DESTRUCTIVE` stays off for one, and a
+configuration that still sets `GDOCS_REQUIRE_PROMPT` on is refused at
+start (D-53).
+
+Next ID: D-96

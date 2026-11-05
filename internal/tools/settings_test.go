@@ -16,7 +16,7 @@ import (
 )
 
 // The model never widens its own reach: only the operator changes what
-// this server may do, outside the conversation (§12a). These two tests
+// this server may do, outside the conversation. These two tests
 // hold that no tool can write the server's settings.
 
 // No tool takes one of the server's settings as an input, nested ones

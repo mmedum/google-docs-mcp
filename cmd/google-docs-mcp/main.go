@@ -256,7 +256,9 @@ func runServer(args []string, stdout, stderr io.Writer) int {
 // the reason as JSON-RPC error -32004 ("server is closing") with the EOF
 // only as text, so errors.Is(err, io.EOF) does not match it and the
 // process would exit non-zero on an ordinary shutdown — which a host
-// then reports as a crash.
+// then reports as a crash. The smoke gate's abrupt close of stdin
+// checks it.
+// https://github.com/modelcontextprotocol/go-sdk/blob/v1.8.0/internal/jsonrpc2/wire.go
 func clientWentAway(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
 		return true
@@ -518,13 +520,11 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 // redactText is the one place this command removes what must not be
 // printed. Every stream it writes goes through it.
 //
-// It exists because masking at each call site does not hold: three
-// separate discoveries of one rule — the status line, then the startup
-// log, then `login` — each got a different subset of it, and the newest
-// insight (an address can arrive inside an error nothing here formatted,
-// which is how a 403 names the account) reached only the newest site. A
-// print added tomorrow is safe by default now; before, it was safe only
-// if its author remembered both rules.
+// One place, because masking at each call site does not hold: each site
+// ends up with its own subset of the rule, and an address can arrive
+// inside an error nothing here formatted, which is how a 403 names the
+// account. A print added later is safe by default, not only when its
+// author remembers both rules.
 func redactText(s string) string {
 	s = redact.Accounts(s)
 	return maskClientID(s)
@@ -559,8 +559,8 @@ func maskClientID(path string) string {
 // Only the id span is replaced, because the file does not always keep
 // the name the console gave it: a second download becomes
 // "… (1).json" and people rename them. Requiring the full
-// ".apps.googleusercontent.com.json" suffix left every variant printing
-// the id in full.
+// ".apps.googleusercontent.com.json" suffix would leave every variant
+// printing the id in full.
 var clientIDInName = regexp.MustCompile(`client_secret_[0-9]+-[A-Za-z0-9_-]+`)
 
 func orUnknown(s string) string {

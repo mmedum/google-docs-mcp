@@ -26,8 +26,9 @@ func diff(want, got any) string {
 }
 
 // docsFile is synthetic, in the shape the Docs editor writes a .md file
-// that holds a comment (spike D, live 2026-10-13): markers around the
-// quoted passage, which spans two paragraphs, and the block at the end.
+// that holds a comment, as TestRawMarkdownAfterDocs reads one: markers
+// around the quoted passage, which spans two paragraphs, and the block at
+// the end.
 const docsFile = "# Notes\n\nIntro with **bold** text.\n\n" +
 	"> <!-- gdoc_comment_begin: c1 -->A quoted line.\n\n" +
 	"Text with a footnote.[^1]<!-- gdoc_comment_end: c1 -->\n\n" +
@@ -105,7 +106,8 @@ func TestApplyKeepsMarkersWhereTheTextIs(t *testing.T) {
 }
 
 func TestApplyInsideAComment(t *testing.T) {
-	// The probe found the comment survives and its anchor grows.
+	// Docs keeps the comment and grows its anchor, as the integration test
+	// TestRawMarkdownEdges shows.
 	f := Parse(docsFile)
 	at := strings.Index(f.Text(), "quoted")
 	got, err := bytesOf(f.Apply([]Edit{{Start: at, End: at + len("quoted"), Insert: "cited"}}))
@@ -604,9 +606,10 @@ func TestAddReply(t *testing.T) {
 }
 
 func TestRepliesAsDocsWritesThem(t *testing.T) {
-	// The shape a person's save in the editor wrote (spike D, stage 3):
-	// the reply list at its key's own indentation, a resolve as a reply
-	// with an action and no body.
+	// The shape a person's save in the editor writes, as the integration
+	// test TestRawMarkdownWithPerson leaves it: the reply list at its
+	// key's own indentation, a resolve as a reply with an action and no
+	// body.
 	src := "x <!-- gdoc_comment_begin: c1 -->y<!-- gdoc_comment_end: c1 -->\n\n---\ngdoc_comments:\n" +
 		"  c1:\n    status: RESOLVED\n    token: AbC\n    head:\n      author: Ada\n      time: '2026-10-14T09:00:00.000Z'\n" +
 		"      body: wup wup\n      quote: y\n    replies:\n    - author: Bo\n      time: '2026-10-14T09:01:00.000Z'\n" +
@@ -642,8 +645,8 @@ const mergeBase = "# Plan\n\nIntro with __bold__ and _italic_ that\nwraps onto a
 	"| Name | Value |\n|:-----|------:|\n| alpha | 1 |\n\n<span style=\"color:red\">Watch out</span>\n\n" +
 	"## Steps\n\n- first\n- second\n\n## Risks\n\nNone yet.\n"
 
-// mergeExport is mergeBase as Docs exports its working copy, unchanged
-// (the dialect measured in spike D).
+// mergeExport is mergeBase as Docs exports its working copy, unchanged,
+// in the dialect the integration test TestRawMarkdownBuild logs.
 const mergeExport = "# Plan\n\nIntro with **bold** and *italic* that wraps onto a second line.\n\n" +
 	"| Name | Value |\n| :---- | ----: |\n| alpha | 1 |\n\n&nbsp;\n\nWatch out\n\n" +
 	"## Steps\n\n- first  \n- second  \n\n## Risks\n\nNone yet.\n"

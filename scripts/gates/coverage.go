@@ -157,12 +157,9 @@ func moduleName() (string, error) {
 // check that skipped on error would have reported as success.
 func internalPackages(module, dir string) ([]string, error) {
 	// A package with no non-test Go files has no statements, so it can
-	// be neither covered nor below a floor. Two entries in the map above
-	// used to say exactly that in prose, and they thrashed: moving one
-	// file out of a build tag added statements to a package and its
-	// exemption had to go; moving the file to another package took them
-	// away and the exemption had to come back. `go list` answers it
-	// exactly, so those two entries delete themselves and stay deleted.
+	// be neither covered nor below a floor. `go list` answers that
+	// exactly, so no exemption has to say it by hand and follow a file
+	// in and out of a build tag.
 	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}}\t{{len .GoFiles}}", "./internal/...")
 	cmd.Dir = dir
 	out, err := cmd.Output()

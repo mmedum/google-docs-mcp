@@ -6,30 +6,32 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/mmedum/google-docs-mcp/v3/scripts/internal/livecover"
 )
 
 // The live driver and the eval harness may put a value into their
 // transcript only through a redacting helper, and this reads their
 // syntax trees to say so.
 //
-// The sibling servers gate the same promise over stdout, because their
-// drivers print. These drivers log through testing.T, so a gate copied
-// from a sibling would have had nothing to read and would have passed by
-// construction — which is worse than no gate, because it reports a
-// guarantee nobody is holding.
+// These drivers log through testing.T rather than stdout, so the gate
+// reads their Log, Logf, Error, Errorf, Fatal and Fatalf calls. A gate
+// over stdout would have nothing to read here and would pass by
+// construction, reporting a guarantee nobody is holding.
 //
-// It is not hypothetical. Writing this found `s.t.Fatalf("harness step
-// %s failed: %s", name, b.String())`, where b held the tool response —
-// document text, logged whole, at exactly the moment somebody pastes the
-// log into an issue. Every neighboring line went through clip. That is
-// the shape the rule is for: not a rule anybody broke on purpose, but a
-// line added where the habit did not reach.
-const transcriptDirs = "internal/livecheck,internal/evals"
+// The shape the rule is for is a failure message that logs a tool
+// response whole, such as `t.Fatalf("step %s failed: %s", name,
+// b.String())`: document text in the log at the moment somebody pastes
+// it into an issue, on a line added where the habit of clip did not
+// reach.
+var transcriptDirs = []string{livecover.DriverDir, "internal/evals"}
+
+// evalsTag is the build tag every file of the eval harness carries.
+const evalsTag = "evals"
 
 // redactors are the calls whose result may be logged. Kept to the two
 // that actually redact: shown and clip both end in redact.Clip, and the
@@ -87,23 +89,12 @@ func transcript(w io.Writer, _ []string) error {
 	}
 	var problems []string
 	checked := 0
-	for _, dir := range strings.Split(transcriptDirs, ",") {
+	for _, dir := range transcriptDirs {
 		files, err := filepath.Glob(filepath.Join(root, dir, "*.go"))
 		if err != nil {
 			return err
 		}
 		for _, file := range files {
-			// Only the tagged driver files. A test that happens to live
-			// beside them and compiles without the tag is an ordinary
-			// unit test, not the transcript, and holding it to this rule
-			// would fill the allowlist with counters until nobody read it.
-			tagged, err := hasDriverTag(file)
-			if err != nil {
-				return err
-			}
-			if !tagged {
-				continue
-			}
 			n, found, err := transcriptProblems(file)
 			if err != nil {
 				return err
@@ -116,7 +107,7 @@ func transcript(w io.Writer, _ []string) error {
 	// are not the same thing.
 	if checked < 15 {
 		return fmt.Errorf("only %d transcript writes read across %s; the check is not reading the drivers",
-			checked, transcriptDirs)
+			checked, strings.Join(transcriptDirs, " and "))
 	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
@@ -131,9 +122,16 @@ func transcript(w io.Writer, _ []string) error {
 // writes it saw and what is wrong with them.
 func transcriptProblems(file string) (int, []string, error) {
 	fset := token.NewFileSet()
-	parsed, err := parser.ParseFile(fset, file, nil, 0)
+	parsed, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
 	if err != nil {
 		return 0, nil, err
+	}
+	// Only the driver files, which compile only under the live or evals
+	// tag. A test beside them that compiles without it is an ordinary
+	// unit test, not the transcript, and holding it to this rule would
+	// fill the allowlist with counters until nobody read it.
+	if tag := docsBuildTag(parsed); tag != livecover.DriverTag && tag != evalsTag {
+		return 0, nil, nil
 	}
 	var problems []string
 	calls := 0
@@ -232,22 +230,4 @@ func exprText(e ast.Expr) string {
 		return v.Op.String() + exprText(v.X)
 	}
 	return fmt.Sprintf("%T", e)
-}
-
-// hasDriverTag reports whether a file compiles only under the live or
-// evals tag, which is what makes it a driver rather than a unit test.
-func hasDriverTag(file string) (bool, error) {
-	body, err := os.ReadFile(file)
-	if err != nil {
-		return false, err
-	}
-	for _, line := range strings.Split(string(body), "\n") {
-		if strings.HasPrefix(line, "package ") {
-			return false, nil
-		}
-		if strings.HasPrefix(line, "//go:build ") {
-			return strings.Contains(line, "live") || strings.Contains(line, "evals"), nil
-		}
-	}
-	return false, nil
 }

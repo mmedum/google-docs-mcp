@@ -354,11 +354,11 @@ func TestABreakOfTheReleaseIsMatchedByItsField(t *testing.T) {
 // The release is the nearest tag the revision reaches. A branch that
 // reaches none has no release, although the repository has tags.
 func TestLastTagIsOneTheRevisionReaches(t *testing.T) {
-	r := newDumpRepo(t)
-	r.git("commit", "--quiet", "--allow-empty", "-m", "Start")
-	r.git("branch", "before-any-release")
-	r.git("commit", "--quiet", "--allow-empty", "-m", "Release")
-	r.git("tag", "v1.0.0")
+	newDumpRepo(t)
+	mustGit(t, "commit", "--quiet", "--allow-empty", "-m", "Start")
+	mustGit(t, "branch", "before-any-release")
+	mustGit(t, "commit", "--quiet", "--allow-empty", "-m", "Release")
+	mustGit(t, "tag", "v1.0.0")
 	for rev, want := range map[string]string{"main": "v1.0.0", "before-any-release": ""} {
 		if got, err := lastTag(rev); err != nil || got != want {
 			t.Errorf("lastTag(%s) = %q, %v; want %q", rev, got, err, want)
@@ -372,9 +372,9 @@ func TestLastTagIsOneTheRevisionReaches(t *testing.T) {
 func TestSchemaAckBuildsBothSidesFromCommits(t *testing.T) {
 	r := newDumpRepo(t)
 	r.commit(plain, "Base")
-	r.git("switch", "--quiet", "-c", "feature")
+	mustGit(t, "switch", "--quiet", "-c", "feature")
 	r.commit(flipped, "Flip add_comment")
-	r.git("switch", "--quiet", "main")
+	mustGit(t, "switch", "--quiet", "main")
 	r.write(strings.Replace(plain, `"document": {}`, `"doc": {}`, 1))
 
 	var out strings.Builder
@@ -385,9 +385,9 @@ func TestSchemaAckBuildsBothSidesFromCommits(t *testing.T) {
 	if want := "changed: [tool add_comment (annotations.destructiveHint)]"; !strings.Contains(out.String(), want) || strings.Contains(out.String(), "removed") {
 		t.Errorf("the report is\n%s\nwant %q and no break", out.String(), want)
 	}
-	r.git("checkout", "--", ".")
-	r.git("switch", "--quiet", "feature")
-	r.git("commit", "--quiet", "--allow-empty", "-m", "Acknowledge it\n\nSCHEMA-CHANGE: add_comment: destructive")
+	mustGit(t, "checkout", "--", ".")
+	mustGit(t, "switch", "--quiet", "feature")
+	mustGit(t, "commit", "--quiet", "--allow-empty", "-m", "Acknowledge it\n\nSCHEMA-CHANGE: add_comment: destructive")
 	if err := schemaAck(io.Discard, []string{"main", "HEAD"}); err != nil {
 		t.Fatalf("acknowledged: %v", err)
 	}
@@ -401,9 +401,9 @@ func TestSchemaAckBuildsBothSidesFromCommits(t *testing.T) {
 func TestSchemaAckAsksForBreakingChangeOnlyForAReleasedBreak(t *testing.T) {
 	r := newDumpRepo(t)
 	r.commit(plain, "Release")
-	r.git("tag", "v1.0.0")
+	mustGit(t, "tag", "v1.0.0")
 	r.commit(strings.Replace(plain, `"tools": [`, `"tools": [{"name": "draft_tool"}, `, 1), "Add draft_tool")
-	r.git("switch", "--quiet", "-c", "feature")
+	mustGit(t, "switch", "--quiet", "-c", "feature")
 	r.commit(strings.Replace(plain, `"document": {}`, `"doc": {}`, 1), "Drop draft_tool and rename document")
 	c, messages, base, err := ackInputs("main", "HEAD")
 	if err != nil {
@@ -425,11 +425,11 @@ func TestTheReleaseIsTheBaseBranchsNewestTag(t *testing.T) {
 	r := newDumpRepo(t)
 	renamed := strings.Replace(plain, `"document": {}`, `"doc": {}`, 1)
 	r.commit(plain, "Release 1")
-	r.git("tag", "v1.0.0")
-	r.git("branch", "feature")
+	mustGit(t, "tag", "v1.0.0")
+	mustGit(t, "branch", "feature")
 	r.commit(renamed, "Release 2")
-	r.git("tag", "v2.0.0")
-	r.git("switch", "--quiet", "feature")
+	mustGit(t, "tag", "v2.0.0")
+	mustGit(t, "switch", "--quiet", "feature")
 	r.commit(renamed, "Rename document")
 	err := schemaAck(io.Discard, []string{"main", "HEAD"})
 	_, fix, _ := strings.Cut(fmt.Sprint(err), "\n\n")
@@ -450,23 +450,16 @@ func newDumpRepo(t *testing.T) *dumpRepo {
 	t.Helper()
 	r := &dumpRepo{t: t, root: initRepo(t)}
 	put(t, r.root, "go.mod", "module example.invalid/fake\n\ngo 1.21\n")
-	r.git("add", "go.mod")
+	mustGit(t, "add", "go.mod")
 	return r
-}
-
-func (r *dumpRepo) git(args ...string) {
-	r.t.Helper()
-	if _, err := gitOutput(args...); err != nil {
-		r.t.Fatal(err)
-	}
 }
 
 // commit commits a main that prints dump.
 func (r *dumpRepo) commit(dump, message string) {
 	r.t.Helper()
 	r.write(dump)
-	r.git("add", "-A")
-	r.git("commit", "--quiet", "-m", message)
+	mustGit(r.t, "add", "-A")
+	mustGit(r.t, "commit", "--quiet", "-m", message)
 }
 
 // write puts a main that prints dump in the working tree, uncommitted.

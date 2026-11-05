@@ -27,8 +27,11 @@ type Target struct {
 	To     string
 	Cell   string
 	// NamedRange targets a range the document remembers by name. Unlike
-	// a handle it survives edits, so it is the way to come back to a
-	// passage in a later call.
+	// a handle it survives edits: content inserted inside one expands it.
+	// So it is the way to come back to a passage in a later call. Checked
+	// by the live steps "edit through the named range" and
+	// "replace the named range's content".
+	// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#NamedRange
 	NamedRange string
 	Tab        string
 	Segment    string
@@ -332,7 +335,10 @@ const objectPlaceholder = '\uFFFC'
 // index offsets. Chips contribute a placeholder, not their display text.
 //
 // A gap between runs is an element the parser does not model, and gets
-// placeholders too, so the offsets after it still equal indices.
+// placeholders too, so the offsets after it still equal indices. Google
+// adds ParagraphElement kinds without notice, dropdown among them; every
+// kind the API can insert is modeled, so nothing live can make a gap.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#ParagraphElement
 func alignedSlice(p *doc.Paragraph, start, end int64) string {
 	var b strings.Builder
 	pos := start

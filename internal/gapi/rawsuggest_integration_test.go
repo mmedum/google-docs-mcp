@@ -2,20 +2,19 @@
 
 package gapi
 
-// Spike B: what does the API really do with a suggested formatting
-// change? Runs against the caller's own account and creates clearly
-// named scratch documents, one per case so no case disturbs another.
+// What the API does with a suggested formatting change (#46). Runs
+// against the caller's own account and creates clearly named scratch
+// documents, one per case so no case disturbs another.
 //
 //	GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestRawSuggestedStyle -v
 //
 // It reads the untouched HTTP body rather than going through
 // documents.get's decoder, which is the point: the decoder is this
-// server's own wire types, and the field in question is one they did not
-// have. read_document format: raw re-marshals those types, so it could
-// not tell "Google recorded nothing" from "we drop it on the way out" —
-// and the issue that started this was filed on exactly that reading.
+// server's own wire types, which may lack the field in question.
+// read_document format: raw re-marshals those types, so it cannot tell
+// "Google recorded nothing" from "we drop it on the way out".
 //
-// What the rounds established, 2026-09-12:
+// Findings:
 //
 //   - A SUGGEST-mode updateTextStyle DOES record a suggestion:
 //     suggestedTextStyleChanges keyed by suggestion id, with a
@@ -24,8 +23,8 @@ package gapi
 //     property filled in, so only the state says what changed.
 //   - A direct updateTextStyle over a suggested INSERTION applies
 //     normally, whether the range covers the inserted run exactly, part
-//     of it, or straddles it and real text. The issue's premise — that a
-//     pending insertion is what blocks the write — does not hold.
+//     of it, or straddles it and real text. A pending insertion does not
+//     block the write.
 //   - A direct change IS silently dropped when a pending suggestion on
 //     the range already suggests the same property AND value: bold over
 //     a suggested bold, alignment CENTER over a suggested CENTER. The
@@ -34,7 +33,7 @@ package gapi
 //     directly to 20pt does land, and an alignment set to a value the
 //     suggestion does not name lands too. So the collision is real and
 //     reproducible and its rule is not known. One case is deliberately
-//     absent: bold false over a suggested bold proved nothing, because
+//     absent: bold false over a suggested bold proves nothing, because
 //     on unbolded text it is indistinguishable from no change at all.
 //
 // That last point is why the server warns here rather than refusing:
@@ -379,7 +378,7 @@ func TestRawSuggestedStyleValue(t *testing.T) {
 }
 
 // TestPrettyPrintFalseIsAccepted checks Google's standard prettyPrint
-// system parameter on documents.get, which matters now that the wire
+// system parameter on documents.get, which matters because the wire
 // types keep the bytes they were decoded from: indented JSON is retained
 // indentation. It asserts the response is accepted, parses, and is
 // smaller than the indented one.
@@ -438,9 +437,9 @@ func TestPrettyPrintFalseIsAccepted(t *testing.T) {
 // TestRawSuggestedReset asks why inserting formatted content in suggest
 // mode leaves two suggestions. The planner inserts the text and then
 // resets its style, so it does not inherit the bold of the word before
-// it. Seen 2026-10-03: the reset, sent with fields "*", came back under a
-// suggestion id of its own, while a bold update right after it joined the
-// insertion's. Each probe inserts " new" after a directly bolded "Alpha".
+// it. The reset, sent with fields "*", comes back under a suggestion id
+// of its own, while a bold update right after it joins the insertion's.
+// Each probe inserts " new" after a directly bolded "Alpha".
 func TestRawSuggestedReset(t *testing.T) {
 	bold := round{reqs: []json.RawMessage{textStyle(t, 1, 6, "bold", true)}}
 	insert := func(fields string) round {

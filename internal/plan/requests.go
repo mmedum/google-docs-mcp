@@ -485,12 +485,23 @@ func DeleteBullets(r Rng) json.RawMessage {
 
 // ClearIndent puts the paragraphs in r back on their named style's
 // indent: a field the mask names and the style leaves out is cleared.
+// deleteParagraphBullets keeps the removed level's indent ("visually
+// preserved by adding indent") and a bullet made over it adds its own,
+// so every bullet deletion is followed by this. Checked by the
+// integration tests TestRawBulletsIndent and TestRawBulletsAfterParagraph,
+// and the live steps "take b1 out of its list" and "a paragraph and a
+// list inside a nested list".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#DeleteParagraphBulletsRequest
 func ClearIndent(r Rng) json.RawMessage {
 	return raw(map[string]any{"updateParagraphStyle": map[string]any{"range": r.json(), "paragraphStyle": map[string]any{}, "fields": "indentStart,indentFirstLine"}})
 }
 
 // ReplaceAllText replaces every occurrence in the given tab. The tab is
-// always named because the API's default is every tab.
+// always named because without tabsCriteria this request reaches every
+// tab, where a request without a tabId reaches only the first. Checked
+// by the live step "replace_all across the tab".
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#ReplaceAllTextRequest
+// https://developers.google.com/workspace/docs/api/how-tos/tabs
 func ReplaceAllText(find, replace string, matchCase bool, tabID string) json.RawMessage {
 	req := map[string]any{"containsText": map[string]any{"text": find, "matchCase": matchCase}, "replaceText": replace}
 	if tabID != "" {
@@ -553,7 +564,9 @@ func RejectSuggestion(id string) json.RawMessage {
 }
 
 // DeleteSuggestion removes a suggestion without applying or declining
-// it. Google allows only its author to; an editor rejects instead.
+// it. Google allows only its author to, answering anyone else 403; an
+// editor rejects instead.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#DeleteSuggestionRequest
 func DeleteSuggestion(id string) json.RawMessage {
 	return raw(map[string]any{"deleteSuggestion": map[string]any{"suggestionId": id}})
 }

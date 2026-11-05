@@ -137,10 +137,16 @@ type mdThread struct {
 }
 
 // mdWithComments reads a Markdown file and its comments: the Docs
-// comments view holds the ones made in the editor (Drive cannot see
-// those), Drive's list, when asked for, the ones made through its API,
-// which are in no editor's view of the file. The three calls need only
-// the id, so they run together.
+// comments view holds the ones made in the editor, Drive's list, when
+// asked for, the ones made through its API, which are in no editor's view
+// of the file. The three calls need only the id, so they run together.
+//
+// A comment made in the editor is markup in the file's bytes, not a Drive
+// comment: comments.list leaves it out, and comments.get and
+// replies.create on its id answer 404. Drive's guide does not say so.
+// Checked by the live step "comments", which reads the Docs view, and by
+// the integration test TestRawMarkdownEdges, which asks Drive.
+// https://developers.google.com/workspace/drive/api/guides/manage-comments
 func (s *Service) mdWithComments(ctx context.Context, ref string, drive, includeDeleted bool) (*mdFile, []mdThread, string, error) {
 	id, err := parseRef(ref)
 	if err != nil {

@@ -40,6 +40,17 @@ func TestRulesCatchPlantedIdentifiers(t *testing.T) {
 		{"synthetic document id", "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", false},
 		{"invented by repetition", "1AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH", false},
 		{"a commit sha is not an id", "pinned at f06c13b6b1a9625abc9e6e439d9c05a8f2190e94", false},
+		// A heading's anchor is lowercase words after a short number, right
+		// after "#" or a decision's "d-". An id in the same shape mixes
+		// cases, or sits elsewhere.
+		{"a decision's anchor", "see docs/architecture.md#d-10-everything-the-repository-runs-on-itself", false},
+		{"a numbered heading's anchor", "see docs/setup.md#1-create-a-project-in-the-console", false},
+		{"a client id without its suffix", "client 123456789012-abcdefghijklmnopqrstuvwxyz012345 in a log", true}, // leakcheck:allow
+		{"a client id without its suffix after #", "#123456789012-abcdefghijklmnopqrstuvwxyz012345", true},        // leakcheck:allow
+		{"a uuid", "run 10293847-ab12-4c3d-9e8f-0a1b2c3d4e5f", true},                                              // leakcheck:allow
+		{"a slug-shaped name in prose", "the 1-create-a-project-in-the-console step", true},                       // leakcheck:allow
+		{"a mixed-case id after d-", "d-1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms", true},                      // leakcheck:allow
+		{"a mixed-case id after #", "docs/setup.md#1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms", true},           // leakcheck:allow
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := findLeaks(tc.text)
@@ -55,11 +66,10 @@ func TestRulesCatchPlantedIdentifiers(t *testing.T) {
 
 // TestHistoryCarriesNoIdentifiers scans every blob ever committed, not
 // just the files as they stand. The tree scan cannot see an identifier
-// that was committed and later edited out — and that is the shape of the
-// accident this repository has already had once, when two of Claude
-// Code's settings files were swept in by `git add -A` and removed in a
-// later commit. gitleaks in CI scans a pull request's own commits, so
-// these rules have never run over the whole history either.
+// that was committed and later edited out, such as a settings file swept
+// in by `git add -A` and removed in a later commit. gitleaks in CI scans
+// a pull request's own commits, so only this runs these rules over the
+// whole history.
 //
 // Guarded by LEAKCHECK_HISTORY=1: it reads the object store, which is
 // not a per-push cost. Run it before a release, or after a scare.
@@ -112,10 +122,8 @@ func TestHistoryCarriesNoIdentifiers(t *testing.T) {
 	t.Logf("scanned %d text blobs across the whole history", scanned)
 }
 
-// The rule that would have caught the 8 MB `gates` binary this gate,
-// `make check` and eight green CI checks all passed. Binary files are
-// unreadable to every other rule here, so what is asserted about them is
-// that they are neither built nor large.
+// Binary files are unreadable to every other rule here, so what is
+// asserted about them is that they are neither built nor large.
 func TestArtifactRule(t *testing.T) {
 	big := append([]byte("fixture\x00"), bytes.Repeat([]byte{0x7f}, maxBinary)...)
 	cases := []struct {

@@ -12,18 +12,20 @@ import (
 )
 
 // simDoc is a one-tab body that applies the requests content rounds send,
-// the way spike E saw Google apply them live, and serves itself back as
-// a document. It knows paragraphs of text and inline images, and tables
-// whose cells hold one paragraph each. A request it does not model fails
-// the test rather than passing unapplied, and so does one Google refuses:
-// a write at the body's final newline, or a delete that would join a
-// paragraph to a table. Text is BMP only, so a rune is one UTF-16 unit.
+// the way the integration test TestRawTablesInContent shows Google apply
+// them, and serves itself back as a document. It knows paragraphs of text
+// and inline images, and tables whose cells hold one paragraph each. A
+// request it does not model fails the test rather than passing
+// unapplied, and so does one Google refuses: a write at the body's final
+// newline, or a delete that would join a paragraph to a table. Text is
+// BMP only, so a rune is one UTF-16 unit.
 //
 // Suggest mode is applied as direct, with what it inserts marked as one
 // suggestion that only the first suggest-mode batch names in its reply:
-// Google files a call's later writes under that suggestion (seen live
-// 2026-10-09). A deletion is not modeled as a suggestion, so a test shows
-// what the rounds send, not what a reviewer sees.
+// Google files a call's later writes under that suggestion, as the live
+// step "content with a table and an image, suggested" checks. A deletion
+// is not modeled as a suggestion, so a test shows what the rounds send,
+// not what a reviewer sees.
 type simDoc struct {
 	t        *testing.T
 	elems    []*simElem
@@ -180,7 +182,7 @@ func (s *simDoc) insertText(text string, index int64) {
 
 func (s *simDoc) deleteRange(from, to int64) {
 	if to <= from {
-		s.t.Fatalf("sim: delete [%d,%d) is empty; Google refuses it (seen live 2026-10-09)", from, to)
+		s.t.Fatalf("sim: delete [%d,%d) is empty; Google refuses it", from, to)
 	}
 	if to > s.end()-1 {
 		s.t.Fatalf("sim: delete [%d,%d) takes the body's final newline", from, to)
@@ -212,9 +214,10 @@ func (s *simDoc) deleteRange(from, to int64) {
 }
 
 // insertTable puts a newline at index and the table right after it, as
-// spike E saw: at a paragraph's newline the table follows that paragraph
-// and its old newline becomes an empty paragraph after the table; at a
-// paragraph's start an empty paragraph appears before the table.
+// TestRawTablesInContent shows: at a paragraph's newline the table
+// follows that paragraph and its old newline becomes an empty paragraph
+// after the table; at a paragraph's start an empty paragraph appears
+// before the table.
 func (s *simDoc) insertTable(rows, cols int, index int64) {
 	if i, _ := s.at(index); s.elems[i].cells != nil {
 		s.t.Fatalf("sim: a table inside a table is not modeled")
@@ -233,7 +236,7 @@ func (s *simDoc) insertTable(rows, cols int, index int64) {
 
 func (s *simDoc) apply(req *gapi.BatchUpdateRequest) (*gapi.BatchUpdateResponse, error) {
 	if req.WriteControl == nil || req.WriteControl.RequiredRevisionID != s.revision {
-		return nil, &gapi.APIError{Status: 400, Message: "The required revision ID does not match the latest revision."}
+		return nil, &gapi.APIError{Status: 400, Message: "The required revision ID 'made-up-revision' does not match the latest revision."}
 	}
 	s.suggesting = req.WriteControl.WriteMode == "SUGGEST"
 	created := ""

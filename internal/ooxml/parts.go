@@ -210,9 +210,10 @@ func (f *File) styles() (*styleSheet, error) {
 // list and the level are each the paragraph's own, else what its style
 // gives ("List Bullet", which is numbered in styles.xml, not on the
 // paragraph), the default paragraph style's for a paragraph naming none;
-// Docs reads them so. numId 0 on the paragraph takes it out of its
-// style's list (ISO/IEC 29500-1, numId), and Docs reads it as no list
-// item.
+// Docs reads them so, which no reference describes. numId 0 on the
+// paragraph takes it out of its style's list (ISO/IEC 29500-1, numId),
+// and Docs reads it as no list item.
+// https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.numberingid
 func (f *File) ListOf(i int) (string, int) {
 	p := f.Paras[i]
 	if p.unlisted {

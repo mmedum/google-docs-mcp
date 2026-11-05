@@ -4,8 +4,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 )
+
+// changelogPath is the changelog, from the module root.
+const changelogPath = "CHANGELOG.md"
 
 // releaseNotes prints one version's section of the changelog, which is
 // what the release workflow passes to goreleaser as --release-notes.
@@ -13,23 +17,17 @@ import (
 // The entry is the release note. Generating notes from commit subjects
 // instead publishes "Put the schema surface where it belongs, and name
 // the gate after the gate (#52)" to somebody deciding whether to
-// upgrade, which is not who that sentence was written for — and it is
-// what this project's release pages carried until 2026-09-13.
+// upgrade, which is not who that sentence was written for.
 //
-// Never reach for changelog.disable in .goreleaser.yaml to stop the
-// generated list. It is read in the changelog pipe's Skip, which runs
-// before Run, so ctx.ReleaseNotes is never assigned and the file named
-// by --release-notes is never opened: the body collapses to the footer
-// alone. A sibling server shipped exactly that and nobody read the page.
-// Deleting the changelog block is the way. release.footer keeps working
-// either way, because internal/pipe/release/body.go wraps ReleaseNotes
-// in it on every path.
+// The generated list is stopped by deleting goreleaser's changelog
+// block, never by changelog.disable, which empties the release body;
+// .goreleaser.yaml says why.
 func releaseNotes(w io.Writer, args []string) error {
 	if len(args) < 1 || len(args) > 2 {
 		return fmt.Errorf("usage: gates release-notes VERSION [CHANGELOG]")
 	}
 	version := strings.TrimPrefix(args[0], "v")
-	file := "CHANGELOG.md"
+	file := changelogPath
 	if len(args) == 2 && args[1] != "" {
 		file = args[1]
 	}
@@ -53,24 +51,20 @@ func releaseNotes(w io.Writer, args []string) error {
 // underneath it. On the release page the version heading is gone —
 // GitHub renders the tag name as the page's h1 — so an unaltered section
 // starts at h3 directly under an h1. That is a skipped rank, which the
-// W3C's heading guidance says to avoid, and it is what every release
-// page here looked like when the extractor was first written. Lifting
-// one level gives h1 then h2, with nothing missing in between, and needs
+// W3C's heading guidance says to avoid. Lifting one level gives h1 then
+// h2, with nothing missing in between, and needs
 // no wrapper heading repeating either the word "changelog" or the
 // version number GitHub is already showing.
 //
-// Fenced code is left alone: a `# comment` inside a shell block is not a
-// heading, and the verification snippets here are full of them. Only h3
-// and deeper are lifted, so this can never emit a second h1.
+// Fenced code is left alone, read as the docs gate reads it: a
+// `# comment` inside a shell block is not a heading, and the
+// verification snippets here are full of them. Only h3 and deeper are
+// lifted, so this can never emit a second h1.
 func promoteHeadings(body string) string {
 	lines := strings.Split(body, "\n")
-	fenced := false
+	code := docsCodeLines(lines)
 	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			fenced = !fenced
-			continue
-		}
-		if !fenced && strings.HasPrefix(line, "###") {
+		if !code[i] && strings.HasPrefix(line, "###") {
 			lines[i] = line[1:]
 		}
 	}
@@ -79,31 +73,34 @@ func promoteHeadings(body string) string {
 
 // sectionFor returns the body under `## [version]`, without the blank
 // lines that top and tail it.
+func sectionFor(changelog, version string) string {
+	lines := strings.Split(changelog, "\n")
+	from, to := changelogSection(lines, version)
+	body := lines[from:to]
+	for len(body) > 0 && strings.TrimSpace(body[0]) == "" {
+		body = body[1:]
+	}
+	return joinTrimmed(body)
+}
+
+// changelogSection is the range of lines under `## [version]`, empty when
+// there is no such heading.
 //
 // It stops at the next heading and at the link footer. The footer is not
 // part of any section, but it follows the oldest one with no heading in
 // between — so without that second stop the oldest entry's notes would
 // end with a block of compare links.
-func sectionFor(changelog, version string) string {
+func changelogSection(lines []string, version string) (from, to int) {
 	want := "## [" + version + "]"
-	var body []string
-	inside := false
-	for _, line := range strings.Split(changelog, "\n") {
-		switch {
-		case strings.HasPrefix(line, want):
-			inside = true
-			continue
-		case !inside:
-			continue
-		case strings.HasPrefix(line, "## "), isLinkDefinition(line):
-			return joinTrimmed(body)
-		case len(body) == 0 && strings.TrimSpace(line) == "":
-			// The blank lines under the heading.
-			continue
-		}
-		body = append(body, line)
+	start := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, want) })
+	if start < 0 {
+		return 0, 0
 	}
-	return joinTrimmed(body)
+	to = start + 1
+	for to < len(lines) && !strings.HasPrefix(lines[to], "## ") && !isLinkDefinition(lines[to]) {
+		to++
+	}
+	return start + 1, to
 }
 
 // joinTrimmed drops the blank lines at the end, so a section that runs to
@@ -116,11 +113,9 @@ func joinTrimmed(body []string) string {
 }
 
 // isLinkDefinition reports whether the line is a markdown link
-// definition, as a changelog's compare-link footer is made of.
+// definition, as a changelog's compare-link footer is made of. It is the
+// docs gate's rule, so a footnote is part of a section, held to the first
+// column: an indented one continues a list item.
 func isLinkDefinition(line string) bool {
-	if !strings.HasPrefix(line, "[") {
-		return false
-	}
-	close := strings.Index(line, "]")
-	return close > 0 && strings.HasPrefix(line[close:], "]: ")
+	return !strings.HasPrefix(line, " ") && docsMDLinkDef.MatchString(line)
 }

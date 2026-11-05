@@ -13,29 +13,59 @@ against your own Google account. There is no server to host, no shared
 deployment and no service account: you create a Google OAuth client, log
 in once, and the refresh token stays in your OS keyring.
 
-It works inside a document the way a careful colleague does — reads it at
-the right granularity, edits in place without damaging what surrounds the
-edit, proposes changes as suggestions, comments on passages, and handles
-tables, tabs, headers, footnotes and formatting.
+It is for a person with a Google account who wants an assistant to work
+inside their documents the way a careful colleague does. It reads a
+document at the right granularity, edits in place without damaging what
+surrounds the edit, proposes changes as suggestions, and comments on
+passages. It handles tables, tabs, headers, footnotes and formatting,
+and Markdown and Word files Docs opens in Drive. Folders, sharing and
+moving files belong to a Drive server such as google-drive-mcp.
+
+## Goals and non-goals
+
+Goals:
+
+- **Nothing in a document is destroyed by accident.** A replace changes
+  only the words that differ. A direct edit that would delete a comment
+  anchor, a suggestion, an image or a footnote is refused unless forced,
+  and suggest and comment modes delete nothing.
+- **Edits land where they were meant to.** The model addresses content
+  by exact text, heading id, block handle or named range, never by an
+  index. Every write is checked against the revision it was planned on.
+- **You decide how a change lands.** Suggest, direct or comment, with a
+  default you set; the server never swaps one for another.
+- **Results say what happened.** A write reports what it touched and the
+  new revision. A write that may have landed says so rather than being
+  sent twice.
+- **Your documents stay yours.** Every call runs as the signed-in
+  account, only to Google's hosts, with no telemetry. Logs never carry a
+  document id, title or text.
+
+Non-goals:
+
+- **Folders, moves, sharing, trash and copies.** The scope is one
+  document and everything inside it, its history included.
+- **A hosted service.** It speaks stdio only.
+- **Round-tripping a document through Markdown.** Markdown is for new
+  content. What the Docs API cannot express is refused, naming the
+  construct, rather than approximated.
+- **What the Docs API cannot do**: insert a chart or a table of
+  contents, write an equation or a drawing, read an old revision's
+  structure rather than its export, or fetch an image from a private
+  address.
+- **Asking you before a call.** Your client approves each call; the
+  server asks nothing.
 
 ## Why google-docs-mcp
 
-Existing servers hand the model raw UTF-16 indices, convert markdown in
+Other servers hand the model raw UTF-16 indices, convert Markdown in
 ways that silently corrupt documents, and anchor comments through the
-Drive API where they never render inline. This server keeps index math on
-the server, addresses content by exact text and stable heading ids, edits
-by minimal diff, refuses to overwrite anchored content, and uses the Docs
-API's suggestion mode where the project is enrolled. The reasoning and
-evidence are in [`docs/architecture.md`](docs/architecture.md).
-
-Reading, searching, creating, exporting, editing with minimal diffs in
-suggest, direct or comment mode, formatting, reviewing suggestions,
-comment threads, revision history and diffs, tables, tabs, headers,
-footers, footnotes, images, chips, named ranges, page and section layout,
-named styles, `gdocs://` resources, large-document performance and agent
-evals are all in. Every GA member of the Docs API's `Request` union is
-emitted; §16 of the architecture says which fields those tools expose and
-which they deliberately do not.
+Drive API, where they never render inline. This server keeps index math
+on the server, addresses content by exact text and stable heading ids,
+edits by minimal diff, refuses to overwrite anchored content, and uses
+the Docs API's suggestion mode and pinned comments. Every GA request of
+the Docs API is emitted. The reasoning, one decision at a time, is in
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Install
 
@@ -90,13 +120,14 @@ is no shared app and nothing to verify with Google.
    an **Internal** app can skip this step. Listing them there anyway does
    no harm.
 
-   All four, though one login never asks for more than two of them: a
-   normal login requests `documents` and `drive`, and `GDOCS_READ_ONLY=true`
-   requests `documents.readonly` and `drive.readonly` instead. An External
-   app's consent screen lists what the client may ask for, so it has to
-   cover both, and a scope it has not been given is refused at the moment
-   somebody first tries read-only mode. Google grants only what is
-   requested, so listing the read-only pair costs a normal login nothing.
+   One login asks for one pair of them: a normal login requests
+   `documents` and `drive`, and `GDOCS_READ_ONLY=true` requests
+   `documents.readonly` and `drive.readonly` instead. An External app's
+   consent screen lists what the client may ask for, so it has to cover
+   both pairs, and a scope it has not been given is refused at the
+   moment somebody first tries read-only mode. Google grants only what
+   is requested, so listing the read-only pair costs a normal login
+   nothing.
 5. Create an OAuth client (Google Auth Platform → Clients) of type
    **Desktop app**, download its JSON, and store it as
    `~/.config/google-docs-mcp/client_secret.json` (Linux; the
@@ -109,55 +140,17 @@ google-docs-mcp login
 google-docs-mcp doctor https://docs.google.com/document/d/<some doc you can open>/edit
 ```
 
-The document is optional: `doctor` on its own checks credentials, scopes
-and API reachability, and reads the document when given one.
-
-`google-docs-mcp status --json` prints the same state as one JSON object
-on stdout, for a script that needs to know whether this server is
-authorized before starting it. `credentials.resolved` is the field to
-branch on, `schema_version` changes only when a field is removed or its
-meaning changes, and the account is masked to its domain exactly as the
-text output masks it. A label in the human output is free to be reworded
-in any release; the object is not.
-
 `login` opens a browser, completes Google's desktop OAuth flow on a
 loopback port, and stores the refresh token in your OS keyring (Secret
 Service, Keychain or Credential Manager), falling back to a 0600 file
-with a warning when no keyring is available. `doctor` checks every step
-and tells you exactly what is missing.
+with a warning when no keyring is available. Over SSH, the callback port
+has to be forwarded;
+[troubleshooting](docs/troubleshooting.md#login-failed-auth-timed-out-waiting-for-the-browser)
+says how.
 
-### Logging in over SSH
-
-The callback goes to the *remote* host's loopback address and your
-browser is local, so the port has to be forwarded. It is drawn at random
-and appears only in the URL `login` prints, percent-encoded as
-`127.0.0.1%3A<port>`:
-
-```bash
-google-docs-mcp login --no-browser
-```
-
-Read the port out of that URL, forward it from a second local terminal,
-then open the URL in your own browser:
-
-```bash
-ssh -N -L <port>:127.0.0.1:<port> you@remote-host
-```
-
-If `ssh` says `bind: Address already in use`, stop the login with Ctrl-C
-and start it again to draw a different port. `--timeout` sets how long
-`login` waits; the default is five minutes.
-
-### Comments and suggestions
-
-Suggestion mode (`mode: suggest`), comments pinned to a text range, and
-accepting or rejecting suggestions use Docs API features Google made
-[generally available](https://developers.google.com/workspace/docs/release-notes)
-on 2026-09-30, rolling out over up to fifteen days. No enrollment is
-needed. If Google refuses them for a document, reads still work, comments
-are posted through Drive quoting the text instead of pinned to it, and
-suggestion mode is refused rather than sent; `get_document` says which.
-`GDOCS_PREVIEW` is deprecated and ignored.
+`doctor` checks the credentials, the granted scopes and the APIs, and
+reads the document when given one. When a check fails,
+[docs/troubleshooting.md](docs/troubleshooting.md) says what it means.
 
 ### Markdown files
 
@@ -324,10 +317,10 @@ for the defaults.
 | `manage_tabs` | Add (with content), rename, move or nest tabs. Always direct: the API cannot suggest tab changes. |
 | `write_markdown_file` | Write a working copy back into its Markdown file, carrying only what changed in the copy; conflicts with changes made in the file since are refused unless forced, and changes in the Docs editor not saved yet are never written past; `dry_run`. |
 
-Two more tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:
+The delete tools register only with `GDOCS_ENABLE_DESTRUCTIVE=true`:
 `delete_comment` (a thread or one reply) and `delete_tab` (a tab with its
-content and child tabs). Both carry the destructive annotation, and each
-call must repeat its target in `confirm_comment_id` or `confirm_tab`.
+content and child tabs). Each carries the destructive annotation, and
+each call must repeat its target in `confirm_comment_id` or `confirm_tab`.
 `delete_comment` also takes `text_start`, how the text it deletes begins
 as `list_comments` shows it, so your client's prompt shows which comment
 goes; the server reads the comment and refuses `[stale]` when it differs.
@@ -355,10 +348,11 @@ once, or `occurrence` / `within` disambiguates), a whole section by its
 stable `heading_id`, a block by handle (`p12`, valid for the revision it
 came from and re-checked on use), a table cell, or a named range, which
 is the one anchor that outlives an edit: Google moves it with the text it
-covers, so `create_named_range` now and `target: {named_range: …}` in a
-later call reach the same passage. New content is written as markdown. A
-`replace` is applied as the smallest diff between the old and new text, so
-untouched words keep their formatting and anchored comments.
+covers, so `create_named_range` in one call and
+`target: {named_range: …}` in a later one reach the same passage. New
+content is written as markdown. A `replace` is applied as the smallest
+diff between the old and new text, so untouched words keep their
+formatting and anchored comments.
 
 Tables are named by handle (`tbl1`) and cells as `r2c3`; a table that
 gets a data grid is inserted empty and filled in a second batch once it
@@ -369,18 +363,19 @@ read and diffed through Google's export, so they have no handles.
 
 ## Safety
 
-- Read tools are annotated read-only. Write tools take a `mode` chosen by
-  the person: `suggest` (tracked change), `direct`, or `comment` (the
-  proposal is posted as a comment and nothing is edited). Every write is
-  guarded by the revision it was planned against; a concurrent edit is
-  re-planned once, then refused.
+- Read tools are annotated read-only. The edits, `edit_document`,
+  `format_document`, `edit_table`, `insert_object` and
+  `layout_document`, take a `mode` chosen by the person: `suggest`
+  (tracked change), `direct`, or `comment` (the proposal is posted as a
+  comment and nothing is edited). Each is guarded by the revision it was
+  planned against; a concurrent edit is re-planned once, then refused.
 - Direct edits never delete a range that holds a comment anchor, a
   pending suggestion, an image or a footnote unless explicitly forced.
 - Destructive tools (deleting comments or tabs) are not registered unless
   `GDOCS_ENABLE_DESTRUCTIVE=true`. `GDOCS_READ_ONLY=true` registers only
   read tools and requests read-only scopes.
 - **Your MCP client approves each call; the server asks you nothing.**
-  claude.ai and Codex prompt for every tool marked destructive: the two
+  claude.ai and Codex prompt for every tool marked destructive: the
   deletes, and every write that changes or removes what is there, such as
   `edit_document`, `format_document` or `reply_comment`. Only
   `create_document`, `add_comment` and `export_document`, which add, are
@@ -402,107 +397,85 @@ read and diffed through Google's export, so they have no handles.
   }
   ```
 
-  `GDOCS_REQUIRE_PROMPT` is gone: set to anything but `false`, the server
-  will not start. Leave `GDOCS_ENABLE_DESTRUCTIVE` off for a client that
-  runs with nobody watching.
-- The server talks only to Google (`googleapis.com`, and `docs.google.com`
-  for the revision export links Google's API returns). No telemetry. Logs
-  (stderr) never contain document text.
+  A client that runs with nobody watching can make every write its
+  settings register, so leave `GDOCS_ENABLE_DESTRUCTIVE` off for one.
+- `dry_run` previews a write and sends nothing. `edit_document`,
+  `format_document`, `edit_table`, `insert_object`, `layout_document`,
+  `review_suggestion`, `write_markdown_file`, `add_comment` and the
+  delete tools take it.
+- The server talks only to Google: `googleapis.com` and its subdomains,
+  `*.googleusercontent.com`, and `docs.google.com` for the export links
+  Google's API returns. No telemetry. Logs (stderr) never carry a
+  document id, revision, title or text, at any level.
 - Refresh tokens live in the OS keyring; `logout` revokes and deletes.
 
-## How it works
-
-```
-MCP client ──stdio──► google-docs-mcp
-                       ├── tools     one handler per tool; shapes the reply
-                       ├── service   orchestration and scope resolution
-                       ├── plan      write planning and all the index math
-                       ├── doc       model, handles, sections
-                       ├── render    markdown, text, outline
-                       ├── gapi      raw REST client for Docs and Drive
-                       └── auth      refresh token → access token
-```
-
-Index math never leaves the server: the model addresses content by exact
-text, `heading_id` or handle, and `internal/plan` turns that into the
-UTF-16 offsets the Docs API wants. The wire types in `internal/gdocs` are
-this project's own, held to Google's published discovery document by a
-gate, rather than the generated client.
+[docs/security.md](docs/security.md) has the threat model.
 
 ## Getting help
 
-`google-docs-mcp doctor` checks credentials, scopes and API reachability
-and names what is missing; most first-run trouble is an API that was
-never enabled or a consent screen without you on it. If that does not
-explain it, [open an issue](https://github.com/mmedum/google-docs-mcp/issues)
-— the bug form asks for the `doctor` output and the version.
+Run `google-docs-mcp doctor` first. It checks the credentials, the
+granted scopes and the APIs, and names what is missing; most first-run
+trouble is an API that was never enabled or a consent screen without
+you on it. [docs/troubleshooting.md](docs/troubleshooting.md) covers
+each failure.
 
-Never paste a document id or URL, document content, a
-`client_secret.json` or a token into an issue; describe the shape of the
-document instead. Security problems go through
-[`SECURITY.md`](SECURITY.md), privately.
+`google-docs-mcp status --json` prints the setup as one JSON object,
+without contacting Google, for a script that has to decide whether this
+server is authorized before starting it; the shape is in
+[docs/configuration.md](docs/configuration.md#reading-the-setup-from-a-script).
+
+Then open an [issue](https://github.com/mmedum/google-docs-mcp/issues)
+with what
+[troubleshooting](docs/troubleshooting.md#reporting-a-problem) lists.
+**Never paste a document id or URL, document content, a client JSON, a
+token or a tool result**; describe the shape of the document instead.
+Security problems go through [`SECURITY.md`](SECURITY.md), privately.
 
 ## Versioning
 
-From v1.0.0, semver as you would expect: a tool removed or renamed, an
-argument that becomes required, or a change to what a tool returns is a
-major version. New tools and new optional arguments are minor. The
-schema diff in CI is what enforces it, and it runs on every pull
-request — the tool surface cannot change without the diff naming it.
+Tool names, their arguments and the shape of their output are stable
+within a major version. A tool removed or renamed, an argument that
+becomes required, or a change to what a tool returns is a major
+version; new tools and new optional arguments are minor. The schema
+diff in CI holds this on every pull request, so the tool surface cannot
+change without the diff naming it.
 
-The one exclusion, stated so it is a decision rather than a surprise:
-the exact prose of a tool's text output, which is written for a model to read and will be
-reworded when a model reads it badly. The `structuredContent` a tool
-returns is covered; the sentence wrapped around it is not.
+The exact prose of a tool's text output is not covered: it is written
+for a model to read, and is reworded when a model reads it badly. The
+`structuredContent` a tool returns is covered.
 
-Each release's notes are the matching section of
-[`CHANGELOG.md`](CHANGELOG.md); a change needing you to act — a new
-scope, another login, a different command in your client config — is
-marked **Breaking:** there.
-
-## Development
-
-```bash
-make build     # the binary
-make test      # race detector, coverage floor
-make check     # everything CI runs
-```
-
-`make check` is the definition of done: formatting, `go vet` under every
-build tag, golangci-lint, race tests with a per-package coverage floor,
-`govulncheck`, a license check, a secret scan, an API-coverage gate and
-an API-fields gate that fail when a Google API method or field has no
-verdict on it, a schema diff against the released tool surface, a stdio
-smoke test, and a staleness gate that fails when this README, the docs or
-the changelog drift from the code.
-
-Test fixtures are synthetic. Never add content, ids or URLs from real
-documents. `make bench` measures the large-document paths;
-`go test -tags=evals ./internal/evals` runs the agent evals against your
-own account (see the package comment).
+A change that needs you to do something, such as a new scope, another
+`login` or a different command in your client config, is marked
+**Breaking:** in [CHANGELOG.md](CHANGELOG.md), which is what the release
+notes are made from.
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — the design, the
-  request flow, the evidence log behind every convention, and the
-  decisions a contributor should not undo.
-- [`docs/configuration.md`](docs/configuration.md) — every environment
-  variable and flag.
-- [`docs/security.md`](docs/security.md) — the threat model: what reaches
-  a log, what `doctor` prints, what the drivers write. Each claim is held
-  by a test.
+- [docs/configuration.md](docs/configuration.md): every setting and
+  flag, where state is stored, and reading the setup from a script.
+- [docs/troubleshooting.md](docs/troubleshooting.md): symptoms and their
+  fixes, then rotating the token, revoking access and handling a
+  suspected exposure.
+- [docs/security.md](docs/security.md): the threat model.
+- [docs/architecture.md](docs/architecture.md): how it works, and the
+  design decisions a contributor should not undo.
+- [docs/release.md](docs/release.md): how a release is cut and checked.
+- [CONTRIBUTING.md](CONTRIBUTING.md): the gates, the live run and the
+  review flow.
+- [CHANGELOG.md](CHANGELOG.md): what each release changed.
 
 ## Contributing
 
 Questions and bugs go in
 [issues](https://github.com/mmedum/google-docs-mcp/issues); pull requests
-are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the branch and
-review flow, and `make check` is what has to pass.
+are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) covers building,
+the gates and the pull request flow, and `make check` is what has to
+pass.
 
 ## Security
 
-[`SECURITY.md`](SECURITY.md) says what is in scope and how to report a
-vulnerability privately. Do not open a public issue for one.
+[`SECURITY.md`](SECURITY.md) says how to report a vulnerability. Please
+do not open a public issue for one.
 
 ## Code of conduct
 

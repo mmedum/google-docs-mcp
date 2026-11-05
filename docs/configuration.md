@@ -50,37 +50,39 @@ The refresh token is stored in the OS keyring under service
 ```
 google-docs-mcp login [--no-browser] [--timeout 5m] [--read-only] [--client-secret PATH]
 google-docs-mcp logout
-google-docs-mcp status
+google-docs-mcp status [--json]
 google-docs-mcp doctor [document id or URL]
 google-docs-mcp --version
 google-docs-mcp --dump-schemas
 ```
 
-`doctor` checks credentials, the token exchange, granted scopes, the Drive
-API, and, given a document, the Docs API and whether Google answers it with
-comments included, which suggestion mode and pinned comments need.
+[troubleshooting.md](troubleshooting.md) says what `status` and `doctor`
+print, and what each failed check means.
 
-## Startup behavior
+## Reading the setup from a script
 
-The server always starts. If no credentials are stored or the token is
-rejected, it logs a warning and every tool returns an `[auth]` error that
-says to run `login`. Exiting instead would make the client show "failed to
-connect" without the model ever learning why.
+`google-docs-mcp status --json` prints the same state as `status`, as one
+JSON object on stdout, without contacting Google. It is for a script
+that needs to know whether this server is authorized before starting
+it. `credentials.resolved` is the field to branch on. `schema_version`
+changes only when a field is removed or its meaning changes, and the
+account is masked to its domain, as the text output masks it (D-05). A
+label in the text output may be reworded in any release; the object may
+not.
 
 ## Approving calls
 
-The server asks the person nothing; the MCP client approves each call.
-The README's Safety section says what each client prompts for, and gives
-Claude Code `permissions.ask` rules.
+The server asks the person nothing; the MCP client approves each call
+(D-52). The README's Safety section says what each client prompts for,
+and gives Claude Code `permissions.ask` rules.
 
-### Removed settings
+## Removed settings
 
-`GDOCS_REQUIRE_PROMPT` went with the server's question in 3.0.0, and its
-flag `--require-prompt` is gone, so a flag left in a client's arguments
-stops the server from starting. The variable is still read, only to
-refuse it: set to anything but `false`, its old default, the server will
-not start, because ignoring it would quietly allow what it was set to
-stop.
+A removed setting that restricted something is still read, only to
+refuse it: set to anything but its old default, the server will not
+start, and its flag is gone (D-53). Ignoring it would quietly allow what
+it was set to stop. [troubleshooting.md](troubleshooting.md) says what
+to do when one stops the server.
 
 | Variable | Still accepted | Instead |
 |---|---|---|

@@ -20,8 +20,11 @@ import (
 // precondition for one. While a person has the file open in the Docs
 // editor, the file is not where their work is: it is in the live session,
 // which reaches the file only when the editor saves, and an upload makes
-// the editor take the uploaded version (spike D, stage 3). So a write
-// checks, writes, verifies and repairs:
+// the editor take the uploaded version: an upload a few seconds after a
+// save overwrites that save, which stays only in Drive's history. It needs
+// a person with the file open, so only the integration tests
+// TestRawMarkdownWithPerson and TestRawMarkdownAfterDocs check it. So a
+// write checks, writes, verifies and repairs:
 //
 //   - before: the live session must agree with the file — no comment,
 //     reply or resolve made in the editor and not saved yet — or the write
@@ -55,13 +58,22 @@ const (
 	// writeAttempts bounds how often a write waits for the editor or
 	// plans again.
 	writeAttempts = 3
-	// saveWait is how long a write waits for the editor to save.
+	// saveWait is how long a write waits for the editor to save. The
+	// editor writes a change into the file 1.7 to 2 seconds after the
+	// live session shows it, typing, comments, replies and resolves
+	// alike, so three seconds outlasts a save. It takes a person typing,
+	// so only the integration test TestRawMarkdownWatch measures it.
 	saveWait = 3 * time.Second
 )
 
 // liveFields is the part of the live session a write checks: its
-// revision, its comments and where they sit. The comments view honors a
-// mask only with the tabs' content asked for (spike D).
+// revision, its comments and where they sit, 2.4 KB where one test file's
+// whole model is 114 KB. The comments view needs the tabs' content asked
+// for too, or Google answers 400 "Comments view mode may only be
+// specified if tabs content is also requested." The live step "edit it"
+// sends this mask, but a refusal there only warns, so the integration
+// test TestRawMarkdownMask is what checks it.
+// https://developers.google.com/workspace/docs/api/how-tos/performance
 const liveFields = "revisionId,comments,tabs(tabProperties(tabId),documentTab(commentAnchors))"
 
 type liveView struct {
@@ -409,6 +421,11 @@ func (s *Service) mdEdit(ctx context.Context, req EditRequest) (*EditResult, err
 	o := mdWriteOpts{ref: req.Document, expectRevision: req.ExpectRevision, dryRun: req.DryRun}
 	switch mode {
 	case plan.ModeSuggest:
+		// Google's help page lists opening, editing, commenting and sharing
+		// for a Markdown file and no suggesting, and the Docs API answers a
+		// SUGGEST batch on one 400. The live step "suggest mode" checks this
+		// refusal, and the integration test TestRawMarkdownFollowups the 400.
+		// https://support.google.com/docs/answer/18289341
 		return nil, Errorf("unavailable", "a Markdown file takes no suggestions: Docs has no suggestion mode for it and the Docs API refuses every write to it; "+
 			"use mode comment to propose the change, or mode direct to make it, as the person asked")
 	case plan.ModeComment:
@@ -605,9 +622,12 @@ func (s *Service) mdAddComment(ctx context.Context, req AddCommentRequest, conte
 
 // mdReply is reply_comment on a comment the Docs editor keeps in a
 // Markdown file, which Drive cannot reach: the reply is written into the
-// file. Resolving cannot be: a resolve written into the bytes makes the
-// Docs API fail on the whole file (spike D), so a person resolves in the
-// editor.
+// file. Resolving cannot be: status RESOLVED written into the bytes, with
+// a RESOLVE reply or without, makes every documents.get on the file
+// answer 500 "Internal error encountered." until the bytes are put back,
+// so a person resolves in the editor. Checked by the integration test
+// TestRawMarkdownBuild; the live step "resolve in the file" checks this
+// server's refusal.
 func (s *Service) mdReply(ctx context.Context, req ReplyRequest, action, content string) (*ReplyResult, error) {
 	commentID := strings.TrimSpace(req.CommentID)
 	if action != "reply" {

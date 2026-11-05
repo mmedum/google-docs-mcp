@@ -20,11 +20,9 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// The review that found this said drive returned from a failed write
-// without reaping the child and without its stderr, so a server that died
-// during init reported a bare broken pipe with the panic that explained
-// it discarded. The fix went in untested, which a sibling admitting the
-// same gap in its own port is what made obvious.
+// A failed write reaps the child and reports its stderr, so a server
+// that dies during init is reported with the panic that explains it,
+// not as a bare broken pipe.
 //
 // The input is deliberately larger than a pipe buffer: a small write
 // lands in the buffer and succeeds even against a dead child, which would

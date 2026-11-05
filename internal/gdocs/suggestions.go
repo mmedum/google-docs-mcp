@@ -12,10 +12,13 @@ package gdocs
 // underline, a font size and a color all filled in and every one of
 // them inherited — reading the style without the state reports a
 // suggestion to change nine properties where a person asked for one.
+// Checked by the live steps "suggest a style-only change" and
+// "list_suggestions", and the integration test TestRawSuggestedStyle.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents#suggestedtextstyle
 //
 // The fields are the discovery document's, in full: a suggestion this
 // server cannot render is still a suggestion it must not report as
-// absent, which is what a partial list did until #46.
+// absent, and a partial list does exactly that (#46).
 
 // BackgroundSuggestionState marks which fields of a suggested
 // background the suggestion sets.

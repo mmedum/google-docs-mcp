@@ -22,6 +22,7 @@ linters:
     - prealloc
     - makezero
     - forbidigo
+    - depguard
   settings:
     misspell:
       locale: US
@@ -33,7 +34,7 @@ linters:
         - pattern: ^os\.Stdout$
           msg: stdout carries only MCP JSON-RPC frames; take an io.Writer instead
         # The server asks the person nothing; the client approves each
-        # call (docs/architecture.md §12a). These are the two ways to ask:
+        # call (D-52). These are the two ways to ask:
         # a form elicitation, and the input requests a result carries from
         # protocol 2026-07-28.
         - pattern: \.Elicit$
@@ -41,6 +42,16 @@ linters:
           msg: the server asks the person nothing; refuse the call, or make the risky variant its own tool
         - pattern: ^mcp\.(ElicitParams|InputRequestMap)$
           msg: the server asks the person nothing; refuse the call, or make the risky variant its own tool
+    depguard:
+      rules:
+        # Own wire types over raw REST (D-08). Check the message text when
+        # verifying this works: a settings block that fails to load
+        # leaves depguard on its default rule, which refuses every
+        # import outside the standard library with a message of its own.
+        own-wire-types:
+          deny:
+            - pkg: "google.golang.org/api"
+              desc: "it drags in gRPC and telemetry for the subset of the API this repository hand-writes in internal/gdocs and internal/gapi (D-08)"
     gocyclo:
       min-complexity: 25
     govet:

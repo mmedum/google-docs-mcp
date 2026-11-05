@@ -88,8 +88,8 @@ type Config struct {
 	ExportDir         string
 	HTTPTimeout       time.Duration
 	ClientSecretPath  string
-	// Warnings name settings that were accepted but no longer do
-	// anything, for the caller to log once at start.
+	// Warnings name deprecated settings, accepted and ignored, for the
+	// caller to log once at start.
 	Warnings []string
 }
 
@@ -298,8 +298,8 @@ func (s *Settings) Build() (Config, error) {
 		errs = append(errs, fmt.Errorf("%w: log format %q (want text, json)", ErrInvalid, s.LogFormat))
 	}
 
-	// Accepted so an existing configuration still starts; Google made
-	// the features it gated generally available on 2026-09-30.
+	// Accepted so an existing configuration still starts; the features
+	// it gated are generally available.
 	if strings.TrimSpace(s.Preview) != "" {
 		c.Warnings = append(c.Warnings, EnvPrefix+"PREVIEW (--preview) is deprecated and ignored: comments and suggestions are generally available")
 	}

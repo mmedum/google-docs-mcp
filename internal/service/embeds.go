@@ -11,7 +11,7 @@ import (
 	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
 )
 
-// Tables and images in content are placed after its text (spike E). The
+// Tables and images in content are placed after its text. The
 // first batch writes the text with an empty paragraph, a slot, where each
 // one goes. Later batches fill the slots one at a time, each against a
 // fresh read, highest slot first, so a placement moves only slots already
@@ -118,6 +118,12 @@ func (s *Service) placeEmbeds(ctx context.Context, req EditRequest, ops []*plan.
 				result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the text was written, but the %s on line %d of the content "+
 					"was not placed: %s", op.Seq, slot.Block.Kind, slot.Block.Line, roundMessage(op.Seq, err)))
 			default:
+				// Google refuses a round's batch whole, so its slot is still
+				// there. An image address that answers 404 is one such
+				// refusal, 400 INVALID_ARGUMENT "The provided image was not
+				// found.", which the reference does not name. Checked by the
+				// live step "content with an image Google cannot fetch".
+				// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertInlineImageRequest
 				result.Warnings = append(result.Warnings, fmt.Sprintf("op %d: the text was written, but the %s on line %d of the content "+
 					"was not placed: %s; its empty paragraph is still there", op.Seq, slot.Block.Kind, slot.Block.Line, roundMessage(op.Seq, err)))
 			}
@@ -168,12 +174,20 @@ func (s *Service) placeEmbed(ctx context.Context, req EditRequest, op *plan.Op, 
 }
 
 // dropSlot deletes the empty paragraphs a table placed at a slot leaves
-// after it (spike E). A table put in at the newline of the paragraph
-// before starts at the slot and leaves that paragraph's old newline as
-// well as the slot; a table with no paragraph before starts one later,
-// behind an empty paragraph Docs needs there, and leaves only the slot.
-// The slot stays where the body ends or a table follows, since Docs needs
-// a paragraph in both places.
+// after it. insertTable puts a newline at its index and the table after
+// it, so a table put in at the newline of the paragraph before starts at
+// the slot and leaves that paragraph's old newline as well as the slot; a
+// table with no paragraph before starts one later, behind an empty
+// paragraph Docs needs there, and leaves only the slot. The slot stays
+// where the body ends or a table follows, since Docs needs a paragraph in
+// both places. Checked by the integration test TestRawTablesInContent.
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTableRequest
+//
+// In suggest mode the delete is a suggested deletion of an empty paragraph
+// the same call suggested, and Google removes it outright, so this round
+// needs nothing of its own there; no Google page says so. Checked by the
+// live steps "content with a table and an image, suggested" and
+// "read after rejecting them".
 func (s *Service) dropSlot(ctx context.Context, req EditRequest, op *plan.Op, slot plan.Slot, result *EditResult, f *Fetched) (*Fetched, error) {
 	if f.Doc.RevisionID != result.written {
 		return f, Errorf("conflict", "somebody else changed the document in between")

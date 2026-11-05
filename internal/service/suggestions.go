@@ -251,6 +251,11 @@ func (s *Service) Review(ctx context.Context, req ReviewRequest) (*ReviewResult,
 	if s.isMarkdown(ctx, req.Document) {
 		return nil, mdUnsupported("it has no suggestions to review", "")
 	}
+	// A Word file's suggestion ids cannot name its tracked changes: Docs
+	// reads them as suggestIdImport<uuid>_<n>, the uuid new on every
+	// revision and n not the w:id, so a review would go by position. No
+	// reference documents the ids. Checked by the integration test
+	// TestRawDocxRevision; nothing live, since this refuses first.
 	if err := s.wordUnsupported(ctx, req.Document, "reviewing suggestions"); err != nil {
 		return nil, err
 	}

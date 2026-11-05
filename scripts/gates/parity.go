@@ -25,16 +25,14 @@ var (
 //
 // The two lists live in different files and you are only ever editing
 // one of them, so they drift silently and in whichever direction hurts
-// most: here the local list ran four `go vet` passes and CI ran one, so
-// fourteen build-tagged files compiled on a maintainer's laptop and
-// nowhere else. Three of the four servers in this family had the same
-// divergence, in one direction or the other, which is what turned it
-// from a local tidy-up into a rule.
+// most: a local list that runs four `go vet` passes beside a CI that
+// runs one leaves every build-tagged file compiling on a maintainer's
+// laptop and nowhere else.
 //
 // The comparison is by command rather than by target name, because a
-// target and the thing CI runs for it need not be spelled alike — a
-// lesson from the first repository to build this, where `make cover`
-// runs a script and the target name appears in no workflow at all.
+// target and the thing CI runs for it need not be spelled alike: `make
+// cover` runs `gates coverage`, and the target name appears in no
+// workflow at all.
 func parity(w io.Writer, _ []string) error {
 	root, err := moduleRoot()
 	if err != nil {
@@ -150,15 +148,12 @@ func parityCheck(makefile, ci string, declared []string) (problems []string, vet
 	// CI side only counts a gate named by a `run:` step. That narrower
 	// rule is safe only because the pattern is the invocation
 	// (`go run ./scripts/gates NAME`) rather than the gate's bare name,
-	// so it cannot appear anywhere but a `run:`. A sibling keyed the same
-	// map on tool names, where `lint` is satisfied by a `uses:` action —
-	// there the rule has to accept a `uses:` reference too. If a gate here
-	// is ever satisfied by an action, this needs widening with it. Matching the raw
-	// text meant that commenting out a step to unblock a red build left
-	// parity green — the one divergence it exists to catch, achieved by
-	// typing one `#`. What remains uncovered is a step disabled by an
-	// `if:` that is never true; seeing that needs a YAML parse, and this
-	// gate is not worth a dependency.
+	// so it cannot appear anywhere but a `run:`. A gate satisfied by a
+	// `uses:` action would need the rule widened with it. Raw text would
+	// keep parity green over a step commented out to unblock a red build,
+	// the one divergence it exists to catch. What remains uncovered is a
+	// step disabled by an `if:` that is never true; seeing that needs a
+	// YAML parse, and this gate is not worth a dependency.
 	inCI := map[string]bool{}
 	for _, m := range ciGate.FindAllStringSubmatch(runLines(ci), -1) {
 		inCI[m[1]] = true
@@ -175,8 +170,8 @@ func parityCheck(makefile, ci string, declared []string) (problems []string, vet
 		}
 	}
 
-	// The specific divergence that started this: a tagged vet pass that
-	// only ever runs locally. Build tags are where a whole package can
+	// The divergence that matters most: a tagged vet pass that only ever
+	// runs locally. Build tags are where a whole package can
 	// stop compiling with CI perfectly green.
 	local := tagSet(vetTags.FindAllStringSubmatch(code(makefile), -1))
 	remote := tagSet(vetTags.FindAllStringSubmatch(code(ci), -1))

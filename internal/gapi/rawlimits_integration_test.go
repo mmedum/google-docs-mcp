@@ -2,8 +2,8 @@
 
 package gapi
 
-// Spike: how long may a comment's or a reply's text be, and in what unit
-// does Drive count it? Drive's reference states no limit.
+// How long a comment's or a reply's text may be, and in what unit Drive
+// counts it. Drive's reference states no limit.
 //
 //	GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestRawCommentLength -v
 //
@@ -13,8 +13,7 @@ package gapi
 // bytes, units or characters says which one Drive counts. Every comment
 // it makes is deleted again; the scratch document stays.
 //
-// What it established, 2026-10-31, by halving from one character up
-// before the limit was known: Drive counts bytes. It takes 4096 x, 2048 é
+// Findings: Drive counts bytes. It takes 4096 x, 2048 é
 // and 1024 emoji whole, 4096 bytes each, and refuses one more with 403
 // commentLengthLimitExceeded, "Comment content is limited to 4096 bytes
 // in UTF-8 encoding." A reply has the same limit. The Docs API's
@@ -66,7 +65,7 @@ func TestRawCommentLength(t *testing.T) {
 // comments view is on. Each run of text is posted at the Drive limit and
 // one over; the comments stay on the scratch document.
 //
-// What it established, 2026-10-31: insertComment refuses all six, 4096 x
+// Findings: insertComment refuses all six, 4096 x
 // included, with 400 "content must not exceed 2048 UTF-8 code units". So
 // it counts bytes too, and takes 2048 of them.
 //
@@ -106,7 +105,7 @@ func TestRawDocsCommentLength(t *testing.T) {
 // only if Google counts units, and the second refused unless it counts
 // characters.
 //
-// What it established, 2026-10-31: 128 emoji were taken and 129 refused,
+// Findings: 128 emoji are taken and 129 refused,
 // "Invalid name: must be at least 1 and no more than 256 characters". So
 // Google counts UTF-16 units, as the reference says. internal/plan acts
 // on it.

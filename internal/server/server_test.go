@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -204,7 +205,7 @@ func connect(t *testing.T, api *fakeAPI) *mcp.ClientSession {
 // connectWith connects a client to a server over api, with its handle
 // memory seeded as a read would, so tools may target handles.
 //
-// The client can ask the person, and the server asks nobody (§12a): every
+// The client can ask the person, and the server asks nobody: every
 // tool in these tests is called through such a client, so a question from
 // any of them fails the test that made the call.
 func connectWith(t *testing.T, api *fakeAPI, cfg config.Config) *mcp.ClientSession {
@@ -287,7 +288,7 @@ func TestListToolsAndSchemas(t *testing.T) {
 		t.Fatal("destructive tools must not register by default")
 	}
 	// Destructive tools register only with the flag, marked destructive.
-	// No tool carries Claude Code's requiresUserInteraction (§12a).
+	// No tool carries Claude Code's requiresUserInteraction.
 	ds := connectWith(t, &fakeAPI{raw: doctest.RawFixture(t)}, config.Config{EnableDestructive: true, DefaultWriteMode: config.WriteDirect})
 	dres, err := ds.ListTools(context.Background(), nil)
 	if err != nil {
@@ -557,13 +558,34 @@ func TestDumpSchemas(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Server != server.Name || out.SDK != server.SDKVersion || len(out.Tools) != 21 || out.Tools[0].Name != "add_comment" ||
+	if out.Server != server.Name || len(out.Tools) != 21 || out.Tools[0].Name != "add_comment" ||
 		len(out.ResourceTemplates) != 3 || out.ResourceTemplates[0].URITemplate != "gdocs://{document}" {
 		t.Fatalf("dump = %+v", out)
+	}
+	// The sdk field tells an SDK upgrade from a tool-surface change, so it
+	// names the version go.mod requires.
+	if want := goModVersion(t, "github.com/modelcontextprotocol/go-sdk"); out.SDK != want {
+		t.Errorf("the dump names SDK %q, go.mod requires %q", out.SDK, want)
 	}
 	if !errors.Is(context.Canceled, context.Canceled) {
 		t.Fatal("sanity")
 	}
+}
+
+// goModVersion is the version go.mod requires of a module.
+func goModVersion(t *testing.T, module string) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../go.mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if f := strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), "require ")); len(f) >= 2 && f[0] == module {
+			return f[1]
+		}
+	}
+	t.Fatalf("go.mod requires no %s", module)
+	return ""
 }
 
 func TestCommentAndHistoryTools(t *testing.T) {
@@ -1065,16 +1087,15 @@ func TestEveryToolHasArgs(t *testing.T) {
 // TestDebugLogsCarryNoDocumentData is the guarantee a person needs
 // before pasting a log into a bug report: at the loudest level the
 // server offers, the log says a call happened and how it went, and
-// nothing about the document it touched. The SDK would log whole
-// JSON-RPC frames if it were handed a logger, which is why it is not.
+// nothing about the document it touched. The SDK is handed the logger
+// at debug, so its lines are read here too.
 func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 	api := &fakeAPI{raw: doctest.RawFixture(t)}
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	// The service gets the same logger as the server. It did not until
-	// the security document was audited: the two service lines that
-	// carried a document id went to a logger this test never read, so the
-	// guarantee was being checked one layer above where it was broken.
+	// The service gets the same logger as the server, so a service line
+	// that carries a document id reaches the buffer this test reads
+	// rather than a logger one layer below it.
 	svc := service.New(api, service.Options{DefaultWriteMode: config.WriteDirect, Logger: logger})
 	_, _ = svc.Fetch(context.Background(), fixtureID)
 	srv := server.New(server.Deps{Service: svc, Config: config.Config{DefaultWriteMode: config.WriteDirect, EnableDestructive: true}, Logger: logger, Version: "test"})
@@ -1105,9 +1126,9 @@ func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 		}
 	}
 
-	// The conflict path logs at info, not debug, and until now no test
-	// had ever made it run — which is where the id survived longest.
-	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The provided revision id does not match the current revision"}}
+	// The conflict path logs at info, not debug, and only a conflict
+	// makes it run.
+	api.batchErrs = []error{&gapi.APIError{Status: 400, Message: "The required revision ID 'made-up-revision' does not match the latest revision."}}
 	_, _ = cs.CallTool(ctx, &mcp.CallToolParams{Name: "edit_document", Arguments: toolArgs["edit_document"]})
 
 	got := logs.String()
@@ -1124,10 +1145,8 @@ func TestDebugLogsCarryNoDocumentData(t *testing.T) {
 	}
 	// The id, six characters of the id, the revision that names one state
 	// of it, the title, the text, the text a call sent, and a heading id.
-	// The prefix is here because it was in every debug line until the
-	// security document was audited against the code: §12 says a log
-	// carries nothing about the document, and six characters of an id is
-	// six characters of an id.
+	// A log carries nothing about the document, and six characters of an
+	// id is six characters of an id.
 	for _, leak := range []string{fixtureID, fixtureID[:6], "rev-0001", "Quarterly Report", "Revenue grew", leakCanary, "h.bg"} {
 		if strings.Contains(got, leak) {
 			t.Errorf("debug log leaked %q:\n%s", leak, got)

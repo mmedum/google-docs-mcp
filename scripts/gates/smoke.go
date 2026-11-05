@@ -25,8 +25,8 @@ import (
 // goes away, and it is a different path, because the server is still
 // working when the pipe ends. The SDK reports that as JSON-RPC -32004
 // with the EOF only in the message text, so `errors.Is(err, io.EOF)`
-// never matches it and the process used to exit 1 on an ordinary
-// shutdown, which every host logs as a crash.
+// never matches it, and a server that tests for it exits 1 on an
+// ordinary shutdown, which every host logs as a crash.
 //
 // A run that sleeps before closing stdin cannot see that bug: with
 // nothing in flight the exit really is 0. That is why the second run
@@ -101,12 +101,11 @@ func drive(bin string, env []string, input string, pause time.Duration) (stdout,
 		return "", "", err
 	}
 	// Past Start there is a child, and every way out of this function has
-	// to take it with it. The paths below used to return without one:
-	// a server that died during init makes the write fail with EPIPE, and
-	// the gate then reported a broken pipe while discarding the stderr
-	// that said why — and a failing Close left an MCP server running with
-	// an open stdin for as long as the gate did. Reaping before reading
-	// the buffers also keeps the read off the copying goroutines.
+	// to take it with it. A server that died during init makes the write
+	// fail with EPIPE, and the stderr that says why is in its buffer; a
+	// failing Close would leave an MCP server running with an open stdin
+	// for as long as the gate does. Reaping before reading the buffers
+	// also keeps the read off the copying goroutines.
 	reaped := false
 	reap := func() {
 		if !reaped {

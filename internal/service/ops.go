@@ -66,9 +66,10 @@ type ObjectInfo struct {
 // Capabilities tell the model what this server can do with the document.
 type Capabilities struct {
 	// CommentsView says Google answered with comments included, so
-	// suggestions and pinned comments work here. Deprecated name kept
-	// for one release: it was the GDOCS_PREVIEW setting before Google
-	// made these features generally available.
+	// suggestions and pinned comments work here. Preview is the same
+	// value under its deprecated name, after the GDOCS_PREVIEW setting.
+	// Dropping it removes an output field, so it goes at the next major
+	// version (#108).
 	Preview          bool     `json:"preview"`
 	CommentsView     bool     `json:"comments_view"`
 	WriteModes       []string `json:"write_modes"`
@@ -80,10 +81,11 @@ type Capabilities struct {
 const (
 	// KindDocument is a Google Doc.
 	KindDocument = "document"
-	// KindMarkdownFile is a Markdown file Docs opens in place (§7.5).
+	// KindMarkdownFile is a Markdown file Docs opens in place, read and
+	// written as its own text.
 	KindMarkdownFile = "markdown_file"
 	// KindWordFile is a Word file (.docx), read through Docs and written
-	// into the file itself (§7.6).
+	// into the file itself.
 	KindWordFile = "word_file"
 )
 

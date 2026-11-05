@@ -1,92 +1,120 @@
-# CLAUDE.md — google-docs-mcp project instructions
+# CLAUDE.md — google-docs-mcp
 
-Project-specific rules for Claude Code in this repository. The user's
-global instructions still apply; this file adds to them.
+A Go MCP server for Google Docs over stdio: one binary per person, their
+own OAuth client, nothing hosted (D-01). Its scope is one document and
+everything inside it, its history included (D-02). Why the code is the
+way it is lives in `docs/architecture.md`, one decision per `D-NN`; read
+it before changing the tool surface, the addressing or the write path.
 
-## Mission
+## Commands
 
-A production-grade Go MCP server for Google Docs, distributed to other
-people. The design, its evidence log, the decided constraints and the
-phase plan live in `docs/architecture.md`. Read it before changing the
-tool surface, the addressing model, or the write path.
+- `make check` runs every gate CI runs; its `check` target is the list.
+  `pre-commit install`, once per clone, adds gitleaks, `make fmt` and
+  `go vet`.
+- `make live` drives the built binary against the signed-in account;
+  `LIVE_ARGS` passes `go test` flags, such as `-run TestLiveWord`, and
+  the delete steps need `GDOCS_ENABLE_DESTRUCTIVE=true`. Read the
+  transcript. `CONTRIBUTING.md` covers it and the evals.
+- `GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run <Test> -v`
+  runs one integration test against Google.
+- `make api-diff` and `make schema-refetch` are release steps in
+  `docs/release.md`.
+- `go run ./scripts/gates` lists the gates; add a name to run one.
 
 ## Hard rules
 
-1. **Nothing internal, ever.** No organization names, document ids or
-   URLs, account emails, Cloud project ids, OAuth client ids or secrets,
-   and no content from real documents anywhere in the repository, in
-   fixtures, in commit messages, or in logs. Fixtures are synthetic.
-2. **Stdout carries only MCP JSON-RPC frames.** This is the protocol, not
-   a house preference. MCP's stdio transport says the server "MUST NOT
-   write anything to its `stdout` that is not a valid MCP message", and
-   "MAY write UTF-8 strings to its standard error (`stderr`) for logging
-   purposes" —
-   <https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>.
-   Logs use `slog` to stderr. A stray print corrupts the JSON-RPC stream
-   and the client silently stops working, which is why this is a hard
-   rule rather than a style note.
-
-   `forbidigo` enforces it: `fmt.Print*` and `os.Stdout` are forbidden
-   outside `main`, which names the process's streams once and passes them
-   down as `io.Writer`. `scripts/` is excluded, being maintainer tooling
-   rather than the server. Check the message text when verifying it — a
-   settings block that fails to load leaves forbidigo on its defaults,
-   firing, looking like it works.
-3. **The model never sees UTF-16 indices.** Targets are exact text,
-   `heading_id`, or handles. Index math lives in `internal/doc` and (later)
-   `internal/plan`.
-4. **Never overwrite.** Replacements are minimal diffs; direct edits
-   refuse to delete ranges holding comment anchors, suggestions, images
-   or footnotes unless forced; `suggest` and `comment` modes delete
-   nothing. The person chooses the write mode; never substitute one
-   silently.
-5. **Destructive tools are unregistered** unless
-   `GDOCS_ENABLE_DESTRUCTIVE=true`.
-6. **Own wire types, raw REST.** Do not import
-   `google.golang.org/api`; it drags in gRPC and telemetry. Extend
-   `internal/gdocs` instead.
-7. **No auto-commit, no auto-push.**
-8. **Verify conventions against primary sources** before adopting them;
-   record the verdict in the evidence log in `docs/architecture.md`.
-
-## Where things go
-
-- `cmd/google-docs-mcp/` — subcommands and server wiring.
-- `internal/config/` env + bound flags; `internal/credentials/` keyring →
-  file → env; `internal/userconfig/` non-secret profile file;
-  `internal/auth/` loopback OAuth.
-- `internal/gapi/` raw REST client; `internal/gdocs/` wire types.
-- `internal/doc/` model, handles, sections; `internal/render/` markdown,
-  text, outline; `internal/service/` orchestration and scope resolution;
-  `internal/tools/` MCP tools; `internal/server/` SDK wiring and schema dump.
-- `internal/markdown/` the fragment parser; `internal/plan/` write
-  planning and index math; `internal/version/` the build stamp.
-- `internal/redact/` the transcript redactor, shared by both drivers and
-  carrying no build tag so its tests run in every `make check`. Anything
-  that writes an artifact a person may paste goes through it.
-- **The dev tooling lives in `scripts/`, as Go, and there is no shell.**
-  `scripts/gates/` is one command with a registry: coverage, staleness,
-  pins, leaks, classes, schema-diff, smoke and parity, plus schema-ack,
-  which CI runs on pull requests. `internal/` is the
-  server's own implementation, and a thing that only ever runs on a
-  maintainer's machine does not belong there. No shell either — a shell
-  script is held to no gofmt, vet, lint or test, `make check` runs on the
-  Windows runner where bash is a dependency rather than a given, and a
-  script that parses JSON with `sed` is how a quote ends up inside a
-  string.
-- `internal/livecheck/` the live driver (build tag `live`) plus the
-  untagged gates over both drivers; `internal/evals/` the agent evals
-  (build tag `evals`); `internal/doc/doctest/` shared fixtures.
-- `testdata/sample.json` synthetic fixture; `testdata/golden/` renderer goldens.
+1. **Never commit anything internal**: document ids or URLs, the titles
+   or content of real documents, account addresses, organization names,
+   Cloud project ids, OAuth client ids or secrets. Not in code, docs,
+   fixtures, transcripts, commits, pull requests or logs. Naming a
+   sibling server, such as google-drive-mcp, is fine. Fixtures are
+   synthetic (D-06). `make leaks` and gitleaks hold it.
+2. **Never write to stdout outside `main`.** Stdout carries only MCP
+   JSON-RPC frames; logs go to stderr through `slog` (D-03). forbidigo,
+   `make smoke` and `TestNothingPrintsOutsideTheBoundary` hold it, with
+   `scripts/` excluded.
+3. **Never log a document id, revision, title, text or query**, at any
+   level (D-04). `TestDebugLogsCarryNoDocumentData` holds it.
+4. **Never show the model a UTF-16 index.** Targets are exact text,
+   `heading_id`, handles or a named range, and index math stays in
+   `internal/plan` and `internal/doc` (D-12, D-13, D-14, D-15).
+   `TestUTF16` holds the conversion.
+5. **Never overwrite.** A replace is a minimal diff (D-27). A direct
+   edit that would delete a comment anchor, a suggestion, an object or a
+   footnote reference is refused unless forced (D-28).
+   `TestGuardBlocksDirect` holds it.
+6. **Never substitute one write mode for another** (D-29).
+   `TestSuggestModeRefusesUnsupportedRequests` holds it.
+7. **Never send a write unguarded by the revision it was planned on**
+   (D-30), and never repeat one that may have landed: it is
+   `[ambiguous_outcome]` (D-61). `TestDryRunAndConflictRetry` and
+   `TestWriteRetriesOnlyOn429` hold them.
+8. **Never write past unsaved editor work** in a Markdown file, `force`
+   included (D-44). `TestMarkdownFileWaitsForTheEditor` holds it.
+9. **Never register a delete tool without `GDOCS_ENABLE_DESTRUCTIVE`**
+   (D-54), and never take a delete whose target is not repeated (D-56).
+   `TestDeletesNeedTheTargetRepeated` holds it.
+10. **Never ask the person anything, or let a tool take or write the
+    server's settings** (D-52, D-59). `destructiveHint` is on every
+    write but those that only add (D-57), and no tool carries
+    `requiresUserInteraction` (D-58). forbidigo and
+    `TestNoToolTakesAServerSetting` hold it.
+11. **Never import `google.golang.org/api`** or another project's code;
+    extend `internal/gdocs` (D-08). depguard refuses it. Never call a
+    method or model a field without a verdict in
+    `testdata/api-coverage.tsv` or `testdata/api-fields.tsv` (D-09).
+12. **Never rename or drop a released tool, argument, output field or
+    resource template.** `make schema-diff` fails on a break no
+    `**Breaking:**` entry names; a break ships in a new major (D-77).
+13. **Never emit an error outside `[class] message`.** `make classes`
+    holds the vocabulary closed (D-60).
+14. **Never let the live driver or the evals print except through the
+    redactor** (D-07). `make transcript` holds it.
+15. **Never write a shell script**: every check is Go in `scripts/gates`
+    (D-10). `make parity` holds `make check` and CI to one list (D-85).
+16. **Never commit to `main` or push**; the owner pushes, tags and
+    merges (D-92).
+17. **Never adopt a belief about Google without a primary source**: its
+    documentation, the discovery document or a live probe (D-80, D-83).
+    Record a verified Google behavior in the comment at the line that
+    depends on it, with the source link and the live step or
+    integration test that checks it.
 
 ## Definition of done
 
-`make check` (gofmt; four vet passes — untagged plus `integration`,
-`live` and `evals`; golangci-lint;
-race tests with the 80% floor; govulncheck; a license check; a schema
-diff against the last tag; the stdio smoke test; and the staleness check
-of README/docs/CHANGELOG against the code) plus tests for new behavior, `/simplify` and
-`/code-review high` on the changed files with findings resolved or
-explained, and a look at `--dump-schemas` for breaking changes. Commit
-at each milestone with a message that says what and why. Phases end
-with a tagged release and wait for an explicit "go".
+- `make check` passes. On a pull request CI also runs `schema-ack`,
+  which needs a commit footer naming each changed item of the tool
+  surface (`CONTRIBUTING.md`).
+- New behavior has tests, and the schema diff has been read.
+- `/simplify` and `/code-review medium` have run. A fixed finding is one
+  line in the commit body. A declined one goes in the PR body, or
+  becomes a present-tense constraint comment at the line it protects.
+  Never write findings into `docs/`.
+- Anything touching the write path or an API response shape has had a
+  `make live` run whose transcript was read (D-83).
+
+## Traps
+
+- **Green gates are not done.** Every fake is written from belief; only
+  `make live` and the integration tests test it (D-80, D-83).
+- **`dry_run` is taken by the writes whose input carries it, not every
+  write** (D-35). Each returns before sending, with no guard in the API
+  client, so a write that takes it needs its own "sends nothing" test.
+- **`expect_revision` is checked before a write**, so only an edit
+  between the read and the write reaches Google's conflict answer
+  (D-30). `TestRawStaleRevision` checks that answer.
+- **A handle is valid for the revision it came with** (D-14), and a
+  write always fetches again past the five-second cache (D-64).
+- **`make check` runs no integration, live or eval test**; `make vet`
+  compiles them. `cmd/` is outside the coverage floor (D-81).
+- **A linter settings block that fails to load leaves its defaults on**,
+  still firing. Check the message text of forbidigo and depguard.
+- **Never delete a decision or reuse an ID.** Supersede or deprecate it,
+  and take the next ID from the file's `Next ID:` line.
+
+## Writing
+
+Plain and short: lead with the outcome, one idea per sentence, no
+narration, no count a gate does not check. History goes in commit
+messages. `release.yml` lifts the CHANGELOG section verbatim into the
+release notes, so the rules in `CONTRIBUTING.md` are not optional.

@@ -9,9 +9,11 @@ VERSION  ?= dev
 PKG       = github.com/mmedum/google-docs-mcp/v3
 LDFLAGS   = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
 COVER_MIN ?= 80
-GOBIN    := $(shell $(GO) env GOPATH)/bin
-# Prefer tools installed with the current Go (go install ...@latest) over distro packages.
-export PATH := $(GOBIN):$(PATH)
+# The versions .github/workflows/ci.yml pins, so make check runs what CI runs;
+# the pins gate fails if they differ.
+GOLANGCI_VERSION    ?= v2.14.0
+GOVULNCHECK_VERSION ?= v1.7.0
+GO_LICENSES_VERSION ?= v1.6.0
 
 .PHONY: all
 all: check
@@ -36,8 +38,8 @@ vet: ## go vet, including the integration-tagged tests so they keep compiling
 	$(GO) vet -tags=evals ./...
 
 .PHONY: lint
-lint:
-	golangci-lint run
+lint: ## golangci-lint, at the version CI pins
+	$(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run
 
 .PHONY: test
 test: ## Unit tests with race detector and coverage
@@ -51,13 +53,17 @@ cover: test ## Enforce the coverage floor on core packages
 bench: ## Benchmarks over the synthetic large document (doctest.Large)
 	$(GO) test -run XXX -bench . -benchmem ./internal/doc ./internal/render ./internal/service
 
+.PHONY: live
+live: build ## Drive the built binary against the signed-in account (see CONTRIBUTING.md#the-live-run)
+	$(GO) test -tags=live ./internal/livecheck -v -count=1 -timeout 20m $(LIVE_ARGS) -args -bin $(abspath $(BIN))
+
 .PHONY: vuln
-vuln:
-	govulncheck ./...
+vuln: ## Known vulnerabilities in anything the code calls
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 .PHONY: licenses
-licenses:
-	go-licenses check ./... --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
+licenses: ## Dependencies must carry a license we can redistribute under
+	$(GO) run github.com/google/go-licenses@$(GO_LICENSES_VERSION) check ./... --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
 
 .PHONY: schemas
 schemas: build ## Dump tool schemas
@@ -78,6 +84,10 @@ smoke: build ## Drive the binary over stdio, twice
 .PHONY: staleness
 staleness: build ## Docs must match the code
 	@$(GO) run ./scripts/gates staleness $(BIN)
+
+.PHONY: docs
+docs: ## Decision IDs, citations, links, paths, the codemap, live steps and tests resolve
+	@$(GO) run ./scripts/gates docs
 
 .PHONY: leaks
 leaks: ## Nothing identifying may be in the repository
@@ -131,7 +141,7 @@ schema-refetch: ## Check the vendored schemas against what their sources serve (
 	@$(GO) run ./scripts/gates schema-refetch
 
 .PHONY: check
-check: fmt vet lint cover vuln licenses leaks pins classes transcript api-coverage api-fields mcpb schema-diff smoke staleness parity ## Everything CI runs
+check: fmt vet lint cover vuln licenses leaks pins classes transcript api-coverage api-fields mcpb schema-diff smoke staleness docs parity ## Everything CI runs
 
 .PHONY: clean
 clean:

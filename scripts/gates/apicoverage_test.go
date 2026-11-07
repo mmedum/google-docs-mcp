@@ -10,6 +10,7 @@ import (
 
 // The gate itself, over this repository's own snapshot and verdicts.
 func TestAPICoverageGate(t *testing.T) {
+	t.Chdir("../..")
 	if err := apiCoverage(io.Discard, nil); err != nil {
 		t.Errorf("api coverage gate: %v", err)
 	}

@@ -35,7 +35,7 @@ func schemaDiff(w io.Writer, args []string) error {
 		return fmt.Errorf("write schemas.json: %w", err)
 	}
 
-	last, err := lastTag("HEAD")
+	last, err := lastTag(".", "HEAD")
 	if err != nil {
 		return err
 	}
@@ -91,27 +91,24 @@ func codeSpans(s string) []string {
 	return out
 }
 
-// A version heading as Keep a Changelog writes it, a prerelease included,
-// unlike staleness's versionHeading: a prerelease that keeps the major
-// may not break the surface either.
-var changelogHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+[^\]]*)\]`)
-
 // undeclaredBreaks is each breaking change that the unreleased part of
 // the CHANGELOG, everything above the tag's own heading, does not
 // declare: a **Breaking:** entry there names its tool in backticks. A
 // version heading there that does not raise the tag's major version is
 // one too, since only a major release may break the surface (README,
-// Versioning).
+// Versioning). A line in fenced code is an example: it declares nothing
+// and heads no release.
 func undeclaredBreaks(breaking []change, changelog, tag string) ([]string, error) {
 	version := strings.TrimPrefix(tag, "v")
-	unreleased, _, found := strings.Cut(changelog, "\n## ["+version+"]")
-	if !found {
+	doc := readChangelog(changelog)
+	at := slices.IndexFunc(doc.headings, func(h changelogHeading) bool { return h.label == version })
+	if at < 0 {
 		// Without the tag's heading nothing tells unreleased from
 		// released, so no entry can declare a break.
-		return nil, fmt.Errorf("CHANGELOG.md has no ## [%s] heading for %s, so no break can be declared against it", version, tag)
+		return nil, fmt.Errorf("%s has no ## [%s] heading for %s, so no break can be declared against it", changelogPath, version, tag)
 	}
 	named := map[string]bool{}
-	for line := range strings.Lines(unreleased) {
+	for _, line := range doc.prose[:doc.headings[at].line] {
 		if !strings.Contains(line, "**Breaking:**") {
 			continue
 		}
@@ -130,9 +127,9 @@ func undeclaredBreaks(breaking []change, changelog, tag string) ([]string, error
 		n, _ := strconv.Atoi(m)
 		return n
 	}
-	for _, m := range changelogHeading.FindAllStringSubmatch(unreleased, -1) {
-		if major(m[1]) <= major(version) {
-			out = append(out, fmt.Sprintf("release %s breaks the surface without raising the major version from %s", m[1], version))
+	for _, h := range doc.headings[:at] {
+		if changelogVersion.MatchString(h.label) && major(h.label) <= major(version) {
+			out = append(out, fmt.Sprintf("release %s breaks the surface without raising the major version from %s", h.label, version))
 		}
 	}
 	return out, nil
@@ -195,16 +192,19 @@ func dumpSchemas(bin string) ([]byte, error) {
 	return out, nil
 }
 
-// lastTag is the newest release on rev's history: the nearest tag it
-// reaches. It is empty when rev reaches no tag, before the first release
-// or on a fork carrying the upstream's tags, which is a state, not a
-// failure; any git error is one.
-func lastTag(rev string) (string, error) {
-	tags, err := gitOutput("tag", "--merged", rev)
-	if err != nil || tags == "" {
+// lastTag is the newest release rev reaches in the checkout at dir: of the
+// tags on its history, the highest vX.Y.Z by semver, a prerelease included,
+// so a newer release on another line is not rev's. It is empty when rev
+// reaches no release, which is a state, not a failure; a git error is one.
+func lastTag(dir, rev string) (string, error) {
+	tags, err := gitOutput("-C", dir, "tag", "--merged", rev)
+	if err != nil {
 		return "", err
 	}
-	return gitOutput("describe", "--tags", "--abbrev=0", rev)
+	if v := stalenessNewestRelease(strings.Fields(tags)); v != "" {
+		return "v" + v, nil
+	}
+	return "", nil
 }
 
 // dumpAt builds the server at a revision and reads its dump.
@@ -388,7 +388,7 @@ func ackInputs(baseRef, head string) (c surfaceChanges, messages []string, base 
 		// The newest release the pull request lands on is the base
 		// branch's, not the head's: a branch cut before the last tag
 		// would otherwise be measured against an older release.
-		tag, err := lastTag(baseRef)
+		tag, err := lastTag(".", baseRef)
 		if err != nil {
 			return surfaceChanges{}, nil, "", err
 		}

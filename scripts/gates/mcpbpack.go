@@ -209,13 +209,17 @@ func sourceFor(dist string, f staged) (string, error) {
 	}
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("%s: nothing matches %s", f.path, pattern)
+		return "", fmt.Errorf("%s: nothing matches %s", f.path, filepath.ToSlash(pattern))
 	case 1:
 		return matches[0], nil
-	default:
-		return "", fmt.Errorf("%s: %s matches %d files (%v); a bundle packed from the wrong binary "+
-			"is not something a checksum catches", f.path, pattern, len(matches), matches)
 	}
+	// Slash paths in the message, as on every runner.
+	shown := make([]string, 0, len(matches))
+	for _, m := range matches {
+		shown = append(shown, filepath.ToSlash(m))
+	}
+	return "", fmt.Errorf("%s: %s matches %d files (%v); a bundle packed from the wrong binary "+
+		"is not something a checksum catches", f.path, filepath.ToSlash(pattern), len(matches), shown)
 }
 
 func trimDistPrefix(glob string) string {

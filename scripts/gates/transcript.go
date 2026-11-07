@@ -28,10 +28,13 @@ import (
 // b.String())`: document text in the log at the moment somebody pastes
 // it into an issue, on a line added where the habit of clip did not
 // reach.
-var transcriptDirs = []string{livecover.DriverDir, "internal/evals"}
 
 // evalsTag is the build tag every file of the eval harness carries.
 const evalsTag = "evals"
+
+// transcriptFloor is the fewest transcript writes the gate may read, under
+// what the drivers hold.
+const transcriptFloor = 15
 
 // redactors are the calls whose result may be logged. Kept to the two
 // that actually redact: shown and clip both end in redact.Clip, and the
@@ -82,33 +85,29 @@ var loggedPlain = map[string]string{
 	"strings.Join(tr.toolNames(), \" → \")": "the sequence of tool names a task called",
 }
 
+// transcript reads every Go file of the checkout, as git lists it, and
+// holds the ones the live or evals tag builds, wherever they sit.
 func transcript(w io.Writer, _ []string) error {
-	root, err := moduleRoot()
+	files, err := docsFiles(".")
 	if err != nil {
-		return err
+		return couldNotRun{err}
 	}
 	var problems []string
 	checked := 0
-	for _, dir := range transcriptDirs {
-		files, err := filepath.Glob(filepath.Join(root, dir, "*.go"))
+	for _, file := range files {
+		if !strings.HasSuffix(file, ".go") || parityGoIgnores(file) {
+			continue
+		}
+		n, found, err := transcriptProblems(file)
 		if err != nil {
 			return err
 		}
-		for _, file := range files {
-			n, found, err := transcriptProblems(file)
-			if err != nil {
-				return err
-			}
-			checked += n
-			problems = append(problems, found...)
-		}
+		checked += n
+		problems = append(problems, found...)
 	}
 	// Zero calls read is the same output as zero problems, and the two
 	// are not the same thing.
-	if checked < 15 {
-		return fmt.Errorf("only %d transcript writes read across %s; the check is not reading the drivers",
-			checked, strings.Join(transcriptDirs, " and "))
-	}
+	problems = append(problems, floorProblems("transcript writes", checked, transcriptFloor)...)
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
@@ -122,7 +121,7 @@ func transcript(w io.Writer, _ []string) error {
 // writes it saw and what is wrong with them.
 func transcriptProblems(file string) (int, []string, error) {
 	fset := token.NewFileSet()
-	parsed, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+	parsed, err := parser.ParseFile(fset, filepath.ToSlash(file), nil, parser.ParseComments)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -130,7 +129,7 @@ func transcriptProblems(file string) (int, []string, error) {
 	// tag. A test beside them that compiles without it is an ordinary
 	// unit test, not the transcript, and holding it to this rule would
 	// fill the allowlist with counters until nobody read it.
-	if tag := docsBuildTag(parsed); tag != livecover.DriverTag && tag != evalsTag {
+	if need, _ := parityRequiredTags(parsed); !transcriptDriver(need) {
 		return 0, nil, nil
 	}
 	var problems []string
@@ -160,6 +159,18 @@ func transcriptProblems(file string) (int, []string, error) {
 		return true
 	})
 	return calls, problems, nil
+}
+
+// transcriptDriver reports whether a smallest set of tags a file builds
+// with holds the live or the evals tag, its OS and architecture tags left
+// free as parity leaves them: `live && evals` and `live && linux` are
+// driver files.
+func transcriptDriver(need parityTagNeed) bool {
+	return slices.ContainsFunc(need.lists, func(list string) bool {
+		return slices.ContainsFunc(strings.Split(list, ","), func(tag string) bool {
+			return tag == livecover.DriverTag || tag == evalsTag
+		})
+	})
 }
 
 func isTestLog(name string) bool {

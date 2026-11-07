@@ -69,11 +69,7 @@ type verdict struct {
 // CI never checks — which is the same as not having the gate, with a
 // sentence in the documentation saying otherwise.
 func apiCoverage(w io.Writer, _ []string) error {
-	root, err := moduleRoot()
-	if err != nil {
-		return err
-	}
-	snap, err := readSnapshot(filepath.Join(root, apiMethodsFile))
+	snap, err := readSnapshot(apiMethodsFile)
 	if err != nil {
 		return err
 	}
@@ -88,11 +84,11 @@ func apiCoverage(w io.Writer, _ []string) error {
 			apiMethodsFile, len(snap.APIs), len(published))
 	}
 
-	verdicts, err := readVerdicts(filepath.Join(root, apiCoverageFile))
+	verdicts, err := readVerdicts(apiCoverageFile)
 	if err != nil {
 		return err
 	}
-	calls, err := clientCalls(filepath.Join(root, "internal", "gapi"))
+	calls, err := clientCalls(filepath.Join("internal", "gapi"))
 	if err != nil {
 		return err
 	}
@@ -193,12 +189,7 @@ func coverageProblems(published map[string]apiMethod, verdicts []verdict, calls 
 // network, and a check that fails when Google is slow is one people
 // learn to rerun rather than read.
 func apiDiff(w io.Writer, _ []string) error {
-	root, err := moduleRoot()
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(root, apiMethodsFile)
-	old, err := readSnapshot(path)
+	old, err := readSnapshot(apiMethodsFile)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -254,20 +245,20 @@ func apiDiff(w io.Writer, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(apiMethodsFile, append(data, '\n'), 0o644); err != nil {
 		return err
 	}
 	if len(lines) == 0 {
 		if _, err := fmt.Fprintf(w, "api diff: nothing moved; %s rewritten with today's date\n", apiMethodsFile); err != nil {
 			return err
 		}
-		return writeFieldSnapshot(w, root, docsDoc)
+		return writeFieldSnapshot(w, docsDoc)
 	}
 	if _, err := fmt.Fprintf(w, "%s\n\n%s rewritten. Every NEW method needs a verdict in %s before `make check` passes.\n",
 		strings.Join(lines, "\n"), apiMethodsFile, apiCoverageFile); err != nil {
 		return err
 	}
-	return writeFieldSnapshot(w, root, docsDoc)
+	return writeFieldSnapshot(w, docsDoc)
 }
 
 // discoveryDoc is one fetch of one discovery document, decoded into both

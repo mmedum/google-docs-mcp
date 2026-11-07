@@ -1,13 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v3/internal/server"
+	"github.com/mmedum/google-docs-mcp/v3/internal/tools"
 )
 
 // The changelog fixtures: a released v0.9.0, a v0.9.1 with and without
@@ -20,13 +26,13 @@ const (
 	clNextEmpty  = "## [0.9.1] - 2026-02-01\n\n"
 	clUnreleased = "# Changelog\n\n## [Unreleased]\n\n"
 	clWritten    = clUnreleased + "### Added\n\n- A second tool.\n\n"
-	clEmpty      = "Go source changed and CHANGELOG.md [Unreleased] has no entry; " +
-		"write one under [Unreleased], or under the version heading this release tags"
+	clEmpty      = "the binary's source changed but CHANGELOG.md [Unreleased] is empty"
 )
 
-// The CHANGELOG rule: a change to Go source is written up under
+// The CHANGELOG rule: a change to the binary's source is written up under
 // [Unreleased], or, on the release commit before its tag, under the
-// version that commit releases.
+// version that commit releases, a prerelease's included. A heading in a
+// fence is an example and cuts no release.
 func TestTheChangelogRule(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -40,14 +46,18 @@ func TestTheChangelogRule(t *testing.T) {
 		{"an undocumented source change", clUnreleased + clReleased, true, []string{"0.9.0"}, []string{clEmpty}},
 		{"a documented source change", clWritten + clReleased, true, []string{"0.9.0"}, nil},
 		{"the release commit before its tag", clUnreleased + clNext + clReleased, true, []string{"0.9.0"}, nil},
+		{"a prerelease's commit before its tag", clUnreleased + strings.Replace(clNext, "0.9.1", "1.0.0-rc.1", 1) + clReleased,
+			true, []string{"0.9.0"}, nil},
 		{"a release commit with nothing under its version", clUnreleased + clNextEmpty + clReleased, true,
-			[]string{"0.9.0"}, []string{"Go source changed and CHANGELOG.md [0.9.1], the untagged version this commit " +
-				"releases, has no entry; write one under [Unreleased], or under the version heading this release tags"}},
+			[]string{"0.9.0"},
+			[]string{"the binary's source changed but CHANGELOG.md [0.9.1] (untagged, so this is a release commit) is empty"}},
 		{"an undocumented source change after the release is tagged", clUnreleased + clNext + clReleased, true,
 			[]string{"0.9.0", "0.9.1"}, []string{clEmpty}},
 		{"prose and an indented bullet, which are no entry", clUnreleased + "Some prose.\n  - an aside\n\n" + clReleased, true,
 			[]string{"0.9.0"}, []string{clEmpty}},
-		{"no change to Go source", clUnreleased + clReleased, false, []string{"0.9.0"}, nil},
+		{"a release cut only in a fence", clUnreleased + "```\n" + clNext + "```\n\n" + clReleased, true,
+			[]string{"0.9.0"}, []string{clEmpty}},
+		{"no change to the binary's source", clUnreleased + clReleased, false, []string{"0.9.0"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -59,71 +69,176 @@ func TestTheChangelogRule(t *testing.T) {
 	}
 }
 
-// What changelogRule is told comes from git: whether Go source differs
-// from the last tag, which is not always the commit before HEAD, and
-// whether a version is tagged. Each row is a repository whose v0.9.0 tag
-// is followed by one more commit.
-// Outside a git checkout the CHANGELOG rule has no tag to measure from.
-// It reached no verdict, so it says so and exits 2, as the docs gate does.
-func TestTheChangelogRuleNeedsAGitCheckout(t *testing.T) {
+// stalenessRepo is a git checkout of a module whose binary, cmd/fixture,
+// imports internal/a, which embeds a file, and not internal/unused, with a
+// release tag v0.9.0 on its one commit. A case changes a stalenessCopy of
+// it.
+func stalenessRepo(t *testing.T) string {
+	t.Helper()
+	isolateGit(t)
+	t.Setenv("GOWORK", "off")
 	dir := t.TempDir()
-	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
-	t.Chdir(dir)
-	put(t, dir, changelogPath, clUnreleased+clReleased)
-	_, err := checkChangelog()
-	if !errors.As(err, new(couldNotRun)) || exitCode(err) != 2 {
-		t.Errorf("got %v; want a git failure that could not run", err)
+	putAll(t, dir, map[string]string{
+		changelogPath: clUnreleased + clReleased,
+		"go.mod": textLines("module example.com/fixture", "", "go 1.21", "",
+			"require example.com/dep v1.0.0", "", "replace example.com/dep => ./dep"),
+		"dep/go.mod": textLines("module example.com/dep", "", "go 1.21"),
+		"dep/dep.go": textLines("package dep"),
+		"cmd/fixture/main.go": textLines("package main", "", `import (`, `	_ "example.com/dep"`,
+			`	_ "example.com/fixture/internal/a"`, ")", "", "func main() {}"),
+		"tools.go":              textLines("package fixture"),
+		"internal/a/a.go":       textLines("package a", "", `import _ "embed"`, "", "//go:embed data/x.txt", "var X string"),
+		"internal/a/b.go":       textLines("package a"),
+		"internal/a/data/x.txt": "x\n",
+		"internal/a/notes.md":   "notes\n",
+		"internal/unused/u.go":  textLines("package unused"),
+		"internal/a/a_test.go":  textLines("package a"),
+		"internal/a/testdata/x": "x\n",
+		"scripts/gates/main.go": textLines("package main", "", "func main() {}"),
+		"docs/x.md":             "x\n",
+	})
+	stalenessGit(t, dir, "init", "-q", "-b", "main")
+	stalenessGit(t, dir, "add", "-A")
+	stalenessGit(t, dir, "commit", "-q", "-m", "first")
+	stalenessGit(t, dir, "tag", "v0.9.0")
+	return dir
+}
+
+// stalenessCopy is a copy of the checkout at dir, its .git included, for
+// one case to change on its own.
+func stalenessCopy(t *testing.T, dir string) string {
+	t.Helper()
+	cp := t.TempDir()
+	if err := os.CopyFS(cp, os.DirFS(dir)); err != nil {
+		t.Fatal(err)
+	}
+	return cp
+}
+
+// stalenessGit runs git in dir, isolated as the test's isolateGit left it.
+func stalenessGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	mustGit(t, append([]string{"-C", dir}, args...)...)
+}
+
+// stalenessWrite writes the files with their new contents, a file with no
+// contents removed.
+func stalenessWrite(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, body := range files {
+		if body == "" {
+			stalenessGit(t, dir, "rm", "-q", name)
+		} else {
+			put(t, dir, name, body)
+		}
 	}
 }
 
-func TestTheChangelogRuleReadsGit(t *testing.T) {
+// stalenessChange writes the files as stalenessWrite does and commits them.
+func stalenessChange(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	stalenessWrite(t, dir, files)
+	stalenessGit(t, dir, "add", "-A")
+	stalenessGit(t, dir, "commit", "-q", "-m", "change")
+}
+
+// A committed change to what the binary is built from needs an entry: a
+// package it imports, a file one embeds, and go.mod but its require and
+// tool lines. A test, a fixture, a package it does not import and a
+// dependency bump do not, and nor does what is not committed, which CI
+// never sees.
+func TestTheChangelogRuleCountsWhatShips(t *testing.T) {
+	const goMod = "go.mod"
+	base := stalenessRepo(t)
+	raw, err := os.ReadFile(filepath.Join(base, goMod))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gomod := string(raw)
+	bump := strings.Replace(gomod, "require example.com/dep v1.0.0", "require (\n\texample.com/dep v1.1.0 // a bump\n)", 1)
 	for _, tc := range []struct {
-		name      string
-		changelog string
-		// source and readme say which files the commit after v0.9.0
-		// changes, and later commits a change to the README alone after it.
-		source, readme, later bool
-		// tag tags that commit, and edit then changes Go source uncommitted.
-		tag, edit bool
-		want      []string
+		name string
+		// files are committed, and after is written after the commit.
+		files, after map[string]string
+		ships        bool
 	}{
-		{name: "an undocumented source change after the release is tagged", changelog: clUnreleased + clNext + clReleased,
-			source: true, tag: true, edit: true, want: []string{clEmpty}},
-		{name: "an undocumented source change two commits after the tag", changelog: clUnreleased + clReleased,
-			source: true, later: true, want: []string{clEmpty}},
-		{name: "the release commit before its tag", changelog: clUnreleased + clNext + clReleased, source: true},
-		{name: "a change to no Go source", changelog: clUnreleased + clReleased, readme: true},
+		{"a package the binary imports", map[string]string{"internal/a/b.go": "package a\n\n// changed\n"}, nil, true},
+		{"a file added to one", map[string]string{"internal/a/c.go": "package a\n"}, nil, true},
+		{"a file removed from one", map[string]string{"internal/a/b.go": ""}, nil, true},
+		{"a file moved out of one", map[string]string{"internal/a/b.go": "", "docs/b.go": "package a\n"}, nil, true},
+		{"the command", map[string]string{"cmd/fixture/main.go": "package main\n\nfunc main() { println() }\n"}, nil, true},
+		{"a file a package embeds", map[string]string{"internal/a/data/x.txt": "y\n"}, nil, true},
+		{"go.mod's go line", map[string]string{goMod: strings.Replace(gomod, "go 1.21", "go 1.22", 1)}, nil, true},
+		{"go.mod's toolchain", map[string]string{goMod: gomod + "\ntoolchain go1.21.0\n"}, nil, true},
+		{"go.mod's replace", map[string]string{goMod: strings.Replace(gomod, "dep =>", "dep v1.0.0 =>", 1)}, nil, true},
+		{"a dependency bump", map[string]string{goMod: bump}, nil, false},
+		// The go.mod grammar reads ( as a token of its own (https://go.dev/ref/mod#go-mod-file-lexical).
+		{"a dependency bump in a require( block", map[string]string{goMod: strings.Replace(gomod,
+			"require example.com/dep v1.0.0", "require(\n\texample.com/dep v1.1.0\n)", 1)}, nil, false},
+		// A tool directive names a tool `go tool` runs, which the binary does not
+		// build (https://go.dev/ref/mod#go-mod-file-tool).
+		{"a tool directive", map[string]string{goMod: gomod + "\ntool example.com/dep\n"}, nil, false},
+		{"a tool( block", map[string]string{goMod: gomod + "\ntool(\n\texample.com/dep\n)\n"}, nil, false},
+		{"a test", map[string]string{"internal/a/a_test.go": "package a\n\n// changed\n"}, nil, false},
+		{"a fixture", map[string]string{"internal/a/testdata/x": "y\n"}, nil, false},
+		{"a file beside a package that it does not embed", map[string]string{"internal/a/notes.md": "more\n"}, nil, false},
+		{"a package the binary does not import", map[string]string{"internal/unused/u.go": "package unused\n\n// changed\n"}, nil, false},
+		// A dependency's package sits at a path of its own module's, never this one's.
+		{"a package at the path of a dependency's", map[string]string{"tools.go": "package fixture\n\n// changed\n"}, nil, false},
+		{"a script", map[string]string{"scripts/gates/main.go": "package main\n\nfunc main() { println() }\n"}, nil, false},
+		{"a doc", map[string]string{"docs/x.md": "y\n"}, nil, false},
+		{"a change not committed", nil, map[string]string{"internal/a/b.go": "package a\n\n// changed\n"}, false},
+		{"go.mod as committed, its go line changed after", map[string]string{goMod: bump},
+			map[string]string{goMod: strings.Replace(bump, "go 1.21", "go 1.22", 1)}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := initRepo(t)
-			put(t, dir, "main.go", "package main\n")
-			put(t, dir, "README.md", "# Fixture\n")
-			put(t, dir, changelogPath, clUnreleased+clReleased)
-			mustGit(t, "add", "-A")
-			mustGit(t, "commit", "-q", "-m", "Release 0.9.0")
-			mustGit(t, "tag", "-a", "v0.9.0", "-m", "v0.9.0")
+			t.Parallel()
+			dir := stalenessCopy(t, base)
+			if tc.files != nil {
+				stalenessChange(t, dir, tc.files)
+			}
+			stalenessWrite(t, dir, tc.after)
+			got, err := checkChangelog(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want []string
+			if tc.ships {
+				want = []string{clEmpty}
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("checkChangelog() = %q, want %q", got, want)
+			}
+		})
+	}
+}
 
-			if tc.source {
-				put(t, dir, "main.go", "package main\n\nfunc main() {}\n")
-			}
-			if tc.readme {
-				put(t, dir, "README.md", "# Fixture\n\nMore words.\n")
-			}
-			put(t, dir, changelogPath, tc.changelog)
-			mustGit(t, "add", "-A")
-			mustGit(t, "commit", "-q", "-m", "The next change")
-			if tc.later {
-				put(t, dir, "README.md", "# Fixture\n\nA later change.\n")
-				mustGit(t, "commit", "-q", "-am", "A later change")
-			}
-			if tc.tag {
-				mustGit(t, "tag", "-a", "v0.9.1", "-m", "v0.9.1")
-			}
-			if tc.edit {
-				put(t, dir, "main.go", "package main\n\nfunc main() { main() }\n")
-			}
-
-			got, err := checkChangelog()
+// The base is the newest release tag by semver, a prerelease included: a
+// change two commits after it still counts, and a release tagged after
+// the change takes it out of the next release's notes.
+func TestTheChangelogRuleMeasuresFromTheNewestRelease(t *testing.T) {
+	base := stalenessRepo(t)
+	for _, tc := range []struct {
+		name string
+		// then runs in the checkout after the shipped change is committed.
+		then func(t *testing.T, dir string)
+		want []string
+	}{
+		{"a change two commits after the tag", func(t *testing.T, dir string) {
+			stalenessChange(t, dir, map[string]string{"docs/x.md": "later\n"})
+		}, []string{clEmpty}},
+		{"a change a release then tags", func(t *testing.T, dir string) { stalenessGit(t, dir, "tag", "v0.9.1") }, nil},
+		{"a change a prerelease then tags", func(t *testing.T, dir string) { stalenessGit(t, dir, "tag", "v1.0.0-rc.1") }, nil},
+		{"a change older than the newest tag by date, not by version", func(t *testing.T, dir string) {
+			stalenessGit(t, dir, "tag", "v0.8.9")
+		}, []string{clEmpty}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := stalenessCopy(t, base)
+			stalenessChange(t, dir, map[string]string{"internal/a/b.go": "package a\n\n// changed\n"})
+			tc.then(t, dir)
+			got, err := checkChangelog(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -131,6 +246,217 @@ func TestTheChangelogRuleReadsGit(t *testing.T) {
 				t.Errorf("checkChangelog() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A maintenance branch measures from its own release, not from a newer
+// one on another line of history: what only the newer release changed is
+// no change of the branch's, and a fix the branch picks up from it is.
+func TestTheChangelogRuleMeasuresFromTheReleaseHEADReaches(t *testing.T) {
+	const fix = "package a\n\n// fixed in 1.0.0\n"
+	base := stalenessRepo(t)
+	stalenessChange(t, base, map[string]string{"internal/a/b.go": fix})
+	stalenessGit(t, base, "tag", "v1.0.0")
+	for _, tc := range []struct {
+		name string
+		// change is what the maintenance branch commits after v0.9.0.
+		change map[string]string
+		want   []string
+	}{
+		{"a maintenance branch that changes only the docs", map[string]string{"docs/x.md": "later\n"}, nil},
+		// With the docs beside it, the commit is not v1.0.0's own.
+		{"a maintenance branch that picks up the newer release's fix",
+			map[string]string{"internal/a/b.go": fix, "docs/x.md": "back-ported\n"}, []string{clEmpty}},
+		// A version a tag names on any line is released, so its notes are no
+		// release commit's.
+		{"the newer release's fix and notes, squashed onto the branch", map[string]string{"internal/a/b.go": fix,
+			changelogPath: clUnreleased + strings.Replace(clNext, "0.9.1", "1.0.0", 1) + clReleased}, []string{clEmpty}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := stalenessCopy(t, base)
+			stalenessGit(t, dir, "switch", "-q", "-c", "release-0.9", "v0.9.0")
+			stalenessChange(t, dir, tc.change)
+			got, err := checkChangelog(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("checkChangelog() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A listing that names no command is not reading the binary.
+func TestTheChangelogRuleNeedsTheBinary(t *testing.T) {
+	dir := stalenessRepo(t)
+	stalenessChange(t, dir, map[string]string{"cmd/fixture/main.go": "", "cmd/README.md": "moved\n"})
+	_, err := checkChangelog(dir)
+	want := "could not run: the CHANGELOG rule: go list -deps ./cmd/... named no package of this module, so it is not reading the binary"
+	if !errors.As(err, new(couldNotRun)) || err == nil || err.Error() != want {
+		t.Errorf("checkChangelog() = %v, want %q", err, want)
+	}
+}
+
+// Outside a git checkout the CHANGELOG rule has no tag to measure from.
+// It reached no verdict, so it says so and exits 2, as the docs gate does,
+// and a git that cannot answer is never "source changed".
+func TestTheChangelogRuleNeedsAGitCheckout(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	_, err := checkChangelog(dir)
+	if !errors.As(err, new(couldNotRun)) || exitCode(err) != 2 ||
+		!strings.HasPrefix(err.Error(), "could not run: the CHANGELOG rule: git -C "+dir+" tag") {
+		t.Errorf("outside git: %v; want a git tag failure that could not run", err)
+	}
+	// A configuration git diff cannot read, and git tag does not.
+	dir = stalenessRepo(t)
+	stalenessGit(t, dir, "config", "diff.renames", "bogus")
+	_, err = checkChangelog(dir)
+	if !errors.As(err, new(couldNotRun)) || err == nil ||
+		!strings.HasPrefix(err.Error(), "could not run: the CHANGELOG rule: git -C "+dir+" diff v0.9.0..HEAD") {
+		t.Errorf("a diff git cannot make: %v; want a git diff failure that could not run", err)
+	}
+}
+
+// With no release tag there is nothing to measure from, so the rule says
+// why rather than measure from some other commit. A shallow clone fetches
+// no tag, and the rule names it.
+func TestTheChangelogRuleNeedsARelease(t *testing.T) {
+	const noTag = "could not run: the CHANGELOG rule: HEAD reaches no release tag (vX.Y.Z) to measure from"
+	base := stalenessRepo(t)
+	stalenessChange(t, base, map[string]string{"internal/a/b.go": "package a\n\n// changed\n"})
+	untagged := stalenessCopy(t, base)
+	stalenessGit(t, untagged, "tag", "-d", "v0.9.0")
+	shallow := t.TempDir()
+	from := filepath.ToSlash(base)
+	if !strings.HasPrefix(from, "/") {
+		from = "/" + from
+	}
+	stalenessGit(t, shallow, "clone", "-q", "--depth=1", "--no-tags", "file://"+from, ".")
+	for dir, want := range map[string]string{
+		untagged: noTag,
+		shallow:  noTag + "; the checkout is a shallow clone: check it out with fetch-depth: 0",
+	} {
+		_, err := checkChangelog(dir)
+		if !errors.As(err, new(couldNotRun)) || err == nil || err.Error() != want {
+			t.Errorf("checkChangelog() = %v, want %q", err, want)
+		}
+	}
+}
+
+// The CHANGELOG rule not running holds back no other check: the gate
+// still holds the README and the configuration page, a real finding still
+// fails it, and with none it reports only that the rule could not run.
+func TestStalenessRunsEveryOtherCheckWithoutARelease(t *testing.T) {
+	isolateGit(t)
+	dump := stalenessDump(t)
+	files := map[string]string{}
+	for _, name := range []string{"README.md", configDocPath, changelogPath} {
+		data, err := os.ReadFile(filepath.Join(parityRepoRoot, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = string(data)
+	}
+	const unrun = "could not run: the CHANGELOG rule: HEAD reaches no release tag (vX.Y.Z) to measure from"
+	for _, tc := range []struct {
+		name   string
+		readme func(string) string
+		err    string
+		code   int
+	}{
+		{"nothing else wrong", func(s string) string { return s }, unrun, 2},
+		{"a table row for a tool the binary does not register", func(s string) string {
+			row := "| `get_document` |"
+			if !strings.Contains(s, row) {
+				t.Fatalf("README.md has no row starting %q", row)
+			}
+			return strings.Replace(s, row, "| `ghost_tool` | x |\n"+row, 1)
+		}, "README's tool table names tools that are not registered: ghost_tool\n" + unrun, 1},
+		// A fence holds an example, which documents nothing and lists nothing.
+		{"a tool and a scope named only in a fenced example", func(s string) string {
+			for _, old := range []string{"`delete_tab`", "`.../auth/drive.readonly`"} {
+				if !strings.Contains(s, old) {
+					t.Fatalf("README.md does not say %s", old)
+				}
+				s = strings.ReplaceAll(s, old, "that one")
+			}
+			return s + "\n```text\n`delete_tab` .../auth/drive.readonly\n```\n"
+		}, "README does not list the OAuth scope https://www.googleapis.com/auth/drive.readonly, which login requests; " +
+			"an External app's consent screen built from it will refuse that mode\n" +
+			"README does not document: delete_tab\n" + unrun, 1},
+		{"a table row and a scope in a fenced example", func(s string) string {
+			return s + "\n```text\n| `ghost_tool` | x |\n.../auth/drive.file\n```\n"
+		}, unrun, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, body := range files {
+				if name == "README.md" {
+					body = tc.readme(body)
+				}
+				put(t, dir, name, body)
+			}
+			stalenessGit(t, dir, "init", "-q", "-b", "main")
+			stalenessGit(t, dir, "add", "-A")
+			stalenessGit(t, dir, "commit", "-q", "-m", "first")
+			t.Chdir(dir)
+			in, err := readStaleness(dump)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = stalenessCheck(in)
+			if err == nil || err.Error() != tc.err || exitCode(err) != tc.code {
+				t.Errorf("staleness() = %v (exit %d); want %q (exit %d)", err, exitCode(err), tc.err, tc.code)
+			}
+		})
+	}
+}
+
+// stalenessDump is the surface the binary dumps, made in process.
+func stalenessDump(t *testing.T) []byte {
+	t.Helper()
+	var dump bytes.Buffer
+	srv := server.New(server.Deps{Config: tools.FullSurface(config.Config{}), Version: "test"})
+	if err := server.DumpSchemas(context.Background(), srv, nil, &dump, "test"); err != nil {
+		t.Fatal(err)
+	}
+	return dump.Bytes()
+}
+
+// A finding of the CHANGELOG rule fails the gate beside the others.
+func TestStalenessReportsTheChangelogRule(t *testing.T) {
+	var d schemaDump
+	if err := json.Unmarshal(stalenessDump(t), &d); err != nil {
+		t.Fatal(err)
+	}
+	in := stalenessInputs{changelog: []string{clEmpty}, readme: string(repoFile(t, "README.md")),
+		conf: string(repoFile(t, configDocPath))}
+	for _, tool := range d.Tools {
+		in.registered = append(in.registered, tool.Name)
+	}
+	if err := stalenessCheck(in); err == nil || err.Error() != clEmpty || exitCode(err) != 1 {
+		t.Errorf("stalenessCheck() = %v, want %q (exit 1)", err, clEmpty)
+	}
+}
+
+// The newest release is the highest version by semver, a prerelease
+// included, and a tag that is not a version is no release.
+func TestStalenessNewestRelease(t *testing.T) {
+	for want, tags := range map[string][]string{
+		"2.0.0-rc.1":  {"v1.9.0", "v2.0.0-rc.1"},
+		"2.0.0":       {"v2.0.0-rc.1", "v2.0.0", "v1.10.0"},
+		"1.10.0":      {"v1.9.0", "v1.10.0", "latest", "v11", "2.0.0"},
+		"2.0.0-rc.10": {"v2.0.0-rc.2", "v2.0.0-rc.10"},
+		// A prerelease identifier may hold a hyphen (https://semver.org/#spec-item-9).
+		"2.0.0-rc-1": {"v1.9.0", "v2.0.0-rc-1"},
+		"":           {"latest"},
+	} {
+		if got := stalenessNewestRelease(tags); got != want {
+			t.Errorf("stalenessNewestRelease(%q) = %q, want %q", tags, got, want)
+		}
 	}
 }
 

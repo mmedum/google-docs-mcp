@@ -94,20 +94,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # gitleaks scans every commit, so a shallow clone would hide a
+          # credential a branch added and later removed.
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The scanner this wrapper installs, pinned like cosign and
-          # syft. It differs from those two in the mechanism and in the
-          # risk: the version is an env var rather than a `with:` input,
-          # and the action's default is a hard-coded number rather than
-          # `latest`, so a SHA here already pins something. Named anyway,
-          # so which gitleaks ran is a line in this file rather than a
-          # constant inside a five-megabyte bundle. No `v` prefix — the
-          # action's README documents the bare form.
-          # https://github.com/gitleaks/gitleaks-action#environment-variables
-          GITLEAKS_VERSION: "8.30.1"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # Its own cache, keyed by the Makefile that pins gitleaks. Every
+          # other job shares go.mod's key and saves a cache without
+          # gitleaks, and setup-go saves nothing over a hit on its key, so
+          # on that key gitleaks is built from source on every run.
+          # https://github.com/actions/setup-go/blob/b7ad1dad31e06c5925ef5d2fc7ad053ef454303e/src/cache-save.ts#L75-L80
+          cache-dependency-path: Makefile
+      # The Makefile holds the scanner's command and its version, so
+      # `make check` runs exactly this.
+      - name: gitleaks
+        run: make gitleaks
 
   # A pull request is measured from the merge-base of its head and the
   # base branch. github.event.pull_request.base.sha is fixed when the

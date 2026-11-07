@@ -8,6 +8,7 @@ import (
 
 // The gate itself, run against this repository.
 func TestClassesGate(t *testing.T) {
+	t.Chdir("../..")
 	if err := classes(io.Discard, nil); err != nil {
 		t.Errorf("classes gate: %v", err)
 	}

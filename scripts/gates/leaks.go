@@ -55,11 +55,7 @@ var (
 )
 
 func leaks(w io.Writer, _ []string) error {
-	root, err := moduleRoot()
-	if err != nil {
-		return err
-	}
-	files, err := lsFiles(root)
+	files, err := lsFiles(".")
 	if err != nil {
 		// Outside a git checkout there is nothing to enumerate and
 		// nothing to be wrong: a module-cache copy or a source tarball
@@ -82,7 +78,7 @@ func leaks(w io.Writer, _ []string) error {
 		if skipFiles[filepath.Base(name)] {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, name))
+		data, err := os.ReadFile(filepath.FromSlash(name))
 		if err != nil {
 			continue // deleted or unreadable is not this gate's business
 		}

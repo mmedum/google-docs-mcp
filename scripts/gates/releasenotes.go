@@ -1,9 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -62,9 +64,9 @@ func releaseNotes(w io.Writer, args []string) error {
 // lifted, so this can never emit a second h1.
 func promoteHeadings(body string) string {
 	lines := strings.Split(body, "\n")
-	code := docsCodeLines(lines)
+	var fence docsFence
 	for i, line := range lines {
-		if !code[i] && strings.HasPrefix(line, "###") {
+		if !fence.code(line) && docsHeadingLevel(line) >= 3 {
 			lines[i] = line[1:]
 		}
 	}
@@ -74,33 +76,13 @@ func promoteHeadings(body string) string {
 // sectionFor returns the body under `## [version]`, without the blank
 // lines that top and tail it.
 func sectionFor(changelog, version string) string {
-	lines := strings.Split(changelog, "\n")
-	from, to := changelogSection(lines, version)
-	body := lines[from:to]
+	doc := readChangelog(changelog)
+	from, to := doc.section(version)
+	body := doc.lines[from:to]
 	for len(body) > 0 && strings.TrimSpace(body[0]) == "" {
 		body = body[1:]
 	}
 	return joinTrimmed(body)
-}
-
-// changelogSection is the range of lines under `## [version]`, empty when
-// there is no such heading.
-//
-// It stops at the next heading and at the link footer. The footer is not
-// part of any section, but it follows the oldest one with no heading in
-// between — so without that second stop the oldest entry's notes would
-// end with a block of compare links.
-func changelogSection(lines []string, version string) (from, to int) {
-	want := "## [" + version + "]"
-	start := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, want) })
-	if start < 0 {
-		return 0, 0
-	}
-	to = start + 1
-	for to < len(lines) && !strings.HasPrefix(lines[to], "## ") && !isLinkDefinition(lines[to]) {
-		to++
-	}
-	return start + 1, to
 }
 
 // joinTrimmed drops the blank lines at the end, so a section that runs to
@@ -112,10 +94,140 @@ func joinTrimmed(body []string) string {
 	return strings.Join(body, "\n")
 }
 
-// isLinkDefinition reports whether the line is a markdown link
-// definition, as a changelog's compare-link footer is made of. It is the
-// docs gate's rule, so a footnote is part of a section, held to the first
-// column: an indented one continues a list item.
-func isLinkDefinition(line string) bool {
-	return !strings.HasPrefix(line, " ") && docsMDLinkDef.MatchString(line)
+// semverPattern is a version's numbers and a prerelease, whose identifiers
+// may hold a hyphen (https://semver.org/#spec-item-9).
+const semverPattern = `\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`
+
+var (
+	// changelogVersion is a release's version, a prerelease suffix allowed.
+	changelogVersion = regexp.MustCompile(`^` + semverPattern + `$`)
+	// changelogFooter is a compare-link footer line: Unreleased's or a
+	// version's, with or without a v, its URL written or not, the label in
+	// any case, as a label matches (https://spec.commonmark.org/0.31.2/#matches).
+	// Any other link definition sits in a section's prose.
+	changelogFooter = regexp.MustCompile(`^\[(?i:unreleased|v?` + semverPattern + `)\]:(?:[ \t]|$)`)
+)
+
+// changelogDoc is a CHANGELOG read once, fenced code as an example: a
+// heading or a link reference inside a fence is neither. Every reader of
+// the CHANGELOG reads it through this, so the release note, the docs gate,
+// staleness and the schema diff agree on where a section ends.
+type changelogDoc struct {
+	// lines are the file's lines, CRLF read as LF, and prose the same
+	// lines with fenced code blanked.
+	lines, prose []string
+	// headings are the `## [label]` headings, in file order.
+	headings []changelogHeading
+}
+
+// changelogHeading is a `## [label]` heading and the index of its line.
+type changelogHeading struct {
+	label string
+	line  int
+}
+
+func readChangelog(text string) changelogDoc {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	c := changelogDoc{lines: strings.Split(text, "\n"), prose: docsProse(text)}
+	for i, line := range c.prose {
+		if label, ok := changelogLabel(line); ok {
+			c.headings = append(c.headings, changelogHeading{label, i})
+		}
+	}
+	return c
+}
+
+// changelogLabel is the label of a `## [label]` heading line.
+func changelogLabel(line string) (string, bool) {
+	if docsHeadingLevel(line) != 2 {
+		return "", false
+	}
+	title := docsATXHeading.FindStringSubmatch(line)[1]
+	label, _, ok := strings.Cut(strings.TrimPrefix(title, "["), "]")
+	return label, ok && strings.HasPrefix(title, "[")
+}
+
+// section is the range of lines under `## [label]`, empty when there is
+// no such heading. It ends at the next heading of its level or above and
+// at the compare-link footer, which follows the oldest section with no
+// heading in between.
+func (c changelogDoc) section(label string) (from, to int) {
+	i := slices.IndexFunc(c.headings, func(h changelogHeading) bool { return h.label == label })
+	if i < 0 {
+		return 0, 0
+	}
+	from = c.headings[i].line + 1
+	for to = from; to < len(c.prose); to++ {
+		if level := docsHeadingLevel(c.prose[to]); (level > 0 && level <= 2) || changelogFooter.MatchString(c.prose[to]) {
+			break
+		}
+	}
+	return from, to
+}
+
+// versions are the headings that name a release, in file order.
+func (c changelogDoc) versions() []changelogHeading {
+	var out []changelogHeading
+	for _, h := range c.headings {
+		if changelogVersion.MatchString(h.label) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// changelogCompare orders two versions changelogVersion matches by semver
+// precedence: by number, a prerelease before its release, and prerelease
+// fields compared in turn, numbers below words (https://semver.org/#spec-item-11).
+func changelogCompare(a, b string) int {
+	coreA, preA, _ := strings.Cut(a, "-")
+	coreB, preB, _ := strings.Cut(b, "-")
+	if c := slices.CompareFunc(strings.Split(coreA, "."), strings.Split(coreB, "."), changelogCompareNumbers); c != 0 {
+		return c
+	}
+	switch {
+	case preA == preB:
+		return 0
+	case preA == "":
+		return 1
+	case preB == "":
+		return -1
+	}
+	return slices.CompareFunc(strings.Split(preA, "."), strings.Split(preB, "."), func(x, y string) int {
+		xNum, yNum := changelogDigits(x), changelogDigits(y)
+		switch {
+		case xNum && yNum:
+			return changelogCompareNumbers(x, y)
+		case xNum:
+			return -1
+		case yNum:
+			return 1
+		}
+		return strings.Compare(x, y)
+	})
+}
+
+// changelogCompareNumbers orders two runs of digits by the number they
+// write, however long. Semver allows no leading zero.
+func changelogCompareNumbers(x, y string) int {
+	return cmp.Or(cmp.Compare(len(x), len(y)), strings.Compare(x, y))
+}
+
+// changelogDigits reports whether a prerelease field is a number.
+func changelogDigits(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
+}
+
+// entries counts a section's "- " bullets at the margin, outside fenced
+// code. Only such a bullet is an entry: an indented one belongs to the
+// entry or the prose above it.
+func (c changelogDoc) entries(label string) int {
+	from, to := c.section(label)
+	n := 0
+	for _, line := range c.prose[from:to] {
+		if strings.HasPrefix(line, "- ") {
+			n++
+		}
+	}
+	return n
 }

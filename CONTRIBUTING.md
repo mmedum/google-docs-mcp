@@ -16,8 +16,8 @@ logs. Naming the sibling servers, such as google-drive-mcp, is fine.
 Fixtures are synthetic (`testdata/sample.json`). gitleaks scans for
 credentials. `make leaks` scans for addresses, account and client ids,
 user-content links, Drive ids that do not look invented, and compiled
-or large binaries. gitleaks runs in the pre-commit hook and in CI, and
-`make leaks` in `make check`.
+or large binaries. gitleaks runs in the pre-commit hook, in `make check`
+and in CI, and `make leaks` in `make check`.
 
 **Commit under your GitHub no-reply address**, the one at
 `users.noreply.github.com` that GitHub's email settings give you, and
@@ -47,15 +47,18 @@ pre-commit install
 
 Go is the only build prerequisite, at the version in `go.mod`;
 `GOTOOLCHAIN=auto`, the default, fetches it. `make check` runs
-golangci-lint, govulncheck and go-licenses with `go run` at the versions
-the Makefile names, and the `pins` gate holds those to the versions
-`.github/workflows/ci.yml` pins, so nothing else needs installing.
+golangci-lint, govulncheck, go-licenses and gitleaks with `go run` at the
+versions the Makefile names, and the `pins` gate holds those to the
+versions `.github/workflows/ci.yml` pins, so nothing else needs
+installing.
 Everything the repository runs on itself is Go, in `scripts/gates`, with
 no shell scripts (D-10). GoReleaser builds only `./cmd/...`, so none of
 it ships.
 
 `pre-commit install` adds the hooks in `.pre-commit-config.yaml`:
-gitleaks, `make fmt` and `go vet ./...`.
+gitleaks on the staged changes through `make gitleaks-staged`, at the
+version and with the flags `make gitleaks` uses, `make fmt` and
+`go vet ./...`.
 
 ## Gates that must pass
 
@@ -64,8 +67,9 @@ make check
 ```
 
 `make check` runs the gates CI runs, and the `check` target in the
-`Makefile` is the list. `make parity` fails when that list and `ci.yml`
-differ, so a check you add goes in both (D-85). CI runs the tests on
+`Makefile` is the list. `make parity` fails when a command that list
+runs and `ci.yml` differ, so a check you add goes in both, in the same
+words (D-85). CI runs the tests on
 Linux, macOS and Windows, where paths, permission bits and line endings
 differ (D-87).
 
@@ -77,8 +81,9 @@ trust a gate you changed, break what it holds and watch it fail.
 
 These are worth knowing before they fail on you:
 
-- **The schema diff** builds the last tag in a worktree and compares its
-  tool surface, resource templates and instructions with this build's
+- **The schema diff** builds the newest release tag HEAD reaches in a
+  worktree and compares its tool surface, resource templates and
+  instructions with this build's
   (D-77). A removed tool, template, argument or output field, or a newly
   required argument, is a break. A break passes only when a
   `**Breaking:**` entry under `[Unreleased]` names the item, and ships
@@ -104,8 +109,10 @@ These are worth knowing before they fail on you:
   and is a release step.
 - **`make staleness`** holds the README's tool table, scopes and
   permission rules to the binary, and `docs/configuration.md` to every
-  setting the code reads. It also wants a CHANGELOG entry when Go
-  changed since the last tag (D-69).
+  setting the code reads (D-69). It also wants a CHANGELOG entry when the
+  binary's source changed since the newest release tag HEAD reaches, the
+  one the schema diff builds; a test, a script or a dependency bump needs
+  none.
 - **`make classes`** holds every error class the code emits to the
   closed vocabulary in `internal/service` (D-60).
 - **`make transcript`** refuses a live driver or eval line that does not
@@ -233,6 +240,7 @@ GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestRawStaleR
 They call the Docs and Drive APIs directly as the `default` profile's
 account, and each records how Google answers something the code depends
 on. A comment cites one as `Checked by the integration test TestRaw<Name>.`
+It names the test, never a subtest.
 Each makes scratch documents titled `… (safe to delete)` and leaves them
 behind. `make vet` compiles them, and `make check` runs none.
 

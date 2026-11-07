@@ -73,6 +73,11 @@ func TestUndeclaredBreaks(t *testing.T) {
 			[]string{"release 2.5.0 breaks the surface without raising the major version from 2.4.0"}},
 		{"a prerelease that does not", "## [2.5.0-rc.1] - 2026-10-24\n\n- **Breaking:** `delete_all`, `review_suggestion`.\n" + released,
 			[]string{"release 2.5.0-rc.1 breaks the surface without raising the major version from 2.4.0"}},
+		// A fence is an example: it declares nothing, and its heading is no release.
+		{"declared only in fenced code", "## [Unreleased]\n\n- Written up as:\n\n```markdown\n" +
+			"- **Breaking:** `delete_all` is gone; `review_suggestion` takes `ids`.\n```\n" + released, texts(breaking)},
+		{"the tag's heading in fenced code", "## [3.0.0] - 2026-10-24\n\n~~~markdown\n## [2.4.0] - 2026-10-22\n~~~\n\n" +
+			"- **Breaking:** `delete_all`, `review_suggestion`.\n" + released, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := undeclaredBreaks(breaking, "# Changelog\n\n"+tc.changelog, "v2.4.0")
@@ -351,16 +356,51 @@ func TestABreakOfTheReleaseIsMatchedByItsField(t *testing.T) {
 	}
 }
 
-// The release is the nearest tag the revision reaches. A branch that
-// reaches none has no release, although the repository has tags.
+// The release is the newest release tag by semver, a prerelease included,
+// of those the revision reaches. A newer release on another line of
+// history is not the revision's, a nearer tag that is no release or an
+// older one is not its newest, and a branch that reaches none has no
+// release, although the repository has tags.
 func TestLastTagIsOneTheRevisionReaches(t *testing.T) {
 	newDumpRepo(t)
-	mustGit(t, "commit", "--quiet", "--allow-empty", "-m", "Start")
+	empty := func(message string) { mustGit(t, "commit", "--quiet", "--allow-empty", "-m", message) }
+	empty("Start")
 	mustGit(t, "branch", "before-any-release")
-	mustGit(t, "commit", "--quiet", "--allow-empty", "-m", "Release")
+	empty("Release")
 	mustGit(t, "tag", "v1.0.0")
-	for rev, want := range map[string]string{"main": "v1.0.0", "before-any-release": ""} {
-		if got, err := lastTag(rev); err != nil || got != want {
+	mustGit(t, "switch", "--quiet", "-c", "maint")
+	empty("Fix")
+	mustGit(t, "tag", "v1.0.1")
+	mustGit(t, "switch", "--quiet", "main")
+	empty("Next")
+	mustGit(t, "tag", "v2.0.0")
+	// main moves on before the maintenance release merges in, so the merge
+	// is nearer v1.0.1 than v2.0.0.
+	for _, m := range []string{"More", "And more", "And still more"} {
+		empty(m)
+	}
+	mustGit(t, "switch", "--quiet", "-c", "merged")
+	mustGit(t, "merge", "--quiet", "--no-ff", "-m", "Merge maint", "maint")
+	// git's version sort and the tags' names both put v3.0.0-rc.1 after
+	// v3.0.0; semver puts it before.
+	mustGit(t, "switch", "--quiet", "-c", "next", "main")
+	empty("Candidate")
+	mustGit(t, "tag", "v3.0.0-rc.1")
+	mustGit(t, "branch", "candidate")
+	empty("Final")
+	mustGit(t, "tag", "v3.0.0")
+	mustGit(t, "switch", "--quiet", "main")
+	empty("Weekly")
+	mustGit(t, "tag", "weekly")
+	for rev, want := range map[string]string{
+		"main":               "v2.0.0",
+		"maint":              "v1.0.1",
+		"merged":             "v2.0.0",
+		"candidate":          "v3.0.0-rc.1",
+		"next":               "v3.0.0",
+		"before-any-release": "",
+	} {
+		if got, err := lastTag(".", rev); err != nil || got != want {
 			t.Errorf("lastTag(%s) = %q, %v; want %q", rev, got, err, want)
 		}
 	}

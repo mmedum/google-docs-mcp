@@ -9,11 +9,16 @@ VERSION  ?= dev
 PKG       = github.com/mmedum/google-docs-mcp/v3
 LDFLAGS   = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
 COVER_MIN ?= 80
-# The versions .github/workflows/ci.yml pins, so make check runs what CI runs;
-# the pins gate fails if they differ.
-GOLANGCI_VERSION    ?= v2.14.0
-GOVULNCHECK_VERSION ?= v1.7.0
-GO_LICENSES_VERSION ?= v1.6.0
+# The tools at the versions .github/workflows/ci.yml pins, so make check
+# runs what CI runs; the pins gate fails if they differ.
+GOLANGCI_LINT ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+GOVULNCHECK   ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
+GOLICENSES    ?= github.com/google/go-licenses@v1.6.0
+# The module path is zricethezav, not gitleaks: the project moved
+# organization and the module path did not follow it.
+GITLEAKS      ?= github.com/zricethezav/gitleaks/v8@v8.30.1
+# One set of rules for both scans, so the hook finds what make check does.
+GITLEAKS_FLAGS = --config .gitleaks.toml --redact --no-banner
 
 .PHONY: all
 all: check
@@ -28,7 +33,7 @@ install: ## go install the binary
 
 .PHONY: fmt
 fmt: ## Fail if gofmt would change anything
-	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt issues:"; echo "$$out"; exit 1; fi
+	@out=$$(gofmt -l .); [ -z "$$out" ] || { echo "$$out"; exit 1; }
 
 .PHONY: vet
 vet: ## go vet, including the integration-tagged tests so they keep compiling
@@ -39,7 +44,7 @@ vet: ## go vet, including the integration-tagged tests so they keep compiling
 
 .PHONY: lint
 lint: ## golangci-lint, at the version CI pins
-	$(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run
+	$(GO) run $(GOLANGCI_LINT) run
 
 .PHONY: test
 test: ## Unit tests with race detector and coverage
@@ -59,11 +64,24 @@ live: build ## Drive the built binary against the signed-in account (see CONTRIB
 
 .PHONY: vuln
 vuln: ## Known vulnerabilities in anything the code calls
-	$(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+	$(GO) run $(GOVULNCHECK) ./...
 
 .PHONY: licenses
 licenses: ## Dependencies must carry a license we can redistribute under
-	$(GO) run github.com/google/go-licenses@$(GO_LICENSES_VERSION) check ./... --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
+	$(GO) run $(GOLICENSES) check ./... --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
+
+# gitleaks walks every commit the clone holds, as `git log --all` lists
+# them (https://github.com/gitleaks/gitleaks/blob/v8.30.1/sources/git.go#L93),
+# so CI checks out the whole history for it.
+.PHONY: gitleaks
+gitleaks: ## No credential in any commit, at the gitleaks version pinned here
+	$(GO) run $(GITLEAKS) git $(GITLEAKS_FLAGS) .
+
+# The pre-commit hook's scan. gitleaks v8.19.0 deprecated `protect` for
+# `git --staged` (https://github.com/gitleaks/gitleaks/blob/v8.30.1/README.md#commands).
+.PHONY: gitleaks-staged
+gitleaks-staged: ## No credential in the staged changes, at the gitleaks version pinned here
+	$(GO) run $(GITLEAKS) git --staged $(GITLEAKS_FLAGS) .
 
 .PHONY: schemas
 schemas: build ## Dump tool schemas
@@ -141,7 +159,7 @@ schema-refetch: ## Check the vendored schemas against what their sources serve (
 	@$(GO) run ./scripts/gates schema-refetch
 
 .PHONY: check
-check: fmt vet lint cover vuln licenses leaks pins classes transcript api-coverage api-fields mcpb schema-diff smoke staleness docs parity ## Everything CI runs
+check: fmt vet lint cover vuln licenses gitleaks leaks pins classes transcript api-coverage api-fields mcpb schema-diff smoke staleness docs parity ## Everything CI runs
 
 .PHONY: clean
 clean:

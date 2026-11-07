@@ -14,6 +14,7 @@ import (
 
 // The gate itself, over this repository.
 func TestLeaksGate(t *testing.T) {
+	t.Chdir("../..")
 	if err := leaks(io.Discard, nil); err != nil {
 		t.Errorf("leaks gate: %v", err)
 	}
@@ -158,6 +159,7 @@ func TestLeaksCatchesAPlantedBinary(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Remove(path) })
 
+	t.Chdir(root)
 	err := leaks(io.Discard, nil)
 	if err == nil {
 		t.Fatal("the gate passed with a compiled executable in the tree")

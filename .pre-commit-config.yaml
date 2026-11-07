@@ -1,15 +1,14 @@
 repos:
-  - repo: https://github.com/gitleaks/gitleaks
-    # Kept equal to GITLEAKS_VERSION in .github/workflows/ci.yml, and
-    # the `pins` gate fails if they drift. Two versions means a commit
-    # can pass the hook and fail the job, on rules that exist in one and
-    # not the other — the local check would then be teaching the wrong
-    # thing about what CI will say.
-    rev: v8.30.1
-    hooks:
-      - id: gitleaks
   - repo: local
     hooks:
+      # Through the Makefile, so the hook scans with the gitleaks version
+      # `make check` and CI run. A remote hook's rev would be a second
+      # version, and the `pins` gate refuses one.
+      - id: gitleaks
+        name: gitleaks
+        entry: make gitleaks-staged
+        language: system
+        pass_filenames: false
       - id: gofmt
         name: gofmt
         entry: make fmt

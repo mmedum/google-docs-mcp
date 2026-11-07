@@ -1,12 +1,15 @@
 package main
 
 import (
-	"cmp"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -21,8 +24,6 @@ var (
 	// A tool named anywhere in the prose, for the tools that register
 	// only behind a flag and so are described rather than tabulated.
 	readmeMention = regexp.MustCompile("`" + `([a-z_]+)` + "`")
-	// A version heading, as Keep a Changelog writes it.
-	versionHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`)
 )
 
 // staleness fails when the documentation drifts from the code. Each
@@ -32,55 +33,116 @@ var (
 // and does the CHANGELOG say what changed. What the docs cite and link is
 // the docs gate's.
 func staleness(bin string) error {
-	var problems []string
-
-	// The README's tool table against the tools the binary registers.
-	out, err := exec.Command(bin, "--dump-schemas").Output()
+	dump, err := exec.Command(bin, "--dump-schemas").Output()
 	if err != nil {
 		return fmt.Errorf("%s --dump-schemas: %w", bin, err)
 	}
-	var dump schemaDump
-	if err := json.Unmarshal(out, &dump); err != nil {
-		return fmt.Errorf("parse --dump-schemas: %w", err)
-	}
-	registered := make([]string, 0, len(dump.Tools))
-	for _, t := range dump.Tools {
-		registered = append(registered, t.Name)
-	}
-	sort.Strings(registered)
-	if len(registered) == 0 {
-		return fmt.Errorf("the binary registered no tools; the check is not looking at a server")
-	}
-
-	problems = append(problems, scopeProblems()...)
-
-	readme, err := os.ReadFile("README.md")
+	in, err := readStaleness(dump)
 	if err != nil {
 		return err
 	}
-	var tabled []string
-	for _, m := range readmeTool.FindAllStringSubmatch(string(readme), -1) {
+	return stalenessCheck(in)
+}
+
+// stalenessInputs are what the gate reads, so a test can hand it a dump
+// made in process.
+type stalenessInputs struct {
+	// changelog is what the CHANGELOG rule found, and unrun why it could
+	// not run, or nil.
+	changelog []string
+	unrun     error
+	// registered is every tool the binary registers, sorted.
+	registered   []string
+	readme, conf string
+}
+
+// readStaleness reads the checkout and the binary's --dump-schemas
+// document, dump. A CHANGELOG rule that cannot run holds back no other
+// check.
+func readStaleness(dump []byte) (stalenessInputs, error) {
+	var in stalenessInputs
+	if in.changelog, in.unrun = checkChangelog("."); in.unrun != nil && !errors.As(in.unrun, new(couldNotRun)) {
+		return in, in.unrun
+	}
+	var d schemaDump
+	if err := json.Unmarshal(dump, &d); err != nil {
+		return in, fmt.Errorf("parse --dump-schemas: %w", err)
+	}
+	for _, t := range d.Tools {
+		in.registered = append(in.registered, t.Name)
+	}
+	sort.Strings(in.registered)
+	readme, err := os.ReadFile("README.md")
+	if err != nil {
+		return in, err
+	}
+	conf, err := os.ReadFile(configDocPath)
+	if err != nil {
+		return in, err
+	}
+	in.readme, in.conf = string(readme), string(conf)
+	return in, nil
+}
+
+// stalenessCheck holds the docs to the code. The README's tools and scopes
+// are read from its prose, its fences blanked: an example documents
+// nothing. Its permission rules sit in a fence of their own.
+func stalenessCheck(in stalenessInputs) error {
+	if len(in.registered) == 0 {
+		return fmt.Errorf("the binary registered no tools; the check is not looking at a server")
+	}
+	prose := strings.Join(docsProse(in.readme), "\n")
+	problems := slices.Clone(in.changelog)
+	problems = append(problems, scopeProblems(prose)...)
+	problems = append(problems, readmeToolProblems(prose, in.registered)...)
+	problems = append(problems, permissionProblems(in.readme, in.registered)...)
+
+	// Every variable the server reads, named on the configuration page,
+	// and no other. The list is config.Vars, recorded from the reads
+	// rather than typed, so it cannot fall behind.
+	vars := config.Vars()
+	if len(vars) < config.VarsFloor {
+		return fmt.Errorf("config.Vars lists %d variables, below the floor of %d; the check is not looking at the registry",
+			len(vars), config.VarsFloor)
+	}
+	problems = append(problems, configDocProblems(vars, in.conf)...)
+
+	if len(problems) > 0 {
+		if in.unrun != nil {
+			problems = append(problems, in.unrun.Error())
+		}
+		return fmt.Errorf("%s", strings.Join(problems, "\n"))
+	}
+	return in.unrun
+}
+
+// readmeToolProblems holds the README's prose to the tools the binary
+// registers, registered.
+//
+// Two directions, two sets, because they are asking different things.
+//
+// Every registered tool has to be documented somewhere, and the ones
+// that register only under GDOCS_ENABLE_DESTRUCTIVE are deliberately
+// not in the table: the table is the surface a person gets by
+// default, and they are described in the paragraph that explains the
+// flag. --dump-schemas dumps every tool, so the missing check reads
+// the whole prose.
+//
+// The other direction reads the table only: a row naming
+// something that is not a tool is a real error, while an inline code
+// span is as likely to be a field or an op name.
+func readmeToolProblems(prose string, registered []string) []string {
+	rows := readmeTool.FindAllStringSubmatch(prose, -1)
+	tabled := make([]string, 0, len(rows))
+	for _, m := range rows {
 		tabled = append(tabled, m[1])
 	}
 	sort.Strings(tabled)
-
-	// Two directions, two sets, because they are asking different things.
-	//
-	// Every registered tool has to be documented somewhere, and the ones
-	// that register only under GDOCS_ENABLE_DESTRUCTIVE are deliberately
-	// not in the table: the table is the surface a person gets by
-	// default, and they are described in the paragraph that explains the
-	// flag. --dump-schemas dumps every tool, so the missing check reads
-	// the whole file.
-	//
-	// The other direction reads the table only: a row naming
-	// something that is not a tool is a real error, while an inline code
-	// span is as likely to be a field or an op name.
 	mentioned := map[string]bool{}
-	for _, m := range readmeMention.FindAllStringSubmatch(string(readme), -1) {
+	for _, m := range readmeMention.FindAllStringSubmatch(prose, -1) {
 		mentioned[m[1]] = true
 	}
-	var missing []string
+	var problems, missing []string
 	for _, name := range registered {
 		if !mentioned[name] {
 			missing = append(missing, name)
@@ -92,32 +154,7 @@ func staleness(bin string) error {
 	if extra := difference(tabled, registered); len(extra) > 0 {
 		problems = append(problems, "README's tool table names tools that are not registered: "+strings.Join(extra, ", "))
 	}
-	problems = append(problems, permissionProblems(string(readme), registered)...)
-
-	// Every variable the server reads, named on the configuration page,
-	// and no other. The list is config.Vars, recorded from the reads
-	// rather than typed, so it cannot fall behind.
-	conf, err := os.ReadFile(configDocPath)
-	if err != nil {
-		return err
-	}
-	vars := config.Vars()
-	if len(vars) < config.VarsFloor {
-		return fmt.Errorf("config.Vars lists %d variables, below the floor of %d; the check is not looking at the registry",
-			len(vars), config.VarsFloor)
-	}
-	problems = append(problems, configDocProblems(vars, string(conf))...)
-
-	changelog, err := checkChangelog()
-	if err != nil {
-		return err
-	}
-	problems = append(problems, changelog...)
-
-	if len(problems) > 0 {
-		return fmt.Errorf("%s", strings.Join(problems, "\n"))
-	}
-	return nil
+	return problems
 }
 
 // configDocPath is the page every setting is documented on.
@@ -188,67 +225,214 @@ func permissionProblems(readme string, registered []string) []string {
 	return problems
 }
 
-// checkChangelog holds the checkout the gates run in to changelogRule:
-// whether Go source differs from the last tag, or from the commit before
-// HEAD when there is none, and which versions have a tag.
-func checkChangelog() ([]string, error) {
-	raw, err := os.ReadFile(changelogPath)
+// checkChangelog holds the checkout at dir to changelogRule, measured from
+// lastTag, the release schema-diff measures from too. No such tag, or a
+// git or go call that cannot answer, is couldNotRun, never "source
+// changed".
+func checkChangelog(dir string) ([]string, error) {
+	last, err := lastTag(dir, "HEAD")
 	if err != nil {
-		return nil, err
+		return nil, changelogUnrun(dir, err)
 	}
-	last, err := lastTag("HEAD")
+	if last == "" {
+		return nil, changelogUnrun(dir, errors.New("HEAD reaches no release tag (vX.Y.Z) to measure from"))
+	}
+	list, err := gitOutput("-C", dir, "tag")
 	if err != nil {
-		return nil, couldNotRun{err}
+		return nil, changelogUnrun(dir, err)
 	}
-	base := cmp.Or(last, "HEAD~1")
-	// An error is a difference or a base that does not exist; on the
-	// first commit there is nothing to compare against, and asking for
-	// the entry then is the safe way round.
-	_, err = gitOutput("diff", "--quiet", base, "--", "*.go")
-	changed := err != nil
-	tagged := func(version string) bool {
-		_, err := gitOutput("rev-parse", "-q", "--verify", "refs/tags/v"+version)
-		return err == nil
+	changed, err := shippedChangedSince(dir, last)
+	if err != nil {
+		return nil, changelogUnrun(dir, err)
 	}
+	raw, err := os.ReadFile(filepath.Join(dir, changelogPath))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", changelogPath, err)
+	}
+	// A version is released once a tag names it on any line of history.
+	tags := strings.Fields(list)
+	tagged := func(version string) bool { return slices.Contains(tags, "v"+version) }
 	return changelogRule(string(raw), changed, tagged), nil
 }
 
-// changelogRule requires a change to Go source to be written up: an
-// entry under [Unreleased], or, on a release commit, under the newest
-// version heading while that version has no tag. A release commit moves
-// the entries under the version it is about to tag, and CI runs on it
-// before the tag exists.
+// changelogUnrun is why the CHANGELOG rule could not run in the checkout at
+// dir. A shallow clone fetches no tag and too little history, so the
+// reason names one.
+func changelogUnrun(dir string, err error) error {
+	if shallow, _ := gitOutput("-C", dir, "rev-parse", "--is-shallow-repository"); shallow == "true" {
+		err = fmt.Errorf("%w; the checkout is a shallow clone: check it out with fetch-depth: 0", err)
+	}
+	return couldNotRun{fmt.Errorf("the CHANGELOG rule: %w", err)}
+}
+
+// changelogRule requires a change to the binary's source to be written
+// up. Normally that means entries under [Unreleased]; on a release commit
+// those notes have just moved under the new version heading, which is only
+// acceptable while that version has no tag yet.
 func changelogRule(text string, sourceChanged bool, tagged func(version string) bool) []string {
 	if !sourceChanged {
 		return nil
 	}
-	lines := strings.Split(text, "\n")
-	if countEntries(lines, "Unreleased") > 0 {
+	doc := readChangelog(text)
+	if doc.entries("Unreleased") > 0 {
 		return nil
 	}
 	where := "[Unreleased]"
-	if m := versionHeading.FindStringSubmatch(text); m != nil && !tagged(m[1]) {
-		if countEntries(lines, m[1]) > 0 {
+	if v := doc.versions(); len(v) > 0 && !tagged(v[0].label) {
+		if doc.entries(v[0].label) > 0 {
 			return nil
 		}
-		where = "[" + m[1] + "], the untagged version this commit releases,"
+		where = "[" + v[0].label + "] (untagged, so this is a release commit)"
 	}
-	return []string{"Go source changed and " + changelogPath + " " + where + " has no entry; " +
-		"write one under [Unreleased], or under the version heading this release tags"}
+	return []string{"the binary's source changed but " + changelogPath + " " + where + " is empty"}
 }
 
-// countEntries counts the entries in a version's section: the lines that
-// open a bullet at the margin. An indented bullet sits inside a
-// paragraph, and prose is no entry.
-func countEntries(lines []string, version string) int {
-	from, to := changelogSection(lines, version)
-	n := 0
-	for _, line := range lines[from:to] {
-		if strings.HasPrefix(line, "- ") {
-			n++
+// stalenessNewestRelease is the newest release tag's version by semver
+// order, a prerelease included, or "" when there is none. git's version
+// sort puts v2.0.0-rc.1 after v2.0.0, so the order is semver's.
+func stalenessNewestRelease(tags []string) string {
+	newest := ""
+	for _, tag := range tags {
+		v, ok := strings.CutPrefix(tag, "v")
+		if ok && changelogVersion.MatchString(v) && (newest == "" || changelogCompare(v, newest) > 0) {
+			newest = v
 		}
 	}
-	return n
+	return newest
+}
+
+// shippedChangedSince reports whether the commits since..HEAD of the
+// checkout at dir change the binary's source: a Go file other than a test
+// in a package of this module the binary imports, a file such a package
+// embeds, or go.mod outside its require and tool lines. A package counts
+// by its directory, so a file another platform builds counts, and so does
+// a file removed from it. Commits are compared, as CI sees them.
+func shippedChangedSince(dir, since string) (bool, error) {
+	out, err := gitOutput("-C", dir, "diff", since+"..HEAD", "--name-only", "--no-renames", "-z")
+	if err != nil {
+		return false, err
+	}
+	var shipped *shippedSource
+	for _, file := range strings.Split(out, "\x00") {
+		switch file {
+		case "":
+		case "go.mod":
+			if changed, err := goModChangedSince(dir, since); err != nil || changed {
+				return changed, err
+			}
+		default:
+			if shipped == nil {
+				if shipped, err = listShipped(dir); err != nil {
+					return false, err
+				}
+			}
+			if shipped.has(file) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// shippedSource is what the binary is built from in this module, on this
+// platform: its package directories and the files they embed, each
+// slash-separated from the module root.
+type shippedSource struct{ dirs, embeds map[string]bool }
+
+func (s *shippedSource) has(file string) bool {
+	return s.embeds[file] || strings.HasSuffix(file, ".go") && !strings.HasSuffix(file, "_test.go") && s.dirs[path.Dir(file)]
+}
+
+// listShipped asks the go command what ./cmd/... is built from in the
+// module at dir. A package of another module is a dependency, which
+// go.mod's require lines name.
+func listShipped(dir string) (*shippedSource, error) {
+	const what = "go list -deps ./cmd/..."
+	cmd := exec.Command("go", "list", "-deps", "-json=Dir,EmbedFiles,Module", "./cmd/...")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	switch {
+	case errors.As(err, &exit):
+		return nil, fmt.Errorf("%s: %s", what, strings.TrimSpace(string(exit.Stderr)))
+	case err != nil:
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	s := &shippedSource{dirs: map[string]bool{}, embeds: map[string]bool{}}
+	for dec := json.NewDecoder(bytes.NewReader(out)); dec.More(); {
+		var p struct {
+			Dir        string
+			EmbedFiles []string
+			Module     *struct {
+				Main bool
+				Dir  string
+			}
+		}
+		if err := dec.Decode(&p); err != nil {
+			return nil, fmt.Errorf("%s: %w", what, err)
+		}
+		if p.Module == nil || !p.Module.Main {
+			continue
+		}
+		rel, err := filepath.Rel(p.Module.Dir, p.Dir)
+		if err != nil {
+			return nil, err
+		}
+		pkg := filepath.ToSlash(rel)
+		s.dirs[pkg] = true
+		for _, f := range p.EmbedFiles {
+			s.embeds[path.Join(pkg, f)] = true
+		}
+	}
+	// An empty listing is not reading the binary, and would excuse every
+	// change.
+	if len(s.dirs) == 0 {
+		return nil, fmt.Errorf("%s named no package of this module, so it is not reading the binary", what)
+	}
+	return s, nil
+}
+
+// goModChangedSince reports whether go.mod at HEAD in the checkout at dir
+// differs from since's outside its require and tool lines: a go, toolchain
+// or replace line changes what the binary is built with.
+func goModChangedSince(dir, since string) (bool, error) {
+	before, err := gitOutput("-C", dir, "show", since+":go.mod")
+	if err != nil {
+		return false, err
+	}
+	after, err := gitOutput("-C", dir, "show", "HEAD:go.mod")
+	if err != nil {
+		return false, err
+	}
+	return goModBuildLines(before) != goModBuildLines(after), nil
+}
+
+// goModBuildLines is a go.mod's lines, each trimmed and the blank ones
+// dropped, without its require and tool directives, a block's included
+// (https://go.dev/ref/mod#go-mod-file-require). A tool directive adds a
+// package `go tool` runs (https://go.dev/ref/mod#go-mod-file-tool). ( is a
+// token of its own, so `require(` opens a block as `require (` does
+// (https://go.dev/ref/mod#go-mod-file-lexical).
+func goModBuildLines(text string) string {
+	var kept []string
+	inBlock := false
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		verb, paren := "", false
+		if len(fields) > 0 {
+			verb, _, paren = strings.Cut(fields[0], "(")
+		}
+		switch {
+		case inBlock:
+			inBlock = len(fields) == 0 || !strings.HasPrefix(fields[0], ")")
+		case len(fields) == 0:
+		case verb == "require" || verb == "tool":
+			inBlock = paren || len(fields) > 1 && strings.HasPrefix(fields[1], "(")
+		default:
+			kept = append(kept, strings.Join(fields, " "))
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 // difference returns the members of a that are not in b. Both sorted.
@@ -277,16 +461,10 @@ func difference(a, b []string) []string {
 //
 // The list is derived from auth.Scopes rather than typed here, so adding
 // a scope fails this until the README says so.
-func scopeProblems() []string {
+func scopeProblems(readme string) []string {
 	wanted := append(auth.Scopes(false), auth.Scopes(true)...)
 	slices.Sort(wanted)
-	wanted = slices.Compact(wanted)
-
-	readme, err := os.ReadFile("README.md")
-	if err != nil {
-		return []string{"README.md: " + err.Error()}
-	}
-	return scopesAgree(string(readme), wanted)
+	return scopesAgree(readme, slices.Compact(wanted))
 }
 
 // scopesAgree is the rule itself, over the README's text. It is split

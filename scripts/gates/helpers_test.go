@@ -17,21 +17,27 @@ func mustModuleRoot(t *testing.T) string {
 	return root
 }
 
-// initRepo makes an empty git repository in a temporary directory, on
-// branch main, and moves the test into it. Git, the gates' own calls
-// included, reads none of the machine's configuration for the rest of
-// the test, so a personal excludes file or hook cannot change what a
-// gate sees, and a commit has an author.
-func initRepo(t *testing.T) string {
+// isolateGit keeps the machine's git configuration from every git the
+// test runs, the gates' own included, so a personal excludes file or hook
+// cannot change what a gate sees, and gives a commit an author.
+func isolateGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
 	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": os.DevNull, "GIT_CONFIG_NOSYSTEM": "1",
-		"GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.com",
+		"XDG_CONFIG_HOME": t.TempDir(), "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.com",
 		"GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.com"} {
 		t.Setenv(k, v)
 	}
+}
+
+// initRepo makes an empty git repository in a temporary directory, on
+// branch main, and moves the test into it, git isolated as isolateGit
+// isolates it.
+func initRepo(t *testing.T) string {
+	t.Helper()
+	isolateGit(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
 	if _, err := gitOutput("init", "--quiet", "--initial-branch=main"); err != nil {

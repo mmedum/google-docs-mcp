@@ -11,6 +11,7 @@ import (
 
 // The gate itself, over this repository's own snapshot and verdicts.
 func TestAPIFieldsGate(t *testing.T) {
+	t.Chdir("../..")
 	if err := apiFields(io.Discard, nil); err != nil {
 		t.Errorf("api fields gate: %v", err)
 	}

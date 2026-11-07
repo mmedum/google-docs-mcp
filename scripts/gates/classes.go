@@ -50,13 +50,9 @@ func classes(w io.Writer, _ []string) error {
 		}
 	}
 
-	root, err := moduleRoot()
-	if err != nil {
-		return err
-	}
 	seen := map[string]bool{}
 	files := 0
-	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir("internal", func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
 		}
@@ -68,10 +64,9 @@ func classes(w io.Writer, _ []string) error {
 		for _, m := range errorfClass.FindAllStringSubmatch(string(data), -1) {
 			seen[m[1]] = true
 			if !slices.Contains(known, m[1]) {
-				rel, _ := filepath.Rel(root, path)
 				problems = append(problems, fmt.Sprintf(
 					"%s: class %q is not in service.Classes; add it there with what it asks the "+
-						"reader to do, or use an existing class", rel, m[1]))
+						"reader to do, or use an existing class", filepath.ToSlash(path), m[1]))
 			}
 		}
 		return nil

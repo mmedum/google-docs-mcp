@@ -68,11 +68,7 @@ type fieldVerdict struct {
 // SectionStyle's margins. A comment cannot hold that rule, so this gate
 // does.
 func apiFields(w io.Writer, _ []string) error {
-	root, err := moduleRoot()
-	if err != nil {
-		return err
-	}
-	snap, err := readFieldSnapshot(filepath.Join(root, apiFieldsFile))
+	snap, err := readFieldSnapshot(apiFieldsFile)
 	if err != nil {
 		return err
 	}
@@ -87,11 +83,11 @@ func apiFields(w io.Writer, _ []string) error {
 			apiFieldsFile, len(published))
 	}
 
-	verdicts, err := readFieldVerdicts(filepath.Join(root, apiFieldVerdict))
+	verdicts, err := readFieldVerdicts(apiFieldVerdict)
 	if err != nil {
 		return err
 	}
-	modeled, err := wireStructs(filepath.Join(root, wireDir))
+	modeled, err := wireStructs(wireDir)
 	if err != nil {
 		return err
 	}
@@ -492,9 +488,8 @@ func readFieldVerdicts(path string) ([]fieldVerdict, error) {
 // which is the one command here that touches the network — and which
 // hands the documents over rather than letting this refetch them, so that
 // the two snapshots it writes describe one reading of the API.
-func writeFieldSnapshot(w io.Writer, root string, docsDoc *discoveryDoc) error {
-	path := filepath.Join(root, apiFieldsFile)
-	old, err := readFieldSnapshot(path)
+func writeFieldSnapshot(w io.Writer, docsDoc *discoveryDoc) error {
+	old, err := readFieldSnapshot(apiFieldsFile)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -540,7 +535,7 @@ func writeFieldSnapshot(w io.Writer, root string, docsDoc *discoveryDoc) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(apiFieldsFile, append(data, '\n'), 0o644); err != nil {
 		return err
 	}
 	if len(lines) == 0 {

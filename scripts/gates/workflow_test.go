@@ -44,6 +44,12 @@ func TestWorkflowReaderReadsTheBlockStyle(t *testing.T) {
 		"          ./...",
 		"  call:",
 		"    uses: o/r/.github/workflows/x.yml@g",
+		"on:",
+		"  push:",
+		"    branches:",
+		"      - main",
+		"      - 'release/**' # a comment",
+		"    paths: [go.mod, go.sum]",
 	), "\n", "\r\n"))
 	var got []string
 	for _, s := range w.steps {
@@ -156,6 +162,16 @@ func TestWorkflowReaderRefusesWhatItCannotRead(t *testing.T) {
 		`    - run: "go vet C:\\x"`,
 		`      name: "it's" # 'a'' b'`,
 		`    - run: 'echo "a"'`,
+		"    - name: a name",
+		"        continued",
+		"    - ? a complex key",
+		"    - run: echo",
+		"      shell: bash",
+		"    runs-on:",
+		"      - [self-hosted]",
+		"      - - nested",
+		"      -",
+		"...",
 	))
 	want := []string{
 		"w.yml:4: db: a flow collection; write it as a block, one key a line",
@@ -170,9 +186,304 @@ func TestWorkflowReaderRefusesWhatItCannotRead(t *testing.T) {
 		"w.yml:21: run: a quoted value with an escape in it; write it unquoted or as a block",
 		"w.yml:22: name: a quoted value with an escape in it; write it unquoted or as a block",
 		"w.yml:23: run: a quoted value with an escape in it; write it unquoted or as a block",
+		`w.yml:27: "continued": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+		"w.yml:28: an item of steps: is not a block mapping; write it one key a line",
+		`w.yml:32: "- [self-hosted]": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+		`w.yml:33: "- - nested": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+		`w.yml:34: "-": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+		`w.yml:35: "...": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+		// A uses: and a version under a line refused above are read at a
+		// path no rule reads, so they are named as well.
+		"w.yml:9: uses: not read as a step's or a job's; write the step in block style, one key a line",
+		"w.yml:17: version: not read as a step's with: or an env: key; write it in block style, one key a line",
 	}
 	if !slices.Equal(w.refused, want) {
 		t.Errorf("refused:\n  %s\nwant:\n  %s", strings.Join(w.refused, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// A flow collection whose brackets sit on lines of their own opens no step,
+// so the action inside it, and the version it is given, land at a path no
+// gate reads. Each bracket line is refused, and the uses: and the version
+// are too.
+func TestWorkflowReaderRefusesAFlowCollectionOnLinesOfItsOwn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want []string
+	}{
+		{
+			"an action in a flow sequence of steps",
+			textLines(
+				"jobs:",
+				"  sneaky:",
+				"    runs-on: ubuntu-latest",
+				"    steps:",
+				"      [",
+				"        {",
+				"          uses: evil-org/evil-action@main",
+				"        }",
+				"      ]",
+			),
+			[]string{
+				`w.yml:5: "[": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:6: "{": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:8: "}": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:9: "]": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				"w.yml:7: uses: not read as a step's or a job's; write the step in block style, one key a line",
+			},
+		},
+		{
+			"a flow with: under it",
+			textLines(
+				"jobs:",
+				"  announce:",
+				"    steps:",
+				"      [",
+				"        {",
+				"          uses: evil-org/release-notifier@main,",
+				"          with:",
+				"            {",
+				`              token: "${{ github.token }}"`,
+				"            }",
+				"        }",
+				"      ]",
+			),
+			[]string{
+				`w.yml:4: "[": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:5: "{": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:8: "{": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:10: "}": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:11: "}": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:12: "]": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				"w.yml:6: uses: not read as a step's or a job's; write the step in block style, one key a line",
+			},
+		},
+		{
+			"an installer's version in a flow with:",
+			textLines(
+				"jobs:",
+				"  resign:",
+				"    steps:",
+				"      [",
+				"        {",
+				"          uses: sigstore/cosign-installer@0123456789abcdef0123456789abcdef01234567,",
+				"          with:",
+				"            {",
+				"              cosign-release: latest",
+				"            }",
+				"        }",
+				"      ]",
+			),
+			[]string{
+				`w.yml:4: "[": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:5: "{": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:8: "{": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:10: "}": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:11: "}": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				`w.yml:12: "]": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+				"w.yml:6: uses: not read as a step's or a job's; write the step in block style, one key a line",
+				"w.yml:9: cosign-release: not read as a step's with: or an env: key; write it in block style, one key a line",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := parseWorkflow("w.yml", tc.text)
+			if !slices.Equal(w.refused, tc.want) {
+				t.Errorf("refused:\n  %s\nwant:\n  %s", strings.Join(w.refused, "\n  "), strings.Join(tc.want, "\n  "))
+			}
+		})
+	}
+}
+
+// A uses: is read only as a step's or a job's, and a version only as a
+// step's or a reusable call's with: key or an env: key, so either one
+// anywhere else on a line that is not a comment is refused. A reusable
+// call's with: is its step's, in either order. A key line outside every
+// job's steps and with:, a matrix included, holds no installer's version,
+// and is read as any key is.
+func TestWorkflowReaderHoldsEveryUsesAndVersionToWhatItRecorded(t *testing.T) {
+	w := parseWorkflow("w.yml", textLines(
+		"on:",
+		"  release:",
+		"    types: [published]",
+		"  workflow_dispatch:",
+		"    inputs:",
+		"      version:",
+		`        description: "the version: a tag"`,
+		"jobs:",
+		"  build:",
+		"    outputs:",
+		"      version: ${{ steps.v.outputs.version }}",
+		"    strategy:",
+		"      matrix:",
+		"        go-version: [stable]",
+		"    steps:",
+		"      # - uses: a/b@main # cosign-release: latest",
+		"      - id: v",
+		"        run: make version",
+		"  call:",
+		"    uses: ./.github/workflows/x.yml",
+		"    with:",
+		"      version: ${{ github.ref_name }}",
+		"  sign:",
+		"    with:",
+		"      cosign-release: latest",
+		"    uses: o/r/.github/workflows/sign.yml@0123456789abcdef0123456789abcdef01234567 # v1.0.0",
+		"  stray:",
+		"    with:",
+		"      cosign-release: latest",
+	))
+	want := []string{
+		"w.yml:29: cosign-release: not read as a step's with: or an env: key; write it in block style, one key a line",
+	}
+	if !slices.Equal(w.refused, want) {
+		t.Errorf("refused:\n  %s\nwant:\n  %s", strings.Join(w.refused, "\n  "), strings.Join(want, "\n  "))
+	}
+	var got []string
+	for _, s := range w.steps {
+		got = append(got, fmt.Sprintf("%s:%d %s with=%v", s.job, s.line, s.uses, s.with))
+	}
+	if want := []string{
+		"call:20 ./.github/workflows/x.yml with=map[version:{version ${{ github.ref_name }} 22}]",
+		"sign:26 o/r/.github/workflows/sign.yml@0123456789abcdef0123456789abcdef01234567 with=map[cosign-release:{cosign-release latest 25}]",
+	}; !slices.Equal(got, want) {
+		t.Errorf("steps:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// A key is read only where one can stand: at a line's start, after its
+// indentation and any sequence dash, after a { or [, and after a , inside
+// a flow collection, outside a quoted scalar. A value's text, a quoted
+// scalar, a block scalar's body and a comment hold no key, and a key a
+// flow collection writes is one however it is written.
+func TestWorkflowReaderTakesAKeyOnlyWhereOneCanStand(t *testing.T) {
+	steps := func(lines ...string) string {
+		return textLines(append([]string{"jobs:", "  j:", "    steps:"}, lines...)...)
+	}
+	// Each flow row's line 6 sits in a flow mapping in a flow sequence of
+	// steps, whose bracket lines are refused as well.
+	flow := func(line string) string {
+		return steps("      [", "        {", "          "+line, "        }", "      ]")
+	}
+	refusedIn := func(line6 ...string) []string {
+		return append([]string{
+			`w.yml:4: "[": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+			`w.yml:5: "{": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+			`w.yml:7: "}": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+			`w.yml:8: "]": not a block key, a one-line item or a comment; write it in block style, one key a line`,
+		}, line6...)
+	}
+	const (
+		uses   = "w.yml:6: uses: not read as a step's or a job's; write the step in block style, one key a line"
+		cosign = "w.yml:6: cosign-release: not read as a step's with: or an env: key; write it in block style, one key a line"
+	)
+	for _, tc := range []struct {
+		name string
+		text string
+		want []string
+	}{
+		{"a version: in a run line's text", steps(`      - run: echo "go version: $(go version)"`), nil},
+		{"a uses: in a quoted name", steps(`      - name: "Check uses: in workflows"`, "        run: make check"), nil},
+		{"a uses: after a comma in a quoted value", steps(`      - name: 'lint, uses: none'`, "        run: make lint"), nil},
+		{"a version: after a comma in a comment", steps("      - run: make check # lint, version: pinned"), nil},
+		{"a version: inside a block scalar's line", steps("      - run: |", `          echo "version: 1"`), nil},
+		{"a heredoc's keys in a run block", steps("      - run: |", "          cat > w.yml <<EOF", `          version: "2"`,
+			"          uses: a/b@main", "          EOF"), nil},
+		{"a description's key in a block scalar", textLines("on:", "  workflow_dispatch:", "    inputs:", "      release:",
+			"        description: |", "          release: the tag to cut", "        required: true"), nil},
+		{"a uses: after a comma in a plain value", steps("      - run: echo a,uses:b"), nil},
+		{"a version: after a comma in an expression", steps("      - if: contains(github.ref, 'version:1')", "        run: make check"), nil},
+		{"a version: after a comma once a flow on the line has closed", steps("      - run: echo [a] b, version:1"), nil},
+		{"a quoted scalar holding a uses: and a release:", textLines("on:", "  workflow_dispatch:", "    inputs:", "      channel:",
+			"        type: choice", "        options:", `          - "uses: a"`, "          - 'release: v1'"), nil},
+		{"a quoted bar, which is no block scalar", steps(`      - run: "|"`, "          uses: evil-org/evil-action@main"),
+			[]string{"w.yml:5: uses: not read as a step's or a job's; write the step in block style, one key a line"}},
+		{"a version after a comma in a flow mapping on its line", steps("      - name: x", "        timeout: {a: b, cosign-release: latest}"),
+			[]string{"w.yml:5: cosign-release: not read as a step's with: or an env: key; write it in block style, one key a line"}},
+		{"a version in upper case", flow("name: x, with: [COSIGN-RELEASE: latest]"),
+			refusedIn("w.yml:6: COSIGN-RELEASE: not read as a step's with: or an env: key; write it in block style, one key a line")},
+		{"a uses: in an item outside steps", textLines("jobs:", "  j:", "    pre-steps:", "      - uses: evil-org/evil-action@main"),
+			[]string{"w.yml:4: uses: not read as a step's or a job's; write the step in block style, one key a line"}},
+		{"a uses: after a comma", flow("name: x, uses: evil-org/evil-action@main"), refusedIn(uses)},
+		{"a version after a bracket", flow("name: x, with: [cosign-release: latest]"), refusedIn(cosign)},
+		{"a quoted version after a brace", flow(`name: x, with: {"cosign-release": latest}`), refusedIn(cosign)},
+		{"a uses: after a quoted value", flow(`name: "x, y", uses: evil-org/evil-action@main`), refusedIn(uses)},
+		{"a uses: after an apostrophe in a plain value", flow("name: it's, uses: evil-org/evil-action@main"), refusedIn(uses)},
+		{"a uses: after an explicit key's ?, and a version after an anchor",
+			flow("name: x, ? uses : evil-org/evil-action@main, &v cosign-release: latest"), refusedIn(uses, cosign)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := parseWorkflow("w.yml", tc.text)
+			if !slices.Equal(w.refused, tc.want) {
+				t.Errorf("refused:\n  %s\nwant:\n  %s", strings.Join(w.refused, "\n  "), strings.Join(tc.want, "\n  "))
+			}
+		})
+	}
+}
+
+// The runner passes an input as INPUT_ and its name in upper case, a space
+// read as an underscore, so two with: keys of one step that differ only so
+// set one input twice, and the later one is refused. The step keeps the
+// first, and a reusable call's with: is held the same way.
+func TestWorkflowReaderRefusesAnInputSetTwice(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	w := parseWorkflow("w.yml", textLines(
+		"jobs:",
+		"  build:",
+		"    steps:",
+		"      - uses: sigstore/cosign-installer@"+sha+" # v4.1.2",
+		"        with:",
+		"          cosign-release: v3.1.3",
+		"          COSIGN-RELEASE: latest",
+		"      - uses: a/b@"+sha+" # v1.0.0",
+		"        with:",
+		"          tool version: v1.0.0",
+		"          TOOL_VERSION: latest",
+		"          tool-version: v2.0.0",
+		"  call:",
+		"    uses: o/r/.github/workflows/x.yml@"+sha+" # v1.0.0",
+		"    with:",
+		"      release-version: v1.0.0",
+		"      Release-Version: latest",
+	))
+	want := []string{
+		"w.yml:7: COSIGN-RELEASE: names the input cosign-release names, read ignoring case and a space as an underscore; set it once",
+		"w.yml:11: TOOL_VERSION: names the input tool version names, read ignoring case and a space as an underscore; set it once",
+		"w.yml:17: Release-Version: names the input release-version names, read ignoring case and a space as an underscore; set it once",
+	}
+	if !slices.Equal(w.refused, want) {
+		t.Errorf("refused:\n  %s\nwant:\n  %s", strings.Join(w.refused, "\n  "), strings.Join(want, "\n  "))
+	}
+	var got []string
+	for _, s := range w.steps {
+		got = append(got, fmt.Sprintf("%s:%d with=%v", s.job, s.line, s.with))
+	}
+	if want := []string{
+		"build:4 with=map[cosign-release:{cosign-release v3.1.3 6}]",
+		"build:8 with=map[tool version:{tool version v1.0.0 10} tool-version:{tool-version v2.0.0 12}]",
+		"call:14 with=map[release-version:{release-version v1.0.0 16}]",
+	}; !slices.Equal(got, want) {
+		t.Errorf("steps:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// Every workflow here reads with nothing refused, and its steps are read.
+func TestWorkflowReaderReadsEveryWorkflowHere(t *testing.T) {
+	t.Chdir(parityRepoRoot)
+	flows, err := readWorkflows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := 0
+	for _, w := range flows {
+		if w.refused != nil {
+			t.Errorf("%s refused:\n  %s", w.path, strings.Join(w.refused, "\n  "))
+		}
+		steps += len(w.steps)
+	}
+	if len(flows) < 5 || steps < 20 {
+		t.Errorf("read %d workflows and %d steps, under the floors of 5 and 20", len(flows), steps)
 	}
 }
 

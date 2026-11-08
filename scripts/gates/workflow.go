@@ -40,8 +40,8 @@ type workflowFile struct {
 }
 
 // workflowStep is one `uses:`, with the step's own with: and env: keys.
-// A reusable one is a job that calls a reusable workflow, which has no
-// keys of a step.
+// A reusable one is a job that calls a reusable workflow, and its with:
+// is the job's.
 type workflowStep struct {
 	job      string
 	line     int
@@ -56,6 +56,30 @@ type workflowStep struct {
 func (s workflowStep) action() string {
 	a, _, _ := strings.Cut(s.uses, "@")
 	return a
+}
+
+// input is the with: key that sets the input name, as workflowInputName
+// reads both.
+func (s workflowStep) input(name string) (workflowKey, bool) {
+	for key, k := range s.with {
+		if workflowInputName(key) == workflowInputName(name) {
+			return k, true
+		}
+	}
+	return workflowKey{}, false
+}
+
+// workflowInputName is an input's name as the runner passes it, after
+// INPUT_: in upper case, a space read as an underscore
+// (https://github.com/actions/runner/blob/v2.338.2/src/Runner.Worker/Handlers/Handler.cs#L185).
+func workflowInputName(key string) string {
+	return strings.ToUpper(strings.ReplaceAll(key, " ", "_"))
+}
+
+// workflowVersionInput reports whether a with: key names a tool's version,
+// its case ignored as the runner ignores it: Syft-Version is syft-version.
+func workflowVersionInput(key string) bool {
+	return workflowVersionKey.MatchString(strings.ToLower(key))
 }
 
 // workflowKey is one key and its value, unquoted, with its line. A block
@@ -89,12 +113,14 @@ var (
 	workflowQuotedKey = regexp.MustCompile(`^(?:-[ \t]+)?("[^"]*"|'[^']*')[ \t]*:(?:[ \t]|$)`)
 	// workflowBlockScalar is the indicator of a literal or folded scalar.
 	workflowBlockScalar = regexp.MustCompile(`^[|>][-+0-9]*$`)
-	// workflowUsesKey is a uses: key anywhere on a line, as a flow mapping
-	// or a quoted key writes it.
-	workflowUsesKey = regexp.MustCompile(`(?:^|[\s{,\[])["']?uses["']?[ \t]*:`)
+	// workflowKeyAt is a key at the start of a text, plain or in a pair of
+	// quotes, after any explicit key's ?, anchor or tag, with its colon. A
+	// quoted scalar with no colon after its closing quote is no key.
+	workflowKeyAt = regexp.MustCompile(`^[ \t]*(?:(?:\?|[&!][^\s{}\[\],]*)[ \t]+)*(?:"([^"]*)"|'([^']*)'|([^\s"'{}\[\],:#]+))[ \t]*:`)
 	// workflowVersionKey is a key that names a tool's version: an input
 	// such as cosign-release or syft-version, an env value such as
-	// GITLEAKS_VERSION or COSIGN_RELEASE, or a Makefile variable.
+	// GITLEAKS_VERSION or COSIGN_RELEASE, or a Makefile variable. A bare
+	// VERSION is the server's own.
 	workflowVersionKey = regexp.MustCompile(`(?:version|release|_VERSION|_RELEASE)$`)
 )
 
@@ -113,7 +139,7 @@ var workflowReadKeys = map[string]bool{
 func workflowHeld(path []string) bool {
 	key, parent := workflowKeyParent(path)
 	return key == "uses" || key == "image" || key == "container" ||
-		(parent == "with" || parent == "env") && workflowVersionKey.MatchString(key)
+		parent == "with" && workflowVersionInput(key) || parent == "env" && workflowVersionKey.MatchString(key)
 }
 
 // workflowKeyParent is a path's last key and the one before it, each ""
@@ -175,16 +201,26 @@ type workflowFrame struct {
 
 // workflowParser is parseWorkflow's state: the open frames, and in file
 // order every step item read, with an action or without, and every job
-// that calls a reusable workflow.
+// that calls a reusable workflow. calls is each job's with: keys, by the
+// job's name, paths is each key line's key path, and refusedAt each line
+// refused and bodyAt each line of a block scalar's body, by line number.
 type workflowParser struct {
-	w     workflowFile
-	stack []workflowFrame
-	items []workflowStep
+	w         workflowFile
+	stack     []workflowFrame
+	items     []workflowStep
+	calls     map[string]map[string]workflowKey
+	paths     map[int][]string
+	refusedAt map[int]bool
+	bodyAt    map[int]bool
 }
 
 // parseWorkflow reads one workflow's text.
 func parseWorkflow(path, text string) workflowFile {
-	p := workflowParser{w: workflowFile{path: path, text: text}}
+	p := workflowParser{
+		w:     workflowFile{path: path, text: text},
+		calls: map[string]map[string]workflowKey{},
+		paths: map[int][]string{}, refusedAt: map[int]bool{}, bodyAt: map[int]bool{},
+	}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	for i := 0; i < len(lines); i++ {
 		trimmed := strings.TrimSpace(lines[i])
@@ -200,9 +236,14 @@ func parseWorkflow(path, text string) workflowFile {
 	}
 	for _, s := range p.items {
 		if s.line > 0 {
+			if s.reusable {
+				// A job's keys come in any order, so its with: may be read first.
+				s.with = p.calls[s.job]
+			}
 			p.w.steps = append(p.w.steps, s)
 		}
 	}
+	p.unrecorded(lines)
 	return p.w
 }
 
@@ -223,6 +264,7 @@ func (p *workflowParser) key(lines []string, i int, m []string) int {
 	}
 	key, raw := m[2], strings.TrimSpace(m[3])
 	path := append(workflowPath(p.stack), key)
+	p.paths[n] = path
 	var step *workflowStep
 	if len(p.stack) >= 4 && path[0] == "jobs" && path[2] == "steps" && p.stack[3].step >= 0 {
 		step = &p.items[p.stack[3].step]
@@ -233,15 +275,19 @@ func (p *workflowParser) key(lines []string, i int, m []string) int {
 		p.stack[len(p.stack)-1].refused = true
 		return i
 	}
-	if workflowBlockScalar.MatchString(value) {
+	// A quoted | is a scalar of its own, not a block scalar's indicator.
+	if workflowBlockScalar.MatchString(value) && strings.HasPrefix(raw, value) {
 		// The body is indented past the key, not the dash before it, so a
 		// step's next key ends it.
 		body, end := workflowScalarBody(lines, i, keyCol)
+		for j := i + 1; j <= end; j++ {
+			p.bodyAt[j+1] = true
+		}
 		switch {
 		case key == "run":
 			p.w.addRuns(workflowJob(path), n+1, body, strings.HasPrefix(value, ">"))
 		case workflowHeld(path):
-			p.w.refuse(n, "%s: a block scalar; write the value on the key's line", key)
+			p.refuse(n, "%s: a block scalar; write the value on the key's line", key)
 		case strings.HasPrefix(value, ">"):
 			// A folded scalar's lines are one line, joined by spaces.
 			p.read(path, step, workflowKey{key, strings.ReplaceAll(workflowJoin(body), "\n", " "), n}, "")
@@ -271,7 +317,7 @@ func (p *workflowParser) read(path []string, step *workflowStep, k workflowKey, 
 			step.env[k.key] = k
 		}
 	case inStep && depth == 6 && path[4] == "with":
-		step.with[k.key] = k
+		p.setInput(step.with, k)
 	case job != "":
 		p.readJob(path, job, k)
 	case slices.Equal(path, []string{"defaults", "run", "shell"}):
@@ -280,10 +326,15 @@ func (p *workflowParser) read(path []string, step *workflowStep, k workflowKey, 
 	}
 }
 
-// readJob records a job's container image or a service's, and a job's
-// shell or a step's.
+// readJob records a job's container image or a service's, a job's shell or
+// a step's, and a reusable call's with: keys.
 func (p *workflowParser) readJob(path []string, job string, k workflowKey) {
 	switch depth := len(path); {
+	case depth == 4 && path[2] == "with":
+		if p.calls[job] == nil {
+			p.calls[job] = map[string]workflowKey{}
+		}
+		p.setInput(p.calls[job], k)
 	case depth == 3 && k.key == "container" && k.value != "", depth == 4 && path[2] == "container" && k.key == "image":
 		p.w.images = append(p.w.images, workflowJobKey{job, "the container", k})
 	case depth == 5 && path[2] == "services" && k.key == "image":
@@ -295,6 +346,20 @@ func (p *workflowParser) readJob(path []string, job string, k workflowKey) {
 	}
 }
 
+// setInput records one with: key in with, and refuses one that names an
+// input with sets already, as workflowInputName reads names: the runner
+// passes one value for both. with keeps the first.
+func (p *workflowParser) setInput(with map[string]workflowKey, k workflowKey) {
+	for key := range with {
+		if workflowInputName(key) == workflowInputName(k.key) {
+			p.refuse(k.line, "%s: names the input %s names, read ignoring case and a space as an underscore; set it once",
+				k.key, key)
+			return
+		}
+	}
+	with[k.key] = k
+}
+
 // refused refuses a value this reader would misread: a merge key, an
 // anchor, an alias or a tag, a quoted value with an escape in it, a flow
 // collection in or under a key it reads, and a held value on another line.
@@ -302,24 +367,25 @@ func (p *workflowParser) refused(n int, path []string, raw, value string) bool {
 	key, parent := workflowKeyParent(path)
 	switch {
 	case key == "<<":
-		p.w.refuse(n, workflowMergeKey)
+		p.refuse(n, workflowMergeKey)
 	case raw != "" && strings.ContainsRune("&*!", rune(raw[0])):
-		p.w.refuse(n, "%s: an anchor, an alias or a tag; write the value out", key)
+		p.refuse(n, "%s: an anchor, an alias or a tag; write the value out", key)
 	case workflowQuoteEscape(raw):
-		p.w.refuse(n, "%s: a quoted value with an escape in it; write it unquoted or as a block", key)
+		p.refuse(n, "%s: a quoted value with an escape in it; write it unquoted or as a block", key)
 	case raw != "" && strings.ContainsRune("{[", rune(raw[0])) && (workflowReadKeys[key] || workflowReadKeys[parent]):
-		p.w.refuse(n, "%s: a flow collection; write it as a block, one key a line", key)
+		p.refuse(n, "%s: a flow collection; write it as a block, one key a line", key)
 	case value == "" && workflowHeld(path) && key != "container":
-		p.w.refuse(n, "%s: has its value on another line; write it on the key's line", key)
+		p.refuse(n, "%s: has its value on another line; write it on the key's line", key)
 	default:
 		return false
 	}
 	return true
 }
 
-// unread refuses a line that is not a plain block key where a value a gate
-// reads could hide: a quoted key anywhere, a step written as a flow mapping,
+// unread refuses a line that is not a plain block key, by what it is where
+// it can be named: a quoted key anywhere, a step written as a flow mapping,
 // an anchored or empty item, or a held value continued from the line above.
+// Only an item holding one scalar under a key no gate reads is let through.
 func (p *workflowParser) unread(n int, line string) {
 	trimmed := strings.TrimSpace(line)
 	item := trimmed == "-" || strings.HasPrefix(trimmed, "- ")
@@ -327,19 +393,137 @@ func (p *workflowParser) unread(n int, line string) {
 	path := workflowPath(p.stack)
 	last, _ := workflowKeyParent(path)
 	quoted := workflowQuotedKey.FindStringSubmatch(trimmed)
+	onLine, _ := workflowLineKeys(trimmed, 0)
 	switch {
 	case len(p.stack) > 0 && p.stack[len(p.stack)-1].refused:
 	case quoted != nil:
-		p.w.refuse(n, "%s: a quoted key; write the key plain", quoted[1])
+		p.refuse(n, "%s: a quoted key; write the key plain", quoted[1])
 	case strings.Contains(trimmed, "<<:"):
-		p.w.refuse(n, workflowMergeKey)
-	case workflowUsesKey.MatchString(trimmed):
-		p.w.refuse(n, "uses: is not a block key on its own line; write the step in block style")
+		p.refuse(n, workflowMergeKey)
+	case slices.Contains(onLine, "uses"):
+		p.refuse(n, "uses: is not a block key on its own line; write the step in block style")
 	case item && workflowReadKeys[last]:
-		p.w.refuse(n, "an item of %s: is not a block mapping; write it one key a line", last)
+		p.refuse(n, "an item of %s: is not a block mapping; write it one key a line", last)
 	case !strings.HasPrefix(trimmed, "- ") && (workflowHeld(path) || last == "run"):
-		p.w.refuse(n, "%s: a value continued on the next line; write it on one line or as a block scalar", last)
+		p.refuse(n, "%s: a value continued on the next line; write it on one line or as a block scalar", last)
+	case !workflowScalarItem(trimmed):
+		// A flow collection's brackets on lines of their own, a continued
+		// plain scalar, a complex key: what follows lands at a path no gate
+		// reads.
+		p.refuse(n, "%q: not a block key, a one-line item or a comment; write it in block style, one key a line", trimmed)
 	}
+}
+
+// workflowScalarItem reports whether a line is a sequence item holding one
+// scalar on its line, such as a branch name, which no gate reads. A value
+// that starts with an indicator, a nested item's dash included, is not one.
+func workflowScalarItem(trimmed string) bool {
+	value, ok := strings.CutPrefix(trimmed, "- ")
+	value = strings.TrimSpace(value)
+	return ok && value != "" && !strings.ContainsAny(value[:1], "-[]{},#&*!|>?:%@`")
+}
+
+// unrecorded refuses, on each line not refused already, a uses: that is no
+// step's or job's the reader recorded, and a version key that is no step's
+// or reusable call's with: key or env: key it recorded. It reads the text
+// rather than the frames, so a shape the reader misreads without refusing
+// it still cannot hide an action or a version, and takes a key only where
+// one can stand, so a value's text is none. A block scalar's body is text:
+// in a file YAML reads, the lines indented past its key are its body
+// (https://yaml.org/spec/1.2.2/#81-block-scalar-styles).
+func (p *workflowParser) unrecorded(lines []string) {
+	uses, keys := map[int]bool{}, map[int]bool{}
+	for _, s := range p.w.steps {
+		uses[s.line] = true
+		for _, k := range s.with {
+			keys[k.line] = true
+		}
+	}
+	for _, k := range p.w.env {
+		keys[k.line] = true
+	}
+	// depth is the flow collections open where each line starts.
+	depth := 0
+	for i, line := range lines {
+		n, t := i+1, strings.TrimSpace(line)
+		if strings.HasPrefix(t, "#") || p.bodyAt[n] {
+			continue
+		}
+		found, open := workflowLineKeys(t, depth)
+		depth = open
+		if p.refusedAt[n] {
+			continue
+		}
+		if slices.Contains(found, "uses") && !uses[n] {
+			p.w.refuse(n, "uses: not read as a step's or a job's; write the step in block style, one key a line")
+		}
+		// A key line outside every job's steps and with:, such as a
+		// trigger's input, a job's output or a matrix, is no installer's
+		// input. An input that takes its version from one through ${{ }} is
+		// not one exact version, which pins refuses at the input.
+		path := p.paths[n]
+		held := len(path) > 2 && path[0] == "jobs" && (path[2] == "steps" || path[2] == "with")
+		if keys[n] || path != nil && !held {
+			continue
+		}
+		for _, k := range found {
+			if workflowVersionInput(k) {
+				p.w.refuse(n, "%s: not read as a step's with: or an env: key; write it in block style, one key a line", k)
+			}
+		}
+	}
+}
+
+// workflowLineKeys is each key on a line where a key can stand, and the
+// flow collections open at its end, given depth open at its start. A key
+// stands at the line's start, after its dashes, after a { or [, and after
+// a , inside a flow collection; a , outside one is a plain scalar's text.
+// A quoted scalar, opened only where a scalar starts, and a comment hold no
+// key (https://yaml.org/spec/1.2.2/#73-flow-scalar-styles, https://yaml.org/spec/1.2.2/#66-comments).
+func workflowLineKeys(line string, depth int) ([]string, int) {
+	t := strings.TrimSpace(line)
+	for t == "-" || strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "-\t") {
+		t = strings.TrimSpace(t[1:])
+	}
+	keys := workflowKeyStart(nil, t)
+	// start is where a scalar can start. A quoted one is skipped to the
+	// next quote of its kind, an escaped one too, which can only find more
+	// keys; one that goes on past the line takes the rest of it.
+	start := true
+	for i := 0; i < len(t); i++ {
+		switch c := t[i]; {
+		case c == ' ' || c == '\t':
+		case c == '#' && (i == 0 || t[i-1] == ' ' || t[i-1] == '\t'):
+			return keys, depth
+		case start && (c == '"' || c == '\''):
+			end := strings.IndexByte(t[i+1:], c)
+			if end < 0 {
+				return keys, depth
+			}
+			i, start = i+1+end, false
+		case c == '{' || c == '[':
+			depth++
+			keys, start = workflowKeyStart(keys, t[i+1:]), true
+		case c == ',' && depth > 0:
+			keys, start = workflowKeyStart(keys, t[i+1:]), true
+		case c == '}' || c == ']':
+			depth, start = max(depth-1, 0), false
+		case c == ':' && (i+1 == len(t) || t[i+1] == ' ' || t[i+1] == '\t'):
+			start = true
+		default:
+			start = false
+		}
+	}
+	return keys, depth
+}
+
+// workflowKeyStart is keys with the key at the start of s added, if one
+// stands there.
+func workflowKeyStart(keys []string, s string) []string {
+	if m := workflowKeyAt.FindStringSubmatch(s); m != nil {
+		return append(keys, m[1]+m[2]+m[3])
+	}
+	return keys
 }
 
 // pop closes the frames a line at col ends: each at col or deeper, but an
@@ -465,4 +649,10 @@ func (w *workflowFile) addRuns(job string, first int, body []string, folded bool
 
 func (w *workflowFile) refuse(n int, format string, a ...any) {
 	w.refused = append(w.refused, fmt.Sprintf("%s:%d: %s", w.path, n, fmt.Sprintf(format, a...)))
+}
+
+// refuse refuses line n, which unrecorded then reads no further.
+func (p *workflowParser) refuse(n int, format string, a ...any) {
+	p.refusedAt[n] = true
+	p.w.refuse(n, format, a...)
 }

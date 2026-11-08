@@ -273,6 +273,11 @@ func pinsWorkflow(gomod string, w workflowFile, r *pinsReport) {
 				pinsStep(gomod, w, s, r)
 			}
 		}
+		// This repository's own reusable workflow is one of the workflows
+		// read here, which holds a version it is given where it uses it.
+		if !s.reusable || !strings.HasPrefix(s.uses, "./") {
+			pinsInputs(w.path, s, r)
+		}
 	}
 	for _, img := range w.images {
 		if !pinsImageDigest.MatchString(img.value) {
@@ -346,35 +351,60 @@ func pinsGoreleaser(g goreleaserFile, r *pinsReport) {
 // publisher, as goreleaser v2.18.1 reads them
 // (https://github.com/goreleaser/goreleaser/blob/v2.18.1/pkg/config/config.go).
 var goreleaserKeys = func() map[string]bool {
-	keys := map[string]bool{}
-	runs := func(paths ...string) {
-		for _, path := range paths {
-			keys[path] = true
-			for at := strings.LastIndexByte(path, '.'); at > 0; at = strings.LastIndexByte(path[:at], '.') {
-				if _, ok := keys[path[:at]]; !ok {
-					keys[path[:at]] = false
-				}
-			}
-		}
-	}
-	runs("before.hooks", "publishers.cmd")
+	paths := make([]string, 0, 22)
+	paths = append(paths, "before.hooks", "publishers.cmd")
 	for _, at := range []string{"builds", "universal_binaries", "dockers_v2"} {
 		for _, when := range []string{".hooks.pre", ".hooks.post"} {
-			runs(at+when, at+when+".cmd")
+			paths = append(paths, at+when, at+when+".cmd")
 		}
 	}
 	for _, at := range []string{"signs", "docker_signs", "binary_signs", "sboms"} {
-		runs(at+".cmd", at+".args")
+		paths = append(paths, at+".cmd", at+".args")
 	}
-	return keys
+	return goreleaserPaths(paths...)
 }()
 
+// goreleaserValues are, by key path as goreleaserKeys has them, the keys
+// whose values the release attestation is held to, true, and the keys above
+// them, false: the dist directory, each archive and its formats, the files
+// the release uploads beside them, and the checksum file's name
+// (https://github.com/goreleaser/goreleaser/blob/v2.18.1/pkg/config/config.go).
+var goreleaserValues = goreleaserPaths("dist", "archives", "archives.formats", "archives.format",
+	"archives.format_overrides.formats", "archives.format_overrides.format", "release.extra_files.glob",
+	"checksum.name_template")
+
+// goreleaserPaths is each of paths, true, and each key path above one that
+// paths does not name, false.
+func goreleaserPaths(paths ...string) map[string]bool {
+	keys := map[string]bool{}
+	for _, path := range paths {
+		keys[path] = true
+		for at := strings.LastIndexByte(path, '.'); at > 0; at = strings.LastIndexByte(path[:at], '.') {
+			if _, ok := keys[path[:at]]; !ok {
+				keys[path[:at]] = false
+			}
+		}
+	}
+	return keys
+}
+
 // goreleaserFile is what the reader takes from the goreleaser config:
-// every command line the release runs, a block scalar's as one line, and
-// the shapes it refuses to read where a command could hide.
+// every command line the release runs, a block scalar's as one line, each
+// value goreleaserValues names, and the shapes it refuses to read where a
+// command or such a value could hide.
 type goreleaserFile struct {
-	runs    []workflowRun
+	runs []workflowRun
+	// values are in file order, a list's items one each. An item holding a
+	// mapping, such as one archive, is an empty value, so the values after
+	// it are its.
+	values  []goreleaserValue
 	refused []string
+}
+
+// goreleaserValue is one value of a key goreleaserValues names.
+type goreleaserValue struct {
+	path, value string
+	line        int
 }
 
 // readGoreleaser parses the repository's goreleaser config.
@@ -410,11 +440,10 @@ func parseGoreleaser(text string) goreleaserFile {
 // took: a block scalar takes the lines under it.
 func (p *goreleaserParser) line(lines []string, i int, trimmed string) int {
 	col, item := indent(lines[i]), trimmed == "-" || strings.HasPrefix(trimmed, "- ")
-	// A sequence may sit at its key's own column (https://yaml.org/spec/1.2.2/#823-block-nodes).
-	for n := len(p.stack); n > 0 && (p.stack[n-1].indent > col || p.stack[n-1].indent == col && !item); n-- {
-		p.stack = p.stack[:n-1]
-	}
+	p.pop(col, item)
 	keys := workflowPath(p.stack)
+	// of is the key path an item is an item of.
+	of := strings.Join(keys, ".")
 	key, raw, keyCol := "", strings.TrimSpace(strings.TrimPrefix(trimmed, "-")), col
 	m := workflowKeyLine.FindStringSubmatch(trimmed)
 	switch quoted := workflowQuotedKey.FindStringSubmatch(trimmed); {
@@ -425,40 +454,105 @@ func (p *goreleaserParser) line(lines []string, i int, trimmed string) int {
 		// The reader cannot place a quoted key, nor the commands under it.
 		p.refuse(i+1, "%s: a quoted key; write the key plain", quoted[1])
 		return i
-	case !item && p.ran != "":
-		p.refuse(i+1, "%s: a value continued on the next line; write it on one line or as a block scalar", p.ran)
-	}
-	if !item && key == "" || len(keys) == 0 {
+	case !item:
+		if p.ran != "" {
+			p.refuse(i+1, "%s: a value continued on the next line; write it on one line or as a block scalar", p.ran)
+		}
 		return i
 	}
-	// known is a key that runs a command, or holds one that does, and name
-	// is the key, or for an item the key it is an item of.
-	run, known := goreleaserKeys[strings.Join(keys, ".")]
+	if len(keys) == 0 {
+		return i
+	}
+	// run is a key whose value the release runs, and held one whose value
+	// the attestation is held to; known and read are each such key or one
+	// above it. name is the key, or for an item the key it is an item of.
+	path := strings.Join(keys, ".")
+	run, known := goreleaserKeys[path]
+	held, read := goreleaserValues[path]
 	name := keys[len(keys)-1]
 	p.ran = ""
-	if p.refused(i+1, key, name, raw, run, known) {
+	if item && key != "" && goreleaserValues[of] {
+		// An item holding a mapping, such as one archive, starts its values.
+		p.g.values = append(p.g.values, goreleaserValue{of, "", i + 1})
+	}
+	if held && key != "" && strings.HasPrefix(raw, "[") {
+		p.list(i+1, path, name, raw)
+		return i
+	}
+	if p.refused(i+1, key, name, raw, run || held, known || read) {
 		return i
 	}
 	value, _ := workflowValue(raw)
+	if workflowBlockScalar.MatchString(value) {
+		return p.block(lines, i, keyCol, name, run, held)
+	}
+	if run || held {
+		// A line below that is no key or item is this value's, which the
+		// reader does not take.
+		p.ran = name
+	}
 	switch {
-	case workflowBlockScalar.MatchString(value):
-		body, end := workflowScalarBody(lines, i, keyCol)
-		if text := strings.ReplaceAll(workflowJoin(body), "\n", " "); run && text != "" {
-			p.g.runs = append(p.g.runs, workflowRun{line: i + 2, text: text})
-		}
-		return end
 	case key != "" && value == "":
 		p.stack = append(p.stack, workflowFrame{indent: keyCol, key: key})
+	case held:
+		p.g.values = append(p.g.values, goreleaserValue{path, value, i + 1})
 	case run && value != "":
-		p.g.runs, p.ran = append(p.g.runs, workflowRun{line: i + 1, text: value}), name
+		p.g.runs = append(p.g.runs, workflowRun{line: i + 1, text: value})
 	}
 	return i
 }
 
-// refused refuses line n where a command could hide in it, and reports
-// whether it did: a merge key, and on or above a command an anchor, an
-// alias, a tag or a flow collection, or a quoted command with an escape.
-func (p *goreleaserParser) refused(n int, key, name, raw string, run, known bool) bool {
+// pop closes the keys a line at col ends. A sequence may sit at its key's
+// own column (https://yaml.org/spec/1.2.2/#823-block-nodes).
+func (p *goreleaserParser) pop(col int, item bool) {
+	for n := len(p.stack); n > 0 && (p.stack[n-1].indent > col || p.stack[n-1].indent == col && !item); n-- {
+		p.stack = p.stack[:n-1]
+	}
+}
+
+// block takes the block scalar under the key at lines[i], whose key path
+// ends at name, and returns the index of its last line: a command's lines
+// are one command, and a held value is refused.
+func (p *goreleaserParser) block(lines []string, i, keyCol int, name string, run, held bool) int {
+	body, end := workflowScalarBody(lines, i, keyCol)
+	if held {
+		p.refuse(i+1, "%s: a block scalar; write the value on the key's line", name)
+	}
+	if text := strings.ReplaceAll(workflowJoin(body), "\n", " "); run && text != "" {
+		p.g.runs = append(p.g.runs, workflowRun{line: i + 2, text: text})
+	}
+	return end
+}
+
+// list records each item of a flow sequence written whole on the line of
+// key path's key, such as formats: [tar.gz, zip], and refuses one it cannot
+// read: one not closed on the line, or holding more than plain or quoted
+// scalars.
+func (p *goreleaserParser) list(n int, path, name, raw string) {
+	value, _ := yamlCutComment(raw)
+	inner, closed := strings.CutSuffix(strings.TrimPrefix(value, "["), "]")
+	if !closed || strings.ContainsAny(inner, "[]{}&*!") {
+		p.refuse(n, "%s: a flow sequence not closed on its key's line, or holding more than scalars; "+
+			"write it as [a, b] or one item a line", name)
+		return
+	}
+	for _, item := range strings.Split(inner, ",") {
+		item = strings.TrimSpace(item)
+		if workflowQuoteEscape(item) {
+			p.refuse(n, "%s: a quoted value with an escape in it; write it unquoted", name)
+			return
+		}
+		if v, _ := workflowValue(item); v != "" {
+			p.g.values = append(p.g.values, goreleaserValue{path, v, n})
+		}
+	}
+}
+
+// refused refuses line n where a command or a held value could hide in
+// it, and reports whether it did: a merge key, and on or above either an
+// anchor, an alias, a tag or a flow collection, or either quoted with an
+// escape.
+func (p *goreleaserParser) refused(n int, key, name, raw string, held, known bool) bool {
 	switch {
 	case key == "<<":
 		p.refuse(n, "<<: a merge key; write the mapping out")
@@ -466,7 +560,7 @@ func (p *goreleaserParser) refused(n int, key, name, raw string, run, known bool
 		p.refuse(n, "%s: an anchor, an alias or a tag; write the value out", name)
 	case known && raw != "" && strings.ContainsRune("{[", rune(raw[0])):
 		p.refuse(n, "%s: a flow collection; write it as a block, one key or item a line", name)
-	case run && workflowQuoteEscape(raw):
+	case held && workflowQuoteEscape(raw):
 		p.refuse(n, "%s: a quoted value with an escape in it; write it unquoted or as a block", name)
 	default:
 		return false
@@ -588,8 +682,7 @@ func pinsActionRef(at string, s workflowStep, r *pinsReport) {
 }
 
 // pinsStep checks one step that uses an action: an installer sets the
-// key that pins its tool, any other action is classified, and every
-// version input names one exact version.
+// key that pins its tool, and any other action is classified.
 func pinsStep(gomod string, w workflowFile, s workflowStep, r *pinsReport) {
 	file, action := w.path, s.action()
 	at := fmt.Sprintf("%s:%d: %s", file, s.line, action)
@@ -602,7 +695,7 @@ func pinsStep(gomod string, w workflowFile, s workflowStep, r *pinsReport) {
 		installer = true
 		r.installers++
 		r.installed[t.name] = true
-		v, set := s.with[key]
+		v, set := s.input(key)
 		switch {
 		case !set:
 			r.fail("%s is pinned by SHA and does not set %s, so the tool it installs is whatever "+
@@ -619,10 +712,22 @@ func pinsStep(gomod string, w workflowFile, s workflowStep, r *pinsReport) {
 		r.fail("%s is not classified: add it to pinsTools with the input that pins its tool, "+
 			"or to pinsNotInstallers with the reason", at)
 	}
+}
+
+// pinsInputs holds every version input of a step or a reusable call to
+// one exact version, but the key an installer's tool is pinned by, which
+// pinsStep holds. An action's code, a local action's included, and a
+// reusable workflow from another repository are not read here, so the
+// version each is given is held where it is given.
+func pinsInputs(file string, s workflowStep, r *pinsReport) {
+	action := s.action()
 	for _, key := range slices.Sorted(maps.Keys(s.with)) {
 		v := s.with[key]
-		installs := slices.ContainsFunc(pinsTools, func(t pinsTool) bool { return t.actions[action] == key })
-		if installs || !workflowVersionKey.MatchString(key) {
+		installs := slices.ContainsFunc(pinsTools, func(t pinsTool) bool {
+			pin, ok := t.actions[action]
+			return ok && workflowInputName(pin) == workflowInputName(key)
+		})
+		if installs || !workflowVersionInput(key) {
 			continue
 		}
 		if !exactSemver.MatchString(v.value) {

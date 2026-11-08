@@ -403,11 +403,38 @@ func TestUnpinnedTools(t *testing.T) {
 			"no workflow step installs syft through anchore/sbom-action/download-syft; the reader is not seeing the step, " +
 				"or the table names an installer nothing uses",
 		}},
-		{"jobs that call a reusable workflow, held to the SHA rule only", []docsEdit{
+		{"jobs that call a reusable workflow, held to the SHA rule and an exact version", []docsEdit{
 			replace(fxCodeQL, "analyze@"+pinSHA+" # codeql-bundle-v2.26.4\n", "analyze@"+pinSHA+" # codeql-bundle-v2.26.4\n"+
-				"  call:\n    uses: o/r/.github/workflows/x.yml@"+pinSHA+" # v1.0.0\n  tagged:\n    uses: o/r/.github/workflows/x.yml@v1\n"),
+				"  call:\n    uses: o/r/.github/workflows/x.yml@"+pinSHA+" # v1.0.0\n    with:\n      cosign-release: latest\n"+
+				"  tagged:\n    uses: o/r/.github/workflows/x.yml@v1\n"),
 		}, []string{
-			`.github/workflows/codeql.yml:18: o/r/.github/workflows/x.yml is pinned to "v1", a tag or branch that can be moved; pin the 40-character commit SHA`,
+			`.github/workflows/codeql.yml:18: o/r/.github/workflows/x.yml: cosign-release is "latest", which is not one exact version`,
+			`.github/workflows/codeql.yml:20: o/r/.github/workflows/x.yml is pinned to "v1", a tag or branch that can be moved; pin the 40-character commit SHA`,
+		}},
+		// The runner reads an input's name in upper case, so an installer's
+		// input in another case is the one that pins its tool.
+		{"an installer's input in another case", []docsEdit{
+			replace(fxRelease, "cosign-release: v3.1.3", "COSIGN-RELEASE: latest"),
+		}, []string{
+			`.github/workflows/release.yml:18: sigstore/cosign-installer: cosign is pinned to "latest", which is not one exact version`,
+			"cosign is v3.1.3 at .github/workflows/publish-mcp.yml:15: sigstore/cosign-installer and " +
+				"latest at .github/workflows/release.yml:18: sigstore/cosign-installer: one tool, one version",
+		}},
+		{"a version input in another case on an action that installs nothing", []docsEdit{
+			ci("      - uses: actions/checkout@"+pinSHA+" # v7.0.1\n", "      - uses: actions/checkout@"+pinSHA+" # v7.0.1\n"+
+				"        with:\n          Tool-Version: latest\n"),
+		}, []string{
+			`.github/workflows/ci.yml:12: actions/checkout: Tool-Version is "latest", which is not one exact version`,
+		}},
+		// This repository's own reusable workflow is read as a workflow, so a
+		// version it is given is held where it uses it. A local action's
+		// action.yml is read by no gate, so its inputs are held here.
+		{"a version given to a local reusable workflow, and to a local action", []docsEdit{
+			replace(fxRelease, "    uses: ./"+fxPublish+"\n", "    uses: ./"+fxPublish+"\n    with:\n      release-version: ${{ github.ref_name }}\n"),
+			ci("      - uses: actions/checkout@"+pinSHA+" # v7.0.1\n", "      - uses: actions/checkout@"+pinSHA+" # v7.0.1\n"+
+				"      - uses: ./.github/actions/setup\n        with:\n          tool-version: latest\n"),
+		}, []string{
+			`.github/workflows/ci.yml:13: ./.github/actions/setup: tool-version is "latest", which is not one exact version`,
 		}},
 		{"a container image by tag, by digest and on the line after its key", []docsEdit{
 			ci(checkout, "      - uses: docker://alpine:3.20\n      - uses: docker://alpine@"+pinDigest+"\n"+checkout),
@@ -688,6 +715,14 @@ func TestPinsNamesEachProblem(t *testing.T) {
 			".pre-commit-config.yaml:22: entry: the value is on another line" + hookShape,
 			".pre-commit-config.yaml:25: 'entry': a quoted key; write the key plain",
 		}},
+		// A command on the line after its key is the key's value.
+		{"a goreleaser command on the line after its key", []docsEdit{
+			replace(parityGoreleaser, "    - go mod tidy\n", "    - go mod tidy\n"+
+				"publishers:\n"+
+				"  - name: x\n"+
+				"    cmd:\n"+
+				"      go run github.com/google/go-licenses@latest\n"),
+		}, []string{".goreleaser.yaml:8: cmd: a value continued on the next line; write it on one line or as a block scalar"}},
 		{"a workflow with no shell", []docsEdit{
 			replace(fxCodeQL, "defaults:\n  run:\n    shell: bash\n", ""),
 		}, []string{".github/workflows/codeql.yml: no workflow-level `defaults: run: shell:`. " +

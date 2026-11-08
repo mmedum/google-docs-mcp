@@ -480,7 +480,7 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-88 | A workflow is read-only at the top, raises write per job, and keeps no checkout token | accepted | review |
 | D-89 | CodeQL runs on pushes, pull requests and weekly | accepted | review |
 | D-90 | A tag is the whole release, and its notes are that version's CHANGELOG section | accepted | release-notes, TestReleaseNotesTakesOnlyItsOwnVersion, TestReleaseNotesRefusesAnEmptySection |
-| D-91 | A release is signed for people and attested for machines | accepted | TestTheReleaseAttestsEveryFileItPublishes, review |
+| D-91 | A release is signed for people and attested for machines | accepted | TestTheReleaseAttestsItsArchivesBundleAndChecksumFile, review |
 | D-92 | Changes reach main through a pull request with CI green; no second reviewer is required | accepted | review |
 | D-93 | Each release carries a Claude Desktop bundle in the layout the sibling servers share, its settings derived from config.Vars | accepted | mcpb, TestBundleVarsAreDerivedFromTheSettings, TestThePackedBundleLayout, TestTheCommittedManifestIsValid |
 | D-94 | A bundle install starts the server as an unconfigured start does, every setting passed by env | accepted | mcpb, TestTheConfigDiffNamesTheFieldsThatDiffer, TestTheBundleSettingsRefuseEachBreak, TestVarsDescribeWhatBuildDoes |
@@ -2754,8 +2754,8 @@ release workflow's identity, so a person can check a download with
 `cosign verify-blob`. Every archive, the Claude Desktop bundle and the
 checksum file carry a GitHub build provenance attestation, which
 `gh attestation verify` checks against this workflow and commit, and
-`TestTheReleaseAttestsEveryFileItPublishes` holds its `subject-path` to
-those files. Every archive also ships an SBOM.
+`TestTheReleaseAttestsItsArchivesBundleAndChecksumFile` holds its
+`subject-path` to those files. Every archive also ships an SBOM.
 
 The two answer different questions. A signature over the checksums says
 the files are the ones the release workflow published, with no private

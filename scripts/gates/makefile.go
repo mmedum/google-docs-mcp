@@ -48,13 +48,31 @@ var (
 	makefileVarRef   = regexp.MustCompile(`\$\(([A-Za-z_][A-Za-z0-9_]*)\)`)
 )
 
-// readMakefile parses the repository's Makefile.
+// makefileReadFirst are the names GNU make tries before Makefile, in
+// order, so a file by either name is the one `make` runs
+// (https://www.gnu.org/software/make/manual/html_node/Makefile-Names.html).
+var makefileReadFirst = []string{"GNUmakefile", "makefile"}
+
+// readMakefile parses the repository's Makefile, refusing by name a file
+// make reads in its place. A name is matched as the directory lists it:
+// where the file system folds case, makefile is Makefile itself.
 func readMakefile() (*makefile, error) {
 	data, err := os.ReadFile(makefilePath)
 	if err != nil {
 		return nil, err
 	}
-	return parseMakefile(string(data)), nil
+	m := parseMakefile(string(data))
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range makefileReadFirst {
+		if slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == name }) {
+			m.refused = append(m.refused, fmt.Sprintf("%s: GNU make reads it before %s, so `make` runs a file "+
+				"no gate reads; fold it into %s", name, makefilePath, makefilePath))
+		}
+	}
+	return m, nil
 }
 
 // parseMakefile reads a Makefile as make does: a # starts a comment in an

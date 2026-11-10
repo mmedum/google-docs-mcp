@@ -776,7 +776,9 @@ func pinsGoSource(r *pinsReport) error {
 		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			return nil
 		}
-		file, err := parser.ParseFile(token.NewFileSet(), p, nil, parser.SkipObjectResolution)
+		// A slash path opens on Windows too, and makes a parse error's
+		// position read the same on every OS.
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.ToSlash(p), nil, parser.SkipObjectResolution)
 		if err != nil {
 			return err
 		}

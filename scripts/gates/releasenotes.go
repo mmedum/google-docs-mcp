@@ -94,9 +94,14 @@ func joinTrimmed(body []string) string {
 	return strings.Join(body, "\n")
 }
 
-// semverPattern is a version's numbers and a prerelease, whose identifiers
-// may hold a hyphen (https://semver.org/#spec-item-9).
-const semverPattern = `\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`
+// semverPattern is a version's numbers and a prerelease: dot-separated
+// identifiers of ASCII letters, digits and hyphens, none empty
+// (https://semver.org/#spec-item-9). An identifier of hyphens alone, which
+// semver's grammar admits, is refused: it names no release.
+const semverPattern = `\d+\.\d+\.\d+(?:-` + semverIdentifier + `(?:\.` + semverIdentifier + `)*)?`
+
+// semverIdentifier is one prerelease identifier holding a letter or a digit.
+const semverIdentifier = `[0-9A-Za-z-]*[0-9A-Za-z][0-9A-Za-z-]*`
 
 var (
 	// changelogVersion is a release's version, a prerelease suffix allowed.

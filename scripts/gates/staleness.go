@@ -165,7 +165,9 @@ const configDocPath = "docs/configuration.md"
 // a removed one it refuses and the two read outside Define included, so
 // a person whose server will not start can find why, names no other, and
 // says what a profile name is in the words the server refuses one with.
+// It is read with its fences blanked: an example documents nothing.
 func configDocProblems(vars []config.Var, text string) []string {
+	text = strings.Join(docsProse(text), "\n")
 	var problems []string
 	documented := map[string]bool{}
 	for _, m := range settingWord.FindAllStringSubmatch(text, -1) {
@@ -265,7 +267,7 @@ func changelogUnrun(dir string, err error) error {
 	return couldNotRun{fmt.Errorf("the CHANGELOG rule: %w", err)}
 }
 
-// changelogRule requires a change to the binary's source to be written
+// changelogRule requires a change to what users get to be written
 // up. Normally that means entries under [Unreleased]; on a release commit
 // those notes have just moved under the new version heading, which is only
 // acceptable while that version has no tag yet.
@@ -284,7 +286,7 @@ func changelogRule(text string, sourceChanged bool, tagged func(version string) 
 		}
 		where = "[" + v[0].label + "] (untagged, so this is a release commit)"
 	}
-	return []string{"the binary's source changed but " + changelogPath + " " + where + " is empty"}
+	return []string{"what users get changed but " + changelogPath + " " + where + " is empty"}
 }
 
 // stalenessNewestRelease is the newest release tag's version by semver
@@ -302,11 +304,9 @@ func stalenessNewestRelease(tags []string) string {
 }
 
 // shippedChangedSince reports whether the commits since..HEAD of the
-// checkout at dir change the binary's source: a Go file other than a test
-// in a package of this module the binary imports, a file such a package
-// embeds, or go.mod outside its require and tool lines. A package counts
-// by its directory, so a file another platform builds counts, and so does
-// a file removed from it. Commits are compared, as CI sees them.
+// checkout at dir change what users get: a file shippedSource has, or
+// go.mod outside its require and tool lines. Commits are compared, as CI
+// sees them.
 func shippedChangedSince(dir, since string) (bool, error) {
 	out, err := gitOutput("-C", dir, "diff", since+"..HEAD", "--name-only", "--no-renames", "-z")
 	if err != nil {
@@ -339,8 +339,17 @@ func shippedChangedSince(dir, since string) (bool, error) {
 // slash-separated from the module root.
 type shippedSource struct{ dirs, embeds map[string]bool }
 
+// has reports whether a file is one users get: any file but a test in one
+// of the binary's package directories, an embedded file, the bundle's
+// manifest, which a person reads when installing the .mcpb, or a program
+// the bundle packs from this repository, which the desktop spawns. Every
+// file of a package directory counts: the go command builds a package
+// from assembly, a .syso and C as well as Go (`go help filetype`). A
+// package counts by its directory, so a file of it another platform builds
+// counts, and so does one removed from it.
 func (s *shippedSource) has(file string) bool {
-	return s.embeds[file] || strings.HasSuffix(file, ".go") && !strings.HasSuffix(file, "_test.go") && s.dirs[path.Dir(file)]
+	packed := slices.ContainsFunc(bundleFiles, func(f staged) bool { return f.source == file && f.program() })
+	return packed || file == manifestPath || s.embeds[file] || !strings.HasSuffix(file, "_test.go") && s.dirs[path.Dir(file)]
 }
 
 // listShipped asks the go command what ./cmd/... is built from in the

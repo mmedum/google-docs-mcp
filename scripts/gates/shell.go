@@ -24,6 +24,8 @@ type goRun struct {
 // (https://pkg.go.dev/cmd/go#hdr-Compile_packages_and_dependencies). The
 // help leaves out three debug flags that take a value too
 // (https://github.com/golang/go/blob/go1.27.3/src/cmd/go/internal/work/build.go#L358-L361).
+// c is the vet tool's lines of context. `go test -c` is a boolean, so no
+// gate reads a go test's words through this map.
 var goValueFlags = map[string]bool{
 	"C": true, "p": true, "covermode": true, "coverpkg": true, "asmflags": true, "buildmode": true,
 	"compiler": true, "gccgoflags": true, "gcflags": true, "installsuffix": true, "ldflags": true,
@@ -55,7 +57,8 @@ func goAfterFlags(words []string) []string {
 	i := 0
 	for i < len(words) && strings.HasPrefix(words[i], "-") {
 		name, _, inline := strings.Cut(strings.TrimLeft(words[i], "-"), "=")
-		if i++; !inline && goValueFlags[name] {
+		i++
+		if !inline && goValueFlags[name] {
 			i++
 		}
 	}
@@ -120,39 +123,23 @@ func shellSplit(line string) []shellWord {
 	for i := 0; i < len(line); i++ {
 		switch c := line[i]; {
 		case s.quote == '\'':
-			if c == '\'' {
-				s.quote = 0
-			} else {
-				s.word.WriteByte(c)
-			}
-		case c == '\\' && i+1 < len(line) && (s.quote == 0 || strings.IndexByte("\"\\$`", line[i+1]) >= 0):
+			s.inQuote(c)
+		case s.escaped(line, i):
 			i++
-			s.word.WriteByte(line[i])
-			s.inWord = true
+			s.add(line[i])
 		case s.substitution(line, &i):
 		case s.quote == '"':
-			if c == '"' {
-				s.quote = 0
-			} else {
-				s.word.WriteByte(c)
-			}
-		case c == '\'' || c == '"':
+			s.inQuote(c)
+		case strings.IndexByte(`'"`, c) >= 0:
 			s.quote, s.inWord = c, true
 		case c == '#' && !s.inWord:
 			return s.finish()
-		case c == ' ' || c == '\t':
+		case strings.IndexByte(" \t", c) >= 0:
 			s.flush()
 		case s.redirection(line, &i):
-		case strings.IndexByte(";&|", c) >= 0:
-			j := i
-			for j+1 < len(line) && line[j+1] == c {
-				j++
-			}
-			s.operator(line[i : j+1])
-			i = j
+		case s.operatorRun(line, &i):
 		default:
-			s.word.WriteByte(c)
-			s.inWord = true
+			s.add(c)
 		}
 	}
 	return s.finish()
@@ -169,6 +156,45 @@ type shellSplitter struct {
 	quote    byte
 	opened   []struct{ end, quote byte }
 	redirect string
+}
+
+// inQuote reads c inside a quote, whose own character ends it.
+func (s *shellSplitter) inQuote(c byte) {
+	if c == s.quote {
+		s.quote = 0
+	} else {
+		s.word.WriteByte(c)
+	}
+}
+
+// escaped reports whether line[i] is a backslash that keeps the next
+// character: any outside quotes, and in double quotes one before ", \, $
+// or a backtick.
+func (s *shellSplitter) escaped(line string, i int) bool {
+	return line[i] == '\\' && i+1 < len(line) && (s.quote == 0 || strings.IndexByte("\"\\$`", line[i+1]) >= 0)
+}
+
+// add appends c to the word being read.
+func (s *shellSplitter) add(c byte) {
+	s.word.WriteByte(c)
+	s.inWord = true
+}
+
+// operatorRun reads a run of one of ;, & or | at line[*i] as one
+// operator, moving *i to its last character, and reports whether there
+// was one.
+func (s *shellSplitter) operatorRun(line string, i *int) bool {
+	c := line[*i]
+	if strings.IndexByte(";&|", c) < 0 {
+		return false
+	}
+	j := *i
+	for j+1 < len(line) && line[j+1] == c {
+		j++
+	}
+	s.operator(line[*i : j+1])
+	*i = j
+	return true
 }
 
 // flush ends the word being read, the target of a waiting redirection
@@ -269,13 +295,21 @@ func shellTexts(split []shellWord) []string {
 // (https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_09_03).
 var shellListOps = map[string]bool{";": true, "&": true, "&&": true, "||": true}
 
+// shellPipeOps is the operator between the commands of a pipeline
+// (https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_09_02).
+var shellPipeOps = map[string]bool{"|": true}
+
 // shellLists splits a line's words at its list operators into the commands
 // they separate, an empty one dropped. A pipeline stays one command.
-func shellLists(words []shellWord) [][]shellWord {
+func shellLists(words []shellWord) [][]shellWord { return shellSplitAt(words, shellListOps) }
+
+// shellSplitAt splits words at each operator in ops into the runs between
+// them, an empty one dropped.
+func shellSplitAt(words []shellWord, ops map[string]bool) [][]shellWord {
 	var out [][]shellWord
 	start := 0
 	for i := 0; i <= len(words); i++ {
-		if i < len(words) && (!words[i].op || !shellListOps[words[i].text]) {
+		if i < len(words) && (!words[i].op || !ops[words[i].text]) {
 			continue
 		}
 		if i > start {

@@ -109,10 +109,10 @@ These are worth knowing before they fail on you:
   and is a release step.
 - **`make staleness`** holds the README's tool table, scopes and
   permission rules to the binary, and `docs/configuration.md` to every
-  setting the code reads (D-69). It also wants a CHANGELOG entry when the
-  binary's source changed since the newest release tag HEAD reaches, the
-  one the schema diff builds; a test, a script or a dependency bump needs
-  none.
+  setting the code reads (D-69). It also wants a CHANGELOG entry when
+  what the binary is built from, the bundle's manifest or its launcher
+  changed since the newest release tag HEAD reaches, the one the schema
+  diff builds.
 - **`make classes`** holds every error class the code emits to the
   closed vocabulary in `internal/service` (D-60).
 - **`make transcript`** refuses a live driver or eval line that does not

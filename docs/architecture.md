@@ -474,13 +474,13 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-82 | A guarantee stated over the tools is tested over every registered tool | accepted | TestEveryToolHasArgs, TestDebugLogsCarryNoDocumentData |
 | D-83 | The live driver drives every tool and op kind through the binary over stdio; it is run by hand, never in CI | accepted | live, TestCoverage |
 | D-84 | Agent evals score whether a model can do the job through the tools; they are run by hand | accepted | TestEvals, live |
-| D-85 | `make check` and CI run the same gates | accepted | parity, TestParityGate, TestParityCatchesDivergence, TestParityHoldsThePullRequestGates, TestParityHoldsAGateCallsArguments, TestParityHoldsTheTreesTagsToAVetPass |
-| D-86 | Every action is pinned to a full commit SHA, and every tool an action installs to one exact version | accepted | pins, TestPinsGate, TestUnpinnedTools, TestPinsNamesEachProblem, TestPinsRejectsEveryRangeForm, TestAToolDownloadedAtLatestIsNotPinned |
+| D-85 | `make check` and CI run the same gates | accepted | parity, TestParityGate, TestParityCatchesDivergence, TestParityHoldsMakeCheckToWhatAPushRuns, TestParityHoldsThePullRequestGates, TestParityHoldsAGateCallsArguments, TestParityHoldsTheTreesTagsToAVetPass, TestTheReleaseIsReleaseYMLAndWhatItCalls |
+| D-86 | Every action is pinned to a full commit SHA, and every tool an action installs to one exact version | accepted | pins, TestPinsGate, TestUnpinnedTools, TestPinsNamesEachProblem, TestPinsRejectsEveryRangeForm, TestAToolDownloadedAtLatestIsNotPinned, TestReadersRefuseALineBreakTheyDoNotRead |
 | D-87 | CI runs on Linux, macOS and Windows, and every `run` step in bash | accepted | pins, TestPinsShell, review |
 | D-88 | A workflow is read-only at the top, raises write per job, and keeps no checkout token | accepted | review |
 | D-89 | CodeQL runs on pushes, pull requests and weekly | accepted | review |
 | D-90 | A tag is the whole release, and its notes are that version's CHANGELOG section | accepted | release-notes, TestReleaseNotesTakesOnlyItsOwnVersion, TestReleaseNotesRefusesAnEmptySection |
-| D-91 | A release is signed for people and attested for machines | accepted | TestTheReleaseAttestsItsArchivesBundleAndChecksumFile, review |
+| D-91 | A release is signed for people and attested for machines | accepted | TestTheReleaseAttestsItsArchivesBundleAndChecksumFile, TestReleaseAttestProblems, review |
 | D-92 | Changes reach main through a pull request with CI green; no second reviewer is required | accepted | review |
 | D-93 | Each release carries a Claude Desktop bundle in the layout the sibling servers share, its settings derived from config.Vars | accepted | mcpb, TestBundleVarsAreDerivedFromTheSettings, TestThePackedBundleLayout, TestTheCommittedManifestIsValid |
 | D-94 | A bundle install starts the server as an unconfigured start does, every setting passed by env | accepted | mcpb, TestTheConfigDiffNamesTheFieldsThatDiffer, TestTheBundleSettingsRefuseEachBreak, TestVarsDescribeWhatBuildDoes |
@@ -621,14 +621,14 @@ only with a client someone supplies (D-01).
 
 The repository is public, and a pushed commit cannot be taken back. Two
 scanners hold the rule. gitleaks, in the pre-commit hook on the staged
-changes and in `make check` and CI on every commit, catches secrets:
-client secrets and refresh tokens. The `leaks` gate catches identifiers,
-which are not secrets and which no secret scanner flags: an address at a
-domain someone could own, a 21-digit account id, a client id, a
-user-content URL or a Drive id that does not look invented. Every rule
-is an allow-list. The gate reads untracked files too, so it fails before
-`git add -A` sweeps one in. It refuses a compiled executable or a binary
-over a megabyte, since no text rule can read one.
+changes and in `make check` and CI on every commit HEAD reaches, catches
+secrets: client secrets and refresh tokens. The `leaks` gate catches
+identifiers, which are not secrets and which no secret scanner flags: an
+address at a domain someone could own, a 21-digit account id, a client
+id, a user-content URL or a Drive id that does not look invented. Every
+rule is an allow-list. The gate reads untracked files too, so it fails
+before `git add -A` sweeps one in. It refuses a compiled executable or a
+binary over a megabyte, since no text rule can read one.
 
 Rejected: a deny-list of what to look for, which would itself be the
 disclosure; gitleaks alone, which cannot see a document id or an
@@ -2586,12 +2586,13 @@ model can pass `make check` and wait for the next eval run to show it.
 
 `make check` and the CI workflow run the same checks, and `make parity`
 compares them by what they run. Every command a target in `make check`
-runs, its Makefile variables expanded, is one `ci.yml` runs with the
-same words, as the shell splits them, or one an action stands in for. A
-`ci.yml` line that runs `make` with targets runs their recipes and those
-of what they depend on. A command beside a gate call on its line is
-compared on its own. Every go command `ci.yml` runs is one `make check`
-runs.
+runs, its Makefile variables expanded, is one a `ci.yml` job a push to
+`main` runs with the same words, as the shell splits them, or one an
+action there stands in for. The `pr` job does not count: a push to
+`main` never runs it. A `ci.yml` line that runs `make` with targets runs
+their recipes and those of what they depend on. A command beside a gate
+call on its line, in a list or a pipeline, is compared on its own. Every
+go command `ci.yml` runs is one `make check` runs.
 
 The gate refuses a command in `make check` whose failure make ignores,
 behind a `-` prefix or under `.IGNORE`: check would pass where CI, which
@@ -2600,11 +2601,13 @@ holds it.
 
 `scripts/gates` has one list of commands, and each says where it runs:
 in both `make check` and CI, in CI on a pull request only, at release
-time, or by hand from a Makefile target or a pre-commit hook. A gate
-both run takes the same arguments in both, and an omitted binary is the
-one the gate defaults to. Every file of the checkout behind a build tag,
-read from its `//go:build` line, is vetted on both sides by a pass that
-compiles it.
+time, or by hand from a Makefile target or a pre-commit hook. A release
+command is called from `.goreleaser.yaml`, `release.yml` or a workflow
+of this repository that `release.yml` calls. A gate both run takes the
+same arguments in both, and an omitted binary is the one the gate
+defaults to. A bare binary name is not `./name`. Every file of the
+checkout behind a build tag, read from its `//go:build` line, is vetted
+on both sides by a pass that compiles it, CI's in a job a push runs.
 The reader does not read `if:` on a step or a job, so a command under a
 condition counts as one CI runs.
 
@@ -2614,8 +2617,9 @@ somebody runs `make check` by hand, and a gate that runs only in CI is
 one nobody runs before pushing. `schema-ack` measures from a pull
 request's merge-base, which only a pull request has, so it runs there
 alone. `TestParityGate` and `TestParityCatchesDivergence` hold it, the
-second by planting each drift, and `TestParityHoldsThePullRequestGates`
-holds the exception.
+second by planting each drift. `TestParityHoldsMakeCheckToWhatAPushRuns`
+holds the push jobs, `TestTheReleaseIsReleaseYMLAndWhatItCalls` the
+release, and `TestParityHoldsThePullRequestGates` the exception.
 
 Rejected: adding the missing `vet -tags=` lines to the workflow by hand,
 which fixes one drift and leaves the mechanism; a list of gates kept
@@ -2629,17 +2633,30 @@ whose command is gone.
 Every action a workflow uses is pinned to a full commit SHA, with its
 version in a trailing comment. Every tool a step installs is pinned to
 one exact version beside the action that installs it, and a container
-image by its digest. A tool named in a workflow, the Makefile or a
-command the goreleaser config runs is named at one version everywhere.
-The Makefile names a tool as one `module@version` variable, and one no
-recipe runs with the go command pins nothing.
+image by its digest. A tool named in a workflow, the Makefile, a command
+the goreleaser config runs or a string in the Go under `scripts/` is
+named at one version everywhere, a `module@version` on any line but a
+comment included. The Makefile names a tool as one `module@version`
+variable, and one no recipe runs with the go command pins nothing. A
+recipe or a hook that names a known tool as a word runs it from the
+PATH, and is refused.
+
+setup-go pins Go by go.mod alone, since it reads a `go-version` beside
+go.mod first. A version key is read in any case, as the runner reads an
+input's name. A version given to a reusable workflow of this repository
+is exact, or one context's value that the workflow holds where it uses
+it. The goreleaser config is read by key path as the goreleaser version
+`goreleaserChecked` names reads it, and the gate fails when
+`release.yml` runs another.
 
 A pre-commit hook runs its tool through a Makefile target, so the hooks'
 config names no version: a remote hook's `rev:` or a `module@version`
 there would be one of its own. The `pins` gate fails on a
 tag, a branch, a range of any form, a tool fetched at `latest`, an
 action it has not classified, and when it finds too few workflows or
-versions to read.
+versions to read. It fails on a line break its readers do not read: a
+lone CR, NEL, U+2028 or U+2029 in a YAML file it reads, and a lone CR in
+the Makefile.
 
 A tag is mutable by anyone who can write to the action's repository, and
 a full SHA is the only way to use an action as an immutable release
@@ -2650,6 +2667,7 @@ the newest major changes what signing needs while the SHA stays put. A
 `TestUnpinnedTools` holds the action half, and `TestPinsNamesEachProblem`,
 `TestPinsRejectsEveryRangeForm` and
 `TestAToolDownloadedAtLatestIsNotPinned` the tool half.
+`TestReadersRefuseALineBreakTheyDoNotRead` holds the line breaks.
 
 Rejected: a major tag such as `@v7`, which its owner can move; a `~>`
 range, which resolves to the newest match.
@@ -2755,7 +2773,12 @@ release workflow's identity, so a person can check a download with
 checksum file carry a GitHub build provenance attestation, which
 `gh attestation verify` checks against this workflow and commit, and
 `TestTheReleaseAttestsItsArchivesBundleAndChecksumFile` holds its
-`subject-path` to those files. Every archive also ships an SBOM.
+`subject-path` to those files. The attest step runs in the `release.yml`
+job that runs goreleaser release, whose token writes `id-token` and
+`attestations`: another job holds no `dist/`, and without either scope
+the step fails after the release is published.
+`TestReleaseAttestProblems` holds both. Every archive also ships an
+SBOM.
 
 The two answer different questions. A signature over the checksums says
 the files are the ones the release workflow published, with no private

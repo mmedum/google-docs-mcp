@@ -31,13 +31,15 @@ func TestRulesCatchPlantedIdentifiers(t *testing.T) {
 		{"test domain", "a@b.test", false},
 		// The reserved names are whole domains or final labels. One that
 		// only starts or contains like them is a domain someone can own.
-		{"real domain named like a reserved one", "a@example.dk", true},                                 // leakcheck:allow
-		{"reserved label inside a real domain", "a@corp.test.com", true},                                // leakcheck:allow
-		{"subject id", "sub 109876543210987654321 logged in", true},                                     // leakcheck:allow
-		{"client id", "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com", true}, // leakcheck:allow gitleaks:allow
+		{"real domain named like a reserved one", "a@example.dk", true},                                                    // leakcheck:allow
+		{"reserved label inside a real domain", "a@corp.test.com", true},                                                   // leakcheck:allow
+		{"subject id", "sub 109876543210987654321 logged in", true},                                                        // leakcheck:allow
+		{"client id", "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com", true},                    // leakcheck:allow gitleaks:allow
+		{"client id, its host in mixed case", "987654321098-aaaaclient1aaaaaaaaaaaaaaaa.Apps.GoogleUserContent.COM", true}, // leakcheck:allow gitleaks:allow
 		{"api host on its own", "https://docs.googleapis.com/v1/documents", false},
-		{"photo url", "https://lh3.googleusercontent.com/a-/AOh14GhAbCdEfGhIjK", true},     // leakcheck:allow
-		{"real-looking document id", "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms", true}, // leakcheck:allow
+		{"photo url", "https://lh3.googleusercontent.com/a-/AOh14GhAbCdEfGhIjK", true},                     // leakcheck:allow
+		{"photo url, its host in mixed case", "https://LH3.GoogleUserContent.com/a-/AAAAphoto1AAAA", true}, // leakcheck:allow
+		{"real-looking document id", "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms", true},                 // leakcheck:allow
 		{"synthetic document id", "1SyntheticFixtureDocumentIdXXXXXXXXXXXXXXXXXX", false},
 		{"invented by repetition", "1AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH", false},
 		{"a commit sha is not an id", "pinned at f06c13b6b1a9625abc9e6e439d9c05a8f2190e94", false},

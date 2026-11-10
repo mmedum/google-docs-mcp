@@ -70,12 +70,12 @@ vuln: ## Known vulnerabilities in anything the code calls
 licenses: ## Dependencies must carry a license we can redistribute under
 	$(GO) run $(GOLICENSES) check ./... --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
 
-# gitleaks walks every commit the clone holds, as `git log --all` lists
-# them (https://github.com/gitleaks/gitleaks/blob/v8.30.1/sources/git.go#L93),
-# so CI checks out the whole history for it.
+# HEAD's history, which CI checks out whole for it. With no --log-opts
+# gitleaks walks every ref, a branch never pushed included
+# (https://github.com/gitleaks/gitleaks/blob/v8.30.1/sources/git.go#L90-L94).
 .PHONY: gitleaks
-gitleaks: ## No credential in any commit, at the gitleaks version pinned here
-	$(GO) run $(GITLEAKS) git $(GITLEAKS_FLAGS) .
+gitleaks: ## No credential in any commit HEAD reaches, at the gitleaks version pinned here
+	$(GO) run $(GITLEAKS) git --log-opts=HEAD $(GITLEAKS_FLAGS) .
 
 # The pre-commit hook's scan. gitleaks v8.19.0 deprecated `protect` for
 # `git --staged` (https://github.com/gitleaks/gitleaks/blob/v8.30.1/README.md#commands).

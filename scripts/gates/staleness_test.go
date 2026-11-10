@@ -26,7 +26,7 @@ const (
 	clNextEmpty  = "## [0.9.1] - 2026-02-01\n\n"
 	clUnreleased = "# Changelog\n\n## [Unreleased]\n\n"
 	clWritten    = clUnreleased + "### Added\n\n- A second tool.\n\n"
-	clEmpty      = "the binary's source changed but CHANGELOG.md [Unreleased] is empty"
+	clEmpty      = "what users get changed but CHANGELOG.md [Unreleased] is empty"
 )
 
 // The CHANGELOG rule: a change to the binary's source is written up under
@@ -50,7 +50,7 @@ func TestTheChangelogRule(t *testing.T) {
 			true, []string{"0.9.0"}, nil},
 		{"a release commit with nothing under its version", clUnreleased + clNextEmpty + clReleased, true,
 			[]string{"0.9.0"},
-			[]string{"the binary's source changed but CHANGELOG.md [0.9.1] (untagged, so this is a release commit) is empty"}},
+			[]string{"what users get changed but CHANGELOG.md [0.9.1] (untagged, so this is a release commit) is empty"}},
 		{"an undocumented source change after the release is tagged", clUnreleased + clNext + clReleased, true,
 			[]string{"0.9.0", "0.9.1"}, []string{clEmpty}},
 		{"prose and an indented bullet, which are no entry", clUnreleased + "Some prose.\n  - an aside\n\n" + clReleased, true,
@@ -142,9 +142,10 @@ func stalenessChange(t *testing.T, dir string, files map[string]string) {
 	stalenessGit(t, dir, "commit", "-q", "-m", "change")
 }
 
-// A committed change to what the binary is built from needs an entry: a
-// package it imports, a file one embeds, and go.mod but its require and
-// tool lines. A test, a fixture, a package it does not import and a
+// A committed change to what users get needs an entry: any file of a
+// package the binary imports but a test, a file one embeds, the bundle's
+// manifest and launcher, and go.mod but its require and tool lines. A test, a fixture,
+// a directory that is no package, a package it does not import and a
 // dependency bump do not, and nor does what is not committed, which CI
 // never sees.
 func TestTheChangelogRuleCountsWhatShips(t *testing.T) {
@@ -168,6 +169,14 @@ func TestTheChangelogRuleCountsWhatShips(t *testing.T) {
 		{"a file moved out of one", map[string]string{"internal/a/b.go": "", "docs/b.go": "package a\n"}, nil, true},
 		{"the command", map[string]string{"cmd/fixture/main.go": "package main\n\nfunc main() { println() }\n"}, nil, true},
 		{"a file a package embeds", map[string]string{"internal/a/data/x.txt": "y\n"}, nil, true},
+		{"a package's assembly", map[string]string{"internal/a/b_amd64.s": "// assembly\n"}, nil, true},
+		{"a package's .syso", map[string]string{"internal/a/rsrc_windows_amd64.syso": "object\n"}, nil, true},
+		{"a file beside a package's Go that it does not embed", map[string]string{"internal/a/notes.md": "more\n"}, nil, true},
+		{"the bundle's manifest", map[string]string{manifestPath: "{\"name\": \"x\"}\n"}, nil, true},
+		{"the bundle's launcher", map[string]string{launcherPath: "#!/bin/sh\nexec true\n"}, nil, true},
+		{"the root README", map[string]string{"README.md": "# changed\n"}, nil, false},
+		{"a file in a directory of a package that is no package", map[string]string{"internal/a/notes/x.txt": "y\n"}, nil, false},
+		{"assembly under a package's testdata", map[string]string{"internal/a/testdata/x_amd64.s": "// assembly\n"}, nil, false},
 		{"go.mod's go line", map[string]string{goMod: strings.Replace(gomod, "go 1.21", "go 1.22", 1)}, nil, true},
 		{"go.mod's toolchain", map[string]string{goMod: gomod + "\ntoolchain go1.21.0\n"}, nil, true},
 		{"go.mod's replace", map[string]string{goMod: strings.Replace(gomod, "dep =>", "dep v1.0.0 =>", 1)}, nil, true},
@@ -181,7 +190,6 @@ func TestTheChangelogRuleCountsWhatShips(t *testing.T) {
 		{"a tool( block", map[string]string{goMod: gomod + "\ntool(\n\texample.com/dep\n)\n"}, nil, false},
 		{"a test", map[string]string{"internal/a/a_test.go": "package a\n\n// changed\n"}, nil, false},
 		{"a fixture", map[string]string{"internal/a/testdata/x": "y\n"}, nil, false},
-		{"a file beside a package that it does not embed", map[string]string{"internal/a/notes.md": "more\n"}, nil, false},
 		{"a package the binary does not import", map[string]string{"internal/unused/u.go": "package unused\n\n// changed\n"}, nil, false},
 		// A dependency's package sits at a path of its own module's, never this one's.
 		{"a package at the path of a dependency's", map[string]string{"tools.go": "package fixture\n\n// changed\n"}, nil, false},
@@ -498,6 +506,10 @@ func TestConfigDocProblems(t *testing.T) {
 		}},
 		{"a variable the code does not read", "`GDOCS_HTTP_TIMEOUT`", "`GDOCS_HTTP_TIMEOUT` and `GDOCS_RETRIES`",
 			[]string{"docs/configuration.md documents GDOCS_RETRIES, which the code does not read"}},
+		// An example in a fence documents nothing, and names nothing the code
+		// must read.
+		{"a variable named only in an example", "`GDOCS_HTTP_TIMEOUT`", "`the timeout`\n\n```sh\nGDOCS_HTTP_TIMEOUT=30s GDOCS_RETRIES=3 google-docs-mcp\n```\n",
+			[]string{"docs/configuration.md does not document GDOCS_HTTP_TIMEOUT"}},
 		{"the profile rule in other words", "- and _, starting", "`-` and `_`, starting",
 			[]string{`docs/configuration.md does not say a profile name is "up to 64 characters from a to z, ` +
 				`0 to 9, - and _, starting with a letter or digit"`}},

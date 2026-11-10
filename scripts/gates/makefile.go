@@ -12,9 +12,10 @@ import (
 // A reader for the parts of the Makefile the gates ask about: variables,
 // targets, their prerequisites and their recipes. It is not make. It
 // knows `NAME = v` with `?=`, `:=` or `+=`, after `export` or `override`,
-// `target: prereqs`, and recipe lines starting with a TAB, read as make
-// reads them. It refuses every other line by name, so a Makefile written
-// another way fails rather than yielding nothing to check.
+// `target: prereqs`, recipe lines starting with a TAB, read as make reads
+// them, and the special variables in makefileSpecialVars. It refuses
+// every other line by name, so a Makefile written another way fails
+// rather than yielding nothing to check.
 
 const makefilePath = "Makefile"
 
@@ -29,6 +30,11 @@ type makefile struct {
 	text string
 	// refused are the lines this reader does not read, each by name.
 	refused []string
+	// special are the special variables set, by name, with their values.
+	special map[string]string
+	// unsetAt is each variable a := named before any line set it, by the
+	// line of the first such :=.
+	unsetAt map[string]int
 }
 
 // makefileTarget is one target, all its rules merged.
@@ -37,6 +43,8 @@ type makefileTarget struct {
 	recipe  []string
 	// prefixes are the @, - and + before each recipe line, blanks dropped.
 	prefixes []string
+	// lines are the number of the line each recipe line starts on.
+	lines []int
 }
 
 var (
@@ -46,7 +54,18 @@ var (
 	// first colon.
 	makefileRuleHead = regexp.MustCompile(`^([^:=#]*?)[ \t]*:`)
 	makefileVarRef   = regexp.MustCompile(`\$\(([A-Za-z_][A-Za-z0-9_]*)\)`)
+	// makefileSpecialLine sets a variable whose name starts with a dot, as
+	// GNU make names its special variables.
+	makefileSpecialLine = regexp.MustCompile(`^(\.[A-Za-z_][A-Za-z0-9_]*)[ \t]*([:?+!]?=)[ \t]*(.*)$`)
 )
+
+// makefileSpecialVars are the special variables that steer only make,
+// which the reader records rather than refuses: .DEFAULT_GOAL names the
+// goal a bare `make` runs
+// (https://www.gnu.org/software/make/manual/html_node/Special-Variables.html).
+// Any other, such as .RECIPEPREFIX or .EXTRA_PREREQS, changes how make
+// reads the file or what a target runs, so it stays refused.
+var makefileSpecialVars = map[string]bool{".DEFAULT_GOAL": true}
 
 // makefileReadFirst are the names GNU make tries before Makefile, in
 // order, so a file by either name is the one `make` runs
@@ -85,7 +104,15 @@ func readMakefile() (*makefile, error) {
 // (https://www.gnu.org/software/make/manual/html_node/Multiple-Rules.html).
 func parseMakefile(text string) *makefile {
 	m := &makefile{vars: map[string]string{}, simple: map[string]map[string]bool{},
-		targets: map[string]*makefileTarget{}, text: text}
+		targets: map[string]*makefileTarget{}, text: text, special: map[string]string{}, unsetAt: map[string]int{}}
+	// make breaks lines at LF alone and drops only the CR before one
+	// (https://github.com/mirror/make/blob/4.4.1/src/read.c#L2671-L2709),
+	// where the reader drops every CR at a line's end, so a lone CR can end
+	// a line in a backslash for one and not the other.
+	for _, b := range strayBreaks(text, map[rune]string{'\r': loneCR}) {
+		m.refuse(b.line, "%s at byte %d of the line, which make keeps in the line and this reader may drop; "+
+			"break lines with LF or CRLF alone", b.name, b.at)
+	}
 	var current *makefileTarget
 	// fresh is whether the current rule has yet to give its first recipe
 	// line, which replaces any recipe an earlier rule gave.
@@ -117,10 +144,11 @@ func parseMakefile(text string) *makefile {
 				m.refuse(start, "%q is a recipe line outside any rule this reader reads", command)
 			default:
 				if fresh {
-					current.recipe, current.prefixes, fresh = nil, nil, false
+					current.recipe, current.prefixes, current.lines, fresh = nil, nil, nil, false
 				}
 				current.recipe = append(current.recipe, command)
 				current.prefixes = append(current.prefixes, prefix)
+				current.lines = append(current.lines, start)
 			}
 		case line == "" || strings.HasPrefix(line, "#"):
 		default:
@@ -133,8 +161,21 @@ func parseMakefile(text string) *makefile {
 // statement reads line n, an assignment or a rule, and returns the target
 // whose recipe the lines after it give, or nil.
 func (m *makefile) statement(n int, line string) *makefileTarget {
+	if v := makefileSpecialLine.FindStringSubmatch(line); v != nil {
+		name, op := v[1], v[2]
+		switch {
+		case !makefileSpecialVars[name]:
+			m.refuse(n, "%q sets %s, a special variable that changes how make reads or runs the file, "+
+				"which this reader does not read", line, name)
+		case op != "=" && op != ":=":
+			m.refuse(n, "%q sets %s with %s; this reader reads it set with = or :=", line, name, op)
+		default:
+			m.special[name] = strings.TrimSpace(makefileValue(v[3]))
+		}
+		return nil
+	}
 	if v := makefileVarLine.FindStringSubmatch(line); v != nil {
-		m.assign(v[1], v[2], v[3])
+		m.assign(n, v[1], v[2], v[3])
 		return nil
 	}
 	t := makefileTargetLine.FindStringSubmatch(line)
@@ -181,7 +222,14 @@ func makefileUnread(line string) string {
 // assign sets a variable as make does. := expands the value where it is
 // set, and += onto a variable := set expands what it appends
 // (https://www.gnu.org/software/make/manual/html_node/Simple-Assignment.html).
-func (m *makefile) assign(name, op, raw string) {
+// A := that named this variable before any line set it read the host's
+// environment, or nothing, so a line setting it after is refused by name.
+func (m *makefile) assign(n int, name, op, raw string) {
+	if at, ok := m.unsetAt[name]; ok {
+		m.refuse(at, "a := names %s, which line %d sets after it, so make expands it from the environment "+
+			"or empty there; set %s first", name, n, name)
+		delete(m.unsetAt, name)
+	}
 	value := strings.TrimSpace(makefileValue(raw))
 	old, set := m.vars[name]
 	named, simple := m.simple[name]
@@ -190,7 +238,12 @@ func (m *makefile) assign(name, op, raw string) {
 		return
 	case op == ":=" || op == "+=" && simple:
 		refs := m.refs(value)
-		value = m.expandWith(value, makefileUnset)
+		value = m.expandWith(value, func(ref string) string {
+			if unset := ref[2 : len(ref)-1]; m.unsetAt[unset] == 0 {
+				m.unsetAt[unset] = n
+			}
+			return ref
+		})
 		if op == "+=" && old != "" {
 			value = old + " " + value
 			maps.Copy(refs, named)
@@ -253,23 +306,15 @@ const makefileExpandDepth = 10
 
 // expand replaces $(NAME) with the variable's value, recursively, and $$
 // with the $ make hands the shell. A value := set is final and is not
-// expanded again. A name no line sets stays in place.
+// expanded again. A name no line sets stays in place: only the environment
+// sets it, as it does PATH, and the reader reads none, so it reads a file
+// the same on every host.
 func (m *makefile) expand(s string) string {
 	return m.expandWith(s, func(ref string) string { return ref })
 }
 
-// makefileUnset is what a := makes of $(NAME) no line has set yet: nothing,
-// as make has it, or, for a variable the environment sets, such as PATH,
-// the reference as written, since its value is the machine's.
-func makefileUnset(ref string) string {
-	if _, env := os.LookupEnv(ref[2 : len(ref)-1]); env {
-		return ref
-	}
-	return ""
-}
-
-// expandWith is expand with unset giving what a name no line sets
-// expands to.
+// expandWith is expand with unset called on each $(NAME) no line has set,
+// its result what the reference expands to.
 func (m *makefile) expandWith(s string, unset func(ref string) string) string {
 	const dollar = "\x00"
 	s = strings.ReplaceAll(s, "$$", dollar)

@@ -35,6 +35,10 @@ type workflowFile struct {
 	// shells are every shell a run step can take, in file order: the
 	// workflow's, each job's `defaults: run: shell:` and each step's.
 	shells []workflowJobKey
+	// permissions are the token's scopes each permissions: block sets, by
+	// job, "" for the workflow's: a scope's level by its name, and a value
+	// the whole block takes, such as write-all, under "".
+	permissions map[string]map[string]string
 	// refused are the shapes this reader does not read.
 	refused []string
 }
@@ -76,12 +80,6 @@ func workflowInputName(key string) string {
 	return strings.ToUpper(strings.ReplaceAll(key, " ", "_"))
 }
 
-// workflowVersionInput reports whether a with: key names a tool's version,
-// its case ignored as the runner ignores it: Syft-Version is syft-version.
-func workflowVersionInput(key string) bool {
-	return workflowVersionKey.MatchString(strings.ToLower(key))
-}
-
 // workflowKey is one key and its value, unquoted, with its line. A block
 // scalar's value is its lines, trimmed and joined by newlines.
 type workflowKey struct {
@@ -117,11 +115,12 @@ var (
 	// quotes, after any explicit key's ?, anchor or tag, with its colon. A
 	// quoted scalar with no colon after its closing quote is no key.
 	workflowKeyAt = regexp.MustCompile(`^[ \t]*(?:(?:\?|[&!][^\s{}\[\],]*)[ \t]+)*(?:"([^"]*)"|'([^']*)'|([^\s"'{}\[\],:#]+))[ \t]*:`)
-	// workflowVersionKey is a key that names a tool's version: an input
-	// such as cosign-release or syft-version, an env value such as
-	// GITLEAKS_VERSION or COSIGN_RELEASE, or a Makefile variable. A bare
-	// VERSION is the server's own.
-	workflowVersionKey = regexp.MustCompile(`(?:version|release|_VERSION|_RELEASE)$`)
+	// workflowVersionKey is a with: or env: key that names a tool's
+	// version: an input such as cosign-release or syft-version, or an env
+	// value such as GITLEAKS_VERSION. Its case is ignored: the runner reads
+	// an input's name in upper case, and a run step reading $Tool_Version
+	// takes a version all the same.
+	workflowVersionKey = regexp.MustCompile(`(?i)(?:version|release)$`)
 )
 
 // workflowMergeKey refuses a merge key, as a key or inside a flow mapping.
@@ -139,7 +138,7 @@ var workflowReadKeys = map[string]bool{
 func workflowHeld(path []string) bool {
 	key, parent := workflowKeyParent(path)
 	return key == "uses" || key == "image" || key == "container" ||
-		parent == "with" && workflowVersionInput(key) || parent == "env" && workflowVersionKey.MatchString(key)
+		(parent == "with" || parent == "env") && workflowVersionKey.MatchString(key)
 }
 
 // workflowKeyParent is a path's last key and the one before it, each ""
@@ -154,11 +153,15 @@ func workflowKeyParent(path []string) (key, parent string) {
 	return key, parent
 }
 
-// readWorkflows reads every workflow, sorted by path.
-func readWorkflows() ([]workflowFile, error) {
+// readWorkflows reads every workflow of the working directory.
+func readWorkflows() ([]workflowFile, error) { return workflowsUnder(".") }
+
+// workflowsUnder reads every workflow under root, sorted, each by its
+// slash-separated path from root.
+func workflowsUnder(root string) ([]workflowFile, error) {
 	var paths []string
 	for _, pattern := range []string{"*.yml", "*.yaml"} {
-		found, err := filepath.Glob(filepath.Join(filepath.FromSlash(workflowDir), pattern))
+		found, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(workflowDir), pattern))
 		if err != nil {
 			return nil, err
 		}
@@ -171,16 +174,20 @@ func readWorkflows() ([]workflowFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, parseWorkflow(filepath.ToSlash(p), string(data)))
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, parseWorkflow(filepath.ToSlash(rel), string(data)))
 	}
 	return out, nil
 }
 
 // workflowNamed finds one workflow by its base name.
 func workflowNamed(flows []workflowFile, base string) (workflowFile, bool) {
-	for _, w := range flows {
-		if w.path == base || strings.HasSuffix(w.path, "/"+base) {
-			return w, true
+	for i := range flows {
+		if flows[i].path == base || strings.HasSuffix(flows[i].path, "/"+base) {
+			return flows[i], true
 		}
 	}
 	return workflowFile{}, false
@@ -221,6 +228,7 @@ func parseWorkflow(path, text string) workflowFile {
 		calls: map[string]map[string]workflowKey{},
 		paths: map[int][]string{}, refusedAt: map[int]bool{}, bodyAt: map[int]bool{},
 	}
+	yamlStrayBreaks(text, p.w.refuse)
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	for i := 0; i < len(lines); i++ {
 		trimmed := strings.TrimSpace(lines[i])
@@ -252,16 +260,7 @@ func parseWorkflow(path, text string) workflowFile {
 func (p *workflowParser) key(lines []string, i int, m []string) int {
 	n, col := i+1, indent(lines[i])
 	p.pop(col, m[1] != "")
-	keyCol := col
-	if m[1] != "" {
-		item := workflowFrame{indent: col, key: "-", step: -1}
-		if path := workflowPath(p.stack); len(path) == 3 && path[0] == "jobs" && path[2] == "steps" {
-			item.step = len(p.items)
-			p.items = append(p.items, workflowStep{job: path[1], with: map[string]workflowKey{}, env: map[string]workflowKey{}})
-		}
-		p.stack = append(p.stack, item)
-		keyCol = col + len(m[1])
-	}
+	keyCol := p.openItem(col, m[1])
 	key, raw := m[2], strings.TrimSpace(m[3])
 	path := append(workflowPath(p.stack), key)
 	p.paths[n] = path
@@ -277,73 +276,147 @@ func (p *workflowParser) key(lines []string, i int, m []string) int {
 	}
 	// A quoted | is a scalar of its own, not a block scalar's indicator.
 	if workflowBlockScalar.MatchString(value) && strings.HasPrefix(raw, value) {
-		// The body is indented past the key, not the dash before it, so a
-		// step's next key ends it.
-		body, end := workflowScalarBody(lines, i, keyCol)
-		for j := i + 1; j <= end; j++ {
-			p.bodyAt[j+1] = true
-		}
-		switch {
-		case key == "run":
-			p.w.addRuns(workflowJob(path), n+1, body, strings.HasPrefix(value, ">"))
-		case workflowHeld(path):
-			p.refuse(n, "%s: a block scalar; write the value on the key's line", key)
-		case strings.HasPrefix(value, ">"):
-			// A folded scalar's lines are one line, joined by spaces.
-			p.read(path, step, workflowKey{key, strings.ReplaceAll(workflowJoin(body), "\n", " "), n}, "")
-		default:
-			p.read(path, step, workflowKey{key, workflowJoin(body), n}, "")
-		}
-		return end
+		return p.blockScalar(lines, i, keyCol, path, step, value)
 	}
 	p.read(path, step, workflowKey{key, value, n}, comment)
 	return i
 }
 
+// openItem opens the sequence item a key line's dash starts at col, a
+// step's when it is an item of a job's steps:, and returns the column the
+// key starts at. A line with no dash opens nothing.
+func (p *workflowParser) openItem(col int, dash string) int {
+	if dash == "" {
+		return col
+	}
+	item := workflowFrame{indent: col, key: "-", step: -1}
+	if path := workflowPath(p.stack); len(path) == 3 && path[0] == "jobs" && path[2] == "steps" {
+		item.step = len(p.items)
+		p.items = append(p.items, workflowStep{job: path[1], with: map[string]workflowKey{}, env: map[string]workflowKey{}})
+	}
+	p.stack = append(p.stack, item)
+	return col + len(dash)
+}
+
+// blockScalar takes the block scalar under the key at lines[i], whose path
+// is path and indicator value, and returns the index of its last line.
+func (p *workflowParser) blockScalar(lines []string, i, keyCol int, path []string, step *workflowStep, value string) int {
+	n, key := i+1, path[len(path)-1]
+	// The body is indented past the key, not the dash before it, so a
+	// step's next key ends it.
+	body, end := workflowScalarBody(lines, i, keyCol)
+	for j := i + 1; j <= end; j++ {
+		p.bodyAt[j+1] = true
+	}
+	switch {
+	case key == "run":
+		p.w.addRuns(workflowJob(path), n+1, body, strings.HasPrefix(value, ">"))
+	case workflowHeld(path):
+		p.refuse(n, "%s: a block scalar; write the value on the key's line", key)
+	case strings.HasPrefix(value, ">"):
+		// A folded scalar's lines are one line, joined by spaces.
+		p.read(path, step, workflowKey{key, strings.ReplaceAll(workflowJoin(body), "\n", " "), n}, "")
+	default:
+		p.read(path, step, workflowKey{key, workflowJoin(body), n}, "")
+	}
+	return end
+}
+
 // read records one key the gates ask about.
 func (p *workflowParser) read(path []string, step *workflowStep, k workflowKey, comment string) {
-	// A step's keys sit at depth 5: jobs, the job, steps, the item, the key.
-	depth, job, inStep := len(path), workflowJob(path), step != nil
+	depth, job := len(path), workflowJob(path)
 	switch {
-	case inStep && depth == 5 && k.key == "uses":
-		step.line, step.uses, step.comment = k.line, k.value, comment
+	case step != nil && p.readStep(path, step, k, comment):
 	case job != "" && depth == 3 && k.key == "uses":
 		p.items = append(p.items, workflowStep{job: job, line: k.line, uses: k.value, comment: comment, reusable: true})
-	case inStep && depth == 5 && k.key == "run" && k.value != "":
-		p.w.addRuns(job, k.line, []string{k.value}, false)
 	case depth >= 2 && path[depth-2] == "env":
 		p.w.env = append(p.w.env, k)
-		if inStep && depth == 6 {
+		if step != nil && depth == 6 {
 			step.env[k.key] = k
 		}
-	case inStep && depth == 6 && path[4] == "with":
-		p.setInput(step.with, k)
 	case job != "":
 		p.readJob(path, job, k)
+	case path[0] == "permissions" && depth <= 2:
+		p.setPermission("", path[1:], k.value)
 	case slices.Equal(path, []string{"defaults", "run", "shell"}):
 		p.w.shell = k.value
 		p.w.shells = append(p.w.shells, workflowJobKey{"", "the workflow", k})
 	}
 }
 
-// readJob records a job's container image or a service's, a job's shell or
-// a step's, and a reusable call's with: keys.
-func (p *workflowParser) readJob(path []string, job string, k workflowKey) {
+// readStep records a step's action, its run line or a with: key, and
+// reports whether k was one. A step's keys sit at depth 5: jobs, the job,
+// steps, the item, the key.
+func (p *workflowParser) readStep(path []string, step *workflowStep, k workflowKey, comment string) bool {
 	switch depth := len(path); {
-	case depth == 4 && path[2] == "with":
-		if p.calls[job] == nil {
-			p.calls[job] = map[string]workflowKey{}
-		}
-		p.setInput(p.calls[job], k)
-	case depth == 3 && k.key == "container" && k.value != "", depth == 4 && path[2] == "container" && k.key == "image":
+	case depth == 5 && k.key == "uses":
+		step.line, step.uses, step.comment = k.line, k.value, comment
+	case depth == 5 && k.key == "run" && k.value != "":
+		p.w.addRuns(workflowJob(path), k.line, []string{k.value}, false)
+	case depth == 6 && path[4] == "with":
+		p.setInput(step.with, k)
+	default:
+		return false
+	}
+	return true
+}
+
+// readJob records a job's container image or a service's, a job's shell or
+// a step's, its permissions, and a reusable call's with: keys.
+func (p *workflowParser) readJob(path []string, job string, k workflowKey) {
+	switch rest := path[2:]; {
+	case len(rest) > 0 && len(rest) <= 2 && rest[0] == "permissions":
+		p.setPermission(job, rest[1:], k.value)
+	case len(rest) == 2 && rest[0] == "with":
+		p.setInput(p.callWith(job), k)
+	case slices.Equal(rest, []string{"container"}) && k.value != "", slices.Equal(rest, []string{"container", "image"}):
 		p.w.images = append(p.w.images, workflowJobKey{job, "the container", k})
-	case depth == 5 && path[2] == "services" && k.key == "image":
-		p.w.images = append(p.w.images, workflowJobKey{job, "the service " + path[3], k})
-	case depth == 5 && path[2] == "defaults" && path[3] == "run" && k.key == "shell":
+	case len(rest) == 3 && rest[0] == "services" && k.key == "image":
+		p.w.images = append(p.w.images, workflowJobKey{job, "the service " + rest[1], k})
+	case slices.Equal(rest, []string{"defaults", "run", "shell"}):
 		p.w.shells = append(p.w.shells, workflowJobKey{job, "job " + job, k})
-	case depth == 5 && path[2] == "steps" && k.key == "shell":
+	case len(rest) == 3 && rest[0] == "steps" && k.key == "shell":
 		p.w.shells = append(p.w.shells, workflowJobKey{job, "a step of job " + job, k})
 	}
+}
+
+// setPermission records one key of a permissions: block, job's or, where
+// job is "", the workflow's: a scope's level, or with no scope the block's
+// own value.
+func (p *workflowParser) setPermission(job string, scope []string, value string) {
+	if p.w.permissions == nil {
+		p.w.permissions = map[string]map[string]string{}
+	}
+	if p.w.permissions[job] == nil {
+		p.w.permissions[job] = map[string]string{}
+	}
+	switch {
+	case len(scope) == 1:
+		p.w.permissions[job][scope[0]] = value
+	case value != "":
+		p.w.permissions[job][""] = value
+	}
+}
+
+// grantsWrite reports whether job's token may write scope. A job's
+// permissions replace the workflow's, since a scope a block leaves out is
+// none, and write-all grants every scope
+// (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
+// With neither, the token takes a default no file in the repository sets.
+func (w *workflowFile) grantsWrite(job, scope string) bool {
+	perms, ok := w.permissions[job]
+	if !ok {
+		perms = w.permissions[""]
+	}
+	return perms[""] == "write-all" || perms[scope] == "write"
+}
+
+// callWith is a reusable call's with: keys, by its job's name.
+func (p *workflowParser) callWith(job string) map[string]workflowKey {
+	if p.calls[job] == nil {
+		p.calls[job] = map[string]workflowKey{}
+	}
+	return p.calls[job]
 }
 
 // setInput records one with: key in with, and refuses one that names an
@@ -432,16 +505,7 @@ func workflowScalarItem(trimmed string) bool {
 // in a file YAML reads, the lines indented past its key are its body
 // (https://yaml.org/spec/1.2.2/#81-block-scalar-styles).
 func (p *workflowParser) unrecorded(lines []string) {
-	uses, keys := map[int]bool{}, map[int]bool{}
-	for _, s := range p.w.steps {
-		uses[s.line] = true
-		for _, k := range s.with {
-			keys[k.line] = true
-		}
-	}
-	for _, k := range p.w.env {
-		keys[k.line] = true
-	}
+	uses, keys := p.recorded()
 	// depth is the flow collections open where each line starts.
 	depth := 0
 	for i, line := range lines {
@@ -457,21 +521,42 @@ func (p *workflowParser) unrecorded(lines []string) {
 		if slices.Contains(found, "uses") && !uses[n] {
 			p.w.refuse(n, "uses: not read as a step's or a job's; write the step in block style, one key a line")
 		}
-		// A key line outside every job's steps and with:, such as a
-		// trigger's input, a job's output or a matrix, is no installer's
-		// input. An input that takes its version from one through ${{ }} is
-		// not one exact version, which pins refuses at the input.
-		path := p.paths[n]
-		held := len(path) > 2 && path[0] == "jobs" && (path[2] == "steps" || path[2] == "with")
-		if keys[n] || path != nil && !held {
+		if keys[n] || !p.holdsInputs(n) {
 			continue
 		}
 		for _, k := range found {
-			if workflowVersionInput(k) {
+			if workflowVersionKey.MatchString(k) {
 				p.w.refuse(n, "%s: not read as a step's with: or an env: key; write it in block style, one key a line", k)
 			}
 		}
 	}
+}
+
+// recorded is the lines of every uses: the reader recorded, and of every
+// with: and env: key.
+func (p *workflowParser) recorded() (uses, keys map[int]bool) {
+	uses, keys = map[int]bool{}, map[int]bool{}
+	for i := range p.w.steps {
+		uses[p.w.steps[i].line] = true
+		for _, k := range p.w.steps[i].with {
+			keys[k.line] = true
+		}
+	}
+	for _, k := range p.w.env {
+		keys[k.line] = true
+	}
+	return uses, keys
+}
+
+// holdsInputs reports whether line n can hold an installer's input: a
+// line the reader read no key path for, or a key line in a job's steps or
+// with:. A key line outside both, such as a trigger's input, a job's
+// output or a matrix, is no installer's input. An input that takes its
+// version from one through ${{ }} is not one exact version, which pins
+// refuses at the input.
+func (p *workflowParser) holdsInputs(n int) bool {
+	path := p.paths[n]
+	return len(path) == 0 || len(path) > 2 && path[0] == "jobs" && (path[2] == "steps" || path[2] == "with")
 }
 
 // workflowLineKeys is each key on a line where a key can stand, and the
@@ -480,41 +565,53 @@ func (p *workflowParser) unrecorded(lines []string) {
 // a , inside a flow collection; a , outside one is a plain scalar's text.
 // A quoted scalar, opened only where a scalar starts, and a comment hold no
 // key (https://yaml.org/spec/1.2.2/#73-flow-scalar-styles, https://yaml.org/spec/1.2.2/#66-comments).
-func workflowLineKeys(line string, depth int) ([]string, int) {
-	t := strings.TrimSpace(line)
-	for t == "-" || strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "-\t") {
-		t = strings.TrimSpace(t[1:])
-	}
-	keys := workflowKeyStart(nil, t)
+func workflowLineKeys(line string, depth int) (keys []string, open int) {
+	t := workflowAfterDashes(strings.TrimSpace(line))
+	keys = workflowKeyStart(nil, t)
 	// start is where a scalar can start. A quoted one is skipped to the
 	// next quote of its kind, an escaped one too, which can only find more
 	// keys; one that goes on past the line takes the rest of it.
 	start := true
 	for i := 0; i < len(t); i++ {
 		switch c := t[i]; {
-		case c == ' ' || c == '\t':
-		case c == '#' && (i == 0 || t[i-1] == ' ' || t[i-1] == '\t'):
+		case strings.IndexByte(" \t", c) >= 0:
+		case c == '#' && workflowBlankAt(t, i-1):
 			return keys, depth
-		case start && (c == '"' || c == '\''):
+		case start && strings.IndexByte(`"'`, c) >= 0:
 			end := strings.IndexByte(t[i+1:], c)
 			if end < 0 {
 				return keys, depth
 			}
 			i, start = i+1+end, false
-		case c == '{' || c == '[':
+		case strings.IndexByte("{[", c) >= 0:
 			depth++
 			keys, start = workflowKeyStart(keys, t[i+1:]), true
 		case c == ',' && depth > 0:
 			keys, start = workflowKeyStart(keys, t[i+1:]), true
-		case c == '}' || c == ']':
+		case strings.IndexByte("}]", c) >= 0:
 			depth, start = max(depth-1, 0), false
-		case c == ':' && (i+1 == len(t) || t[i+1] == ' ' || t[i+1] == '\t'):
+		case c == ':' && workflowBlankAt(t, i+1):
 			start = true
 		default:
 			start = false
 		}
 	}
 	return keys, depth
+}
+
+// workflowAfterDashes is a trimmed line without the sequence dashes it
+// starts with.
+func workflowAfterDashes(t string) string {
+	for t == "-" || strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "-\t") {
+		t = strings.TrimSpace(t[1:])
+	}
+	return t
+}
+
+// workflowBlankAt reports whether t holds a blank at i, or i is past
+// either end of it, where a comment may start or a key's colon end.
+func workflowBlankAt(t string, i int) bool {
+	return i < 0 || i >= len(t) || t[i] == ' ' || t[i] == '\t'
 }
 
 // workflowKeyStart is keys with the key at the start of s added, if one
@@ -581,6 +678,57 @@ func workflowValue(s string) (value, comment string) {
 	return yamlCutComment(s)
 }
 
+// loneCR names a CR that is not half of a CRLF pair.
+const loneCR = "a CR with no LF after it"
+
+// yamlBreaks are the line breaks a YAML parser may read that the YAML
+// readers here do not, each by its name. They break lines at LF alone,
+// and drop the CR of a CRLF pair. YAML 1.2 breaks a line at a lone CR too
+// (https://yaml.org/spec/1.2.2/#54-line-break-characters), and YAML 1.1
+// at NEL, LS and PS as well (https://yaml.org/spec/1.1/#id871136), so a
+// line written after one would be read as the rest of the line before.
+var yamlBreaks = map[rune]string{
+	'\r':     loneCR,
+	'\u0085': "U+0085 (NEXT LINE)",
+	'\u2028': "U+2028 (LINE SEPARATOR)",
+	'\u2029': "U+2029 (PARAGRAPH SEPARATOR)",
+}
+
+// strayBreak is a line break a reader does not read: its name, the line it
+// sits on, counted at LF as the readers count, and the byte of the line it
+// starts at, from 1.
+type strayBreak struct {
+	name     string
+	line, at int
+}
+
+// strayBreaks is each rune of text that breaks names, but a CR followed by
+// an LF.
+func strayBreaks(text string, breaks map[rune]string) []strayBreak {
+	var out []strayBreak
+	line, start := 1, 0
+	for i, r := range text {
+		name, isBreak := breaks[r]
+		switch {
+		case r == '\n':
+			line, start = line+1, i+1
+		case !isBreak, r == '\r' && strings.HasPrefix(text[i+1:], "\n"):
+		default:
+			out = append(out, strayBreak{name, line, i - start + 1})
+		}
+	}
+	return out
+}
+
+// yamlStrayBreaks refuses, through refuse, each line break of text a YAML
+// parser may read and the YAML readers do not, by its line and its byte.
+func yamlStrayBreaks(text string, refuse func(n int, format string, a ...any)) {
+	for _, b := range strayBreaks(text, yamlBreaks) {
+		refuse(b.line, "%s at byte %d of the line, which YAML reads as a line break and this reader does not; "+
+			"break lines with LF or CRLF alone", b.name, b.at)
+	}
+}
+
 // yamlCutComment is a YAML line or value without the comment after it, and
 // the comment's text. A comment starts at a # that begins the text or
 // follows white space (https://yaml.org/spec/1.2.2/#66-comments).
@@ -596,8 +744,8 @@ func yamlCutComment(s string) (value, comment string) {
 
 // workflowScalarBody is a block scalar's lines after the key at line i,
 // indented past col, and the index of its last line.
-func workflowScalarBody(lines []string, i, col int) ([]string, int) {
-	end := i
+func workflowScalarBody(lines []string, i, col int) (body []string, end int) {
+	end = i
 	for j := i + 1; j < len(lines); j++ {
 		if strings.TrimSpace(lines[j]) != "" && indent(lines[j]) <= col {
 			break

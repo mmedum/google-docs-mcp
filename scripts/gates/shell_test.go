@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"maps"
+	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -98,6 +102,81 @@ func TestGoAfterFlagsSkipsTheValues(t *testing.T) {
 	} {
 		if got := goAfterFlags(words); !slices.Equal(got, []string{"./scripts/gates"}) {
 			t.Errorf("goAfterFlags(%q) = %q, want [./scripts/gates]", words, got)
+		}
+	}
+}
+
+// goValueFlags is exactly the flags the go command reads a value for on
+// the commands the gates read, run, install and vet, at the toolchain
+// go.mod names: `go help build`, `go help run`, `go help vet` and the vet
+// tool's own. A value flag it lacks reads its value as the package, so
+// `go run -pgo file tool@v1` would run file; a boolean it holds reads the
+// package as the flag's value, so `go run -race tool@v1` would run nothing.
+// `go help test` is not read: no gate reads a go test's words, and there
+// -c is a boolean where vet's -c takes a value.
+func TestGoValueFlagsAreTheFlagsTheHelpGivesAValue(t *testing.T) {
+	gomod := repoFile(t, "go.mod")
+	goCmd := func(args ...string) string {
+		cmd := exec.Command("go", args...)
+		cmd.Dir = parityRepoRoot
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("go %s: %v", strings.Join(args, " "), err)
+		}
+		return string(out)
+	}
+	// A GOEXPERIMENT build carries its experiments after the release.
+	version := strings.FieldsFunc(goCmd("env", "GOVERSION"), func(r rune) bool { return r == '-' || r == ' ' || r == '\n' })
+	if want := "go" + pinsGoVersion(string(gomod)); len(version) == 0 || version[0] != want {
+		t.Skipf("go is %v, not go.mod's %s, whose help the map is held to; GOTOOLCHAIN=auto runs it", version, want)
+	}
+	// A flag line in the help, with the word that names its value or with
+	// none, or a flag in a usage line, with the word that names its value.
+	valueLine := regexp.MustCompile(`(?m)^\t-([\w.-]+) \S|\[-([\w.-]+) \w+\]`)
+	boolLine := regexp.MustCompile(`(?m)^\t-([\w.-]+)$`)
+	value, boolean := map[string]bool{}, map[string]bool{}
+	for _, help := range []string{goCmd("help", "build"), goCmd("help", "run"), goCmd("help", "vet")} {
+		for _, m := range valueLine.FindAllStringSubmatch(help, -1) {
+			value[m[1]+m[2]] = true
+		}
+		for _, m := range boolLine.FindAllStringSubmatch(help, -1) {
+			boolean[m[1]] = true
+		}
+	}
+	var vetFlags []struct {
+		Name string
+		Bool bool
+	}
+	if err := json.Unmarshal([]byte(goCmd("tool", "vet", "-flags")), &vetFlags); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range vetFlags {
+		if f.Bool {
+			boolean[f.Name] = true
+		} else {
+			value[f.Name] = true
+		}
+	}
+	// The help leaves out three debug flags that take a value
+	// (https://github.com/golang/go/blob/go1.27.3/src/cmd/go/internal/work/build.go#L358-L361).
+	for _, name := range []string{"debug-actiongraph", "debug-runtime-trace", "debug-trace"} {
+		value[name] = true
+	}
+	if len(value) < 25 || len(boolean) < 20 {
+		t.Fatalf("read %d value flags and %d boolean flags from the help, want at least 25 and 20", len(value), len(boolean))
+	}
+	for _, name := range slices.Sorted(maps.Keys(value)) {
+		if !goValueFlags[name] {
+			t.Errorf("the help gives -%s a value, and goValueFlags does not have it", name)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(goValueFlags)) {
+		switch {
+		case value[name]:
+		case boolean[name]:
+			t.Errorf("goValueFlags has -%s, which the help lists as a boolean", name)
+		default:
+			t.Errorf("goValueFlags has -%s, which no help lists", name)
 		}
 	}
 }

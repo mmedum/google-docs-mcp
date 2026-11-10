@@ -28,10 +28,6 @@ import (
 // otherwise correct, and asserts the sentence that names it.
 
 // repoFile reads a path relative to the repository root.
-//
-// The gates run from the root, which they chdir to themselves; a test
-// runs from its own package directory. One helper rather than the same
-// fallback written at each call site.
 func repoFile(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(repoPath(t, path))
@@ -42,13 +38,11 @@ func repoFile(t *testing.T, path string) []byte {
 }
 
 // repoPath resolves a repository-relative path from wherever the test is
-// running, for the callers that need the PATH rather than the bytes.
+// running. The gates chdir to the root themselves; a test runs from its
+// own package directory.
 func repoPath(t *testing.T, path string) string {
 	t.Helper()
-	if _, err := os.Stat("../../" + path); err == nil {
-		return "../../" + path
-	}
-	return path
+	return filepath.Join(parityRepoRoot, filepath.FromSlash(path))
 }
 
 // good is the committed manifest, which every case starts from.

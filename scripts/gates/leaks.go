@@ -33,13 +33,14 @@ var (
 	subjectID = regexp.MustCompile(`\b[0-9]{21}\b`)
 
 	// An OAuth client id, which is not a secret and is still an
-	// identifier of the person's Cloud project.
-	clientID = regexp.MustCompile(`[0-9]{6,}-[a-z0-9]{20,}\.apps\.googleusercontent\.com`)
+	// identifier of the person's Cloud project. A host name matches in any
+	// case, as DNS compares names (RFC 4343).
+	clientID = regexp.MustCompile(`[0-9]{6,}-[a-z0-9]{20,}(?i:\.apps\.googleusercontent\.com)`)
 
 	// A profile photo or user-content URL carries an account id in its
 	// path. The bare host is allowed: the API client's allowlist names
 	// it, and must.
-	userContent = regexp.MustCompile(`\b[a-z0-9\-]+\.googleusercontent\.com/[A-Za-z0-9_\-/]{8,}`)
+	userContent = regexp.MustCompile(`\b(?i:[a-z0-9\-]+\.googleusercontent\.com)/[A-Za-z0-9_\-/]{8,}`)
 
 	// A Drive or Docs resource id.
 	resourceID = regexp.MustCompile(`\b1[A-Za-z0-9_\-]{25,}\b`)

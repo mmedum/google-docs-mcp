@@ -126,7 +126,13 @@ func parseGoreleaser(text string) goreleaserFile {
 	for _, v := range p.g.values {
 		switch goreleaserKeys[v.keys] {
 		case goreleaserLine:
-			if text := goreleaserCommand(strings.ReplaceAll(v.value, "\n", " ")); text != "" {
+			line := strings.ReplaceAll(v.value, "\n", " ")
+			if !goreleaserWrapped(line) {
+				p.refuse(v.line, "%s: a template control action; goreleaser runs one branch, and the gates read only "+
+					"a command wrapped whole in one {{ if }}...{{ end }}", v.keys[strings.LastIndexByte(v.keys, '.')+1:])
+				continue
+			}
+			if text := goreleaserCommand(line); text != "" {
 				p.g.runs = append(p.g.runs, workflowRun{line: v.line, text: text})
 			}
 		case goreleaserWord:
@@ -288,7 +294,29 @@ var goreleaserTemplate = regexp.MustCompile(`\{\{.*?\}\}`)
 // goreleaserControl is an action that renders no text of its own: a
 // wrapper's if, else, range, with or end, a break, a continue or a
 // comment (https://pkg.go.dev/text/template#hdr-Actions).
-var goreleaserControl = regexp.MustCompile(`^\{\{-?\s*(?:(?:if|else|end|range|with|break|continue)\b|/\*)`)
+var goreleaserControl = regexp.MustCompile(`^\{\{-?\s*(?:(if|else|end|range|with|break|continue)\b|/\*)`)
+
+// goreleaserWrapped reports whether a command line's control actions are
+// none, or one if or with that opens the line and the end that closes it.
+// goreleaserCommand reads every branch as one line, and goreleaser runs
+// only the branch it renders, so any other control action hides what runs.
+func goreleaserWrapped(line string) bool {
+	line = strings.TrimSpace(line)
+	opened := false
+	for _, at := range goreleaserTemplate.FindAllStringIndex(line, -1) {
+		m := goreleaserControl.FindStringSubmatch(line[at[0]:at[1]])
+		switch {
+		case m == nil:
+		case !opened && at[0] == 0 && (m[1] == "if" || m[1] == "with"):
+			opened = true
+		case opened && at[1] == len(line) && m[1] == "end":
+			return true
+		default:
+			return false
+		}
+	}
+	return !opened
+}
 
 // goreleaserPlaceholder is the word an action that is a word of its own
 // reads as.

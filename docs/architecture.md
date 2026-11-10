@@ -2647,7 +2647,9 @@ input's name. A version given to a reusable workflow of this repository
 is exact, or one context's value that the workflow holds where it uses
 it. The goreleaser config is read by key path as the goreleaser version
 `goreleaserChecked` names reads it, and the gate fails when
-`release.yml` runs another.
+`release.yml` runs another. goreleaser runs one branch of a template, so
+the reader refuses a command holding a control action other than one
+`{{ if }}` or `{{ with }}` wrapping it whole.
 
 A pre-commit hook runs its tool through a Makefile target, so the hooks'
 config names no version: a remote hook's `rev:` or a `module@version`

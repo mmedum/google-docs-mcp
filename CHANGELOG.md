@@ -11,6 +11,7 @@ diff in CI flags them.
 ### Security
 
 - Built with Go 1.27.4, which fixes an HTTP/1 server crash in `net/http` (CVE-2026-97054, GO-2026-6859). `govulncheck` found the package reachable from this server.
+- Sign-in always uses Google's OAuth endpoints, ignoring the client file's `auth_uri` and `token_uri`, which a tampered file could point elsewhere (#114).
 
 ## [3.2.1] - 2026-11-05
 

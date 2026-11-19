@@ -455,7 +455,7 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-63 | Every HTTP call has a deadline, the token refresh and the login code exchange included | accepted | TestTokenRefreshIsBounded, TestContextCancellation |
 | D-64 | A five-second cache coalesces fetches of a document, and a write always fetches again | accepted | TestFetchCacheAndHandles |
 | D-65 | Everything derived from one fetch is derived once | accepted | TestLargeFixtureIsConsistent, bench, review |
-| D-66 | Sign-in is Google's desktop flow on a loopback port with PKCE | accepted | TestLoginHappyPath, TestLoginRejectsBadStateAndDenial, TestLoginTimeoutAndCancel |
+| D-66 | Sign-in is Google's desktop flow on a loopback port with PKCE | accepted | TestLoginHappyPath, TestLoginRejectsBadStateAndDenial, TestLoginTimeoutAndCancel, TestClientFileEndpointsAreNotUsed |
 | D-67 | The refresh token goes to the OS keyring, else an owner-only file with a warning, and the environment overrides both | accepted | TestEnvWins, TestFileFallbackWhenKeyringBroken, TestKeyringSaveRemovesStaleFile |
 | D-68 | The scopes are documents and drive, or their read-only pair | accepted | TestScopesAgree, review |
 | D-69 | Configuration is the environment, each variable with a bound flag, read through config and validated once at start | accepted | staleness, TestEnvThenFlagPrecedence, TestEveryVariableTheCodeNamesIsInEnvVars, TestEveryReaderOfAVariableGoesThroughConfig, TestASettingOfSpacesIsUnset |
@@ -2155,18 +2155,20 @@ Google documents this flow for installed applications and blocks the
 out-of-band flow, which had the person paste a code back
 ([OAuth for installed apps](https://developers.google.com/identity/protocols/oauth2/native-app)).
 The loopback redirect keeps the code on the person's machine, PKCE keeps
-it useless to anything that intercepts it. `TestLoginHappyPath`,
+it useless to anything that intercepts it. The server always uses
+Google's auth and token endpoints and ignores the file's `auth_uri` and
+`token_uri`, so a tampered file cannot send the code or the refresh
+token to another host; `TestClientFileEndpointsAreNotUsed` holds it.
+`TestLoginHappyPath`,
 `TestLoginRejectsBadStateAndDenial` and `TestLoginTimeoutAndCancel` hold
 the flow, its state check and its bounded wait.
 
 Rejected: the out-of-band flow, which Google blocks; a web client with a
-hosted callback, which needs a server somebody runs (D-01).
+hosted callback, which needs a server somebody runs (D-01); refusing a
+client file whose endpoints name another host, which would refuse a file
+whose endpoints Google changes, where ignoring them reaches nothing.
 Cost: over SSH the browser and the listener sit on different machines,
-so the person forwards the port by hand. The `token_uri` and `auth_uri`
-of the client file are used as given, falling back to Google's endpoints
-only when missing, so a tampered file could send the code and the token
-elsewhere. Issue #114 asks whether to pin both to Google's endpoints
-or refuse any other host.
+so the person forwards the port by hand.
 
 ### D-67 The refresh token goes to the OS keyring, else an owner-only file with a warning, and the environment overrides both
 

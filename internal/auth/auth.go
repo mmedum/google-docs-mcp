@@ -66,8 +66,6 @@ func ParseClientSecret(data []byte, scopes []string) (*oauth2.Config, error) {
 		Installed *struct {
 			ClientID     string `json:"client_id"`
 			ClientSecret string `json:"client_secret"`
-			AuthURI      string `json:"auth_uri"`
-			TokenURI     string `json:"token_uri"`
 		} `json:"installed"`
 	}
 	if err := json.Unmarshal(data, &file); err != nil {
@@ -80,22 +78,17 @@ func ParseClientSecret(data []byte, scopes []string) (*oauth2.Config, error) {
 	if in.ClientID == "" {
 		return nil, errors.New("auth: client secret JSON has no client_id")
 	}
-	authURL, tokenURL := in.AuthURI, in.TokenURI
-	if authURL == "" {
-		authURL = GoogleAuthURL
-	}
-	if tokenURL == "" {
-		tokenURL = GoogleTokenURL
-	}
 	return &oauth2.Config{
 		ClientID:     in.ClientID,
 		ClientSecret: in.ClientSecret,
 		Scopes:       scopes,
-		Endpoint:     oauth2.Endpoint{AuthURL: authURL, TokenURL: tokenURL, AuthStyle: oauth2.AuthStyleInParams},
+		Endpoint:     oauth2.Endpoint{AuthURL: GoogleAuthURL, TokenURL: GoogleTokenURL, AuthStyle: oauth2.AuthStyleInParams},
 	}, nil
 }
 
-// Google's OAuth endpoints, used when the client JSON omits them.
+// Google's OAuth endpoints. The client file's auth_uri and token_uri are
+// ignored, because a tampered file would send the code and the refresh
+// token to its own host (D-66).
 const (
 	GoogleAuthURL  = "https://accounts.google.com/o/oauth2/auth"
 	GoogleTokenURL = "https://oauth2.googleapis.com/token"

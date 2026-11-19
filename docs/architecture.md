@@ -748,8 +748,8 @@ URL taken from a long-running operation's response body (D-41), and the
 token goes with the request. A check on `url.URL.Hostname()` would drop
 the port and pass a host it never meant to. Where a check that governs
 where a token goes is wrong, it should be wrong toward refusing. The
-allowlist governs the API client; sign-in and the token refresh go to
-the endpoints the OAuth client file names (D-66).
+allowlist governs the API client; sign-in and the token refresh go
+only to Google's OAuth endpoints (D-66).
 
 Rejected: matching on `url.URL.Hostname()`, which drops the port;
 telemetry, crash reporting and update checks, which would send something
@@ -2155,18 +2155,19 @@ Google documents this flow for installed applications and blocks the
 out-of-band flow, which had the person paste a code back
 ([OAuth for installed apps](https://developers.google.com/identity/protocols/oauth2/native-app)).
 The loopback redirect keeps the code on the person's machine, PKCE keeps
-it useless to anything that intercepts it. The server always uses
-Google's auth and token endpoints and ignores the file's `auth_uri` and
-`token_uri`, so a tampered file cannot send the code or the refresh
-token to another host; `TestClientFileEndpointsAreNotUsed` holds it.
-`TestLoginHappyPath`,
+it useless to anything that intercepts it. `TestLoginHappyPath`,
 `TestLoginRejectsBadStateAndDenial` and `TestLoginTimeoutAndCancel` hold
 the flow, its state check and its bounded wait.
 
+The server always uses Google's auth and token endpoints and ignores the
+client file's `auth_uri` and `token_uri`, so a tampered file cannot send
+the code or the refresh token to another host.
+`TestClientFileEndpointsAreNotUsed` holds it.
+
 Rejected: the out-of-band flow, which Google blocks; a web client with a
 hosted callback, which needs a server somebody runs (D-01); refusing a
-client file whose endpoints name another host, which would refuse a file
-whose endpoints Google changes, where ignoring them reaches nothing.
+client file whose endpoints name another host, which adds an error and
+protects nothing more than ignoring the fields does.
 Cost: over SSH the browser and the listener sit on different machines,
 so the person forwards the port by hand.
 

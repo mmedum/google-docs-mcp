@@ -13,7 +13,7 @@ waits, no telemetry and no update check.
 | Boundary | Crosses | Assumption |
 |---|---|---|
 | MCP client ↔ this server | An OS pipe | Both run as the same OS user, unauthenticated. Stdout carries only protocol frames (D-03). |
-| This server ↔ Google | TLS | API requests carry the token only to `googleapis.com` and its subdomains, `*.googleusercontent.com` and `docs.google.com` (D-11). Sign-in and the token refresh use the endpoints the OAuth client file names. |
+| This server ↔ Google | TLS | API requests carry the token only to `googleapis.com` and its subdomains, `*.googleusercontent.com` and `docs.google.com` (D-11). Sign-in and the token refresh go only to Google's OAuth endpoints, whatever the OAuth client file names (D-66). |
 | This server ↔ disk | The file system | The config directory holds the profile and, without a keyring, the token file (D-67). Exports go only under `GDOCS_EXPORT_DIR` (D-24). |
 | Browser ↔ the login listener | The loopback interface, on a random port | Alive only while `login` waits. PKCE and `state` are checked on the callback (D-66). |
 | Document authors ↔ the model | Every text, comment and suggestion a tool returns | Written by other people, sometimes to steer an assistant. |
@@ -143,8 +143,7 @@ normal course.
 ## What you are responsible for
 
 - **Your own OAuth client.** Use the client file the Cloud console gave
-  you, since sign-in sends the code and the token to the endpoints it
-  names. [`troubleshooting.md`](troubleshooting.md#tasks) says how to
+  you, since its client id and secret are what sign-in presents. [`troubleshooting.md`](troubleshooting.md#tasks) says how to
   rotate the token, revoke access and handle a suspected exposure.
 - **The switches you turn on.** `GDOCS_ENABLE_DESTRUCTIVE` registers
   deletes, so leave it off for a client that runs with nobody watching.

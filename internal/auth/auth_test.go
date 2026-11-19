@@ -51,7 +51,7 @@ func TestClientFileEndpointsAreNotUsed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Endpoint.AuthURL != "https://accounts.google.com/o/oauth2/auth" || cfg.Endpoint.TokenURL != "https://oauth2.googleapis.com/token" {
+	if cfg.Endpoint.AuthURL != "https://accounts.google.com/o/oauth2/v2/auth" || cfg.Endpoint.TokenURL != "https://oauth2.googleapis.com/token" {
 		t.Errorf("ParseClientSecret(%s) endpoint = %+v, want Google's auth and token URLs", data, cfg.Endpoint)
 	}
 }

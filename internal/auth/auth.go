@@ -86,11 +86,12 @@ func ParseClientSecret(data []byte, scopes []string) (*oauth2.Config, error) {
 	}, nil
 }
 
-// Google's OAuth endpoints. The client file's auth_uri and token_uri are
-// ignored, because a tampered file would send the code and the refresh
-// token to its own host (D-66).
+// Google's OAuth endpoints, as https://accounts.google.com/.well-known/openid-configuration
+// publishes them; `login` checks them live. The client file's auth_uri and
+// token_uri are ignored, because a tampered file would send the code and
+// the refresh token to its own host (D-66).
 const (
-	GoogleAuthURL  = "https://accounts.google.com/o/oauth2/auth"
+	GoogleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
 	GoogleTokenURL = "https://oauth2.googleapis.com/token"
 )
 

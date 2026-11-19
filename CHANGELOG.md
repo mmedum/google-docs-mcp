@@ -8,6 +8,10 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Security
+
+- Built with Go 1.27.4, which fixes an HTTP/1 server crash in `net/http` (CVE-2026-97054, GO-2026-6859). `govulncheck` found the package reachable from this server.
+
 ## [3.2.1] - 2026-11-05
 
 ### Changed

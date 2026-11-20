@@ -63,10 +63,11 @@ package gapi
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -515,7 +516,7 @@ func TestRawSuggestedReset(t *testing.T) {
 func TestRawSuggestedResetWholeParagraph(t *testing.T) {
 	insertReset := round{wc: suggestMode, reqs: []json.RawMessage{insertAt(t, "new", 8), reset(t, 8, 11, "*")}}
 	normal := func(start, end int) json.RawMessage { return paraStyle(t, start, end, "namedStyleType", "NORMAL_TEXT") }
-	runProbes(t, []probe{
+	inline, _ := runProbes(t, []probe{
 		{name: "empty paragraph", seed: "Alpha.\n", rounds: []round{insertReset}},
 		{name: "before other text", seed: "Alpha.\nold\n", rounds: []round{insertReset}},
 		// The named style the planner gives each paragraph it inserts,
@@ -527,6 +528,19 @@ func TestRawSuggestedResetWholeParagraph(t *testing.T) {
 		{name: "empty paragraph filled, its named style set", seed: "Alpha.\n", rounds: []round{{wc: suggestMode,
 			reqs: []json.RawMessage{insertAt(t, "new", 8), normal(8, 11)}}}},
 	})
+	// What the planner relies on: one suggestion unless a reset or a
+	// named style covers a paragraph whose mark is not inserted.
+	for name, want := range map[string]int{
+		"empty paragraph":                             2,
+		"before other text":                           1,
+		"appended paragraph, its named style set":     2,
+		"appended paragraph, no named style":          1,
+		"empty paragraph filled, its named style set": 2,
+	} {
+		if got := suggestionCount(t, inline[name]); got != want {
+			t.Errorf("%s: %d suggestion(s), want %d", name, got, want)
+		}
+	}
 }
 
 // TestRawSuggestedInheritance asks which style suggested text takes when
@@ -573,14 +587,82 @@ func TestRawSuggestedInheritance(t *testing.T) {
 	}
 }
 
-// newIsBold reports whether the accepted run holding "new" is bold.
+// newIsBold reports whether the run holding "new" in a logged view is
+// bold.
 func newIsBold(t *testing.T, view string) bool {
 	t.Helper()
-	m := regexp.MustCompile(`"content":"[^"]*new[^"]*","textStyle":\{([^}]*)\}`).FindStringSubmatch(view)
-	if m == nil {
+	var v any
+	if err := json.Unmarshal([]byte(view), &v); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var bold, found bool
+	walkRuns(v, func(run map[string]any) {
+		if content, _ := run["content"].(string); !found && strings.Contains(content, "new") {
+			style, _ := run["textStyle"].(map[string]any)
+			bold, _ = style["bold"].(bool)
+			found = true
+		}
+	})
+	if !found {
 		t.Fatalf("no run holds \"new\":\n%s", view)
 	}
-	return strings.Contains(m[1], `"bold":true`)
+	return bold
+}
+
+// suggestionCount is how many suggestion ids a logged view carries, on
+// its runs and on its paragraphs.
+func suggestionCount(t *testing.T, view string) int {
+	t.Helper()
+	var v any
+	if err := json.Unmarshal([]byte(view), &v); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ids := map[string]bool{}
+	var walk func(any)
+	walk = func(x any) {
+		switch x := x.(type) {
+		case []any:
+			for _, e := range x {
+				walk(e)
+			}
+		case map[string]any:
+			for k, e := range x {
+				switch k {
+				case "suggestedInsertionIds", "suggestedDeletionIds":
+					for _, id := range e.([]any) {
+						ids[id.(string)] = true
+					}
+				case "suggestedTextStyleChanges", "suggestedParagraphStyleChanges":
+					m, _ := e.(map[string]any)
+					for id := range m {
+						ids[id] = true
+					}
+				default:
+					walk(e)
+				}
+			}
+		}
+	}
+	walk(v)
+	return len(ids)
+}
+
+// walkRuns calls f on every textRun in a decoded view, in order.
+func walkRuns(x any, f func(map[string]any)) {
+	switch x := x.(type) {
+	case []any:
+		for _, e := range x {
+			walkRuns(e, f)
+		}
+	case map[string]any:
+		if run, ok := x["textRun"].(map[string]any); ok {
+			f(run)
+			return
+		}
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			walkRuns(x[k], f)
+		}
+	}
 }
 
 // reset clears the named text properties over a range, "*" for all of

@@ -22,6 +22,7 @@ package gapi
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -94,6 +95,41 @@ func TestRawDocsCommentLength(t *testing.T) {
 			continue
 		}
 		t.Logf("insertComment %q x %d: reply %s", tc.unit, tc.n, res.Raw)
+	}
+	t.Logf("=== scratch document left behind; Drive search title:\"safe to delete\" finds it ===")
+}
+
+// TestRawSuggestionReplyLength asks the same of addCommentReply, the
+// path a reply on a suggestion's thread takes (#111): at the Docs API's
+// insertComment limit and Drive's and one over each in ASCII, and at
+// the Docs limit and one over in é, which is two bytes and one UTF-16
+// unit.
+//
+// Findings: it takes 2048 x and 1024 é, and refuses 2049 x, 4096 x,
+// 4097 x and 1025 é with 400 "content must not exceed 2048 UTF-8 code units". So it
+// counts bytes, and takes 2048 of them, as insertComment does.
+//
+//	GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestRawSuggestionReplyLength -v
+func TestRawSuggestionReplyLength(t *testing.T) {
+	c := probeClient(t)
+	ctx := context.Background()
+	id := probeDoc(t, c, ctx, "suggestion-replies", "google-docs-mcp suggestion reply length probe (safe to delete)",
+		[]json.RawMessage{insertAt(t, "Probe text", 1)}, []round{{reqs: []json.RawMessage{insertAt(t, " new", 6)}, wc: suggestMode}})
+	m := regexp.MustCompile(`"suggestedInsertionIds":\["([^"]+)"`).FindSubmatch(rawBody(t, c, ctx, id, SuggestionsInline))
+	if m == nil {
+		t.Fatal("the suggested insertion carries no id")
+	}
+	for _, tc := range []struct {
+		unit string
+		n    int
+	}{{"x", 2048}, {"x", 2049}, {"x", 4096}, {"x", 4097}, {"é", 1024}, {"é", 1025}} {
+		res, err := c.BatchUpdate(ctx, id, &BatchUpdateRequest{Requests: []json.RawMessage{marshal(t, map[string]any{
+			"addCommentReply": map[string]any{"suggestionId": string(m[1]), "post": map[string]any{"content": strings.Repeat(tc.unit, tc.n)}}})}})
+		if err != nil {
+			t.Logf("addCommentReply %q x %d: refused: %v", tc.unit, tc.n, err)
+			continue
+		}
+		t.Logf("addCommentReply %q x %d: reply %s", tc.unit, tc.n, res.Raw)
 	}
 	t.Logf("=== scratch document left behind; Drive search title:\"safe to delete\" finds it ===")
 }

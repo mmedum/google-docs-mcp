@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
-	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v4/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v4/internal/plan"
 )
 
 // TableOp carries the table-specific arguments of an edit_table op, in

@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/auth"
-	"github.com/mmedum/google-docs-mcp/v3/internal/credentials"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v3/internal/userconfig"
+	"github.com/mmedum/google-docs-mcp/v4/internal/auth"
+	"github.com/mmedum/google-docs-mcp/v4/internal/credentials"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/userconfig"
 )
 
 // driveClient is a client of the account the server is signed in to,

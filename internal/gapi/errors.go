@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/mmedum/google-docs-mcp/v3/internal/redact"
+	"github.com/mmedum/google-docs-mcp/v4/internal/redact"
 	"strings"
 
 	"golang.org/x/oauth2"

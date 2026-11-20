@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v3/internal/render"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/render"
 )
 
 // unmodeled is a response carrying fields internal/gdocs does not

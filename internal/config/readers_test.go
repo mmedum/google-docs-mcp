@@ -16,9 +16,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
-	"github.com/mmedum/google-docs-mcp/v3/internal/credentials"
-	"github.com/mmedum/google-docs-mcp/v3/internal/userconfig"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/credentials"
+	"github.com/mmedum/google-docs-mcp/v4/internal/userconfig"
 )
 
 // The variables and their readers, from outside the package: the

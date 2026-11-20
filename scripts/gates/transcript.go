@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v3/scripts/internal/livecover"
+	"github.com/mmedum/google-docs-mcp/v4/scripts/internal/livecover"
 )
 
 // The live driver and the eval harness may put a value into their

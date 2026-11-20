@@ -14,6 +14,7 @@ diff in CI flags them.
 
 ### Removed
 
+- **Breaking:** the Go module path is now `github.com/mmedum/google-docs-mcp/v4`; install with `go install github.com/mmedum/google-docs-mcp/v4/cmd/google-docs-mcp@latest`.
 - **Breaking:** the `--preview` flag, and `GDOCS_PREVIEW`, which is no longer read. Remove `--preview` from a client's arguments, or the server stops at start.
 - **Breaking:** `status --json`'s `settings.preview`, which always read true; `schema_version` is 2 (#108).
 

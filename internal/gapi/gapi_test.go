@@ -21,7 +21,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
 )
 
 func newTestClient(t *testing.T, h http.Handler) (*Client, *httptest.Server) {

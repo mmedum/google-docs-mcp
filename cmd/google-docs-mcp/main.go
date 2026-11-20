@@ -18,7 +18,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/mmedum/google-docs-mcp/v3/internal/tools"
 	"io"
 	"log/slog"
 	"os"
@@ -32,15 +31,16 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/auth"
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
-	"github.com/mmedum/google-docs-mcp/v3/internal/credentials"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v3/internal/redact"
-	"github.com/mmedum/google-docs-mcp/v3/internal/server"
-	"github.com/mmedum/google-docs-mcp/v3/internal/service"
-	"github.com/mmedum/google-docs-mcp/v3/internal/userconfig"
-	"github.com/mmedum/google-docs-mcp/v3/internal/version"
+	"github.com/mmedum/google-docs-mcp/v4/internal/auth"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/credentials"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v4/internal/redact"
+	"github.com/mmedum/google-docs-mcp/v4/internal/server"
+	"github.com/mmedum/google-docs-mcp/v4/internal/service"
+	"github.com/mmedum/google-docs-mcp/v4/internal/tools"
+	"github.com/mmedum/google-docs-mcp/v4/internal/userconfig"
+	"github.com/mmedum/google-docs-mcp/v4/internal/version"
 )
 
 // below takes them as io.Writer so nothing else can reach stdout.

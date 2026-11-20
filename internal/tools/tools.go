@@ -8,8 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
-	"github.com/mmedum/google-docs-mcp/v3/internal/service"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/service"
 )
 
 // Deps are what the tools need.

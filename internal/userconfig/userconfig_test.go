@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
 )
 
 func TestPathsAndRoundTrip(t *testing.T) {

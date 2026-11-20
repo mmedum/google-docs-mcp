@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
 )
 
 func BenchmarkDecodeLarge(b *testing.B) {

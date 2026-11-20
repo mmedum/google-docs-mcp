@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
 )
 
 // The model never widens its own reach: only the operator changes what

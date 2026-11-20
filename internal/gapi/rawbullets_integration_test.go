@@ -40,7 +40,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
 )
 
 const (

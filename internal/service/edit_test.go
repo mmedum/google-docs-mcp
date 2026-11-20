@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
-	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v4/internal/plan"
 )
 
 // writable builds a service whose handle memory holds the fixture, as it

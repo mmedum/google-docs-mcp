@@ -508,6 +508,7 @@ func (s *Service) resolveOps(ctx context.Context, f *Fetched, ops []EditOp, mode
 		if err != nil {
 			return nil, Errorf(classOf(err), "op %d: %s", i, messageOf(err))
 		}
+		keepEdgeSpaces(op, &p)
 		out.ops = append(out.ops, p)
 	}
 	return out, checkInternalLinks(f.Doc, out.ops)
@@ -879,11 +880,14 @@ func targetTab(t *Target) string {
 }
 
 func parseContent(content, format string) (*markdown.Fragment, error) {
-	if strings.EqualFold(strings.TrimSpace(format), "text") {
+	if isText(format) {
 		return markdown.Plain(content), nil
 	}
 	return markdown.Parse(content)
 }
+
+// isText says content is verbatim text rather than markdown.
+func isText(format string) bool { return strings.EqualFold(strings.TrimSpace(format), "text") }
 
 type insertPoint struct {
 	tab         *doc.Tab
@@ -916,6 +920,27 @@ func (ip *insertPoint) fill(p *plan.Op, out *resolvedOps) {
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
 	out.note(ip.tab.ID, ip.segment.ID, ip.index)
+}
+
+// keepEdgeSpaces parses markdown content that lands inside an existing
+// paragraph again, keeping the spaces it starts and ends with (D-26):
+// an insertion that does not fill a blank paragraph, or the replacement
+// of text within one. Text content keeps them already.
+func keepEdgeSpaces(op EditOp, p *plan.Op) {
+	if op.Fragment != nil || p.Fragment == nil || isText(op.ContentFormat) {
+		return
+	}
+	inside := p.Kind == plan.OpReplace && !p.TargetIsBlock
+	if p.Insert != nil {
+		inside = p.Inline && !p.Fill
+	}
+	if !inside {
+		return
+	}
+	// The content parsed whole already, so trimmed it parses too.
+	if f, err := markdown.ParseInside(op.Content); err == nil {
+		p.Fragment = f
+	}
 }
 
 // soleUnstyled keeps Unstyled only for an op alone in its segment: it is

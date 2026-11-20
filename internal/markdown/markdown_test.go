@@ -3,6 +3,7 @@ package markdown
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -267,4 +268,44 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func TestParseInside(t *testing.T) {
+	for _, tc := range []struct {
+		name, src string
+		want      []string // each block's text, every one a paragraph
+	}{
+		{"leading space", " and more", []string{" and more"}},
+		{"trailing space after bold", "**bold** ", []string{"bold "}},
+		{"both, two paragraphs", " one\n\ntwo\t", []string{" one", "two\t"}},
+		{"a leading tab is no code block", "\tand more", []string{"\tand more"}},
+		{"four leading spaces are no code block", "    and more", []string{"    and more"}},
+		{"only a space", " ", []string{" "}},
+		{"a space on a line of its own", " \nmore", []string{"more"}},
+		{"a list item keeps Markdown's rules", "- item ", []string{"item"}},
+		{"none", "plain", []string{"plain"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := ParseInside(tc.src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var texts []string
+			for _, b := range f.Blocks {
+				if b.Kind != KindParagraph && b.Kind != KindListItem {
+					t.Errorf("ParseInside(%q) made a %s block", tc.src, b.Kind)
+				}
+				texts = append(texts, b.Text())
+			}
+			if !slices.Equal(texts, tc.want) {
+				t.Errorf("ParseInside(%q) = %q, want %q", tc.src, texts, tc.want)
+			}
+		})
+	}
+	// The added text carries no style, so a plain paragraph stays one a
+	// minimal diff can take.
+	f, _ := ParseInside(" and more")
+	if text, ok := f.SingleParagraph(); !ok || text != " and more" {
+		t.Errorf("SingleParagraph = %q, %t; want \" and more\", true", text, ok)
+	}
 }

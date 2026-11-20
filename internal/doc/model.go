@@ -549,6 +549,9 @@ type Cell struct {
 	// the cell's own style and to the style of the row holding it.
 	StyleChanges []StyleChange
 	RowChanges   []StyleChange
+	// Inserted and Deleted are the suggestions adding or removing the
+	// cell, its own ids and its row's together.
+	Inserted, Deleted []string
 }
 
 // CellStyle is a table cell's own formatting.

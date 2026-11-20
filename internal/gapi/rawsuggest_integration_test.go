@@ -43,7 +43,16 @@ package gapi
 //     absent: bold false over a suggested bold proves nothing, because
 //     on unbolded text it is indistinguishable from no change at all.
 //
-// That last point is why the server warns here rather than refusing:
+//   - A suggested insertion in a table cell is the same as in the body.
+//     A suggested row carries its id on the row, every cell of it and
+//     every cell's newline; a suggested column on its cells and their
+//     newlines, and on no row (TestRawSuggestedTableInsertions).
+//   - A reset over inserted text joins the insertion's id unless the
+//     text fills its paragraph. Then Google extends the reset to the
+//     paragraph mark, outside the insertion, and files it under a second
+//     id (TestRawSuggestedResetWholeParagraph).
+//
+// The restyle point is why the server warns there rather than refusing:
 // see guardRestyle in internal/plan/ops.go.
 import (
 	"context"
@@ -489,6 +498,18 @@ func TestRawSuggestedReset(t *testing.T) {
 	})
 }
 
+// TestRawSuggestedResetWholeParagraph asks when the reset gets a
+// suggestion id of its own (#109). Text inserted into an empty paragraph
+// and reset takes two ids, the second also on the paragraph mark; the
+// control inserts the same text before other text in the paragraph.
+func TestRawSuggestedResetWholeParagraph(t *testing.T) {
+	insertReset := round{wc: suggestMode, reqs: []json.RawMessage{insertAt(t, "new", 8), reset(t, 8, 11, "*")}}
+	runProbes(t, []probe{
+		{name: "empty paragraph", seed: "Alpha.\n", rounds: []round{insertReset}},
+		{name: "before other text", seed: "Alpha.\nold\n", rounds: []round{insertReset}},
+	})
+}
+
 // reset clears the named text properties over a range, "*" for all of
 // them, which is what the planner sends after inserting a fragment.
 func reset(t *testing.T, start, end int, fields string) json.RawMessage {
@@ -640,4 +661,99 @@ func TestRawSuggestedStyleKindControls(t *testing.T) {
 			{[]json.RawMessage{paraStyle(t, 1, 10, "spaceAbove", pt(12))}, suggestMode},
 			{[]json.RawMessage{paraStyle(t, 1, 10, "spaceAbove", pt(12))}, nil}}},
 	})
+}
+
+// TestRawSuggestedTableInsertions asks what a suggested insertion looks
+// like inside a table (#109): text inserted into a cell, the same text
+// with the planner's reset after it, a row inserted below the first and
+// a column right of the first.
+// Each case gets a fresh document holding a direct 2×2 table, and the
+// table is logged as Google returns it, suggestion ids included.
+func TestRawSuggestedTableInsertions(t *testing.T) {
+	c := probeClient(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		reqs func(table, cell int) []json.RawMessage
+	}{
+		{"text into a cell", func(_, cell int) []json.RawMessage {
+			return []json.RawMessage{insertAt(t, "new", cell)}
+		}},
+		{"text into a cell, then the planner's reset", func(_, cell int) []json.RawMessage {
+			return []json.RawMessage{insertAt(t, "new", cell), reset(t, cell, cell+3, "*")}
+		}},
+		{"a row below the first", func(table, _ int) []json.RawMessage {
+			return []json.RawMessage{marshal(t, map[string]any{"insertTableRow": map[string]any{
+				"tableCellLocation": map[string]any{"tableStartLocation": map[string]any{"index": table}, "rowIndex": 0, "columnIndex": 0},
+				"insertBelow":       true}})}
+		}},
+		{"a column right of the first", func(table, _ int) []json.RawMessage {
+			return []json.RawMessage{marshal(t, map[string]any{"insertTableColumn": map[string]any{
+				"tableCellLocation": map[string]any{"tableStartLocation": map[string]any{"index": table}, "rowIndex": 0, "columnIndex": 0},
+				"insertRight":       true}})}
+		}},
+	} {
+		id := probeDoc(t, c, ctx, tc.name, "google-docs-mcp suggested-table probe (safe to delete)",
+			[]json.RawMessage{insertAt(t, "Probe line.\n", 1), marshal(t, map[string]any{"insertTable": map[string]any{
+				"rows": 2, "columns": 2, "endOfSegmentLocation": map[string]any{}}})}, nil)
+		table, cell := tableIndices(t, rawBody(t, c, ctx, id, SuggestionsInline))
+		res, err := c.BatchUpdate(ctx, id, &BatchUpdateRequest{Requests: tc.reqs(table, cell), WriteControl: suggestMode})
+		if err != nil {
+			// A refusal is an answer too: the planner would have to refuse
+			// the same op in suggest mode.
+			t.Logf("--- %s: suggest-mode batch refused: %v ---", tc.name, err)
+			continue
+		}
+		reply, _ := json.Marshal(res.Replies)
+		t.Logf("--- %s: replies %s ---", tc.name, reply)
+		for _, view := range []string{SuggestionsInline, SuggestionsPreviewAccepted} {
+			t.Logf("%s %s:\n%s", tc.name, view, tableOf(t, rawBody(t, c, ctx, id, view)))
+		}
+	}
+	t.Logf("=== scratch documents left behind; Drive search title:\"safe to delete\" finds them ===")
+}
+
+// firstTable is the first table element in the first tab's body.
+func firstTable(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	var whole map[string]any
+	if err := json.Unmarshal(body, &whole); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	tabs, _ := whole["tabs"].([]any)
+	tab, _ := tabs[0].(map[string]any)
+	dt, _ := tab["documentTab"].(map[string]any)
+	b, _ := dt["body"].(map[string]any)
+	content, _ := b["content"].([]any)
+	for _, el := range content {
+		if m, _ := el.(map[string]any); m["table"] != nil {
+			return m
+		}
+	}
+	t.Fatal("the document holds no table")
+	return nil
+}
+
+// tableIndices is the table's start index and the start of the first
+// cell's first paragraph, read back rather than computed, since where
+// insertTable puts the table is Google's choice.
+func tableIndices(t *testing.T, body []byte) (table, cell int) {
+	t.Helper()
+	el := firstTable(t, body)
+	tbl, _ := el["table"].(map[string]any)
+	rows, _ := tbl["tableRows"].([]any)
+	row, _ := rows[0].(map[string]any)
+	cells, _ := row["tableCells"].([]any)
+	c0, _ := cells[0].(map[string]any)
+	content, _ := c0["content"].([]any)
+	p0, _ := content[0].(map[string]any)
+	start, _ := el["startIndex"].(float64)
+	cs, _ := p0["startIndex"].(float64)
+	return int(start), int(cs)
+}
+
+func tableOf(t *testing.T, body []byte) string {
+	t.Helper()
+	out, _ := json.Marshal(firstTable(t, body))
+	return string(out)
 }

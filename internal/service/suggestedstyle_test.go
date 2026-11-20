@@ -330,3 +330,68 @@ func TestARestyleSpanningRunsIsReportedOnce(t *testing.T) {
 	}
 	t.Errorf("the suggestion is missing: %+v", res.Suggestions)
 }
+
+// TestASuggestedRowOrColumnIsStructure is the shape Google returns for
+// a row or a column inserted as a suggestion
+// (TestRawSuggestedTableInsertions): the id on each new cell and its
+// newline, and for a row on the row too.
+func TestASuggestedRowOrColumnIsStructure(t *testing.T) {
+	const id = "s.grid"
+	ins := gdocs.Suggested{SuggestedInsertionIDs: []string{id}}
+	for _, tc := range []struct {
+		name       string
+		suggested  func(r, c int) bool
+		onRow      int // the row that carries the id itself, or -1
+		wantHandle string
+	}{
+		{"row", func(r, _ int) bool { return r == 1 }, 1, "tbl1:r2c1"},
+		{"column", func(_, c int) bool { return c == 1 }, -1, "tbl1:r1c2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A 2×2 table at 1: each row opens at one index, each cell at
+			// the next and holds a lone newline, and the table closes one
+			// past its last cell.
+			tbl := &gdocs.Table{Rows: 2, Columns: 2}
+			at := int64(2)
+			for r := range 2 {
+				row := &gdocs.TableRow{StartIndex: at}
+				if r == tc.onRow {
+					row.Suggested = ins
+				}
+				for c := range 2 {
+					run := &gdocs.TextRun{Content: "\n"}
+					cell := &gdocs.TableCell{StartIndex: at, EndIndex: at + 2}
+					if tc.suggested(r, c) {
+						run.Suggested, cell.Suggested = ins, ins
+					}
+					cell.Content = []*gdocs.StructuralElement{{StartIndex: at + 1, EndIndex: at + 2, Paragraph: &gdocs.Paragraph{
+						ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+						Elements:       []*gdocs.ParagraphElement{{StartIndex: at + 1, EndIndex: at + 2, TextRun: run}},
+					}}}
+					row.TableCells = append(row.TableCells, cell)
+					at += 2
+				}
+				row.EndIndex = at
+				tbl.TableRows = append(tbl.TableRows, row)
+			}
+			raw, err := json.Marshal(&gdocs.Document{
+				DocumentID: fixtureID, RevisionID: "r",
+				Body: &gdocs.Body{Content: []*gdocs.StructuralElement{{StartIndex: 1, EndIndex: at + 1, Table: tbl}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc := New(&fakeAPI{raw: raw}, Options{DefaultWriteMode: config.WriteDirect})
+			res, err := svc.ListSuggestions(context.Background(), fixtureID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Suggestions) != 1 {
+				t.Fatalf("one suggested %s is one suggestion, got %+v", tc.name, res.Suggestions)
+			}
+			if sg := res.Suggestions[0]; sg.ID != id || sg.Kind != "structure" || sg.Handle != tc.wantHandle {
+				t.Errorf("got %s %s at %s, want %s structure at %s", sg.ID, sg.Kind, sg.Handle, id, tc.wantHandle)
+			}
+		})
+	}
+}

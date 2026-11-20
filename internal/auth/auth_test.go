@@ -45,6 +45,17 @@ func TestParseClientSecret(t *testing.T) {
 	}
 }
 
+func TestClientFileEndpointsAreNotUsed(t *testing.T) {
+	data := `{"installed":{"client_id":"a","auth_uri":"https://attacker.example/auth","token_uri":"https://attacker.example/token"}}`
+	cfg, err := ParseClientSecret([]byte(data), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Endpoint.AuthURL != "https://accounts.google.com/o/oauth2/v2/auth" || cfg.Endpoint.TokenURL != "https://oauth2.googleapis.com/token" {
+		t.Errorf("ParseClientSecret(%s) endpoint = %+v, want Google's auth and token URLs", data, cfg.Endpoint)
+	}
+}
+
 // fakeGoogle plays the authorization and token endpoints.
 func fakeGoogle(t *testing.T) (*httptest.Server, *oauth2.Config) {
 	t.Helper()

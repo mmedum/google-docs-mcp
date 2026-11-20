@@ -612,8 +612,19 @@ func maskOf(fields []string) fieldMask {
 	return m
 }
 
+// landsOverASuggestion are the text properties Google applies directly
+// over a pending suggestion of the same property, at the value it
+// suggests or another. Bold and every paragraph property tried
+// (alignment, lineSpacing, spaceAbove) are dropped at the suggested
+// value, and an unprobed property may be, so those still warn.
+// TestRawSuggestedStyleKinds and TestRawSuggestedStyleValue in
+// internal/gapi check it (GDOCS_INTEGRATION=1, -tags=integration).
+var landsOverASuggestion = map[string]bool{"italic": true, "underline": true, "strikethrough": true, "smallCaps": true,
+	"baselineOffset": true, "foregroundColor": true, "weightedFontFamily": true, "fontSize": true}
+
 // overlapProps are the properties a suggestion sets that the mask also
-// sets.
+// sets, less those Google applies over a suggestion anyway. A reset
+// ("*") is not among those probed, so it overlaps everything.
 func overlapProps(mask fieldMask, suggested []string) []string {
 	var out []string
 	for _, p := range suggested {
@@ -624,6 +635,9 @@ func overlapProps(mask fieldMask, suggested []string) []string {
 		top := p
 		if i := strings.IndexByte(p, '.'); i >= 0 {
 			top = p[:i]
+		}
+		if mask.names[top] && landsOverASuggestion[top] {
+			continue
 		}
 		if mask.all || mask.names[top] {
 			out = append(out, p)

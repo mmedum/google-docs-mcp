@@ -121,9 +121,14 @@ func TestDirectFormatWarnsOnACollidingSuggestion(t *testing.T) {
 		{"direct, a size where a font is suggested", "direct",
 			plan.TextStyleSpec{SizePt: 14},
 			&gdocs.TextStyleSuggestionState{WeightedFontFamilySuggested: true}, false},
+		// Google applies these over a suggestion of the same property, at
+		// the same value or another (TestRawSuggestedStyleKinds), so only
+		// bold, a paragraph property or one unprobed warns (#106).
 		{"direct, a size where a size is suggested", "direct",
 			plan.TextStyleSpec{SizePt: 14},
-			&gdocs.TextStyleSuggestionState{FontSizeSuggested: true}, true},
+			&gdocs.TextStyleSuggestionState{FontSizeSuggested: true}, false},
+		{"direct, italic where italic is suggested", "direct", italic,
+			&gdocs.TextStyleSuggestionState{ItalicSuggested: true}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := restyledService(t, "suggest.bold1", tc.state)

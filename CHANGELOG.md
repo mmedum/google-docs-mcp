@@ -12,6 +12,10 @@ diff in CI flags them.
 
 - `dry_run` on `create_document`, `reply_comment`, `manage_tabs` and `export_document`: each checks the call and sends, creates and writes nothing (#105).
 
+### Changed
+
+- A direct format change over a pending suggestion warns only for bold, paragraph properties and unprobed ones; Google applies the rest, probes show (#106).
+
 ### Removed
 
 - **Breaking:** the `--preview` flag, and `GDOCS_PREVIEW`, which is no longer read. Remove `--preview` from a client's arguments, or the server stops at start.

@@ -397,39 +397,100 @@ func TestASuggestedRowOrColumnIsStructure(t *testing.T) {
 }
 
 // TestASuggestionInAPlainParagraphSendsNoReset covers where the reset
-// after inserted text is left out: in suggest mode, in a paragraph with
-// no styled run, where it would change nothing and Google would file it
-// as a suggestion of its own (TestRawSuggestedInheritance).
+// after inserted text, and a paragraph's named style where it is the one
+// it has, are left out: in suggest mode, for an op alone in its segment,
+// in a paragraph with no style and no pending suggestion, where they
+// would change nothing and Google would file them as a suggestion of
+// their own (TestRawSuggestedInheritance).
 func TestASuggestionInAPlainParagraphSendsNoReset(t *testing.T) {
+	var blank string
+	for _, b := range doctest.Fixture(t).AllBlocks() {
+		if blank == "" && b.IsBlankParagraph() {
+			blank = b.Handle
+		}
+	}
+	if blank == "" {
+		t.Fatal("the fixture needs a blank paragraph")
+	}
+	insert := func(at string, of *Target) EditOp {
+		return EditOp{Kind: plan.OpInsert, Location: &Location{At: at, Of: of}, Content: "new"}
+	}
+	afterStepOne := insert("after", &Target{Text: "Step one"})
 	for _, tc := range []struct {
 		name, mode string
-		loc        Location
-		wantReset  bool
+		pending    bool // a suggestion restyles "Step one"
+		ops        []EditOp
+		// wantReset is the reset after the text; wantNamed the named style
+		// of a paragraph the content styles, which an insertion inside a
+		// paragraph never sends.
+		wantReset, wantNamed bool
 	}{
-		{"suggest, after plain text", "suggest", Location{At: "after", Of: &Target{Text: "Step one"}}, false},
-		{"suggest, end of the body", "suggest", Location{At: "end"}, true},
-		{"suggest, after text in a code font", "suggest", Location{At: "after", Of: &Target{Text: "go build"}}, true},
-		{"direct, after plain text", "direct", Location{At: "after", Of: &Target{Text: "Step one"}}, true},
+		{"suggest, after plain text", "suggest", false, []EditOp{afterStepOne}, false, false},
+		{"suggest, filling a blank paragraph", "suggest", false, []EditOp{insert("start", &Target{Handle: blank})}, false, false},
+		{"suggest, end of the body", "suggest", false, []EditOp{insert("end", nil)}, true, true},
+		{"suggest, after text in a code font", "suggest", false, []EditOp{insert("after", &Target{Text: "go build"})}, true, false},
+		{"suggest, beside a pending suggestion", "suggest", true, []EditOp{afterStepOne}, true, false},
+		{"suggest, two ops in the segment", "suggest", false, []EditOp{afterStepOne, insert("after", &Target{Text: "Step two"})}, true, false},
+		{"direct, after plain text", "direct", false, []EditOp{afterStepOne}, true, false},
+		{"direct, filling a blank paragraph", "direct", false, []EditOp{insert("start", &Target{Handle: blank})}, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, api := writable(t, true)
-			loc := tc.loc
-			if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: tc.mode,
-				Ops: []EditOp{{Kind: plan.OpInsert, Location: &loc, Content: "new"}}}); err != nil {
+			if tc.pending {
+				api.raw = withStepOneRestyled(t, api.raw)
+			}
+			for i := range tc.ops {
+				tc.ops[i].Seq = i
+			}
+			if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: tc.mode, Ops: tc.ops}); err != nil {
 				t.Fatal(err)
 			}
 			if len(api.batches) != 1 {
 				t.Fatalf("want one batch, got %d", len(api.batches))
 			}
-			reset := false
+			reset, named := false, false
 			for _, r := range api.batches[0].Requests {
-				if strings.Contains(string(r), `"fields":"*"`) {
-					reset = true
-				}
+				reset = reset || strings.Contains(string(r), `"fields":"*"`)
+				named = named || strings.Contains(string(r), `"fields":"namedStyleType"`)
 			}
-			if reset != tc.wantReset {
-				t.Errorf("reset sent = %t, want %t; requests: %s", reset, tc.wantReset, kindsOf(t, api.batches[0].Requests))
+			if reset != tc.wantReset || named != tc.wantNamed {
+				t.Errorf("reset sent = %t, named style sent = %t, want %t and %t; requests: %s",
+					reset, named, tc.wantReset, tc.wantNamed, kindsOf(t, api.batches[0].Requests))
 			}
 		})
 	}
+}
+
+// withStepOneRestyled hangs a pending suggested italic on the fixture's
+// run "Step one".
+func withStepOneRestyled(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var d gdocs.Document
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tab := range d.Tabs {
+		for _, el := range tab.DocumentTab.Body.Content {
+			if el.Paragraph == nil {
+				continue
+			}
+			for _, pe := range el.Paragraph.Elements {
+				if pe.TextRun != nil && strings.HasPrefix(pe.TextRun.Content, "Step one") {
+					pe.TextRun.SuggestedTextStyleChanges = map[string]gdocs.SuggestedTextStyle{"s.italic": {
+						TextStyle:                &gdocs.TextStyle{Italic: true},
+						TextStyleSuggestionState: &gdocs.TextStyleSuggestionState{ItalicSuggested: true}}}
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal(`the fixture no longer has a run "Step one"`)
+	}
+	out, err := json.Marshal(&d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

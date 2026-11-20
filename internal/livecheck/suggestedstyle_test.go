@@ -95,13 +95,13 @@ func TestStyleOnlySuggestionIsVisible(t *testing.T) {
 		t.Errorf("the untouched paragraph picked up a marker:\n%s", shown(quiet, 400))
 	}
 
-	// Suggested text in a paragraph with no style is one suggestion: the
-	// planner sends no reset, which Google would file as a second one
-	// (TestRawSuggestedInheritance).
-	plain := d.ok("suggest text in a plain paragraph", "edit_document", map[string]any{
+	// A paragraph appended after a plain last one is one suggestion: the
+	// planner sends no reset, which would cover the new paragraph and its
+	// kept mark and be filed as a second suggestion
+	// (TestRawSuggestedInheritance, TestRawSuggestedResetWholeParagraph).
+	plain := d.ok("suggest a paragraph after a plain one", "edit_document", map[string]any{
 		"document": doc, "mode": "suggest", "ops": []any{
-			map[string]any{"op": "insert", "location": map[string]any{"at": "after", "of": map[string]any{"text": "sentence two"}},
-				"content": " and more"}}})
+			map[string]any{"op": "append", "content": "Appended plain text."}}})
 	plainIDs := regexp.MustCompile(`suggest\.\w+`).FindAllString(first(regexp.MustCompile(`suggestion ids: ([^\n]+)`), plain), -1)
 	if len(plainIDs) != 1 {
 		t.Errorf("want one suggestion for text in a plain paragraph, got %d:\n%s", len(plainIDs), shown(plain, 400))

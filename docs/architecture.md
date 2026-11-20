@@ -1012,13 +1012,18 @@ A suggested row carries its id on the row, its cells and their
 newlines, and a suggested column on its cells and their newlines. Each
 is listed once as `structure` at its first cell.
 
-Suggested text takes its style from its own paragraph, so in suggest
-mode the planner leaves out the reset after inserted text when no run
-of that paragraph carries a text style.
+Suggested text takes its style from its own paragraph, and a new
+paragraph the style of the one the text lands in. So in suggest mode,
+when that paragraph and its runs carry no style and no pending
+suggestion and the op is the only one in its segment, since another
+could style the paragraph first, the planner leaves out the reset after
+inserted text, and a paragraph's named style where it is the one that
+paragraph has. Either, sent over a paragraph whose mark the content
+does not insert, is filed as a second suggestion.
 
-Cost: inserted text that fills a styled paragraph and is then reset
-gets a second suggestion: Google extends the reset to the paragraph
-mark, which the insertion does not cover. It is listed as a `format`
+Cost: inserted text that fills a styled paragraph, and is then reset
+or given a named style, gets a second suggestion: Google extends the
+change to the paragraph mark, which the insertion does not cover. It is listed as a `format`
 suggestion of every text property. The integration tests
 TestRawSuggestedResetWholeParagraph, TestRawSuggestedInheritance and
 TestRawSuggestedTableInsertions show it.

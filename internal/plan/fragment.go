@@ -42,14 +42,16 @@ type FragmentOptions struct {
 	// they are refused. Checked by the integration test
 	// TestRawTablesInContent.
 	Slots bool
-	// Unstyled leaves out the style reset, for a suggestion landing in a
-	// paragraph that carries no text style. Suggested text takes its
-	// style from its own paragraph, so the reset changes nothing; sent, a
-	// reset covering a paragraph whose mark it does not insert is filed
-	// as a second suggestion of every text property. Direct mode keeps
-	// the reset. Checked by the integration tests
-	// TestRawSuggestedInheritance and TestRawSuggestedResetWholeParagraph.
-	Unstyled bool
+	// Unstyled, for a suggestion, is the named style of the paragraph it
+	// lands in when that paragraph carries no style (Op.Unstyled). The
+	// style reset is then left out, and so is a paragraph's named style
+	// where it is that one: suggested text takes its style from its own
+	// paragraph, so neither changes anything, and either, sent over a
+	// paragraph whose mark the content does not insert, is filed as a
+	// second suggestion of every text property. Direct mode keeps both.
+	// Checked by the integration tests TestRawSuggestedInheritance and
+	// TestRawSuggestedResetWholeParagraph.
+	Unstyled string
 	// Isolate gives a slot that ends the fragment a newline of its own.
 	// Set where the newline it would end with follows text the batch
 	// deletes: as a suggestion that text stays, inside the slot.
@@ -162,7 +164,7 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 		c.Requests = append(c.Requests, InsertText(text, at))
 	}
 	// Inserted text inherits the style of its neighbors; reset it.
-	if cursor > contentStart && !o.Unstyled {
+	if cursor > contentStart && o.Unstyled == "" {
 		c.Requests = append(c.Requests, ClearTextStyle(rng(contentStart, cursor)))
 	}
 	for i, p := range pieces {
@@ -230,7 +232,11 @@ func pieceRequests(p *piece, o FragmentOptions, merged bool, rng func(int64, int
 		if p.block.Kind == markdown.KindHeading {
 			ps.NamedStyle = fmt.Sprintf("HEADING_%d", p.block.HeadingLevel())
 		}
-		reqs = append(reqs, UpdateParagraphStyle(paraRange(p), ps))
+		// A new paragraph takes the style of the one the text lands in.
+		// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTextRequest
+		if ps.NamedStyle != o.Unstyled {
+			reqs = append(reqs, UpdateParagraphStyle(paraRange(p), ps))
+		}
 		if o.Inherited != nil && !p.listItem {
 			// The bullet's indent outlives it.
 			reqs = append(reqs, DeleteBullets(paraRange(p)), ClearIndent(paraRange(p)))

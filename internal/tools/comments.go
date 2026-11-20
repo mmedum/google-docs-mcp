@@ -33,6 +33,7 @@ type ReplyInput struct {
 	ReplyID      string `json:"reply_id,omitempty" jsonschema:"edit: the reply to rewrite; without it the thread's own comment is rewritten"`
 	Content      string `json:"content,omitempty" jsonschema:"reply text, up to 2048 bytes; required for a plain reply and for edit, optional with resolve or reopen"`
 	Action       string `json:"action,omitempty" jsonschema:"reply (default), resolve, reopen, or edit"`
+	DryRun       bool   `json:"dry_run,omitempty" jsonschema:"look the thread up, run every check and stop before the write"`
 }
 
 // DeleteCommentInput removes a thread or a reply.
@@ -90,11 +91,12 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 			"one reply when reply_id names it; Google allows only the author of a comment to rewrite it. Thread and " +
 			"reply ids come from list_comments. With suggestion_id instead of comment_id it replies on a suggested " +
 			"edit's thread; accepting or rejecting one is review_suggestion. On a Markdown file (.md) a comment the Docs " +
-			"editor keeps takes replies only, written into the file; the person resolves it in the editor.",
+			"editor keeps takes replies only, written into the file; the person resolves it in the editor. dry_run runs " +
+			"every check and stops before the write.",
 		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReplyInput) (*mcp.CallToolResult, *service.ReplyResult, error) {
 		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, SuggestionID: in.SuggestionID,
-			ReplyID: in.ReplyID, Content: in.Content, Action: in.Action})
+			ReplyID: in.ReplyID, Content: in.Content, Action: in.Action, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

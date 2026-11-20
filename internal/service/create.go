@@ -21,6 +21,9 @@ type CreateRequest struct {
 	// FromFile makes a working copy of a Markdown file: a Google Doc
 	// holding its text, which WriteBack writes back into it.
 	FromFile string
+	// DryRun checks the request, and the source of a working copy, and
+	// creates nothing.
+	DryRun bool
 }
 
 // CreateResult describes the new document.
@@ -30,12 +33,42 @@ type CreateResult struct {
 	Kind       string   `json:"kind"`
 	URL        string   `json:"url"`
 	RevisionID string   `json:"revision_id"`
+	DryRun     bool     `json:"dry_run,omitempty"`
 	Warnings   []string `json:"warnings,omitempty"`
+	Text       string   `json:"-"`
 }
 
 // Create makes a document and, when content is given, writes it directly
 // (a new document has nothing to suggest against).
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult, error) {
+	res, err := s.create(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	res.DryRun = req.DryRun
+	res.Text = createText(res)
+	return res, nil
+}
+
+// createText is the result a person reads: what was made, or what a dry
+// run would make, and where.
+func createText(res *CreateResult) string {
+	var sb strings.Builder
+	if res.DryRun {
+		fmt.Fprintf(&sb, "dry run: would create %s %q", res.Kind, res.Title)
+	} else {
+		fmt.Fprintf(&sb, "created %q\n%s", res.Title, res.URL)
+	}
+	if res.RevisionID != "" {
+		sb.WriteString("\nrevision " + res.RevisionID)
+	}
+	for _, w := range res.Warnings {
+		sb.WriteString("\nwarning: " + w)
+	}
+	return sb.String()
+}
+
+func (s *Service) create(ctx context.Context, req CreateRequest) (*CreateResult, error) {
 	if err := s.requireWritable(); err != nil {
 		return nil, err
 	}
@@ -52,9 +85,17 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	switch strings.ToLower(strings.TrimSpace(req.Kind)) {
 	case "", KindDocument:
 	case KindMarkdownFile:
-		return s.createMarkdown(ctx, title, req.Content)
+		return s.createMarkdown(ctx, title, req.Content, req.DryRun)
 	default:
 		return nil, Errorf("invalid", "kind %q; use document or markdown_file", req.Kind)
+	}
+	if req.DryRun {
+		res := &CreateResult{Title: title, Kind: KindDocument}
+		if strings.TrimSpace(req.Content) != "" {
+			// The content is planned against the new document, which a dry run never makes.
+			res.Warnings = append(res.Warnings, "the content is not planned: the document it goes into does not exist yet")
+		}
+		return res, nil
 	}
 	d, err := s.api.CreateDocument(ctx, title)
 	if err != nil {
@@ -84,7 +125,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 // createMarkdown makes a Markdown file in My Drive holding content as
 // given, which Docs opens in place. The name gets .md unless it ends in
 // .md or .markdown, which is what Docs and Drive recognize the file by.
-func (s *Service) createMarkdown(ctx context.Context, title, content string) (*CreateResult, error) {
+func (s *Service) createMarkdown(ctx context.Context, title, content string, dryRun bool) (*CreateResult, error) {
 	if mdfile.ContainsMarkup(content) {
 		return nil, Errorf("invalid", "%s", markupRefused)
 	}
@@ -94,6 +135,9 @@ func (s *Service) createMarkdown(ctx context.Context, title, content string) (*C
 	name := title
 	if lower := strings.ToLower(name); !strings.HasSuffix(lower, ".md") && !strings.HasSuffix(lower, ".markdown") {
 		name += ".md"
+	}
+	if dryRun {
+		return &CreateResult{Title: name, Kind: KindMarkdownFile}, nil
 	}
 	f, err := s.api.CreateFile(ctx, gapi.NewFile{Name: name, MimeType: gapi.MarkdownMimeType}, gapi.MarkdownMimeType, []byte(content))
 	if err != nil {

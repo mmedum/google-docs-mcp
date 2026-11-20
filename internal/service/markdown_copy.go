@@ -48,15 +48,18 @@ func (s *Service) createWorkingCopy(ctx context.Context, req CreateRequest) (*Cr
 	// Front matter stays in the file: Docs' import would make it a rule
 	// and a heading.
 	body := m.md.Text()[m.md.FrontMatter().End:]
-	f, err := s.api.CreateFile(ctx, gapi.NewFile{Name: title, MimeType: gapi.DocumentMimeType,
-		AppProperties: map[string]string{copySourceKey: m.id(), copyBaseKey: m.revision()}}, gapi.MarkdownMimeType, []byte(body))
-	if err != nil {
-		return nil, wrapAPI(err, "working copy")
-	}
-	s.rememberKind(f.ID, gapi.DocumentMimeType)
-	res := &CreateResult{ID: f.ID, Title: f.Name, Kind: KindDocument, URL: doc.DocumentURL(f.ID)}
-	if f.Name == "" {
-		res.Title = title
+	res := &CreateResult{Title: title, Kind: KindDocument}
+	if !req.DryRun {
+		f, err := s.api.CreateFile(ctx, gapi.NewFile{Name: title, MimeType: gapi.DocumentMimeType,
+			AppProperties: map[string]string{copySourceKey: m.id(), copyBaseKey: m.revision()}}, gapi.MarkdownMimeType, []byte(body))
+		if err != nil {
+			return nil, wrapAPI(err, "working copy")
+		}
+		s.rememberKind(f.ID, gapi.DocumentMimeType)
+		res.ID, res.URL = f.ID, doc.DocumentURL(f.ID)
+		if f.Name != "" {
+			res.Title = f.Name
+		}
 	}
 	if m.md.FrontMatter().Present {
 		res.Warnings = append(res.Warnings, "the file's front matter stays in the file and is not in the copy; writing the copy back keeps it")

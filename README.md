@@ -399,10 +399,11 @@ read and diffed through Google's export, so they have no handles.
 
   A client that runs with nobody watching can make every write its
   settings register, so leave `GDOCS_ENABLE_DESTRUCTIVE` off for one.
-- `dry_run` previews a write and sends nothing. `edit_document`,
-  `format_document`, `edit_table`, `insert_object`, `layout_document`,
-  `review_suggestion`, `write_markdown_file`, `add_comment` and the
-  delete tools take it.
+- `dry_run` previews a write and sends nothing. Every tool that writes
+  takes it: `edit_document`, `format_document`, `edit_table`,
+  `insert_object`, `layout_document`, `review_suggestion`,
+  `write_markdown_file`, `add_comment`, `reply_comment`, `manage_tabs`,
+  `create_document`, `export_document` and the delete tools.
 - The server talks only to Google: `googleapis.com` and its subdomains,
   `*.googleusercontent.com`, and `docs.google.com` for the export links
   Google's API returns. No telemetry. Logs (stderr) never carry a

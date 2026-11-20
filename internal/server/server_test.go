@@ -33,6 +33,7 @@ type fakeAPI struct {
 	batches   []*gapi.BatchUpdateRequest
 	comments  []*gapi.DriveComment
 	deleted   []string
+	sent      []string // replies, creates and exports, by method
 
 	// A Markdown file, mdFileID, and a working copy of it, copyID: the
 	// file as it is, as it was when the copy was made, the copy's
@@ -91,6 +92,7 @@ func (f *fakeAPI) BatchUpdate(_ context.Context, id string, req *gapi.BatchUpdat
 }
 
 func (f *fakeAPI) CreateDocument(_ context.Context, title string) (*gdocs.Document, error) {
+	f.sent = append(f.sent, "CreateDocument")
 	return &gdocs.Document{DocumentID: fixtureID, Title: title, RevisionID: "rev-new", Body: &gdocs.Body{Content: []*gdocs.StructuralElement{
 		{StartIndex: 0, EndIndex: 1, SectionBreak: &gdocs.SectionBreak{}},
 		{StartIndex: 1, EndIndex: 2, Paragraph: &gdocs.Paragraph{Elements: []*gdocs.ParagraphElement{{StartIndex: 1, EndIndex: 2, TextRun: &gdocs.TextRun{Content: "\n"}}}}},
@@ -102,6 +104,7 @@ func (f *fakeAPI) SearchFiles(_ context.Context, q string, limit int, pageToken 
 }
 
 func (f *fakeAPI) Export(_ context.Context, id, mimeType string) ([]byte, error) {
+	f.sent = append(f.sent, "Export")
 	if id == copyID {
 		return []byte(f.copyExport), nil
 	}
@@ -126,6 +129,7 @@ func (f *fakeAPI) GetComment(_ context.Context, fileID, commentID string) (*gapi
 }
 
 func (f *fakeAPI) CreateReply(_ context.Context, fileID, commentID, content, action string) (*gapi.DriveReply, error) {
+	f.sent = append(f.sent, "CreateReply")
 	return &gapi.DriveReply{ID: "r1", Content: content, Action: action}, nil
 }
 
@@ -1268,5 +1272,26 @@ func TestDumpSchemasListsEverythingAClientIsTold(t *testing.T) {
 	}
 	if dump.Instructions != "Read before writing." || dump.ReadOnlyInstructions != "Read only." {
 		t.Errorf("instructions = %q and %q, want the server's and the read-only server's", dump.Instructions, dump.ReadOnlyInstructions)
+	}
+}
+
+// Each of these tools passes dry_run through to the service: a dry run
+// over the protocol says so and sends nothing.
+func TestDryRunReachesTheService(t *testing.T) {
+	api := &fakeAPI{raw: doctest.RawFixture(t), comments: []*gapi.DriveComment{{ID: "c1", Content: "Please check"}}}
+	cs := connectWith(t, api, config.Config{DefaultWriteMode: config.WriteDirect, ExportDir: t.TempDir()})
+	for name, args := range map[string]map[string]any{
+		"create_document": {"title": "Plan", "content": "A line.", "dry_run": true},
+		"reply_comment":   {"document": fixtureID, "comment_id": "c1", "content": "Agreed.", "dry_run": true},
+		"manage_tabs":     {"document": fixtureID, "action": "add", "title": "Appendix", "dry_run": true},
+		"export_document": {"document": fixtureID, "format": "pdf", "dry_run": true},
+	} {
+		res := call(t, cs, name, args)
+		if res.IsError || !strings.HasPrefix(textOf(res), "dry run: ") {
+			t.Errorf("%s dry run: %s", name, textOf(res))
+		}
+	}
+	if len(api.sent) != 0 || len(api.batches) != 0 {
+		t.Errorf("dry runs sent %v and %d batches, want nothing", api.sent, len(api.batches))
 	}
 }

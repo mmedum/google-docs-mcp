@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -227,21 +226,16 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"because a new document has nothing to suggest against. With kind markdown_file it makes a Markdown file " +
 			"(.md) instead, holding the content as written; such a file is edited as text. With from_file it makes a " +
 			"working copy of a Markdown file: a Google Doc holding its text, for working in together live with every " +
-			"write mode, which write_markdown_file writes back into the file.",
+			"write mode, which write_markdown_file writes back into the file. dry_run checks the request, reads the file " +
+			"a working copy is made from, and creates nothing.",
 		Annotations: adding,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, *service.CreateResult, error) {
-		res, err := d.Service.Create(ctx, service.CreateRequest{Title: in.Title, Content: in.Content, ContentFormat: in.ContentFormat, Kind: in.Kind, FromFile: in.FromFile})
+		res, err := d.Service.Create(ctx, service.CreateRequest{Title: in.Title, Content: in.Content, ContentFormat: in.ContentFormat, Kind: in.Kind,
+			FromFile: in.FromFile, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}
-		msg := fmt.Sprintf("created %q\n%s", res.Title, res.URL)
-		if res.RevisionID != "" {
-			msg += "\nrevision " + res.RevisionID
-		}
-		for _, w := range res.Warnings {
-			msg += "\nwarning: " + w
-		}
-		return text(msg), res, nil
+		return text(res.Text), res, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -287,6 +281,7 @@ type CreateInput struct {
 	ContentFormat string `json:"content_format,omitempty" jsonschema:"markdown (default) or text"`
 	Kind          string `json:"kind,omitempty" jsonschema:"document (default: a Google Doc) or markdown_file (a .md file in Drive that Docs opens in place, holding content exactly as given)"`
 	FromFile      string `json:"from_file,omitempty" jsonschema:"a Markdown file (id or drive.google.com URL) to make a working copy of: a Google Doc holding its text; title then defaults to the file's"`
+	DryRun        bool   `json:"dry_run,omitempty" jsonschema:"check the request, and read the file a working copy is made from, and create nothing; content is not planned"`
 }
 
 // WriteBackInput is the write_markdown_file call.

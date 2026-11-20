@@ -27,10 +27,14 @@ func dryRunArgs(doc, table, comment, tab, workingCopy string, suggestions []any)
 	}
 	args["add_comment"] = map[string]any{"document": doc, "dry_run": true, "content": "written by a dry run",
 		"target": map[string]any{"text": "Closing line"}}
+	args["manage_tabs"] = map[string]any{"document": doc, "action": "add", "title": "Tab added by a dry run", "dry_run": true}
+	args["export_document"] = map[string]any{"document": doc, "format": "md", "dry_run": true}
+	args["create_document"] = map[string]any{"title": dryRunCreateTitle, "content": "written by a dry run", "dry_run": true}
 	if workingCopy != "" {
 		args["write_markdown_file"] = map[string]any{"document": workingCopy, "dry_run": true}
 	}
 	if comment != "" {
+		args["reply_comment"] = map[string]any{"document": doc, "comment_id": comment, "content": "written by a dry run", "dry_run": true}
 		args["delete_comment"] = map[string]any{"document": doc, "comment_id": comment, "confirm_comment_id": comment,
 			"text_start": "Live test: the target of a dry-run delete.", "dry_run": true}
 	}
@@ -43,6 +47,10 @@ func dryRunArgs(doc, table, comment, tab, workingCopy string, suggestions []any)
 	}
 	return args
 }
+
+// dryRunCreateTitle names the document create_document's dry run would
+// make, so the sweep can search for it and find nothing.
+const dryRunCreateTitle = "google-docs-mcp live dry-run create (never made)"
 
 var revisionOf = regexp.MustCompile(`(?m)^revision (\S+)`)
 
@@ -140,6 +148,14 @@ func liveDryRuns(t *testing.T, d *driver, doc, table string) {
 		// without passing through shown, and the failure is the fact
 		// that the revision moved, not which revision it moved to.
 		t.Errorf("a dry run changed the document: the revision moved after %d dry runs", covered)
+	}
+	// A reply and a new document do not move the document's revision,
+	// so their absence is checked where each would show.
+	if text := d.ok("the comments after the dry runs", "list_comments", map[string]any{"document": doc}); strings.Contains(text, "written by a dry run") {
+		t.Errorf("reply_comment's dry run posted a reply: %s", shown(text, 300))
+	}
+	if text := d.ok("search for the document a dry run would create", "search_documents", map[string]any{"title": dryRunCreateTitle}); strings.Contains(text, dryRunCreateTitle) {
+		t.Errorf("create_document's dry run created a document: %s", shown(text, 300))
 	}
 	t.Logf("=== dry runs ===\n%d tools swept, revision unchanged", covered)
 

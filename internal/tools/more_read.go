@@ -36,6 +36,7 @@ type ExportInput struct {
 	Document string `json:"document" jsonschema:"document id, or any docs.google.com URL or drive.google.com file URL"`
 	Format   string `json:"format" jsonschema:"md, txt or html (returned inline); pdf, docx, odt, rtf or epub (written under GDOCS_EXPORT_DIR)"`
 	MaxChars int    `json:"max_chars,omitempty" jsonschema:"inline formats: character budget, default 20000"`
+	DryRun   bool   `json:"dry_run,omitempty" jsonschema:"check the document and the format, name the file a binary export would write, and download and write nothing"`
 }
 
 func registerMoreRead(s *mcp.Server, d Deps) {
@@ -73,10 +74,11 @@ func registerMoreRead(s *mcp.Server, d Deps) {
 		Description: "Export a Google Doc through Google's converters. md, txt and html come back inline (budgeted by " +
 			"max_chars); pdf, docx, odt, rtf and epub are written as new files under the server's export directory, " +
 			"never over a file already there, and the path is returned. The markdown export is Google's own rendering, useful for a faithful whole-document " +
-			"dump; read_document is better for working with sections.",
+			"dump; read_document is better for working with sections. dry_run names the file a binary export would " +
+			"write and downloads nothing.",
 		Annotations: adding,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ExportInput) (*mcp.CallToolResult, any, error) {
-		res, err := d.Service.Export(ctx, service.ExportRequest{Document: in.Document, Format: in.Format, MaxChars: in.MaxChars})
+		res, err := d.Service.Export(ctx, service.ExportRequest{Document: in.Document, Format: in.Format, MaxChars: in.MaxChars, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

@@ -18,7 +18,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/mmedum/google-docs-mcp/v4/internal/tools"
 	"io"
 	"log/slog"
 	"os"
@@ -39,6 +38,7 @@ import (
 	"github.com/mmedum/google-docs-mcp/v4/internal/redact"
 	"github.com/mmedum/google-docs-mcp/v4/internal/server"
 	"github.com/mmedum/google-docs-mcp/v4/internal/service"
+	"github.com/mmedum/google-docs-mcp/v4/internal/tools"
 	"github.com/mmedum/google-docs-mcp/v4/internal/userconfig"
 	"github.com/mmedum/google-docs-mcp/v4/internal/version"
 )

@@ -243,3 +243,34 @@ func TestTranscriptJSON(t *testing.T) {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
 }
+
+// " by " also starts the server's own phrases, which name no person: a
+// handle, a heading, "the section_break". Each keeps its text, and a
+// person later on the same line is still masked.
+func TestTranscriptKeepsTheServersOwnByPhrases(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"warning: re-read before targeting by handle.\n", "warning: re-read before targeting by handle.\n"},
+		{"[invalid] op 0: a section's type is read-only; it is fixed by the section_break that made the section\n",
+			"[invalid] op 0: a section's type is read-only; it is fixed by the section_break that made the section\n"},
+		{"dry run: would add tab \"Tab added by a dry run\"\n", "dry run: would add tab \"Tab added by a dry run\"\n"},
+		{"read one section by its heading text\n", "read one section by its heading text\n"},
+		{"targeting by handle, written by Ann Petersen (Acme Corp)\n", "targeting by handle, written by <person>\n"},
+		{"replied to comment c1 in the file by Ann Petersen\n", "replied to comment c1 in the file by <person>\n"},
+		{"edited by The Ann\n", "edited by <person>\n"},
+	}
+	for _, tc := range cases {
+		if got := Transcript(tc.in); got != tc.want {
+			t.Errorf("Transcript(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// A page token is opaque and long; it is masked like an id, and the
+// parenthesis after it stays.
+func TestTranscriptMasksAPageToken(t *testing.T) {
+	in := "3 document(s) (more available; pass page_token ~!!~AAfjczfOUK2pVopk4_Zwg7AiE8mzpupyt8)\n"
+	want := "3 document(s) (more available; pass page_token <token>)\n"
+	if got := Transcript(in); got != want {
+		t.Errorf("Transcript(%q) = %q, want %q", in, got, want)
+	}
+}

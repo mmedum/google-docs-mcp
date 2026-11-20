@@ -956,10 +956,11 @@ func inBody(op *Op) bool { return op.Seg.ID == "" }
 // "content must not exceed 2048 UTF-8 code units"; Drive's comments and
 // replies take 4096. Neither reference states a limit. A comment takes
 // either path, as the comments view allows, and a reply on a
-// suggestion's thread goes through the Docs API, unmeasured, so all
-// comment text keeps to the lower limit, a plain reply's included.
-// Checked by the integration tests TestRawCommentLength and
-// TestRawDocsCommentLength.
+// suggestion's thread goes through the Docs API's addCommentReply,
+// which also refuses more than 2048, so all comment text keeps to the
+// lower limit, a plain reply's included. Checked by the integration
+// tests TestRawCommentLength, TestRawDocsCommentLength and
+// TestRawSuggestionReplyLength.
 // https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertCommentRequest
 // https://developers.google.com/workspace/drive/api/reference/rest/v3/comments/create
 const MaxCommentBytes = 2048

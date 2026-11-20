@@ -244,6 +244,8 @@ func TestReplyToASuggestionIsRefused(t *testing.T) {
 		{"edit", true, ReplyRequest{Document: fixtureID, SuggestionID: "s1", Action: "edit", Content: "x"}, "invalid"},
 		{"no content", true, ReplyRequest{Document: fixtureID, SuggestionID: "s1"}, "invalid"},
 		{"unknown suggestion", true, ReplyRequest{Document: fixtureID, SuggestionID: "s9", Content: "x"}, "not_found"},
+		// addCommentReply refuses more than 2048 bytes (TestRawSuggestionReplyLength).
+		{"over the limit", true, ReplyRequest{Document: fixtureID, SuggestionID: "s1", Content: strings.Repeat("é", 1025)}, "invalid"},
 		{"comments view refused", false, ReplyRequest{Document: fixtureID, SuggestionID: "s1", Content: "x"}, "unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -104,7 +104,6 @@ type Settings struct {
 	Profile           string
 	LogLevel          string
 	LogFormat         string
-	Preview           string
 	DefaultWriteMode  string
 	ReadOnly          string
 	EnableDestructive string
@@ -187,7 +186,6 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.Profile, "profile", "PROFILE", DefaultProfile, "named configuration profile")
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
-	def(&s.Preview, "preview", "PREVIEW", "", "deprecated and ignored: comments and suggestions are generally available")
 	def(&s.DefaultWriteMode, "default-write-mode", "DEFAULT_WRITE_MODE", "", "default write mode: "+WriteModeRule())
 	sw(&s.ReadOnly, "read-only", "READ_ONLY", "register only read tools and request read-only scopes")
 	sw(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "register destructive tools (delete comment, delete tab)")
@@ -213,7 +211,7 @@ func Vars() []Var {
 // VarsFloor is how many variables Vars lists today, on purpose: every
 // walk over Vars, the tests' and the gates', refuses fewer, so a
 // registry that records nothing cannot pass one. It moves with Vars.
-const VarsFloor = 13
+const VarsFloor = 12
 
 // defined is every variable Define reads, in the order it reads them.
 func defined() []Var {
@@ -299,12 +297,6 @@ func (s *Settings) Build() (Config, error) {
 	c.LogFormat = LogFormat(strings.ToLower(strings.TrimSpace(s.LogFormat)))
 	if !logFormats[c.LogFormat] {
 		errs = append(errs, fmt.Errorf("%w: log format %q (want text, json)", ErrInvalid, s.LogFormat))
-	}
-
-	// Accepted so an existing configuration still starts; the features
-	// it gated are generally available.
-	if strings.TrimSpace(s.Preview) != "" {
-		c.Warnings = append(c.Warnings, EnvPrefix+"PREVIEW (--preview) is deprecated and ignored: comments and suggestions are generally available")
 	}
 
 	var err error

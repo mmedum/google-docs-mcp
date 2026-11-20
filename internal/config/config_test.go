@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"flag"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -56,31 +57,23 @@ func TestEnvThenFlagPrecedence(t *testing.T) {
 	}
 }
 
-// An existing configuration that still sets the retired preview switch
-// starts, says the switch does nothing, and changes nothing else.
-func TestPreviewIsDeprecated(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		env  map[string]string
-		args []string
-	}{
-		{"env", map[string]string{"GDOCS_PREVIEW": "true"}, nil},
-		{"env false", map[string]string{"GDOCS_PREVIEW": "false"}, nil},
-		{"flag", nil, []string{"--preview=true"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, err := build(t, tc.env, tc.args...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := "GDOCS_PREVIEW (--preview) is deprecated and ignored: comments and suggestions are generally available"
-			if len(c.Warnings) != 1 || c.Warnings[0] != want {
-				t.Fatalf("warnings = %q", c.Warnings)
-			}
-			if c.DefaultWriteMode != WriteSuggest {
-				t.Fatalf("default write mode = %q", c.DefaultWriteMode)
-			}
-		})
+// GDOCS_PREVIEW is no longer read, so a configuration that still sets
+// it starts without a word, and --preview is no longer a flag (D-96).
+func TestPreviewIsGone(t *testing.T) {
+	c, err := build(t, map[string]string{"GDOCS_PREVIEW": "true"})
+	if err != nil || len(c.Warnings) != 0 {
+		t.Errorf("GDOCS_PREVIEW=true: warnings %q, err %v; want it ignored without a word", c.Warnings, err)
+	}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	Define(fs, func(string) string { return "" })
+	if err := fs.Parse([]string{"--preview=true"}); err == nil {
+		t.Error("--preview parsed; want it unknown")
+	}
+	for _, v := range Vars() {
+		if v.Name == "GDOCS_PREVIEW" {
+			t.Error("Vars lists GDOCS_PREVIEW, which nothing reads")
+		}
 	}
 }
 
@@ -263,7 +256,7 @@ func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 func TestEnvVars(t *testing.T) {
 	want := []string{
 		"GDOCS_CLIENT_SECRET", "GDOCS_CONFIG_DIR", "GDOCS_DEFAULT_WRITE_MODE", "GDOCS_ENABLE_DESTRUCTIVE",
-		"GDOCS_EXPORT_DIR", "GDOCS_HTTP_TIMEOUT", "GDOCS_LOG_FORMAT", "GDOCS_LOG_LEVEL", "GDOCS_PREVIEW",
+		"GDOCS_EXPORT_DIR", "GDOCS_HTTP_TIMEOUT", "GDOCS_LOG_FORMAT", "GDOCS_LOG_LEVEL",
 		"GDOCS_PROFILE", "GDOCS_READ_ONLY", "GDOCS_REFRESH_TOKEN", "GDOCS_REQUIRE_PROMPT",
 	}
 	if got := EnvVars(); !slices.Equal(got, want) {

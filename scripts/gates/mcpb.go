@@ -715,7 +715,6 @@ var bundleLeftOut = map[string]string{
 	config.EnvPrefix + "LOG_LEVEL":    diagnostics,
 	config.EnvPrefix + "LOG_FORMAT":   diagnostics,
 	config.EnvPrefix + "HTTP_TIMEOUT": "a timeout, whose default suits an install",
-	config.EnvPrefix + "PREVIEW":      "ignored since 2.1.0, when comments and suggestions became generally available",
 	config.EnvConfigDir:               "moves every profile, which tests do; a second account is a profile",
 	config.EnvRefreshToken:            "a credential for automation; a bundle install uses the login's keyring entry",
 }

@@ -479,7 +479,7 @@ func TestInfoCommentsViewRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := info.Capabilities
-	if strings.Join(c.WriteModes, "/") != "direct/comment" || c.CommentsView || c.Preview {
+	if strings.Join(c.WriteModes, "/") != "direct/comment" || c.CommentsView {
 		t.Fatalf("capabilities: %+v", c)
 	}
 	if !strings.Contains(info.Text, "Google refused the comments view for this document: suggestion mode is unavailable and comments are posted unanchored") {
@@ -497,7 +497,7 @@ func TestInfo(t *testing.T) {
 		t.Fatalf("info wrong: %+v", info)
 	}
 	if info.CanEdit == nil || !*info.CanEdit || info.Stats.Tables != 1 || info.Capabilities.DefaultWriteMode != "direct" ||
-		strings.Join(info.Capabilities.WriteModes, "/") != "suggest/direct/comment" || !info.Capabilities.CommentsView || !info.Capabilities.Preview {
+		strings.Join(info.Capabilities.WriteModes, "/") != "suggest/direct/comment" || !info.Capabilities.CommentsView {
 		t.Fatalf("info wrong: %+v", info)
 	}
 	if strings.Contains(info.Text, "refused the comments view") {

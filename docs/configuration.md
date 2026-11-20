@@ -23,7 +23,6 @@ token belongs to it.
 | `GDOCS_CONFIG_DIR` | OS config dir + `google-docs-mcp` | Absolute directory profiles live in. A relative one stops the server at start. |
 | `GDOCS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr. |
 | `GDOCS_LOG_FORMAT` | `text` | `text` or `json`. |
-| `GDOCS_PREVIEW` | unset | Deprecated and ignored; setting it logs a warning. Comments and suggestions are generally available. |
 | `GDOCS_DEFAULT_WRITE_MODE` | `suggest` | `suggest`, `direct` or `comment`. |
 | `GDOCS_READ_ONLY` | `false` | Register only read tools; `login` requests read-only scopes. |
 | `GDOCS_ENABLE_DESTRUCTIVE` | `false` | Register destructive tools (delete comment, delete tab). |
@@ -80,8 +79,9 @@ and gives Claude Code `permissions.ask` rules.
 
 A removed setting that restricted something is still read, only to
 refuse it: set to anything but its old default, the server will not
-start, and its flag is gone (D-53). Ignoring it would quietly allow what
-it was set to stop. [troubleshooting.md](troubleshooting.md) says what
+start, and its flag is gone (D-96). Ignoring it would quietly allow what
+it was set to stop. A removed setting that restricted nothing is not
+read at all. [troubleshooting.md](troubleshooting.md) says what
 to do when one stops the server.
 
 | Variable | Still accepted | Instead |

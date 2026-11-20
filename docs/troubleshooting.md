@@ -209,7 +209,7 @@ The server and its subcommands refuse to start. The flag
 
 **Cause:** `GDOCS_REQUIRE_PROMPT` is set to anything but `false`, or the
 flag is in the client's arguments. The server asks the person nothing,
-and the client approves each call (D-52, D-53). Ignoring the setting
+and the client approves each call (D-52, D-96). Ignoring the setting
 would quietly allow what it was set to stop.
 
 **Fix (resolves it):** unset it, and take the flag out of the arguments.

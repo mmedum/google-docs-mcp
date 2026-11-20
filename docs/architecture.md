@@ -114,7 +114,7 @@ In priority order:
 - `internal/config` reads the `GDOCS_*` environment and the bound flags,
   and validates them once at start. `config.Vars` is the registry of
   every variable the server reads, which the staleness and `mcpb` gates
-  read. A removed setting still turned on is refused (D-53, D-69, D-70).
+  read. A removed setting still turned on is refused (D-96, D-69, D-70).
 - `internal/credentials` resolves the refresh token from the
   environment, the OS keyring, or an owner-only file the server warns
   about (D-67).
@@ -340,7 +340,7 @@ flag mirrors each variable, and a profile holds one account (D-69,
 D-70). Read-only mode and the delete switch decide what registers, and
 read-only mode also narrows the scopes `login` asks for (D-54, D-55,
 D-68). A removed setting that restricted something is refused at start
-(D-53). The full list is in [configuration.md](configuration.md).
+(D-96). The full list is in [configuration.md](configuration.md).
 
 **Reliability.** Limiters keep reads, document writes and Drive writes
 below Google's quotas. Every attempt has a deadline, the token refresh
@@ -442,7 +442,7 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-50 | An op reaches a Word file's paragraphs by order, each checked to hold the text the Docs model shows | accepted | TestWordStale, TestWordMergedCells, TestWordCoveredCell |
 | D-51 | On a Word file a suggestion is a tracked change and a comment a Word comment, under the account's name | accepted | TestReplaceTracked, TestComment, TestWordEditSuggest, TestWordComments |
 | D-52 | The server asks the person nothing; the client approves each call | accepted | forbidigo, TestWriteToolsEndToEnd, live |
-| D-53 | GDOCS_REQUIRE_PROMPT is refused at start unless off, and GDOCS_PREVIEW is ignored with a warning | accepted | TestTheRemovedRequirePromptIsRefusedUnlessOff, TestPreviewIsDeprecated |
+| D-53 | GDOCS_REQUIRE_PROMPT is refused at start unless off, and GDOCS_PREVIEW is ignored with a warning | superseded by D-96 | — |
 | D-54 | The delete tools register only with GDOCS_ENABLE_DESTRUCTIVE | accepted | TestListToolsAndSchemas, TestFullSurfaceRegistersEverything |
 | D-55 | Read-only mode registers the reads alone and asks for read-only scopes | accepted | TestListToolsAndSchemas, TestScopesAgree |
 | D-56 | A delete repeats its target, and delete_comment how the text it deletes begins | accepted | TestDeletesNeedTheTargetRepeated, TestDeleteCommentHoldsItsTextToTheWitness |
@@ -485,6 +485,7 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-93 | Each release carries a Claude Desktop bundle in the layout the sibling servers share, its settings derived from config.Vars | accepted | mcpb, TestBundleVarsAreDerivedFromTheSettings, TestThePackedBundleLayout, TestTheCommittedManifestIsValid |
 | D-94 | A bundle install starts the server as an unconfigured start does, every setting passed by env | accepted | mcpb, TestTheConfigDiffNamesTheFieldsThatDiffer, TestTheBundleSettingsRefuseEachBreak, TestVarsDescribeWhatBuildDoes |
 | D-95 | The server asks the person before a risky write, through form elicitation | rejected | — |
+| D-96 | GDOCS_REQUIRE_PROMPT is refused at start unless off, and the preview setting and its status field are gone | accepted | TestTheRemovedRequirePromptIsRefusedUnlessOff, TestPreviewIsGone, TestStatusSchemaTwoHasNoPreview |
 
 ### D-01 One stdio binary per person, signed in to their own Google account through their own OAuth client; nothing is hosted
 
@@ -1832,6 +1833,8 @@ watches.
 
 ### D-53 GDOCS_REQUIRE_PROMPT is refused at start unless off, and GDOCS_PREVIEW is ignored with a warning
 
+Superseded by D-96, which keeps the first half and retires the second.
+
 `GDOCS_REQUIRE_PROMPT` is a removed setting. Set to anything but `false`
 it is refused at start, naming what to do instead: leave
 `GDOCS_ENABLE_DESTRUCTIVE` off for a client that runs with nobody
@@ -2431,9 +2434,7 @@ and the exclusion. `TestSchemaDiffBreaksOnALostOutputField` and
 Rejected: a stability promise gated on an outside user's report or on
 evals through a second client, neither of which a check can hold.
 Cost: an output field keeps its place until a major release, even one
-that means nothing. Issue #108 tracks removing the deprecated
-`preview` fields of `get_document`'s capabilities and `status --json` at
-the next major.
+that means nothing.
 
 ### D-78 A change to the tool surface names each changed item in a commit footer
 
@@ -2916,6 +2917,33 @@ setting that refuses the asking writes on a client that cannot ask.
 Cost: a client running with nobody watching makes every registered
 write, so `GDOCS_ENABLE_DESTRUCTIVE` stays off for one, and a
 configuration that still sets `GDOCS_REQUIRE_PROMPT` on is refused at
-start (D-53).
+start (D-96).
 
-Next ID: D-96
+### D-96 GDOCS_REQUIRE_PROMPT is refused at start unless off, and the preview setting and its status field are gone
+
+`GDOCS_REQUIRE_PROMPT` is a removed setting. Set to anything but `false`
+it is refused at start, naming what to do instead: leave
+`GDOCS_ENABLE_DESTRUCTIVE` off for a client that runs with nobody
+watching. `false`, its old default, and unset are accepted.
+`GDOCS_PREVIEW` is not read, and `--preview` is not a flag. `status
+--json` carries no `settings.preview` from schema version 2.
+
+`GDOCS_REQUIRE_PROMPT` refused the writes that asked the person on a
+client that could not ask, and the server asks nobody (D-52). Ignoring
+it would quietly allow what its owner set it to stop. `GDOCS_PREVIEW`
+gated comments and suggestions, which are generally available and
+detected per read (D-17), so the switch decided nothing, and
+`settings.preview` always read true. Left unread, a configuration
+that still sets it starts, since it restricts nothing. `config.Vars`
+marks the removed setting, so the bundle gate leaves it out of what the
+bundle asks for. [configuration.md](configuration.md) lists it.
+
+Rejected: ignoring `GDOCS_REQUIRE_PROMPT`, which would allow what it was
+set to stop; refusing `GDOCS_PREVIEW`, which would stop a server whose
+setting restricts nothing; keeping `settings.preview`, which always
+read true.
+Cost: `--require-prompt` and `--preview` are not flags, so one left in a
+client's arguments stops the server at start. A configuration that sets
+`GDOCS_PREVIEW` gets no word that it does nothing.
+
+Next ID: D-97

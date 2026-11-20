@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
-	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v3/internal/render"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/mdfile"
+	"github.com/mmedum/google-docs-mcp/v4/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v4/internal/render"
 )
 
 // mdNotes is a synthetic Markdown file in the shape Docs leaves one that

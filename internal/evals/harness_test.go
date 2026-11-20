@@ -17,7 +17,7 @@ package evals
 import (
 	"context"
 	"fmt"
-	"github.com/mmedum/google-docs-mcp/v3/internal/redact"
+	"github.com/mmedum/google-docs-mcp/v4/internal/redact"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

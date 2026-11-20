@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
 )
 
 // smoke drives the built binary over stdio without credentials, twice.

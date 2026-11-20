@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v3/internal/service"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v4/internal/service"
 )
 
 // errorfClass finds the class literal in a service.Errorf call, and in

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/mmedum/google-docs-mcp/v3/internal/redact"
+	"github.com/mmedum/google-docs-mcp/v4/internal/redact"
 	"go/ast"
 	"go/parser"
 	"go/token"

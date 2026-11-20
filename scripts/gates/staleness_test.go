@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
-	"github.com/mmedum/google-docs-mcp/v3/internal/server"
-	"github.com/mmedum/google-docs-mcp/v3/internal/tools"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/server"
+	"github.com/mmedum/google-docs-mcp/v4/internal/tools"
 )
 
 // The changelog fixtures: a released v0.9.0, a v0.9.1 with and without

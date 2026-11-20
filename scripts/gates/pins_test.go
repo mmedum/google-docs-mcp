@@ -728,7 +728,7 @@ func TestPinsNamesEachProblem(t *testing.T) {
 			replace(parityGoreleaser, "    - go mod tidy\n", "    - go mod tidy\n"+
 				"release:\n"+
 				"  footer: |\n"+
-				"    go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest\n"+
+				"    go install github.com/mmedum/google-docs-mcp/v4/cmd/google-docs-mcp@latest\n"+
 				"    go run golang.org/x/vuln/cmd/govulncheck@master ./...\n"+
 				"    https://github.com/x/y/releases/latest/download/z.tar.gz\n"+
 				"changelog:\n"+

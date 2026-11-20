@@ -15,8 +15,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/auth"
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/auth"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
 )
 
 var (

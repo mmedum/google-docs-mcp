@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/config"
+	"github.com/mmedum/google-docs-mcp/v4/internal/config"
 )
 
 // Break the manifest all six ways and watch each be refused before
@@ -306,9 +306,9 @@ func TestManifestProblemsRunsEveryCheck(t *testing.T) {
 			want: "the manifest has server.mcp_config.env.GDOCS_PROFILE more than once"},
 		// The install hint is held to go.mod, which moves at every major
 		// version.
-		{name: "a go.mod at another major version", file: "go.mod", old: "/v3", new: "/v4",
-			want: `the launcher says "go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest", ` +
-				`and go.mod's module gives "go install github.com/mmedum/google-docs-mcp/v4/cmd/google-docs-mcp@latest"`},
+		{name: "a go.mod at another major version", file: "go.mod", old: "/v4", new: "/v5",
+			want: `the launcher says "go install github.com/mmedum/google-docs-mcp/v4/cmd/google-docs-mcp@latest", ` +
+				`and go.mod's module gives "go install github.com/mmedum/google-docs-mcp/v5/cmd/google-docs-mcp@latest"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := copiedRoot(t)

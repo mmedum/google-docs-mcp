@@ -161,8 +161,49 @@ func TestDirectFormatWarnsOnACollidingSuggestion(t *testing.T) {
 	}
 }
 
+// TestOnlyAValueSetLandsOverASuggestion covers the edges of
+// landsOverASuggestion: a boolean set false and a reset are unprobed,
+// since on unstyled text they look like no change, so they still warn;
+// and an op mixing bold with italic warns of bold alone.
+func TestOnlyAValueSetLandsOverASuggestion(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		style         plan.TextStyleSpec
+		state         *gdocs.TextStyleSuggestionState
+		named, absent string
+	}{
+		{"italic off where italic is suggested", plan.TextStyleSpec{Italic: boolp(false)},
+			&gdocs.TextStyleSuggestionState{ItalicSuggested: true}, "italic", ""},
+		{"color reset where a color is suggested", plan.TextStyleSpec{Foreground: "none"},
+			&gdocs.TextStyleSuggestionState{ForegroundColorSuggested: true}, "color", ""},
+		{"bold and italic where both are suggested", plan.TextStyleSpec{Bold: boolp(true), Italic: boolp(true)},
+			&gdocs.TextStyleSuggestionState{BoldSuggested: true, ItalicSuggested: true}, "bold", "italic"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := restyledService(t, "suggest.s1", tc.state)
+			op := EditOp{Kind: plan.OpTextStyle, Target: &Target{Text: "substantially"}}
+			op.Text = tc.style
+			res, err := svc.Edit(context.Background(), EditRequest{
+				Document: fixtureID, Mode: "direct", DryRun: true, Ops: []EditOp{op},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := strings.Join(res.Warnings, " ")
+			if !strings.Contains(w, "suggest.s1") || !strings.Contains(w, tc.named) {
+				t.Errorf("want a warning naming %s: %v", tc.named, res.Warnings)
+			}
+			if tc.absent != "" && strings.Contains(w, tc.absent) {
+				t.Errorf("Google applies %s, so the warning should leave it out: %v", tc.absent, res.Warnings)
+			}
+		})
+	}
+}
+
 // TestClearFormattingCollidesWithEverySuggestedProperty checks the
 // "*" fields mask, which clear_formatting compiles to.
+// A size is one Google applies over a suggested size, so the warning
+// here shows a reset lands nothing.
 func TestClearFormattingCollidesWithEverySuggestedProperty(t *testing.T) {
 	svc := restyledService(t, "suggest.size", &gdocs.TextStyleSuggestionState{FontSizeSuggested: true})
 	res, err := svc.Edit(context.Background(), EditRequest{

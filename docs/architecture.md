@@ -1393,10 +1393,11 @@ The reference says nothing of this
 Set directly to the value a pending suggestion names, bold and every
 paragraph property probed (alignment, line spacing, space above) are
 dropped: the batch is accepted, the reply is empty, and nothing changes.
-Italic, underline, strikethrough, small caps, baseline offset, color,
-font and size land, at that value or another, and so does an alignment
-to a value the suggestion does not name. The integration tests
-TestRawSuggestedStyleKinds, TestRawSuggestedStyleKindControls,
+Italic, underline, strikethrough and small caps set true land, and
+baseline offset, color, font and size land at that value or another, as
+does an alignment to a value the suggestion does not name. The
+integration tests TestRawSuggestedStyleKinds,
+TestRawSuggestedStyleKindOtherValue, TestRawSuggestedStyleKindControls,
 TestRawSuggestedStyleSameProperty and TestRawSuggestedStyleValue check
 both sides, and the live step "direct change to the suggested property"
 drives it. What the person needs either way is to learn that a
@@ -1406,8 +1407,9 @@ tell them.
 Rejected: refusing the change, which would block the writes that land.
 Cost: bold and a paragraph property warn at any value, though only the
 suggested value was seen dropped, since the guard knows the property and
-not the value; a property not yet probed, and clear_formatting's reset,
-warn too.
+not the value. An unprobed property, a boolean set false, `NONE` and a
+reset, clear_formatting's included, warn too, because on unstyled text
+a probe cannot tell them from no change.
 
 ### D-37 Every GA request of the Docs API and every field it accepts on a write is emitted; a read-only field is reported, never sent
 

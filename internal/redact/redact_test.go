@@ -243,3 +243,42 @@ func TestTranscriptJSON(t *testing.T) {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
 }
+
+// " by " also starts two of the server's own messages, which name no
+// person, and they keep their text. Anything else after " by " is
+// masked as before: document text that begins the same way, and a name
+// that begins like a server word.
+func TestTranscriptKeepsTheServersOwnByPhrases(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"warning: the number of blocks changed; use the handles in the preview or re-read before targeting by handle\n",
+			"warning: the number of blocks changed; use the handles in the preview or re-read before targeting by handle\n"},
+		{"[invalid] op 0: a section's type is read-only; it is fixed by the section_break that made the section\n",
+			"[invalid] op 0: a section's type is read-only; it is fixed by the section_break that made the section\n"},
+		{"[p4] Approved by the CEO, Jane Doe\n", "[p4] Approved by <person>\n"},
+		{"[p4] signed by handle Jane Doe\n", "[p4] signed by <person>\n"},
+		{"comment c1 written into the file on L3 by a.petersen (as the file names them)\n", "comment c1 written into the file on L3 by <person>\n"},
+		{"edited by The Ann\n", "edited by <person>\n"},
+	}
+	for _, tc := range cases {
+		if got := Transcript(tc.in); got != tc.want {
+			t.Errorf("Transcript(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// A page token is opaque and long; it is masked whatever it holds, in
+// the text and in a structured result.
+func TestTranscriptMasksAPageToken(t *testing.T) {
+	for _, in := range []string{
+		"3 document(s) (more available; pass page_token ~!!~AAfjczfOUK2pVopk4_Zwg7AiE8mzpupyt8)\n",
+		"3 document(s) (more available; pass page_token ~!!~abc)def)\n",
+	} {
+		if got, want := Transcript(in), "3 document(s) (more available; pass page_token <token>)\n"; got != want {
+			t.Errorf("Transcript(%q) = %q, want %q", in, got, want)
+		}
+	}
+	got, err := TranscriptJSON([]byte(`{"next_page_token":"~!!~AAfjczfOUK2pVopk4"}`))
+	if err != nil || strings.Contains(string(got), "AAfjcz") {
+		t.Errorf("TranscriptJSON kept the token: %s %v", got, err)
+	}
+}

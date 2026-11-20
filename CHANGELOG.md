@@ -24,6 +24,7 @@ diff in CI flags them.
 
 ### Fixed
 
+- `list_suggestions` lists a suggested table row once, as `structure` at its first cell, rather than as an insert of no text (#109).
 - `export_document` on a Word file (.docx) refuses up front, saying to save it as a Google Doc, rather than failing at Drive's converter.
 
 ### Security

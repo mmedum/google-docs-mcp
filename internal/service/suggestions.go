@@ -115,6 +115,18 @@ func (s *suggestionSet) collectEdits(d *doc.Document) {
 		for _, id := range b.Deleted {
 			s.note(id, b.Handle, "", "", true)
 		}
+		if b.Table != nil {
+			// The table comes before its cells in the walk, so a suggested
+			// row or column is noted as structure, at its first cell, before
+			// its cells' newline runs are seen as inserted text.
+			for _, row := range b.Table.Cells {
+				for _, c := range row {
+					for _, id := range slices.Concat(c.Inserted, c.Deleted) {
+						s.note(id, c.Handle, "", "", true)
+					}
+				}
+			}
+		}
 		if b.Paragraph == nil {
 			continue
 		}

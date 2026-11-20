@@ -1008,9 +1008,16 @@ Rejected: walking insertion and deletion ids alone, which cannot find a
 restyling; reading the style, which reports every inherited property;
 dropping an insertion's own entry, which hides the bold of text inserted
 after bold text.
-Cost: one case stays unexplained, a reset filed under a second
-suggestion id. Issue #109 covers it, together with suggested
-insertions in table cells and rows, which no test probes.
+A suggested row carries its id on the row, its cells and their
+newlines, and a suggested column on its cells and their newlines. Each
+is listed once as `structure` at its first cell.
+
+Cost: inserted text that fills its whole paragraph, as in an empty
+table cell, and is then reset gets a second suggestion: Google extends
+the reset to the paragraph mark, which the insertion does not cover.
+It is listed as a `format` suggestion of every text property. The
+integration tests TestRawSuggestedResetWholeParagraph and
+TestRawSuggestedTableInsertions show it.
 
 ### D-22 `format: raw` returns the bytes Google sent
 

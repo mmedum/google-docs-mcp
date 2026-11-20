@@ -35,15 +35,15 @@ func TestDryRunSendsNothing(t *testing.T) {
 		svc  func(t *testing.T) (*Service, *fakeAPI)
 		run  func(svc *Service) (dryRun bool, text string, err error)
 	}{
-		{"manage_tabs add", tabService, func(svc *Service) (bool, string, error) {
+		{"manage_tabs add", newWritable, func(svc *Service) (bool, string, error) {
 			res, err := svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "add", Title: "Appendix", Content: "Hello tab", DryRun: true})
 			return tabDry(res, err)
 		}},
-		{"manage_tabs rename", tabService, func(svc *Service) (bool, string, error) {
+		{"manage_tabs rename", newWritable, func(svc *Service) (bool, string, error) {
 			res, err := svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "rename", Tab: "Notes", Title: "Notes 2", DryRun: true})
 			return tabDry(res, err)
 		}},
-		{"manage_tabs move", tabService, func(svc *Service) (bool, string, error) {
+		{"manage_tabs move", newWritable, func(svc *Service) (bool, string, error) {
 			res, err := svc.ManageTabs(ctx, TabRequest{Document: fixtureID, Action: "move", Tab: "Notes", Position: 1, DryRun: true})
 			return tabDry(res, err)
 		}},
@@ -126,13 +126,46 @@ func TestDryRunRefusesWhatTheCallRefuses(t *testing.T) {
 	if _, err := svc.Create(ctx, CreateRequest{Title: "x", Kind: KindMarkdownFile, Content: "<!-- gdoc_comment_begin: c1 -->", DryRun: true}); classOf(err) != "invalid" {
 		t.Errorf("dry run creating a Markdown file with comment markup: %v, want [invalid]", err)
 	}
+	if _, err := svc.Create(ctx, CreateRequest{Title: "x", Content: "one<br>two <b>bold</b>", DryRun: true}); classOf(err) != "unsupported" {
+		t.Errorf("dry run creating a document with content Docs cannot take: %v, want [unsupported]", err)
+	}
 	svc, _ = newWritable(t)
 	if _, err := svc.Export(ctx, ExportRequest{Document: fixtureID, Format: "pdf", DryRun: true}); classOf(err) != "unavailable" {
 		t.Errorf("dry run of a binary export with no export dir: %v, want [unavailable]", err)
 	}
+	svc, _ = wordService(t)
+	for _, dry := range []bool{true, false} {
+		if _, err := svc.Export(ctx, ExportRequest{Document: fixtureID, Format: "pdf", DryRun: dry}); classOf(err) != "unsupported" {
+			t.Errorf("export of a Word file (dry run %v): %v, want [unsupported]", dry, err)
+		}
+	}
 }
 
-func tabService(t *testing.T) (*Service, *fakeAPI) { return writable(t, false) }
+// A dry-run export fails only where the export would: on a missing
+// document or an export directory it cannot look in, not on a metadata
+// error the export works around.
+func TestExportDryRunFailsWhereTheExportWould(t *testing.T) {
+	ctx := context.Background()
+	svc, api := exportService(t)
+	api.fileErr = &gapi.APIError{Status: 500, Message: "backend error"}
+	res, err := svc.Export(ctx, ExportRequest{Document: fixtureID, Format: "pdf", DryRun: true})
+	if err != nil || filepath.Base(res.Path) != "document-1Synth.pdf" {
+		t.Errorf("dry run with a failing metadata read: %+v %v, want the path document-1Synth.pdf", res, err)
+	}
+	api.fileErr = &gapi.APIError{Status: 404, Message: "missing"}
+	if _, err := svc.Export(ctx, ExportRequest{Document: fixtureID, Format: "pdf", DryRun: true}); classOf(err) != "not_found" {
+		t.Errorf("dry run of a missing document: %v, want [not_found]", err)
+	}
+	api.fileErr = nil
+	notADir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc.opts.ExportDir = notADir
+	if _, err := svc.Export(ctx, ExportRequest{Document: fixtureID, Format: "pdf", DryRun: true}); classOf(err) != "unexpected" {
+		t.Errorf("dry run into an export dir that is a file: %v, want [unexpected]", err)
+	}
+}
 
 func newWritable(t *testing.T) (*Service, *fakeAPI) { return writable(t, false) }
 

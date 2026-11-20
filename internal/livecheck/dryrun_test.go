@@ -129,6 +129,9 @@ func liveDryRuns(t *testing.T, d *driver, doc, table string) {
 		switch {
 		case !strings.Contains(text, "dry run"):
 			t.Errorf("%s: the rendering does not say it was a dry run: %s", tool.Name, shown(text, 300))
+		case tool.Name == "create_document" && strings.Contains(text, "https://"):
+			// A create prints the new document's URL; a dry run has none.
+			t.Errorf("create_document: the dry run names a document it made: %s", shown(text, 300))
 		case !plans[tool.Name]:
 			// A delete, a comment or a review names what it would act on
 			// in a sentence rather than as planned ops.
@@ -150,7 +153,9 @@ func liveDryRuns(t *testing.T, d *driver, doc, table string) {
 		t.Errorf("a dry run changed the document: the revision moved after %d dry runs", covered)
 	}
 	// A reply and a new document do not move the document's revision,
-	// so their absence is checked where each would show.
+	// so their absence is checked where each would show. Drive search is
+	// eventually consistent, so the search is best-effort beside the
+	// create dry run's own text.
 	if text := d.ok("the comments after the dry runs", "list_comments", map[string]any{"document": doc}); strings.Contains(text, "written by a dry run") {
 		t.Errorf("reply_comment's dry run posted a reply: %s", shown(text, 300))
 	}

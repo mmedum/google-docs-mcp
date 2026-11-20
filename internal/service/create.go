@@ -92,8 +92,11 @@ func (s *Service) create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if req.DryRun {
 		res := &CreateResult{Title: title, Kind: KindDocument}
 		if strings.TrimSpace(req.Content) != "" {
+			if _, err := parseContent(req.Content, req.ContentFormat); err != nil {
+				return nil, Errorf("unsupported", "content: %v", err)
+			}
 			// The content is planned against the new document, which a dry run never makes.
-			res.Warnings = append(res.Warnings, "the content is not planned: the document it goes into does not exist yet")
+			res.Warnings = append(res.Warnings, "the content is parsed but not planned: the document it goes into does not exist yet")
 		}
 		return res, nil
 	}

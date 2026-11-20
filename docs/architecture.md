@@ -1364,9 +1364,10 @@ content, since the document or tab it goes into does not exist yet. A
 dry run of `export_document` names the file a binary export would write
 and downloads nothing. The live driver calls every tool whose schema
 takes `dry_run`, fails on one it has no call for, and checks with the
-live step "revision after the dry runs" that the document did not move,
-and with "the comments after the dry runs" and "search for the document
-a dry run would create" what does not move a revision.
+live step "revision after the dry runs" that the document did not move.
+A reply and a new document move no revision, so the live steps "the
+comments after the dry runs" and "search for the document a dry run
+would create" check those.
 `TestEveryWriteTakesDryRun` holds the list; `TestDryRunSendsNothing` and
 `TestDryRunReachesTheService` hold that `reply_comment`, `manage_tabs`,
 `create_document` and `export_document` send nothing.

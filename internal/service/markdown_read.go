@@ -345,13 +345,13 @@ func (s *Service) mdExport(ctx context.Context, req ExportRequest, format string
 	if format != "md" && format != "txt" {
 		return nil, mdUnsupported("Drive exports only Google's own formats and converts a Markdown file to nothing", "md and txt return the file's text")
 	}
-	if req.DryRun {
-		return &ExportResult{Format: format, MimeType: gapi.MarkdownMimeType, Inline: true, DryRun: true,
-			Text: "dry run: would return the file's text inline as " + format}, nil
-	}
 	m, err := s.fetchMarkdown(ctx, req.Document, nil)
 	if err != nil {
 		return nil, err
+	}
+	if req.DryRun {
+		return &ExportResult{Format: format, MimeType: gapi.MarkdownMimeType, Inline: true, DryRun: true,
+			Text: "dry run: would return the file's text inline as " + format}, nil
 	}
 	limit := req.MaxChars
 	if limit <= 0 {

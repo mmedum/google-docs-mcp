@@ -92,7 +92,7 @@ func registerCommentsWrite(s *mcp.Server, d Deps) {
 			"reply ids come from list_comments. With suggestion_id instead of comment_id it replies on a suggested " +
 			"edit's thread; accepting or rejecting one is review_suggestion. On a Markdown file (.md) a comment the Docs " +
 			"editor keeps takes replies only, written into the file; the person resolves it in the editor. dry_run runs " +
-			"every check and stops before the write.",
+			"every check and stops before the write; it does not check who wrote a comment an edit rewrites.",
 		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReplyInput) (*mcp.CallToolResult, *service.ReplyResult, error) {
 		res, err := d.Service.Reply(ctx, service.ReplyRequest{Document: in.Document, CommentID: in.CommentID, SuggestionID: in.SuggestionID,

@@ -91,6 +91,11 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	if s.isMarkdown(ctx, id) {
 		return s.mdExport(ctx, req, format)
 	}
+	// Drive's export converts only Google Workspace files, so a Word file
+	// has none (https://developers.google.com/workspace/drive/api/reference/rest/v3/files/export).
+	if err := s.wordUnsupported(ctx, id, "exporting"); err != nil {
+		return nil, err
+	}
 	if !inlineFormats[format] && s.opts.ExportDir == "" {
 		return nil, Errorf("unavailable", "binary exports need "+config.EnvPrefix+"EXPORT_DIR to be set to a directory; md, txt and html are returned inline")
 	}
@@ -133,26 +138,32 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 // names the file a binary export would write. It downloads nothing and
 // creates neither the file nor the export directory.
 func (s *Service) exportDryRun(ctx context.Context, id, format, mime string) (*ExportResult, error) {
+	// A missing document fails the export too; any other metadata error
+	// leaves the export to name the file "document", as it does.
+	title := "document"
 	file, err := s.api.GetFile(ctx, id)
-	if err != nil {
+	switch {
+	case errors.Is(err, gapi.ErrNotFound):
 		return nil, wrapAPI(err, "document")
+	case err == nil && file.Name != "":
+		title = file.Name
 	}
 	res := &ExportResult{Format: format, MimeType: mime, Inline: inlineFormats[format], DryRun: true}
 	if res.Inline {
 		res.Text = "dry run: would return the document inline as " + format
 		return res, nil
 	}
-	title := file.Name
-	if title == "" {
-		title = "document"
-	}
 	stem, dir := fileName(title)+"-"+gapi.ShortID(id), filepath.Clean(s.opts.ExportDir)
 	for n := 1; n <= maxExportNames; n++ {
 		path := filepath.Join(dir, exportName(stem, format, n))
-		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+		_, err := os.Lstat(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
 			res.Path = path
 			res.Text = fmt.Sprintf("dry run: would export %q as %s to %s", title, format, path)
 			return res, nil
+		case err != nil:
+			return nil, Errorf("unexpected", "check export dir: %v", err)
 		}
 	}
 	return nil, exportNamesTaken(stem, format)

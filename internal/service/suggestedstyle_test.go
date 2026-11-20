@@ -330,3 +330,46 @@ func TestARestyleSpanningRunsIsReportedOnce(t *testing.T) {
 	}
 	t.Errorf("the suggestion is missing: %+v", res.Suggestions)
 }
+
+// TestASuggestedRowIsStructure is the shape Google returns for a row
+// inserted as a suggestion (TestRawSuggestedTableInsertions): the id on
+// the row, on each of its cells and on each cell's newline. It was
+// listed as an insert of no text, at the first cell's paragraph.
+func TestASuggestedRowIsStructure(t *testing.T) {
+	const id = "s.row"
+	ins := gdocs.Suggested{SuggestedInsertionIDs: []string{id}}
+	cell := func(start int64, suggested bool) *gdocs.TableCell {
+		run := &gdocs.TextRun{Content: "\n"}
+		c := &gdocs.TableCell{StartIndex: start, EndIndex: start + 2}
+		if suggested {
+			run.Suggested, c.Suggested = ins, ins
+		}
+		c.Content = []*gdocs.StructuralElement{{StartIndex: start + 1, EndIndex: start + 2, Paragraph: &gdocs.Paragraph{
+			ParagraphStyle: &gdocs.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+			Elements:       []*gdocs.ParagraphElement{{StartIndex: start + 1, EndIndex: start + 2, TextRun: run}},
+		}}}
+		return c
+	}
+	row := &gdocs.TableRow{StartIndex: 6, EndIndex: 11, Suggested: ins, TableCells: []*gdocs.TableCell{cell(6, true), cell(8, true)}}
+	raw, err := json.Marshal(&gdocs.Document{
+		DocumentID: fixtureID, RevisionID: "r",
+		Body: &gdocs.Body{Content: []*gdocs.StructuralElement{{StartIndex: 1, EndIndex: 11, Table: &gdocs.Table{
+			Rows: 2, Columns: 2,
+			TableRows: []*gdocs.TableRow{{StartIndex: 2, EndIndex: 6, TableCells: []*gdocs.TableCell{cell(2, false), cell(4, false)}}, row},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(&fakeAPI{raw: raw}, Options{DefaultWriteMode: config.WriteDirect})
+	res, err := svc.ListSuggestions(context.Background(), fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Suggestions) != 1 {
+		t.Fatalf("one suggested row is one suggestion, got %+v", res.Suggestions)
+	}
+	if sg := res.Suggestions[0]; sg.ID != id || sg.Kind != "structure" || sg.Handle != "tbl1:r2c1" {
+		t.Errorf("got %s %s at %s, want %s structure at tbl1:r2c1", sg.ID, sg.Kind, sg.Handle, id)
+	}
+}

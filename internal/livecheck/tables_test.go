@@ -34,6 +34,18 @@ func liveTables(t *testing.T, d *driver, doc string) {
 		map[string]any{"op": "set_cells", "table": tbl, "cells": []any{map[string]any{"cell": "r3c1", "content": "Suggested cell text"}}}}}
 	d.ok("suggested cell edit", "edit_table", suggestCell)
 
+	// A suggested row carries its id on the row, its cells and their
+	// newlines (TestRawSuggestedTableInsertions), and lists once as
+	// structure. It is rejected so the row numbers below hold.
+	d.ok("suggested row", "edit_table", map[string]any{"document": doc, "mode": "suggest", "ops": []any{
+		map[string]any{"op": "insert_rows", "table": tbl, "row": 2, "count": 1}}})
+	rowLine := regexp.MustCompile(`(suggest\.\S+) \[` + regexp.QuoteMeta(tbl) + `:r\d+c1\] structure`)
+	if m := rowLine.FindStringSubmatch(d.ok("list the suggested row", "list_suggestions", map[string]any{"document": doc})); m == nil {
+		t.Error("the suggested row is not listed once as structure at its first cell")
+	} else {
+		d.ok("reject the suggested row", "review_suggestion", map[string]any{"document": doc, "action": "reject", "ids": []any{m[1]}})
+	}
+
 	d.ok("merge cells", "edit_table", map[string]any{"document": doc, "mode": "direct", "ops": []any{
 		map[string]any{"op": "merge_cells", "table": tbl, "from_cell": "r3c1", "to_cell": "r3c3"}}})
 	d.ok("unmerge cells", "edit_table", map[string]any{"document": doc, "mode": "direct", "ops": []any{

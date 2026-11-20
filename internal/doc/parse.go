@@ -266,6 +266,10 @@ func parseTable(seg *Segment, t *gdocs.Table, handle string) *Table {
 			}
 			c.StyleChanges = changesOf(tc.SuggestedTableCellStyleChanges)
 			c.RowChanges = changesOf(row.SuggestedTableRowStyleChanges)
+			// A suggested row carries its id on the row, each of its cells
+			// and each cell's newline (TestRawSuggestedTableInsertions).
+			c.Inserted = union(row.SuggestedInsertionIDs, tc.SuggestedInsertionIDs)
+			c.Deleted = union(row.SuggestedDeletionIDs, tc.SuggestedDeletionIDs)
 			c.Blocks = parseBlocks(seg, c, c.Handle+"/", tc.Content)
 			cells = append(cells, c)
 		}
@@ -703,4 +707,15 @@ func parsePageSetup(ds *gdocs.DocumentStyle) *PageSetup {
 		p.Background = hexColor(ds.Background.Color)
 	}
 	return p
+}
+
+// union is a then the ids of b it lacks, nil when both are empty.
+func union(a, b []string) []string {
+	out := slices.Clone(a)
+	for _, id := range b {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }

@@ -2856,9 +2856,9 @@ wrong for most installs, since read-only mode and the destructive switch
 change what registers; `$schema` at a branch, which upstream can change
 under the manifest.
 Cost: Windows carries amd64 only, which Windows on arm64 runs under
-emulation. Issue #113 covers the settings table that
-docs/configuration.md and the README type by hand, which can drift from
-`config.Vars`.
+emulation. The settings table in docs/configuration.md is written by
+hand: the staleness gate holds its names and its literal defaults to
+`config.Vars`, and nothing holds the rest of its prose.
 
 ### D-94 A bundle install starts the server as an unconfigured start does, every setting passed by env
 

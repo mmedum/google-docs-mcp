@@ -188,8 +188,44 @@ func configDocProblems(vars []config.Var, text string) []string {
 	if !strings.Contains(text, config.ProfileRule) {
 		problems = append(problems, fmt.Sprintf("%s does not say a profile name is %q", configDocPath, config.ProfileRule))
 	}
+	return append(problems, configDefaultProblems(vars, documented, text)...)
+}
+
+// configDefaultProblems holds each table row's Default cell to the value
+// the code falls back to, where that is a literal; a default worked out
+// later, such as the write mode, is prose the page explains.
+func configDefaultProblems(vars []config.Var, documented map[string]bool, text string) []string {
+	cells := map[string]string{}
+	var problems []string
+	for _, m := range settingRow.FindAllStringSubmatch(text, -1) {
+		if _, twice := cells[m[1]]; twice {
+			problems = append(problems, fmt.Sprintf("%s has two table rows for %s; give each setting one", configDocPath, m[1]))
+		}
+		cells[m[1]] = m[2]
+	}
+	for _, v := range vars {
+		// One left out of the page is already reported as that.
+		if v.Default == "" || !documented[v.Name] {
+			continue
+		}
+		want := "`" + v.Default + "`"
+		switch cell, ok := cells[v.Name]; {
+		case !ok:
+			problems = append(problems, fmt.Sprintf("%s has no table row, in the form | `NAME` | default | meaning |, for %s to give its default %s",
+				configDocPath, v.Name, want))
+		case firstCode.FindString(cell) != want:
+			problems = append(problems, fmt.Sprintf("%s gives %s a default without %s, the code's", configDocPath, v.Name, want))
+		}
+	}
 	return problems
 }
+
+// firstCode is the first code span in a cell: the default it states.
+var firstCode = regexp.MustCompile("`[^`]*`")
+
+// settingRow is a row of the configuration page's table: the variable
+// and its Default cell.
+var settingRow = regexp.MustCompile("(?m)^\\| `(" + config.NamePattern + ")`[^|]*\\| ([^|]*) \\|")
 
 // settingWord is a setting's name, by config.NamePattern, standing as a
 // word of its own, all of it: a longer name that contains one, such as

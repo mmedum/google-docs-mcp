@@ -126,6 +126,9 @@ type Var struct {
 	Switch bool
 	// Removed marks a setting a release took out, read only to refuse it.
 	Removed bool
+	// Default is the value Define falls back to when the setting is
+	// unset, empty when the default is worked out later or there is none.
+	Default string
 }
 
 // The variables read outside Define. internal/userconfig reads the
@@ -176,7 +179,7 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 			v = fallback
 		}
 		fs.StringVar(p, name, v, usage+" [env "+EnvPrefix+key+"]")
-		s.vars = append(s.vars, Var{Name: EnvPrefix + key, Switch: isSwitch})
+		s.vars = append(s.vars, Var{Name: EnvPrefix + key, Switch: isSwitch, Default: fallback})
 	}
 	def := func(p *string, name, key, fallback, usage string) { bind(p, name, key, fallback, usage, false) }
 	// A switch is off unless set.

@@ -3,6 +3,7 @@
 package livecheck
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -92,5 +93,17 @@ func TestStyleOnlySuggestionIsVisible(t *testing.T) {
 		"document": doc, "include_suggestions": true, "heading": "Style-only suggestion"})
 	if strings.Contains(quiet, "sentence two here.{==") {
 		t.Errorf("the untouched paragraph picked up a marker:\n%s", shown(quiet, 400))
+	}
+
+	// A paragraph appended after a plain last one is one suggestion: the
+	// planner sends no reset, which would cover the new paragraph and its
+	// kept mark and be filed as a second suggestion
+	// (TestRawSuggestedInheritance, TestRawSuggestedResetWholeParagraph).
+	plain := d.ok("suggest a paragraph after a plain one", "edit_document", map[string]any{
+		"document": doc, "mode": "suggest", "ops": []any{
+			map[string]any{"op": "append", "content": "Appended plain text."}}})
+	plainIDs := regexp.MustCompile(`suggest\.\w+`).FindAllString(first(regexp.MustCompile(`suggestion ids: ([^\n]+)`), plain), -1)
+	if len(plainIDs) != 1 {
+		t.Errorf("want one suggestion for text in a plain paragraph, got %d:\n%s", len(plainIDs), shown(plain, 400))
 	}
 }

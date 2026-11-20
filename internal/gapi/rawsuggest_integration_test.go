@@ -50,16 +50,24 @@ package gapi
 //   - A reset over inserted text joins the insertion's id unless the
 //     text fills its paragraph. Then Google extends the reset to the
 //     paragraph mark, outside the insertion, and files it under a second
-//     id (TestRawSuggestedResetWholeParagraph).
+//     id (TestRawSuggestedResetWholeParagraph). A named style set on
+//     such a paragraph, even the one it has, is filed the same way.
+//   - Suggested text takes its style from its own paragraph: the
+//     character before it, or an empty paragraph's mark, never the
+//     paragraph before. The inline view's run style shows the paragraph
+//     before, and the insertion's own entry overrides it
+//     (TestRawSuggestedInheritance).
 //
 // The restyle point is why the server warns there rather than refusing:
 // see guardRestyle in internal/plan/ops.go.
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -201,22 +209,25 @@ func paraStyle(t *testing.T, start, end int, prop string, value any) json.RawMes
 func pt(v float64) map[string]any { return map[string]any{"magnitude": v, "unit": "PT"} }
 
 // runProbes applies each probe to a scratch document of its own, logs
-// the runs the API reports afterwards, and returns them by probe name.
-func runProbes(t *testing.T, probes []probe) map[string]string {
+// the runs the API reports afterwards in the inline and the accepted
+// view, and returns both by probe name.
+func runProbes(t *testing.T, probes []probe) (inline, accepted map[string]string) {
 	t.Helper()
 	c := probeClient(t)
 	ctx := context.Background()
 	got := make(map[string]string, len(probes))
+	accepted = make(map[string]string, len(probes))
 	for _, p := range probes {
 		id := probeDoc(t, c, ctx, p.name, "google-docs-mcp suggested-style probe (safe to delete)",
 			[]json.RawMessage{insertAt(t, p.seed, 1)}, p.rounds)
 		got[p.name] = rawElements(t, c, ctx, id)
 		t.Logf("--- %s ---\n%s", p.name, got[p.name])
 		// Google's own answer to what the suggestions will do.
-		t.Logf("--- %s accepted ---\n%s", p.name, rawView(t, c, ctx, id, SuggestionsPreviewAccepted))
+		accepted[p.name] = rawView(t, c, ctx, id, SuggestionsPreviewAccepted)
+		t.Logf("--- %s accepted ---\n%s", p.name, accepted[p.name])
 	}
 	t.Logf("=== %d scratch documents left behind; Drive search title:\"safe to delete\" finds them ===", len(probes))
-	return got
+	return got, accepted
 }
 
 // assertLanded fails unless each probe's run carries its property in its
@@ -504,10 +515,154 @@ func TestRawSuggestedReset(t *testing.T) {
 // control inserts the same text before other text in the paragraph.
 func TestRawSuggestedResetWholeParagraph(t *testing.T) {
 	insertReset := round{wc: suggestMode, reqs: []json.RawMessage{insertAt(t, "new", 8), reset(t, 8, 11, "*")}}
-	runProbes(t, []probe{
+	normal := func(start, end int) json.RawMessage { return paraStyle(t, start, end, "namedStyleType", "NORMAL_TEXT") }
+	inline, _ := runProbes(t, []probe{
 		{name: "empty paragraph", seed: "Alpha.\n", rounds: []round{insertReset}},
 		{name: "before other text", seed: "Alpha.\nold\n", rounds: []round{insertReset}},
+		// The named style the planner gives each paragraph it inserts,
+		// here the one the paragraph already has.
+		{name: "appended paragraph, its named style set", seed: "Alpha.\n", rounds: []round{{wc: suggestMode,
+			reqs: []json.RawMessage{insertAt(t, "\nnew", 7), normal(8, 11)}}}},
+		{name: "appended paragraph, no named style", seed: "Alpha.\n", rounds: []round{{wc: suggestMode,
+			reqs: []json.RawMessage{insertAt(t, "\nnew", 7)}}}},
+		{name: "empty paragraph filled, its named style set", seed: "Alpha.\n", rounds: []round{{wc: suggestMode,
+			reqs: []json.RawMessage{insertAt(t, "new", 8), normal(8, 11)}}}},
 	})
+	// What the planner relies on: one suggestion unless a reset or a
+	// named style covers a paragraph whose mark is not inserted.
+	for name, want := range map[string]int{
+		"empty paragraph":                             2,
+		"before other text":                           1,
+		"appended paragraph, its named style set":     2,
+		"appended paragraph, no named style":          1,
+		"empty paragraph filled, its named style set": 2,
+	} {
+		if got := suggestionCount(t, inline[name]); got != want {
+			t.Errorf("%s: %d suggestion(s), want %d", name, got, want)
+		}
+	}
+}
+
+// TestRawSuggestedInheritance asks which style suggested text takes when
+// no reset follows it, so the planner knows where its reset changes
+// nothing. Each case inserts "new" in suggest mode next to bold text
+// in another place: the paragraph before, its own mark, the character
+// before. The control has nothing bold.
+func TestRawSuggestedInheritance(t *testing.T) {
+	bold := func(start, end int) round {
+		return round{reqs: []json.RawMessage{textStyle(t, start, end, "bold", true)}}
+	}
+	insert := func(text string, at int) round {
+		return round{wc: suggestMode, reqs: []json.RawMessage{insertAt(t, text, at)}}
+	}
+	_, accepted := runProbes(t, []probe{
+		{name: "control: empty paragraph, nothing bold", seed: "Alpha.\n\n", rounds: []round{insert("new", 8)}},
+		{name: "empty paragraph after a bold one", seed: "Alpha.\n\n", rounds: []round{bold(1, 8), insert("new", 8)}},
+		{name: "empty paragraph whose mark is bold", seed: "Alpha.\n\n", rounds: []round{bold(8, 9), insert("new", 8)}},
+		{name: "start of a plain paragraph after a bold one", seed: "Alpha.\nplain\n", rounds: []round{bold(1, 8), insert("new", 8)}},
+		{name: "end of a paragraph after a bold word", seed: "Alpha bold\n", rounds: []round{bold(7, 11), insert("new", 11)}},
+		{name: "two paragraphs into an empty one, nothing bold", seed: "Alpha.\n\n", rounds: []round{insert("new\nmore", 8)}},
+		{name: "a paragraph after a plain one, nothing bold", seed: "Alpha.\n", rounds: []round{insert("\nnew", 7)}},
+		{name: "a paragraph before a plain one after a bold one", seed: "Alpha.\nplain\n", rounds: []round{bold(1, 8), insert("new\n", 8)}},
+		{name: "a paragraph after a bold one, at its mark", seed: "Alpha.\n", rounds: []round{bold(1, 8), insert("\nnew", 7)}},
+	})
+	// What the planner relies on: in a paragraph with no style, the
+	// accepted text is plain. The styled controls show the check can see
+	// bold, and that text added after a paragraph's last character takes
+	// that character's style.
+	for name, wantBold := range map[string]bool{
+		"control: empty paragraph, nothing bold":          false,
+		"empty paragraph after a bold one":                false,
+		"start of a plain paragraph after a bold one":     false,
+		"two paragraphs into an empty one, nothing bold":  false,
+		"a paragraph after a plain one, nothing bold":     false,
+		"a paragraph before a plain one after a bold one": false,
+		"empty paragraph whose mark is bold":              true,
+		"end of a paragraph after a bold word":            true,
+		"a paragraph after a bold one, at its mark":       true,
+	} {
+		if got := newIsBold(t, accepted[name]); got != wantBold {
+			t.Errorf("%s: accepted \"new\" bold = %t, want %t", name, got, wantBold)
+		}
+	}
+}
+
+// newIsBold reports whether the run holding "new" in a logged view is
+// bold.
+func newIsBold(t *testing.T, view string) bool {
+	t.Helper()
+	var v any
+	if err := json.Unmarshal([]byte(view), &v); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var bold, found bool
+	walkRuns(v, func(run map[string]any) {
+		if content, _ := run["content"].(string); !found && strings.Contains(content, "new") {
+			style, _ := run["textStyle"].(map[string]any)
+			bold, _ = style["bold"].(bool)
+			found = true
+		}
+	})
+	if !found {
+		t.Fatalf("no run holds \"new\":\n%s", view)
+	}
+	return bold
+}
+
+// suggestionCount is how many suggestion ids a logged view carries, on
+// its runs and on its paragraphs.
+func suggestionCount(t *testing.T, view string) int {
+	t.Helper()
+	var v any
+	if err := json.Unmarshal([]byte(view), &v); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ids := map[string]bool{}
+	var walk func(any)
+	walk = func(x any) {
+		switch x := x.(type) {
+		case []any:
+			for _, e := range x {
+				walk(e)
+			}
+		case map[string]any:
+			for k, e := range x {
+				switch k {
+				case "suggestedInsertionIds", "suggestedDeletionIds":
+					for _, id := range e.([]any) {
+						ids[id.(string)] = true
+					}
+				case "suggestedTextStyleChanges", "suggestedParagraphStyleChanges":
+					m, _ := e.(map[string]any)
+					for id := range m {
+						ids[id] = true
+					}
+				default:
+					walk(e)
+				}
+			}
+		}
+	}
+	walk(v)
+	return len(ids)
+}
+
+// walkRuns calls f on every textRun in a decoded view, in order.
+func walkRuns(x any, f func(map[string]any)) {
+	switch x := x.(type) {
+	case []any:
+		for _, e := range x {
+			walkRuns(e, f)
+		}
+	case map[string]any:
+		if run, ok := x["textRun"].(map[string]any); ok {
+			f(run)
+			return
+		}
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			walkRuns(x[k], f)
+		}
+	}
 }
 
 // reset clears the named text properties over a range, "*" for all of
@@ -594,7 +749,7 @@ func TestRawSuggestedStyleKinds(t *testing.T) {
 		return probe{name, "Probe line.\n", []round{{[]json.RawMessage{req()}, suggestMode}, {[]json.RawMessage{req()}, nil}}}
 	}
 	red := map[string]any{"color": map[string]any{"rgbColor": map[string]any{"red": 1}}}
-	got := runProbes(t, []probe{
+	got, _ := runProbes(t, []probe{
 		same("n  italic", func() json.RawMessage { return textStyle(t, 1, 10, "italic", true) }),
 		same("o  underline", func() json.RawMessage { return textStyle(t, 1, 10, "underline", true) }),
 		same("p  strikethrough", func() json.RawMessage { return textStyle(t, 1, 10, "strikethrough", true) }),
@@ -624,7 +779,7 @@ func TestRawSuggestedStyleKindOtherValue(t *testing.T) {
 	color := func(r, b float64) map[string]any {
 		return map[string]any{"color": map[string]any{"rgbColor": map[string]any{"red": r, "blue": b}}}
 	}
-	got := runProbes(t, []probe{
+	got, _ := runProbes(t, []probe{
 		then("r2 baselineOffset SUPERSCRIPT, then SUBSCRIPT", "baselineOffset", "SUPERSCRIPT", "SUBSCRIPT"),
 		then("s2 foregroundColor red, then blue", "foregroundColor", color(1, 0), color(0, 1)),
 		then("t2 weightedFontFamily Georgia, then Courier New", "weightedFontFamily",
@@ -711,6 +866,33 @@ func TestRawSuggestedTableInsertions(t *testing.T) {
 		}
 	}
 	t.Logf("=== scratch documents left behind; Drive search title:\"safe to delete\" finds them ===")
+}
+
+// TestRawSuggestedCellInheritance asks the inheritance question of an
+// empty table cell: text suggested into it, after a cell holding bold
+// text. It stays plain when it takes its style from its own cell.
+func TestRawSuggestedCellInheritance(t *testing.T) {
+	c := probeClient(t)
+	ctx := context.Background()
+	id := probeDoc(t, c, ctx, "cell after a bold cell", "google-docs-mcp suggested-table probe (safe to delete)",
+		[]json.RawMessage{insertAt(t, "Probe line.\n", 1), marshal(t, map[string]any{"insertTable": map[string]any{
+			"rows": 1, "columns": 2, "endOfSegmentLocation": map[string]any{}}})}, nil)
+	_, cell := tableIndices(t, rawBody(t, c, ctx, id, SuggestionsInline))
+	if _, err := c.BatchUpdate(ctx, id, &BatchUpdateRequest{Requests: []json.RawMessage{
+		insertAt(t, "Bold", cell), textStyle(t, cell, cell+4, "bold", true)}}); err != nil {
+		t.Fatalf("bold cell: %v", err)
+	}
+	// The second cell's paragraph opens two past the first cell's end:
+	// its newline, then the second cell's own start.
+	if _, err := c.BatchUpdate(ctx, id, &BatchUpdateRequest{Requests: []json.RawMessage{insertAt(t, "new", cell+4+2)},
+		WriteControl: suggestMode}); err != nil {
+		t.Fatalf("suggested text: %v", err)
+	}
+	accepted := tableOf(t, rawBody(t, c, ctx, id, SuggestionsPreviewAccepted))
+	t.Logf("accepted:\n%s", accepted)
+	if newIsBold(t, accepted) {
+		t.Error("text suggested into an empty cell took the bold of the cell before")
+	}
 }
 
 // firstTable is the first table element in the first tab's body.

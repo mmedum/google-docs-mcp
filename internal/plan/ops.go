@@ -117,6 +117,10 @@ type Op struct {
 	// than the insertion point, is the whitespace the fill replaces.
 	Fill    bool
 	ClearTo int64
+	// Unstyled is the named style of the paragraph holding the insertion
+	// point when neither it nor any of its runs carries a text style or a
+	// pending suggestion, and empty otherwise.
+	Unstyled string
 	// List is the list around the insertion point or the target.
 	List ListContext
 	// Items are the list items a bullets op's target reaches, whose
@@ -794,12 +798,20 @@ func formatRequests(op *Op) []json.RawMessage {
 	return nil
 }
 
+// suggestOnly is v in suggest mode and empty in any other.
+func suggestOnly(mode Mode, v string) string {
+	if mode != ModeSuggest {
+		return ""
+	}
+	return v
+}
+
 func contentRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	switch op.Kind {
 	case OpInsert, OpAppend:
 		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline,
 			Inline: op.Inline, Fill: op.Fill, Inherited: op.List.At, List: op.List, ListLevel: op.ListLevel, Slots: inBody(op),
-			Isolate: mode == ModeSuggest && op.ClearTo > op.Insert.Index})
+			Isolate: mode == ModeSuggest && op.ClearTo > op.Insert.Index, Unstyled: suggestOnly(mode, op.Unstyled)})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 		}

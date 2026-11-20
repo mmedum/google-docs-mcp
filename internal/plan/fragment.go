@@ -42,6 +42,11 @@ type FragmentOptions struct {
 	// they are refused. Checked by the integration test
 	// TestRawTablesInContent.
 	Slots bool
+	// Unstyled, for a suggestion only, is Op.Unstyled: the reset and a
+	// paragraph's named style where it is this one are left out, since
+	// Google files either as a second suggestion that changes nothing
+	// (D-21, TestRawSuggestedResetWholeParagraph).
+	Unstyled string
 	// Isolate gives a slot that ends the fragment a newline of its own.
 	// Set where the newline it would end with follows text the batch
 	// deletes: as a suggestion that text stays, inside the slot.
@@ -153,8 +158,9 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 	if text != "" {
 		c.Requests = append(c.Requests, InsertText(text, at))
 	}
-	// Inserted text inherits the style of its neighbors; reset it.
-	if cursor > contentStart {
+	// Inserted text inherits the style of its neighbors; reset it, unless
+	// as a suggestion its paragraph carries none (Unstyled).
+	if cursor > contentStart && o.Unstyled == "" {
 		c.Requests = append(c.Requests, ClearTextStyle(rng(contentStart, cursor)))
 	}
 	for i, p := range pieces {
@@ -222,7 +228,11 @@ func pieceRequests(p *piece, o FragmentOptions, merged bool, rng func(int64, int
 		if p.block.Kind == markdown.KindHeading {
 			ps.NamedStyle = fmt.Sprintf("HEADING_%d", p.block.HeadingLevel())
 		}
-		reqs = append(reqs, UpdateParagraphStyle(paraRange(p), ps))
+		// A new paragraph takes the style of the one the text lands in.
+		// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#InsertTextRequest
+		if ps.NamedStyle != o.Unstyled {
+			reqs = append(reqs, UpdateParagraphStyle(paraRange(p), ps))
+		}
 		if o.Inherited != nil && !p.listItem {
 			// The bullet's indent outlives it.
 			reqs = append(reqs, DeleteBullets(paraRange(p)), ClearIndent(paraRange(p)))

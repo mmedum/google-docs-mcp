@@ -378,6 +378,7 @@ func (s *Service) planAndApply(ctx context.Context, f *Fetched, req EditRequest,
 		return nil, nil, err
 	}
 	dropOwn(ro.ops, req.own)
+	soleUnstyled(ro.ops)
 	if err := checkEmbeds(req.Ops, ro.ops); err != nil {
 		return nil, nil, err
 	}
@@ -911,9 +912,42 @@ func (ip *insertPoint) fill(p *plan.Op, out *resolvedOps) {
 	p.Seg = ip.bounds()
 	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
 	p.AtEnd, p.Inline, p.Fill, p.ClearTo, p.List = ip.atEnd, ip.inline, ip.fills, ip.clearTo, ip.list
+	p.Unstyled = unstyledAs(ip.segment.BlockAt(ip.index))
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
 	out.note(ip.tab.ID, ip.segment.ID, ip.index)
+}
+
+// soleUnstyled keeps Unstyled only for an op alone in its segment: it is
+// read from the document as fetched, and another op in the batch may put
+// styled text in the same paragraph first.
+func soleUnstyled(ops []plan.Op) {
+	type seg struct{ tab, id string }
+	count := map[seg]int{}
+	for i := range ops {
+		count[seg{ops[i].Seg.TabID, ops[i].Seg.ID}]++
+	}
+	for i := range ops {
+		if count[seg{ops[i].Seg.TabID, ops[i].Seg.ID}] > 1 {
+			ops[i].Unstyled = ""
+		}
+	}
+}
+
+// unstyledAs is the named style of b when b is a paragraph that, like
+// each of its runs, carries no text style and no pending suggestion, and
+// empty otherwise: suggested text takes no style from it then
+// (plan.FragmentOptions.Unstyled).
+func unstyledAs(b *doc.Block) string {
+	if b == nil || b.Paragraph == nil || len(b.Paragraph.StyleChanges) > 0 || len(b.Paragraph.BulletChanges) > 0 {
+		return ""
+	}
+	for _, r := range b.Paragraph.Runs {
+		if r.Style != (doc.TextStyle{}) || len(r.Inserted) > 0 || len(r.Deleted) > 0 || len(r.StyleChanges) > 0 {
+			return ""
+		}
+	}
+	return b.Paragraph.NamedStyle
 }
 
 // resolveLocation turns a Location into an insertion index.

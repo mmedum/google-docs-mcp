@@ -117,9 +117,10 @@ it before changing the tool surface, the addressing or the write path.
 
 - **Green gates are not done.** Every fake is written from belief; only
   `make live` and the integration tests test it (D-80, D-83).
-- **`dry_run` is taken by the writes whose input carries it, not every
-  write** (D-35). Each returns before sending, with no guard in the API
-  client, so a write that takes it needs its own "sends nothing" test.
+- **Every write takes `dry_run`, and each stops on its own** (D-35).
+  Each returns before sending, with no guard in the API client, so a
+  new write needs `dry_run` and its own "sends nothing" test.
+  `TestEveryWriteTakesDryRun` holds the first.
 - **`expect_revision` is checked before a write**, so only an edit
   between the read and the write reaches Google's conflict answer
   (D-30). `TestRawStaleRevision` checks that answer.

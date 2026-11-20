@@ -20,6 +20,9 @@ type ExportRequest struct {
 	Document string
 	Format   string
 	MaxChars int
+	// DryRun resolves the document and the path a binary export would
+	// take, and downloads and writes nothing.
+	DryRun bool
 }
 
 // ExportResult is either inline text or a file path.
@@ -30,6 +33,7 @@ type ExportResult struct {
 	Path      string `json:"path,omitempty"`
 	Bytes     int    `json:"bytes"`
 	Truncated bool   `json:"truncated,omitempty"`
+	DryRun    bool   `json:"dry_run,omitempty"`
 	Text      string `json:"-"`
 }
 
@@ -87,8 +91,16 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	if s.isMarkdown(ctx, id) {
 		return s.mdExport(ctx, req, format)
 	}
+	// Drive's export converts only Google Workspace files, so a Word file
+	// has none (https://developers.google.com/workspace/drive/api/reference/rest/v3/files/export).
+	if err := s.wordUnsupported(ctx, id, "exporting"); err != nil {
+		return nil, err
+	}
 	if !inlineFormats[format] && s.opts.ExportDir == "" {
 		return nil, Errorf("unavailable", "binary exports need "+config.EnvPrefix+"EXPORT_DIR to be set to a directory; md, txt and html are returned inline")
+	}
+	if req.DryRun {
+		return s.exportDryRun(ctx, id, format, mime)
 	}
 	data, err := s.api.Export(ctx, id, mime)
 	if err != nil {
@@ -122,6 +134,54 @@ func (s *Service) Export(ctx context.Context, req ExportRequest) (*ExportResult,
 	return res, nil
 }
 
+// exportDryRun reads the document's metadata, which shows it exists, and
+// names the file a binary export would write. It downloads nothing and
+// creates neither the file nor the export directory.
+func (s *Service) exportDryRun(ctx context.Context, id, format, mime string) (*ExportResult, error) {
+	// A missing document fails the export too; any other metadata error
+	// leaves the export to name the file "document", as it does.
+	title := "document"
+	file, err := s.api.GetFile(ctx, id)
+	switch {
+	case errors.Is(err, gapi.ErrNotFound):
+		return nil, wrapAPI(err, "document")
+	case err == nil && file.Name != "":
+		title = file.Name
+	}
+	res := &ExportResult{Format: format, MimeType: mime, Inline: inlineFormats[format], DryRun: true}
+	if res.Inline {
+		res.Text = "dry run: would return the document inline as " + format
+		return res, nil
+	}
+	stem, dir := fileName(title)+"-"+gapi.ShortID(id), filepath.Clean(s.opts.ExportDir)
+	for n := 1; n <= maxExportNames; n++ {
+		path := filepath.Join(dir, exportName(stem, format, n))
+		_, err := os.Lstat(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			res.Path = path
+			res.Text = fmt.Sprintf("dry run: would export %q as %s to %s", title, format, path)
+			return res, nil
+		case err != nil:
+			return nil, Errorf("unexpected", "check export dir: %v", err)
+		}
+	}
+	return nil, exportNamesTaken(stem, format)
+}
+
+// exportName is the nth name tried for an export: stem.ext, then stem-2.ext.
+func exportName(stem, ext string, n int) string {
+	if n > 1 {
+		return fmt.Sprintf("%s-%d.%s", stem, n, ext)
+	}
+	return stem + "." + ext
+}
+
+func exportNamesTaken(stem, ext string) error {
+	return Errorf("blocked", "%d files in the export directory are already named like %s.%s, and an export never "+
+		"overwrites one; move or delete earlier exports, then export again", maxExportNames, stem, ext)
+}
+
 // maxExportNames bounds the search for a free export file name.
 const maxExportNames = 100
 
@@ -134,11 +194,7 @@ const maxExportNames = 100
 // A write that fails removes the file it created.
 func writeExport(dir, stem, ext string, data []byte) (string, error) {
 	for n := 1; n <= maxExportNames; n++ {
-		name := stem + "." + ext
-		if n > 1 {
-			name = fmt.Sprintf("%s-%d.%s", stem, n, ext)
-		}
-		path := filepath.Join(dir, name)
+		path := filepath.Join(dir, exportName(stem, ext, n))
 		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if errors.Is(err, fs.ErrExist) {
 			continue
@@ -155,8 +211,7 @@ func writeExport(dir, stem, ext string, data []byte) (string, error) {
 		}
 		return "", Errorf("unexpected", "write export: %v", err)
 	}
-	return "", Errorf("blocked", "%d files in the export directory are already named like %s.%s, and an export never "+
-		"overwrites one; move or delete earlier exports, then export again", maxExportNames, stem, ext)
+	return "", exportNamesTaken(stem, ext)
 }
 
 // fileName turns a document title into a name a person can recognize in

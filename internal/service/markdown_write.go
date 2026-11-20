@@ -652,7 +652,7 @@ func (s *Service) mdReply(ctx context.Context, req ReplyRequest, action, content
 		return nil, Errorf("not_found", "no comment %s on the file; ids come from list_comments, and the id of a comment written into a Markdown file changes each time the file is written, until a person saves the file in the Docs editor", commentID)
 	}
 	author, at := s.account(ctx), s.postTime()
-	if _, err := s.mdWrite(ctx, mdWriteOpts{ref: req.Document, comment: true, posts: []string{content}},
+	if _, err := s.mdWrite(ctx, mdWriteOpts{ref: req.Document, dryRun: req.DryRun, comment: true, posts: []string{content}},
 		func(m *mdFile) (*mdfile.File, *EditResult, error) {
 			entries := m.md.Comments()
 			k := matchEntry(entries, make([]bool, len(entries)), *thread)
@@ -667,6 +667,10 @@ func (s *Service) mdReply(ctx context.Context, req ReplyRequest, action, content
 		}); err != nil {
 		return nil, err
 	}
-	return &ReplyResult{CommentID: commentID, Action: "reply", Resolved: thread.Resolved,
-		Text: fmt.Sprintf("replied to comment %s in the file by %s", commentID, author)}, nil
+	res := &ReplyResult{CommentID: commentID, Action: "reply", Resolved: thread.Resolved, DryRun: req.DryRun,
+		Text: fmt.Sprintf("replied to comment %s in the file by %s", commentID, author)}
+	if req.DryRun {
+		res.Text = fmt.Sprintf("dry run: would reply to comment %s in the file as %s", commentID, author)
+	}
+	return res, nil
 }

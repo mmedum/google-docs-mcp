@@ -302,6 +302,7 @@ type ReplyRequest struct {
 	ReplyID      string // edit: the reply to rewrite; empty means the comment itself
 	Content      string
 	Action       string // reply (default), resolve, reopen, edit
+	DryRun       bool   // run every check and stop before the write
 }
 
 // ReplyResult reports the posted reply.
@@ -311,6 +312,7 @@ type ReplyResult struct {
 	ReplyID      string `json:"reply_id"`
 	Action       string `json:"action"`
 	Resolved     bool   `json:"resolved"`
+	DryRun       bool   `json:"dry_run,omitempty"`
 	Text         string `json:"-"`
 }
 
@@ -332,7 +334,7 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 		if action != "reply" {
 			return nil, Errorf("invalid", "a suggestion's thread takes replies only; accept or reject the suggestion with review_suggestion")
 		}
-		return s.replyToSuggestion(ctx, req.Document, suggestionID, content)
+		return s.replyToSuggestion(ctx, req.Document, suggestionID, content, req.DryRun)
 	}
 	if s.isMarkdown(ctx, req.Document) {
 		// A comment made through Drive's API is Drive's to answer; one
@@ -347,13 +349,18 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, er
 		return nil, err
 	}
 	if action == "edit" {
-		return s.editComment(ctx, id, commentID, strings.TrimSpace(req.ReplyID), content, thread)
+		return s.editComment(ctx, id, commentID, strings.TrimSpace(req.ReplyID), content, thread, req.DryRun)
 	}
 	if action == "resolve" && thread.Resolved {
 		return nil, Errorf("invalid", "comment %s is already resolved", commentID)
 	}
 	if action == "reopen" && !thread.Resolved {
 		return nil, Errorf("invalid", "comment %s is not resolved", commentID)
+	}
+	if req.DryRun {
+		verb := map[string]string{"reply": "reply to", "resolve": "resolve", "reopen": "reopen"}[action]
+		return &ReplyResult{CommentID: commentID, Action: action, Resolved: thread.Resolved, DryRun: true,
+			Text: fmt.Sprintf("dry run: would %s comment %s", verb, commentID)}, nil
 	}
 	apiAction := action
 	if action == "reply" {
@@ -398,7 +405,7 @@ func replyAction(req ReplyRequest) (string, string, error) {
 // replyToSuggestion posts a reply on a suggestion's thread. Drive's
 // comments do not include these threads, so the reply goes through the
 // Docs API and needs the comments view.
-func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, content string) (*ReplyResult, error) {
+func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, content string, dryRun bool) (*ReplyResult, error) {
 	if err := s.wordUnsupported(ctx, ref, "a reply on a suggestion's thread"); err != nil {
 		return nil, err
 	}
@@ -411,6 +418,10 @@ func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, cont
 	}
 	if !slices.ContainsFunc(f.Wire.Suggestions, func(t gdocs.SuggestionThread) bool { return t.SuggestionID == suggestionID }) {
 		return nil, Errorf("not_found", "suggestion %s has no thread in this document; ids come from list_suggestions", suggestionID)
+	}
+	if dryRun {
+		return &ReplyResult{SuggestionID: suggestionID, Action: "reply", DryRun: true,
+			Text: "dry run: would reply to suggestion " + suggestionID}, nil
 	}
 	env, _, err := s.commentBatch(ctx, f, []json.RawMessage{plan.ReplyToSuggestion(suggestionID, content)})
 	if err != nil {
@@ -426,9 +437,13 @@ func (s *Service) replyToSuggestion(ctx context.Context, ref, suggestionID, cont
 
 // editComment rewrites a comment or one of its replies. Google allows
 // only the author to, and answers 403 to anyone else.
-func (s *Service) editComment(ctx context.Context, id, commentID, replyID, content string, thread *gapi.DriveComment) (*ReplyResult, error) {
-	res := &ReplyResult{CommentID: commentID, Action: "edit", Resolved: thread.Resolved}
+func (s *Service) editComment(ctx context.Context, id, commentID, replyID, content string, thread *gapi.DriveComment, dryRun bool) (*ReplyResult, error) {
+	res := &ReplyResult{CommentID: commentID, Action: "edit", Resolved: thread.Resolved, DryRun: dryRun}
 	if replyID == "" {
+		if dryRun {
+			res.Text = "dry run: would rewrite comment " + commentID
+			return res, nil
+		}
 		if _, err := s.api.UpdateComment(ctx, id, commentID, content); err != nil {
 			return nil, wrapWriteError(err)
 		}
@@ -441,10 +456,14 @@ func (s *Service) editComment(ctx context.Context, id, commentID, replyID, conte
 		if !found {
 			return nil, Errorf("not_found", "comment %s has no reply %s", commentID, replyID)
 		}
+		res.ReplyID = replyID
+		if dryRun {
+			res.Text = fmt.Sprintf("dry run: would rewrite reply %s of comment %s", replyID, commentID)
+			return res, nil
+		}
 		if _, err := s.api.UpdateReply(ctx, id, commentID, replyID, content); err != nil {
 			return nil, wrapWriteError(err)
 		}
-		res.ReplyID = replyID
 		res.Text = fmt.Sprintf("rewrote reply %s of comment %s", replyID, commentID)
 	}
 	s.Invalidate(id)

@@ -19,6 +19,7 @@ type TabInput struct {
 	Emoji          string `json:"emoji,omitempty" jsonschema:"add, rename: a single emoji as the tab icon"`
 	Content        string `json:"content,omitempty" jsonschema:"add: initial content as markdown"`
 	ExpectRevision string `json:"expect_revision,omitempty"`
+	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"resolve the tabs and stop before the write; add's content is not planned"`
 }
 
 // DeleteTabInput is the delete_tab call.
@@ -36,11 +37,11 @@ func registerTabs(s *mcp.Server, d Deps) {
 		Description: "Add, rename or move a tab of a Google Doc. add takes a title, optional position, parent tab, emoji " +
 			"and initial markdown content; rename changes the title or emoji; move changes the position among siblings " +
 			"or nests the tab under a parent. Tab changes are always direct edits (the API cannot suggest them). Other " +
-			"tools address tabs by id, title or number; get_document lists them.",
+			"tools address tabs by id, title or number; get_document lists them. dry_run resolves the tabs and stops.",
 		Annotations: overwriting,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TabInput) (*mcp.CallToolResult, *service.TabResult, error) {
 		res, err := d.Service.ManageTabs(ctx, service.TabRequest{Document: in.Document, Action: in.Action, Tab: in.Tab, Title: in.Title, Position: in.Position,
-			Parent: in.Parent, Emoji: in.Emoji, Content: in.Content, ExpectRevision: in.ExpectRevision})
+			Parent: in.Parent, Emoji: in.Emoji, Content: in.Content, ExpectRevision: in.ExpectRevision, DryRun: in.DryRun})
 		if err != nil {
 			return nil, nil, fail(err)
 		}

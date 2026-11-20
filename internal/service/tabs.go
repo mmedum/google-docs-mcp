@@ -23,7 +23,7 @@ type TabRequest struct {
 	Emoji          string
 	Content        string // add: initial markdown content
 	ExpectRevision string
-	DryRun         bool // delete: resolve the tab and stop before the write
+	DryRun         bool // resolve the tab, build the request and stop before the write
 }
 
 // TabResult reports the tab change.
@@ -61,7 +61,12 @@ func (s *Service) ManageTabs(ctx context.Context, req TabRequest) (*TabResult, e
 		return nil, err
 	}
 	if action == "add" {
-		s.fillNewTab(ctx, req, res)
+		if req.DryRun && strings.TrimSpace(req.Content) != "" {
+			// The content is planned against the new tab, which a dry run never makes.
+			res.Warnings = append(res.Warnings, "the content is not planned: the tab it goes into does not exist yet")
+		} else {
+			s.fillNewTab(ctx, req, res)
+		}
 		res.Text = tabText(res)
 	}
 	return res, nil
@@ -267,21 +272,19 @@ func (s *Service) fillNewTab(ctx context.Context, req TabRequest, res *TabResult
 
 func tabText(res *TabResult) string {
 	var sb strings.Builder
+	verb := map[string]string{"add": "added", "rename": "renamed", "move": "moved", "delete": "deleted"}[res.Action]
+	if res.DryRun {
+		verb = "dry run: would " + res.Action
+	}
 	switch res.Action {
 	case "add":
-		fmt.Fprintf(&sb, "added tab %q", res.Title)
+		fmt.Fprintf(&sb, "%s tab %q", verb, res.Title)
 		if res.TabID != "" {
 			fmt.Fprintf(&sb, " (id %s)", res.TabID)
 		}
 	case "rename":
-		fmt.Fprintf(&sb, "renamed tab %s to %q", res.TabID, res.Title)
-	case "move":
-		fmt.Fprintf(&sb, "moved tab %s (%q)", res.TabID, res.Title)
-	case "delete":
-		verb := "deleted"
-		if res.DryRun {
-			verb = "dry run: would delete"
-		}
+		fmt.Fprintf(&sb, "%s tab %s to %q", verb, res.TabID, res.Title)
+	case "move", "delete":
 		fmt.Fprintf(&sb, "%s tab %s (%q)", verb, res.TabID, res.Title)
 	}
 	fmt.Fprintf(&sb, "; revision %s", res.RevisionID)

@@ -8,6 +8,14 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Added
+
+- `dry_run` on `create_document`, `reply_comment`, `manage_tabs` and `export_document`: each checks the call and sends, creates and writes nothing (#105).
+
+### Fixed
+
+- `export_document` on a Word file (.docx) refuses up front, saying to save it as a Google Doc, rather than failing at Drive's converter.
+
 ### Security
 
 - Built with Go 1.27.4, which fixes an HTTP/1 server crash in `net/http` (CVE-2026-97054, GO-2026-6859). `govulncheck` found the package reachable from this server.

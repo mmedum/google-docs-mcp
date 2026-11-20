@@ -349,6 +349,10 @@ func (s *Service) mdExport(ctx context.Context, req ExportRequest, format string
 	if err != nil {
 		return nil, err
 	}
+	if req.DryRun {
+		return &ExportResult{Format: format, MimeType: gapi.MarkdownMimeType, Inline: true, DryRun: true,
+			Text: "dry run: would return the file's text inline as " + format}, nil
+	}
 	limit := req.MaxChars
 	if limit <= 0 {
 		limit = DefaultMaxChars

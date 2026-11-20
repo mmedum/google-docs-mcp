@@ -424,7 +424,7 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-32 | Ops addressed in a table after a grid change wait for a batch of their own against a fresh read | accepted | TestGridChangesChain, TestAForcedOpInALaterBatchIsRefused |
 | D-33 | A list item keeps a right inherited bullet, and the rest are rebuilt in windows that count levels from the item before | accepted | TestCompileFragmentListLevels, TestPlanListLevel, TestBulletsNoneKeepsHandIndents, live |
 | D-34 | A regex replace is expanded by the server into one replace per match, found with RE2 within a paragraph | accepted | TestRegexReplaceAllReplacesEachMatch, TestRegexReplaceAllIsGuardedAndRefused, TestARegexMatchAcrossAChipIsRefused, TestAReplacementNamingAMissingGroupIsRefused |
-| D-35 | A write that takes dry_run resolves, plans and reports, and sends nothing | accepted | TestDryRunAndConflictRetry, TestEmbedsDryRun, TestDryRunListsFollowups, live |
+| D-35 | A write that takes dry_run resolves, plans and reports, and sends nothing | accepted | TestDryRunAndConflictRetry, TestEmbedsDryRun, TestDryRunListsFollowups, TestDryRunSendsNothing, TestDryRunReachesTheService, TestEveryWriteTakesDryRun, live |
 | D-36 | A direct formatting change over a property a pending suggestion sets is warned about, not refused | accepted | TestDirectFormatWarnsOnACollidingSuggestion, TestClearFormattingCollidesWithEverySuggestedProperty, live |
 | D-37 | Every GA request of the Docs API and every field it accepts on a write is emitted; a read-only field is reported, never sent | accepted | api-coverage, api-fields, TestKindRegistryCoversEveryTool |
 | D-38 | A comment is pinned through insertComment where the comments view answered, else posted through Drive quoting the text and said to be unanchored | accepted | TestAddComment, TestPreviewAnchorsLocateComments, TestListCommentsLocatesAndRenders |
@@ -1354,20 +1354,30 @@ rather than requests, because a request carries UTF-16 indices, which
 the model never sees (D-12). A delete, a comment or a review names what
 it would act on, after the same lookup and checks the write makes.
 
-The tools that take it are `edit_document`, `format_document`,
-`edit_table`, `insert_object`, `layout_document`, `review_suggestion`,
-`write_markdown_file`, `add_comment`, `delete_comment` and `delete_tab`.
-The live driver calls every tool whose schema takes `dry_run`, fails on
-one it has no call for, and checks with the live step "revision after
-the dry runs" that the document did not move.
+Every tool that is not read-only takes it: `edit_document`,
+`format_document`, `edit_table`, `insert_object`, `layout_document`,
+`review_suggestion`, `write_markdown_file`, `add_comment`,
+`reply_comment`, `manage_tabs`, `create_document`, `export_document`,
+`delete_comment` and `delete_tab`.
+A dry run of `create_document` and of `manage_tabs`' add plans no
+content, since the document or tab it goes into does not exist yet. A
+dry run of `export_document` names the file a binary export would write
+and downloads nothing. The live driver calls every tool whose schema
+takes `dry_run`, fails on one it has no call for, and checks with the
+live step "revision after the dry runs" that the document did not move.
+A reply and a new document move no revision, so the live steps "the
+comments after the dry runs" and "search for the document a dry run
+would create" check those.
+`TestEveryWriteTakesDryRun` holds the list; `TestDryRunSendsNothing` and
+`TestDryRunReachesTheService` hold that `reply_comment`, `manage_tabs`,
+`create_document` and `export_document` send nothing.
 
 Rejected: a dry run as a substitute for the client's approval, since the
 model decides whether to send one (D-52).
 Cost: a dry run never plans a later batch, whose grid or slots do not
-exist yet (D-31, D-32). `create_document`, `reply_comment`,
-`manage_tabs` and `export_document` take none, so they cannot be
-previewed; issue #105 proposes `dry_run` on each, with a test that a
-dry run sends nothing.
+exist yet (D-31, D-32), and the content of a new document or tab is
+not planned. `search_documents` and the reads take none, since they
+send nothing.
 
 ### D-36 A direct formatting change over a property a pending suggestion sets is warned about, not refused
 

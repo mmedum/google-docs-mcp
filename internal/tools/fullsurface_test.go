@@ -68,3 +68,23 @@ func TestFullSurfaceRegistersEverything(t *testing.T) {
 		}
 	}
 }
+
+// Every tool that is not read-only takes dry_run, so a client can preview
+// any write (D-35).
+func TestEveryWriteTakesDryRun(t *testing.T) {
+	var writes int
+	for _, tool := range listedUnder(t, FullSurface(config.Config{})) {
+		if tool.Annotations != nil && tool.Annotations.ReadOnlyHint {
+			continue
+		}
+		writes++
+		schema, _ := tool.InputSchema.(map[string]any)
+		props, _ := schema["properties"].(map[string]any)
+		if _, ok := props["dry_run"]; !ok {
+			t.Errorf("%s writes and takes no dry_run", tool.Name)
+		}
+	}
+	if writes < 10 {
+		t.Fatalf("found %d write tools, want at least 10; the annotations probably moved", writes)
+	}
+}

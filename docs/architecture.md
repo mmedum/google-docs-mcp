@@ -425,7 +425,7 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-33 | A list item keeps a right inherited bullet, and the rest are rebuilt in windows that count levels from the item before | accepted | TestCompileFragmentListLevels, TestPlanListLevel, TestBulletsNoneKeepsHandIndents, live |
 | D-34 | A regex replace is expanded by the server into one replace per match, found with RE2 within a paragraph | accepted | TestRegexReplaceAllReplacesEachMatch, TestRegexReplaceAllIsGuardedAndRefused, TestARegexMatchAcrossAChipIsRefused, TestAReplacementNamingAMissingGroupIsRefused |
 | D-35 | A write that takes dry_run resolves, plans and reports, and sends nothing | accepted | TestDryRunAndConflictRetry, TestEmbedsDryRun, TestDryRunListsFollowups, TestDryRunSendsNothing, TestDryRunReachesTheService, TestEveryWriteTakesDryRun, live |
-| D-36 | A direct formatting change over a property a pending suggestion sets is warned about, not refused | accepted | TestDirectFormatWarnsOnACollidingSuggestion, TestClearFormattingCollidesWithEverySuggestedProperty, live |
+| D-36 | A direct formatting change over a property a pending suggestion sets is warned about, not refused | accepted | TestDirectFormatWarnsOnACollidingSuggestion, TestClearFormattingCollidesWithEverySuggestedProperty, TestRawSuggestedStyleKinds, live |
 | D-37 | Every GA request of the Docs API and every field it accepts on a write is emitted; a read-only field is reported, never sent | accepted | api-coverage, api-fields, TestKindRegistryCoversEveryTool |
 | D-38 | A comment is pinned through insertComment where the comments view answered, else posted through Drive quoting the text and said to be unanchored | accepted | TestAddComment, TestPreviewAnchorsLocateComments, TestListCommentsLocatesAndRenders |
 | D-39 | Thread operations go through Drive's comment API, one backend; a reply on a suggestion's thread is the exception | accepted | TestReplyAndDeleteComment, TestReplyToASuggestionsThread, TestCommentEditAndSuggestionDiscard |
@@ -1384,17 +1384,20 @@ send nothing.
 
 In direct mode, a formatting change over a property that a pending
 suggestion on the same range already sets comes back with a warning
-naming the suggestion and the property. It is applied, not refused.
-`guardRestyle` in `internal/plan/ops.go` makes the check.
+naming the suggestion and the property, unless Google is known to apply
+that property anyway. It is applied, not refused. `guardRestyle` in
+`internal/plan/ops.go` makes the check.
 
-Google's behavior here is not one rule, and the reference says nothing
-of it
+The reference says nothing of this
 ([UpdateTextStyleRequest](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateTextStyleRequest)).
-Bold set directly over a suggested bold leaves the run unbolded, and the
-same holds for a paragraph alignment: the batch is accepted, the reply
-is empty, and nothing changes. A font size set to exactly the size a
-suggestion names does land, and so does an alignment to a value the
-suggestion does not name. The integration tests
+Set directly to the value a pending suggestion names, bold and every
+paragraph property probed (alignment, line spacing, space above) are
+dropped: the batch is accepted, the reply is empty, and nothing changes.
+Italic, underline, strikethrough and small caps set true land, and
+baseline offset, color, font and size land at that value or another, as
+does an alignment to a value the suggestion does not name. The
+integration tests TestRawSuggestedStyleKinds,
+TestRawSuggestedStyleKindOtherValue, TestRawSuggestedStyleKindControls,
 TestRawSuggestedStyleSameProperty and TestRawSuggestedStyleValue check
 both sides, and the live step "direct change to the suggested property"
 drives it. What the person needs either way is to learn that a
@@ -1402,10 +1405,11 @@ suggestion sits on the property they set, which `ops_applied` cannot
 tell them.
 
 Rejected: refusing the change, which would block the writes that land.
-Cost: the warning fires on every collision, the ones that land included,
-since the rule is not known. Issue #106 asks for more properties to
-be probed until the rule is found and reported to Google, so the warning
-can name only the changes Google drops.
+Cost: bold and a paragraph property warn at any value, though only the
+suggested value was seen dropped, since the guard knows the property and
+not the value. An unprobed property, a boolean set false, `NONE` and a
+reset, clear_formatting's included, warn too, because on unstyled text
+a probe cannot tell them from no change.
 
 ### D-37 Every GA request of the Docs API and every field it accepts on a write is emitted; a read-only field is reported, never sent
 

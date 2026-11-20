@@ -550,21 +550,14 @@ func (op *Op) sets() []string {
 // guardRestyle warns when a direct formatting change touches a property
 // a pending suggestion on the same range already sets.
 //
-// A warning rather than a refusal, because Google's behavior here is
-// not one rule, and the reference says nothing of it. Suggesting bold
-// and then applying bold directly leaves the run unbolded, and the same
-// holds for a paragraph alignment suggested and then applied with the
-// same value — the batch is accepted, the reply is empty, and nothing
-// changes. Yet a font size suggested at 20pt and then set directly to
-// 20pt does land, and so does an alignment set to a different value than
-// the pending suggestion names. So the collision is real and
-// reproducible but its exact rule is not known, and a refusal would
-// block writes that work. What the person needs either way is to be told
-// a pending suggestion is sitting on the property they just set, because
-// that is the thing ops_applied cannot tell them. Checked by the
-// integration tests TestRawSuggestedStyleSameProperty,
-// TestRawSuggestedStyleParagraph and TestRawSuggestedStyleValue, and the
-// live step "direct change to the suggested property".
+// A warning rather than a refusal, because Google accepts the batch,
+// replies empty and drops the change only for some properties, and the
+// reference says nothing of it: bold and the paragraph properties drop,
+// the text properties in landsOverASuggestion land. ops_applied cannot
+// tell the two apart, so the warning does. Checked by the integration
+// tests TestRawSuggestedStyleSameProperty, TestRawSuggestedStyleParagraph,
+// TestRawSuggestedStyleValue and TestRawSuggestedStyleKinds, and the live
+// step "direct change to the suggested property".
 // https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateTextStyleRequest
 func guardRestyle(ops []Op, o Options, res *Result) {
 	if o.Mode != ModeDirect {
@@ -584,9 +577,9 @@ func guardRestyle(ops []Op, o Options, res *Result) {
 		if len(fields) == 0 {
 			continue
 		}
-		mask := maskOf(fields)
+		mask, lands := maskOf(fields), op.lands()
 		for _, c := range op.Restyled {
-			if hit := overlapProps(mask, c.Props); len(hit) > 0 {
+			if hit := overlapProps(mask, lands, c.Props); len(hit) > 0 {
 				res.Warnings = append(res.Warnings, fmt.Sprintf(
 					"op %d: suggestion %s already suggests %s on %s; Google accepts a direct change to the same property and may silently drop it, so check the result or review the suggestion first (list_suggestions, review_suggestion)",
 					op.Seq, c.ID, doc.PropList(hit), op.Description))
@@ -612,9 +605,40 @@ func maskOf(fields []string) fieldMask {
 	return m
 }
 
+// landsOverASuggestion are the text properties Google applies directly
+// over a pending suggestion of the same property: a boolean set true over
+// a suggested true, a value-typed one at the suggested value or another.
+// Bold and every paragraph property tried (alignment, lineSpacing,
+// spaceAbove) are dropped, and an unprobed property may be, so those
+// still warn. TestRawSuggestedStyleKinds and
+// TestRawSuggestedStyleKindOtherValue in internal/gapi check it
+// (GDOCS_INTEGRATION=1, -tags=integration).
+// https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateTextStyleRequest
+var landsOverASuggestion = map[string]bool{"italic": true, "underline": true, "strikethrough": true, "smallCaps": true,
+	"baselineOffset": true, "foregroundColor": true, "weightedFontFamily": true, "fontSize": true}
+
+// lands are the properties this op sets to a value Google applies over a
+// pending suggestion of the same property. A boolean set false, NONE or a
+// reset still warns: on unstyled text a probe cannot tell any of them
+// from no change, so none is probed.
+func (op *Op) lands() map[string]bool {
+	if op.Kind != OpTextStyle {
+		return nil
+	}
+	style, _ := op.Text.body()
+	out := map[string]bool{}
+	for name, v := range style {
+		if landsOverASuggestion[name] && v != false && v != "NONE" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
 // overlapProps are the properties a suggestion sets that the mask also
-// sets.
-func overlapProps(mask fieldMask, suggested []string) []string {
+// sets, less those the op lands anyway. A reset ("*") lands nothing, so
+// it overlaps everything.
+func overlapProps(mask fieldMask, lands map[string]bool, suggested []string) []string {
 	var out []string
 	for _, p := range suggested {
 		// A suggestion names a nested property as shading.backgroundColor
@@ -624,6 +648,9 @@ func overlapProps(mask fieldMask, suggested []string) []string {
 		top := p
 		if i := strings.IndexByte(p, '.'); i >= 0 {
 			top = p[:i]
+		}
+		if lands[top] {
+			continue
 		}
 		if mask.all || mask.names[top] {
 			out = append(out, p)

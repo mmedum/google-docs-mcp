@@ -29,10 +29,17 @@ package gapi
 //     the range already suggests the same property AND value: bold over
 //     a suggested bold, alignment CENTER over a suggested CENTER. The
 //     batch is accepted and its reply is empty.
-//   - But not always. A font size suggested at 20pt and then set
-//     directly to 20pt does land, and an alignment set to a value the
-//     suggestion does not name lands too. So the collision is real and
-//     reproducible and its rule is not known. One case is deliberately
+//   - The rule follows the property (TestRawSuggestedStyleKinds, read
+//     against TestRawSuggestedStyleKindControls, twice): at the
+//     suggested value, bold and every paragraph property tried
+//     (alignment, lineSpacing, spaceAbove) are dropped, while italic,
+//     underline, strikethrough, smallCaps, baselineOffset,
+//     foregroundColor, weightedFontFamily and fontSize land. A value
+//     the suggestion does not name lands for baselineOffset,
+//     foregroundColor, weightedFontFamily and fontSize
+//     (TestRawSuggestedStyleKindOtherValue, TestRawSuggestedStyleValue)
+//     and for alignment. A boolean set false and a reset are not
+//     probed, for the reason that follows. One case is deliberately
 //     absent: bold false over a suggested bold proves nothing, because
 //     on unbolded text it is indistinguishable from no change at all.
 //
@@ -184,20 +191,37 @@ func paraStyle(t *testing.T, start, end int, prop string, value any) json.RawMes
 
 func pt(v float64) map[string]any { return map[string]any{"magnitude": v, "unit": "PT"} }
 
-// runProbes applies each probe to a scratch document of its own and logs
-// the runs the API reports afterwards.
-func runProbes(t *testing.T, probes []probe) {
+// runProbes applies each probe to a scratch document of its own, logs
+// the runs the API reports afterwards, and returns them by probe name.
+func runProbes(t *testing.T, probes []probe) map[string]string {
 	t.Helper()
 	c := probeClient(t)
 	ctx := context.Background()
+	got := make(map[string]string, len(probes))
 	for _, p := range probes {
 		id := probeDoc(t, c, ctx, p.name, "google-docs-mcp suggested-style probe (safe to delete)",
 			[]json.RawMessage{insertAt(t, p.seed, 1)}, p.rounds)
-		t.Logf("--- %s ---\n%s", p.name, rawElements(t, c, ctx, id))
+		got[p.name] = rawElements(t, c, ctx, id)
+		t.Logf("--- %s ---\n%s", p.name, got[p.name])
 		// Google's own answer to what the suggestions will do.
 		t.Logf("--- %s accepted ---\n%s", p.name, rawView(t, c, ctx, id, SuggestionsPreviewAccepted))
 	}
 	t.Logf("=== %d scratch documents left behind; Drive search title:\"safe to delete\" finds them ===", len(probes))
+	return got
+}
+
+// assertLanded fails unless each probe's run carries its property in its
+// own textStyle, which is what the direct change landing looks like. The
+// suggestion's textStyle lists every property from backgroundColor on,
+// so the match cannot come from it. landsOverASuggestion in
+// internal/plan/ops.go depends on this.
+func assertLanded(t *testing.T, got map[string]string, props map[string]string) {
+	t.Helper()
+	for name, prop := range props {
+		if !strings.Contains(got[name], `"textStyle":{"`+prop+`"`) {
+			t.Errorf("%s: the direct %s did not land; take it out of landsOverASuggestion", name, prop)
+		}
+	}
 }
 
 // probeDoc makes one scratch document under title, sends the seed batch
@@ -277,7 +301,9 @@ func elementsOf(whole map[string]any) any {
 			// A paragraph's own style and suggestions are on the paragraph,
 			// not its runs.
 			ps, _ := pm["paragraphStyle"].(map[string]any)
-			out = append(out, map[string]any{"namedStyleType": ps["namedStyleType"], "suggestedParagraphStyleChanges": pm["suggestedParagraphStyleChanges"]})
+			// The whole base style: whether a direct change landed shows
+			// only there, beside the suggestion.
+			out = append(out, map[string]any{"paragraphStyle": ps, "suggestedParagraphStyleChanges": pm["suggestedParagraphStyleChanges"]})
 		}
 	}
 	return out
@@ -535,5 +561,83 @@ func TestRawDirectOverPendingBold(t *testing.T) {
 		{"suggested bold on existing italic", "Alpha beta.\n", []round{
 			{reqs: []json.RawMessage{textStyle(t, 1, 6, "italic", true)}},
 			{wc: suggestMode, reqs: []json.RawMessage{textStyle(t, 1, 6, "bold", true)}}}},
+	})
+}
+
+// TestRawSuggestedStyleKinds asks whether the collision follows the kind
+// of property (#106): each case suggests one property and then sets the
+// same value directly, across booleans, an enum, a color and a font.
+// The paragraph properties are in TestRawSuggestedStyleKindControls.
+func TestRawSuggestedStyleKinds(t *testing.T) {
+	same := func(name string, req func() json.RawMessage) probe {
+		return probe{name, "Probe line.\n", []round{{[]json.RawMessage{req()}, suggestMode}, {[]json.RawMessage{req()}, nil}}}
+	}
+	red := map[string]any{"color": map[string]any{"rgbColor": map[string]any{"red": 1}}}
+	got := runProbes(t, []probe{
+		same("n  italic", func() json.RawMessage { return textStyle(t, 1, 10, "italic", true) }),
+		same("o  underline", func() json.RawMessage { return textStyle(t, 1, 10, "underline", true) }),
+		same("p  strikethrough", func() json.RawMessage { return textStyle(t, 1, 10, "strikethrough", true) }),
+		same("q  smallCaps", func() json.RawMessage { return textStyle(t, 1, 10, "smallCaps", true) }),
+		same("r  baselineOffset SUPERSCRIPT", func() json.RawMessage { return textStyle(t, 1, 10, "baselineOffset", "SUPERSCRIPT") }),
+		same("s  foregroundColor red", func() json.RawMessage { return textStyle(t, 1, 10, "foregroundColor", red) }),
+		same("t  weightedFontFamily Georgia", func() json.RawMessage {
+			return textStyle(t, 1, 10, "weightedFontFamily", map[string]any{"fontFamily": "Georgia"})
+		}),
+	})
+	assertLanded(t, got, map[string]string{
+		"n  italic": "italic", "o  underline": "underline", "p  strikethrough": "strikethrough",
+		"q  smallCaps": "smallCaps", "r  baselineOffset SUPERSCRIPT": "baselineOffset",
+		"s  foregroundColor red": "foregroundColor", "t  weightedFontFamily Georgia": "weightedFontFamily",
+	})
+}
+
+// TestRawSuggestedStyleKindOtherValue is the other half for the
+// value-typed properties that land: a suggestion of one value, then a
+// different value set directly.
+func TestRawSuggestedStyleKindOtherValue(t *testing.T) {
+	then := func(name, prop string, suggested, direct any) probe {
+		return probe{name, "Probe line.\n", []round{
+			{[]json.RawMessage{textStyle(t, 1, 10, prop, suggested)}, suggestMode},
+			{[]json.RawMessage{textStyle(t, 1, 10, prop, direct)}, nil}}}
+	}
+	color := func(r, b float64) map[string]any {
+		return map[string]any{"color": map[string]any{"rgbColor": map[string]any{"red": r, "blue": b}}}
+	}
+	got := runProbes(t, []probe{
+		then("r2 baselineOffset SUPERSCRIPT, then SUBSCRIPT", "baselineOffset", "SUPERSCRIPT", "SUBSCRIPT"),
+		then("s2 foregroundColor red, then blue", "foregroundColor", color(1, 0), color(0, 1)),
+		then("t2 weightedFontFamily Georgia, then Courier New", "weightedFontFamily",
+			map[string]any{"fontFamily": "Georgia"}, map[string]any{"fontFamily": "Courier New"}),
+	})
+	assertLanded(t, got, map[string]string{
+		"r2 baselineOffset SUPERSCRIPT, then SUBSCRIPT":   "baselineOffset",
+		"s2 foregroundColor red, then blue":               "foregroundColor",
+		"t2 weightedFontFamily Georgia, then Courier New": "weightedFontFamily",
+	})
+}
+
+// TestRawSuggestedStyleKindControls is what each property looks like
+// suggested and nothing more, beside the bold case known to drop, so a
+// run in TestRawSuggestedStyleKinds can be read as landed or dropped.
+func TestRawSuggestedStyleKindControls(t *testing.T) {
+	only := func(name string, req json.RawMessage) probe {
+		return probe{name, "Probe line.\n", []round{{[]json.RawMessage{req}, suggestMode}}}
+	}
+	runProbes(t, []probe{
+		only("n0 italic suggested only", textStyle(t, 1, 10, "italic", true)),
+		only("x0 bold suggested only", textStyle(t, 1, 10, "bold", true)),
+		{"x1 bold suggested, then direct bold (known to drop)", "Probe line.\n", []round{
+			{[]json.RawMessage{textStyle(t, 1, 10, "bold", true)}, suggestMode},
+			{[]json.RawMessage{textStyle(t, 1, 10, "bold", true)}, nil}}},
+		only("u0 lineSpacing suggested only", paraStyle(t, 1, 10, "lineSpacing", 200)),
+		{"u1 lineSpacing suggested, then direct", "Probe line.\n", []round{
+			{[]json.RawMessage{paraStyle(t, 1, 10, "lineSpacing", 200)}, suggestMode},
+			{[]json.RawMessage{paraStyle(t, 1, 10, "lineSpacing", 200)}, nil}}},
+		{"i1 alignment CENTER suggested, then direct (known to drop)", "Probe line.\n", []round{
+			{[]json.RawMessage{paraStyle(t, 1, 10, "alignment", "CENTER")}, suggestMode},
+			{[]json.RawMessage{paraStyle(t, 1, 10, "alignment", "CENTER")}, nil}}},
+		{"v1 spaceAbove suggested, then direct", "Probe line.\n", []round{
+			{[]json.RawMessage{paraStyle(t, 1, 10, "spaceAbove", pt(12))}, suggestMode},
+			{[]json.RawMessage{paraStyle(t, 1, 10, "spaceAbove", pt(12))}, nil}}},
 	})
 }

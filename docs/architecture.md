@@ -485,7 +485,7 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-93 | Each release carries a Claude Desktop bundle in the layout the sibling servers share, its settings derived from config.Vars | accepted | mcpb, TestBundleVarsAreDerivedFromTheSettings, TestThePackedBundleLayout, TestTheCommittedManifestIsValid |
 | D-94 | A bundle install starts the server as an unconfigured start does, every setting passed by env | accepted | mcpb, TestTheConfigDiffNamesTheFieldsThatDiffer, TestTheBundleSettingsRefuseEachBreak, TestVarsDescribeWhatBuildDoes |
 | D-95 | The server asks the person before a risky write, through form elicitation | rejected | — |
-| D-96 | GDOCS_REQUIRE_PROMPT is refused at start unless off, and the preview setting and its status field are gone | accepted | TestTheRemovedRequirePromptIsRefusedUnlessOff, TestPreviewIsGone, TestStatusSchemaTwoHasNoPreview |
+| D-96 | GDOCS_REQUIRE_PROMPT is refused at start unless off, and the preview setting and its status field are gone | accepted | TestTheRemovedRequirePromptIsRefusedUnlessOff, TestPreviewIsGone |
 
 ### D-01 One stdio binary per person, signed in to their own Google account through their own OAuth client; nothing is hosted
 

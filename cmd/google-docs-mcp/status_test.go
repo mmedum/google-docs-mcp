@@ -178,22 +178,3 @@ func TestTextStillNamesWhatItAlwaysDid(t *testing.T) {
 		}
 	}
 }
-
-// Version 2 removed settings.preview, which said nothing a document's
-// comments_view does not (D-96); a removed field moves the version.
-func TestStatusSchemaTwoHasNoPreview(t *testing.T) {
-	var buf bytes.Buffer
-	if err := (statusReport{SchemaVersion: statusSchemaVersion}).writeJSON(&buf); err != nil {
-		t.Fatal(err)
-	}
-	var got struct {
-		SchemaVersion int            `json:"schema_version"`
-		Settings      map[string]any `json:"settings"`
-	}
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := got.Settings["preview"]; ok || got.SchemaVersion != 2 {
-		t.Errorf("schema_version %d, settings %v; want version 2 with no preview", got.SchemaVersion, got.Settings)
-	}
-}

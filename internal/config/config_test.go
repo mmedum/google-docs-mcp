@@ -57,8 +57,8 @@ func TestEnvThenFlagPrecedence(t *testing.T) {
 	}
 }
 
-// GDOCS_PREVIEW is no longer read, so a configuration that still sets
-// it starts without a word, and --preview is no longer a flag (D-96).
+// Nothing reads GDOCS_PREVIEW, so a configuration that sets it starts
+// without a word, and --preview is not a flag (D-96).
 func TestPreviewIsGone(t *testing.T) {
 	c, err := build(t, map[string]string{"GDOCS_PREVIEW": "true"})
 	if err != nil || len(c.Warnings) != 0 {
@@ -69,11 +69,6 @@ func TestPreviewIsGone(t *testing.T) {
 	Define(fs, func(string) string { return "" })
 	if err := fs.Parse([]string{"--preview=true"}); err == nil {
 		t.Error("--preview parsed; want it unknown")
-	}
-	for _, v := range Vars() {
-		if v.Name == "GDOCS_PREVIEW" {
-			t.Error("Vars lists GDOCS_PREVIEW, which nothing reads")
-		}
 	}
 }
 

@@ -217,6 +217,17 @@ For a client that runs with nobody watching, leave
 `GDOCS_ENABLE_DESTRUCTIVE` off, and list the writes you want to approve
 under the client's ask rules, as the README shows.
 
+## `flag provided but not defined: -preview`
+
+The server and its subcommands refuse to start.
+
+**Cause:** `--preview` is in the client's arguments. It is not a flag:
+the features it switched are generally available, so it decided nothing
+(D-96).
+
+**Fix (resolves it):** take `--preview` out of the arguments and restart
+the client.
+
 ## `warning: keyring unavailable (…); refresh token saved in plaintext at … (mode 0600)`
 
 Each later use warns `using plaintext token file …` while the keyring

@@ -455,7 +455,7 @@ every switch off by default (D-93, D-94). Releasing is in
 | D-63 | Every HTTP call has a deadline, the token refresh and the login code exchange included | accepted | TestTokenRefreshIsBounded, TestContextCancellation |
 | D-64 | A five-second cache coalesces fetches of a document, and a write always fetches again | accepted | TestFetchCacheAndHandles |
 | D-65 | Everything derived from one fetch is derived once | accepted | TestLargeFixtureIsConsistent, bench, review |
-| D-66 | Sign-in is Google's desktop flow on a loopback port with PKCE | accepted | TestLoginHappyPath, TestLoginRejectsBadStateAndDenial, TestLoginTimeoutAndCancel |
+| D-66 | Sign-in is Google's desktop flow on a loopback port with PKCE | accepted | TestLoginHappyPath, TestLoginRejectsBadStateAndDenial, TestLoginTimeoutAndCancel, TestClientFileEndpointsAreNotUsed |
 | D-67 | The refresh token goes to the OS keyring, else an owner-only file with a warning, and the environment overrides both | accepted | TestEnvWins, TestFileFallbackWhenKeyringBroken, TestKeyringSaveRemovesStaleFile |
 | D-68 | The scopes are documents and drive, or their read-only pair | accepted | TestScopesAgree, review |
 | D-69 | Configuration is the environment, each variable with a bound flag, read through config and validated once at start | accepted | staleness, TestEnvThenFlagPrecedence, TestEveryVariableTheCodeNamesIsInEnvVars, TestEveryReaderOfAVariableGoesThroughConfig, TestASettingOfSpacesIsUnset |
@@ -748,8 +748,8 @@ URL taken from a long-running operation's response body (D-41), and the
 token goes with the request. A check on `url.URL.Hostname()` would drop
 the port and pass a host it never meant to. Where a check that governs
 where a token goes is wrong, it should be wrong toward refusing. The
-allowlist governs the API client; sign-in and the token refresh go to
-the endpoints the OAuth client file names (D-66).
+allowlist governs the API client; sign-in and the token refresh go
+only to Google's OAuth endpoints (D-66).
 
 Rejected: matching on `url.URL.Hostname()`, which drops the port;
 telemetry, crash reporting and update checks, which would send something
@@ -2159,14 +2159,17 @@ it useless to anything that intercepts it. `TestLoginHappyPath`,
 `TestLoginRejectsBadStateAndDenial` and `TestLoginTimeoutAndCancel` hold
 the flow, its state check and its bounded wait.
 
+The server always uses Google's auth and token endpoints and ignores the
+client file's `auth_uri` and `token_uri`, so a tampered file cannot send
+the code or the refresh token to another host.
+`TestClientFileEndpointsAreNotUsed` holds it.
+
 Rejected: the out-of-band flow, which Google blocks; a web client with a
-hosted callback, which needs a server somebody runs (D-01).
+hosted callback, which needs a server somebody runs (D-01); refusing a
+client file whose endpoints name another host, which adds an error and
+protects nothing more than ignoring the fields does.
 Cost: over SSH the browser and the listener sit on different machines,
-so the person forwards the port by hand. The `token_uri` and `auth_uri`
-of the client file are used as given, falling back to Google's endpoints
-only when missing, so a tampered file could send the code and the token
-elsewhere. Issue #114 asks whether to pin both to Google's endpoints
-or refuse any other host.
+so the person forwards the port by hand.
 
 ### D-67 The refresh token goes to the OS keyring, else an owner-only file with a warning, and the environment overrides both
 

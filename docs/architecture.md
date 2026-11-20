@@ -1012,11 +1012,15 @@ A suggested row carries its id on the row, its cells and their
 newlines, and a suggested column on its cells and their newlines. Each
 is listed once as `structure` at its first cell.
 
-Cost: inserted text that fills its whole paragraph, as in an empty
-table cell, and is then reset gets a second suggestion: Google extends
-the reset to the paragraph mark, which the insertion does not cover.
-It is listed as a `format` suggestion of every text property. The
-integration tests TestRawSuggestedResetWholeParagraph and
+Suggested text takes its style from its own paragraph, so in suggest
+mode the planner leaves out the reset after inserted text when no run
+of that paragraph carries a text style.
+
+Cost: inserted text that fills a styled paragraph and is then reset
+gets a second suggestion: Google extends the reset to the paragraph
+mark, which the insertion does not cover. It is listed as a `format`
+suggestion of every text property. The integration tests
+TestRawSuggestedResetWholeParagraph, TestRawSuggestedInheritance and
 TestRawSuggestedTableInsertions show it.
 
 ### D-22 `format: raw` returns the bytes Google sent

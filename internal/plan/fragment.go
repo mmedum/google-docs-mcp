@@ -42,6 +42,14 @@ type FragmentOptions struct {
 	// they are refused. Checked by the integration test
 	// TestRawTablesInContent.
 	Slots bool
+	// Unstyled leaves out the style reset, for a suggestion landing in a
+	// paragraph that carries no text style. Suggested text takes its
+	// style from its own paragraph, so the reset changes nothing; sent, a
+	// reset covering a paragraph whose mark it does not insert is filed
+	// as a second suggestion of every text property. Direct mode keeps
+	// the reset. Checked by the integration tests
+	// TestRawSuggestedInheritance and TestRawSuggestedResetWholeParagraph.
+	Unstyled bool
 	// Isolate gives a slot that ends the fragment a newline of its own.
 	// Set where the newline it would end with follows text the batch
 	// deletes: as a suggestion that text stays, inside the slot.
@@ -154,7 +162,7 @@ func CompileFragment(f *markdown.Fragment, at Loc, o FragmentOptions) (*Compiled
 		c.Requests = append(c.Requests, InsertText(text, at))
 	}
 	// Inserted text inherits the style of its neighbors; reset it.
-	if cursor > contentStart {
+	if cursor > contentStart && !o.Unstyled {
 		c.Requests = append(c.Requests, ClearTextStyle(rng(contentStart, cursor)))
 	}
 	for i, p := range pieces {

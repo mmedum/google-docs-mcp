@@ -117,6 +117,9 @@ type Op struct {
 	// than the insertion point, is the whitespace the fill replaces.
 	Fill    bool
 	ClearTo int64
+	// Unstyled says no run of the paragraph holding the insertion point
+	// carries a text style or a pending suggestion.
+	Unstyled bool
 	// List is the list around the insertion point or the target.
 	List ListContext
 	// Items are the list items a bullets op's target reaches, whose
@@ -799,7 +802,7 @@ func contentRequests(op *Op, mode Mode) ([]json.RawMessage, bool, error) {
 	case OpInsert, OpAppend:
 		c, err := CompileFragment(op.Fragment, *op.Insert, FragmentOptions{Prefix: op.AtEnd, Suffix: !op.AtEnd && !op.Inline,
 			Inline: op.Inline, Fill: op.Fill, Inherited: op.List.At, List: op.List, ListLevel: op.ListLevel, Slots: inBody(op),
-			Isolate: mode == ModeSuggest && op.ClearTo > op.Insert.Index})
+			Isolate: mode == ModeSuggest && op.ClearTo > op.Insert.Index, Unstyled: mode == ModeSuggest && op.Unstyled})
 		if err != nil {
 			return nil, false, fmt.Errorf("op %d: %w", op.Seq, err)
 		}

@@ -911,9 +911,25 @@ func (ip *insertPoint) fill(p *plan.Op, out *resolvedOps) {
 	p.Seg = ip.bounds()
 	p.Insert = &plan.Loc{Index: ip.index, SegmentID: ip.segment.ID, TabID: ip.tab.ID}
 	p.AtEnd, p.Inline, p.Fill, p.ClearTo, p.List = ip.atEnd, ip.inline, ip.fills, ip.clearTo, ip.list
+	p.Unstyled = unstyled(ip.segment.BlockAt(ip.index))
 	p.Description = ip.description
 	p.CommentAnchor = ip.anchor
 	out.note(ip.tab.ID, ip.segment.ID, ip.index)
+}
+
+// unstyled reports whether b is a paragraph none of whose runs carries a
+// text style or a pending suggestion: what suggested text would take
+// from it is then no style at all (plan.FragmentOptions.Unstyled).
+func unstyled(b *doc.Block) bool {
+	if b == nil || b.Paragraph == nil {
+		return false
+	}
+	for _, r := range b.Paragraph.Runs {
+		if r.Style != (doc.TextStyle{}) || len(r.Inserted) > 0 || len(r.Deleted) > 0 || len(r.StyleChanges) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveLocation turns a Location into an insertion index.

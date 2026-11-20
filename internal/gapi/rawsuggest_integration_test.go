@@ -51,6 +51,11 @@ package gapi
 //     text fills its paragraph. Then Google extends the reset to the
 //     paragraph mark, outside the insertion, and files it under a second
 //     id (TestRawSuggestedResetWholeParagraph).
+//   - Suggested text takes its style from its own paragraph: the
+//     character before it, or an empty paragraph's mark, never the
+//     paragraph before. The inline view's run style shows the paragraph
+//     before, and the insertion's own entry overrides it
+//     (TestRawSuggestedInheritance).
 //
 // The restyle point is why the server warns there rather than refusing:
 // see guardRestyle in internal/plan/ops.go.
@@ -507,6 +512,29 @@ func TestRawSuggestedResetWholeParagraph(t *testing.T) {
 	runProbes(t, []probe{
 		{name: "empty paragraph", seed: "Alpha.\n", rounds: []round{insertReset}},
 		{name: "before other text", seed: "Alpha.\nold\n", rounds: []round{insertReset}},
+	})
+}
+
+// TestRawSuggestedInheritance asks which style suggested text takes when
+// no reset follows it, so the planner knows where its reset changes
+// nothing. Each case inserts "new" in suggest mode next to bold text
+// in another place: the paragraph before, its own mark, the character
+// before. The control has nothing bold.
+func TestRawSuggestedInheritance(t *testing.T) {
+	bold := func(start, end int) round {
+		return round{reqs: []json.RawMessage{textStyle(t, start, end, "bold", true)}}
+	}
+	insert := func(text string, at int) round {
+		return round{wc: suggestMode, reqs: []json.RawMessage{insertAt(t, text, at)}}
+	}
+	runProbes(t, []probe{
+		{name: "control: empty paragraph, nothing bold", seed: "Alpha.\n\n", rounds: []round{insert("new", 8)}},
+		{name: "empty paragraph after a bold one", seed: "Alpha.\n\n", rounds: []round{bold(1, 8), insert("new", 8)}},
+		{name: "empty paragraph whose mark is bold", seed: "Alpha.\n\n", rounds: []round{bold(8, 9), insert("new", 8)}},
+		{name: "start of a plain paragraph after a bold one", seed: "Alpha.\nplain\n", rounds: []round{bold(1, 8), insert("new", 8)}},
+		{name: "end of a paragraph after a bold word", seed: "Alpha bold\n", rounds: []round{bold(7, 11), insert("new", 11)}},
+		{name: "two paragraphs into an empty one, nothing bold", seed: "Alpha.\n\n", rounds: []round{insert("new\nmore", 8)}},
+		{name: "a paragraph after a plain one, nothing bold", seed: "Alpha.\n", rounds: []round{insert("\nnew", 7)}},
 	})
 }
 

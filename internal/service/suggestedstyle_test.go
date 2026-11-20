@@ -395,3 +395,41 @@ func TestASuggestedRowOrColumnIsStructure(t *testing.T) {
 		})
 	}
 }
+
+// TestASuggestionInAPlainParagraphSendsNoReset covers where the reset
+// after inserted text is left out: in suggest mode, in a paragraph with
+// no styled run, where it would change nothing and Google would file it
+// as a suggestion of its own (TestRawSuggestedInheritance).
+func TestASuggestionInAPlainParagraphSendsNoReset(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode string
+		loc        Location
+		wantReset  bool
+	}{
+		{"suggest, after plain text", "suggest", Location{At: "after", Of: &Target{Text: "Step one"}}, false},
+		{"suggest, end of the body", "suggest", Location{At: "end"}, true},
+		{"suggest, after text in a code font", "suggest", Location{At: "after", Of: &Target{Text: "go build"}}, true},
+		{"direct, after plain text", "direct", Location{At: "after", Of: &Target{Text: "Step one"}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, api := writable(t, true)
+			loc := tc.loc
+			if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: tc.mode,
+				Ops: []EditOp{{Kind: plan.OpInsert, Location: &loc, Content: "new"}}}); err != nil {
+				t.Fatal(err)
+			}
+			if len(api.batches) != 1 {
+				t.Fatalf("want one batch, got %d", len(api.batches))
+			}
+			reset := false
+			for _, r := range api.batches[0].Requests {
+				if strings.Contains(string(r), `"fields":"*"`) {
+					reset = true
+				}
+			}
+			if reset != tc.wantReset {
+				t.Errorf("reset sent = %t, want %t; requests: %s", reset, tc.wantReset, kindsOf(t, api.batches[0].Requests))
+			}
+		})
+	}
+}

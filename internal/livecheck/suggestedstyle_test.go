@@ -3,6 +3,7 @@
 package livecheck
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -92,5 +93,17 @@ func TestStyleOnlySuggestionIsVisible(t *testing.T) {
 		"document": doc, "include_suggestions": true, "heading": "Style-only suggestion"})
 	if strings.Contains(quiet, "sentence two here.{==") {
 		t.Errorf("the untouched paragraph picked up a marker:\n%s", shown(quiet, 400))
+	}
+
+	// Suggested text in a paragraph with no style is one suggestion: the
+	// planner sends no reset, which Google would file as a second one
+	// (TestRawSuggestedInheritance).
+	plain := d.ok("suggest text in a plain paragraph", "edit_document", map[string]any{
+		"document": doc, "mode": "suggest", "ops": []any{
+			map[string]any{"op": "insert", "location": map[string]any{"at": "after", "of": map[string]any{"text": "sentence two"}},
+				"content": " and more"}}})
+	plainIDs := regexp.MustCompile(`suggest\.\w+`).FindAllString(first(regexp.MustCompile(`suggestion ids: ([^\n]+)`), plain), -1)
+	if len(plainIDs) != 1 {
+		t.Errorf("want one suggestion for text in a plain paragraph, got %d:\n%s", len(plainIDs), shown(plain, 400))
 	}
 }

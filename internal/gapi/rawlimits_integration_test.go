@@ -101,11 +101,12 @@ func TestRawDocsCommentLength(t *testing.T) {
 
 // TestRawSuggestionReplyLength asks the same of addCommentReply, the
 // path a reply on a suggestion's thread takes (#111): at the Docs API's
-// insertComment limit and Drive's, and one over each, in ASCII and in
-// é, which is two bytes and one UTF-16 unit.
+// insertComment limit and Drive's and one over each in ASCII, and at
+// the Docs limit and one over in é, which is two bytes and one UTF-16
+// unit.
 //
-// Findings: it takes 2048 x and 1024 é, and refuses 2049 x, 4096 x and
-// 1025 é with 400 "content must not exceed 2048 UTF-8 code units". So it
+// Findings: it takes 2048 x and 1024 é, and refuses 2049 x, 4096 x,
+// 4097 x and 1025 é with 400 "content must not exceed 2048 UTF-8 code units". So it
 // counts bytes, and takes 2048 of them, as insertComment does.
 //
 //	GDOCS_INTEGRATION=1 go test -tags=integration ./internal/gapi -run TestRawSuggestionReplyLength -v

@@ -1494,10 +1494,9 @@ API's `addCommentReply`, which needs the comments view. The live step
 Rejected: the Docs API's own thread requests, `addCommentReply` on a
 comment thread, `updateCommentPost`, `deleteComment` and
 `deleteCommentReply`, which would give one act two paths.
-Cost: a reply on a suggestion's thread takes plain replies only. Its
-length limit is unmeasured, so it is held to the 2048 bytes
-`insertComment` takes; issue #111 asks for the limit to be measured
-the way the comment limits are.
+Cost: a reply on a suggestion's thread takes plain replies only, of at
+most 2048 bytes: `addCommentReply` refuses more, as `insertComment`
+does (TestRawSuggestionReplyLength).
 
 ### D-40 review_suggestion takes each suggestion by the id list_suggestions showed
 

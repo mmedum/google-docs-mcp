@@ -23,14 +23,14 @@ it before changing the tool surface, the addressing or the write path.
 
 ## Hard rules
 
-1. **Keep everything internal out of commits**: document ids or URLs,
-   the titles or content of real documents, account addresses,
-   organization names, Cloud project ids, OAuth client ids and secrets.
-   That covers code, docs, fixtures, transcripts, commits, pull requests
-   and logs, because the repository is public and a pushed commit
-   cannot be taken back. Naming a sibling server, such as
-   google-drive-mcp, is fine. Fixtures are synthetic (D-06). `make leaks`
-   and gitleaks hold it.
+1. **Keep everything internal out of the repository and what it
+   publishes**: document ids or URLs, the titles or content of real
+   documents, account addresses, organization names, Cloud project ids,
+   OAuth client ids and secrets. That covers code, docs, fixtures,
+   transcripts, commits, pull requests and logs, because the repository
+   is public and a pushed commit cannot be taken back. Naming a sibling
+   server, such as google-drive-mcp, is fine. Fixtures are synthetic
+   (D-06). `make leaks` and gitleaks hold it.
 2. **Write to stdout only in `main`.** Stdout carries only MCP JSON-RPC
    frames, because one stray print breaks the session; logs go to
    stderr through `slog` (D-03). forbidigo, `make smoke` and
@@ -47,7 +47,8 @@ it before changing the tool surface, the addressing or the write path.
    conversion.
 5. **Change only what changed, rather than overwriting.** A replace is a
    minimal diff, because overwriting a range deletes every comment and
-   suggestion anchored inside it (D-27). A direct edit that would delete
+   suggestion anchored inside it; a replace that changes the paragraph
+   structure says it was not minimal (D-27). A direct edit that would delete
    a comment anchor, a suggestion, an object or a footnote reference is
    refused unless forced (D-28). `TestGuardBlocksDirect` holds it.
 6. **Write in the mode asked for, or refuse rather than substitute
@@ -58,8 +59,9 @@ it before changing the tool surface, the addressing or the write path.
    and report one that may have landed as `[ambiguous_outcome]` rather
    than repeating it (D-61). `TestDryRunAndConflictRetry` and
    `TestWriteRetriesOnlyOn429` hold them.
-8. **Wait for unsaved editor work in a Markdown file rather than
-   writing past it**, `force` included (D-44).
+8. **Wait briefly for unsaved editor work in a Markdown file, then
+   refuse with `[conflict]` rather than writing past it**, `force`
+   included (D-44).
    `TestMarkdownFileWaitsForTheEditor` holds it.
 9. **Register a delete tool only with `GDOCS_ENABLE_DESTRUCTIVE`**,
    because the control has to be the server's (D-54), and take a delete
@@ -86,10 +88,10 @@ it before changing the tool surface, the addressing or the write path.
 14. **Print from the live driver and the evals only through the
     redactor**, because transcripts are pasted into issues and commit
     messages (D-07). `make transcript` holds it.
-15. **Write every check in Go in `scripts/gates`, not as a shell
-    script**, because a Go check runs the same on the three platforms CI
-    uses (D-10). `make parity` holds `make check` and CI to one list
-    (D-85).
+15. **Write everything the repository runs on itself in Go, checks in
+    `scripts/gates`, not as a shell script**, because Go runs the same on
+    every platform CI uses (D-10). A script the bundle ships is not one.
+    `make parity` holds `make check` and CI to one list (D-85).
 16. **Commit on a branch, not `main`, and leave pushing to the owner**,
     who pushes, tags and merges (D-92).
 17. **Back every belief about Google with a primary source**: its
@@ -107,7 +109,7 @@ it before changing the tool surface, the addressing or the write path.
 - `/simplify` and `/code-review medium` have run. A fixed finding is one
   line in the commit body. A declined one goes in the PR body, or
   becomes a present-tense constraint comment at the line it protects.
-  Findings go there, not into `docs/`.
+  Findings go in those places, not into `docs/`.
 - Anything touching the write path or an API response shape has had a
   `make live` run whose transcript was read (D-83).
 

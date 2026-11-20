@@ -8,6 +8,8 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-11-20
+
 ### Added
 
 - `dry_run` on `create_document`, `reply_comment`, `manage_tabs` and `export_document`: each checks the call and sends, creates and writes nothing (#105).

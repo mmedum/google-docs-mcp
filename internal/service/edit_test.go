@@ -1217,3 +1217,49 @@ func listContextString(lc plan.ListContext) string {
 	}
 	return fmt.Sprintf("at %s after %s anchor %s preceding %+v", item(lc.At), item(lc.After), item(lc.Anchor), lc.Preceding)
 }
+
+// TestInlineContentKeepsItsEdgeSpaces: content placed inside a
+// paragraph keeps the spaces it starts and ends with, which Markdown
+// drops, or " and more" after a word lands joined to it. A block of its
+// own keeps Markdown's rules.
+func TestInlineContentKeepsItsEdgeSpaces(t *testing.T) {
+	var stepOne string
+	for _, b := range doctest.Fixture(t).AllBlocks() {
+		if b.Paragraph != nil && len(b.Paragraph.Runs) > 0 && b.Paragraph.Runs[0].Text == "Step one\n" {
+			stepOne = b.Handle
+		}
+	}
+	if stepOne == "" {
+		t.Fatal(`the fixture needs a paragraph "Step one"`)
+	}
+	for _, tc := range []struct {
+		name string
+		op   EditOp
+		want string // the text insertText sends
+	}{
+		{"after a word", EditOp{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Text: "Step one"}}, Content: " and more"}, " and more"},
+		{"before a word", EditOp{Kind: plan.OpInsert, Location: &Location{At: "before", Of: &Target{Text: "Step one"}}, Content: "**Very** "}, "Very "},
+		{"as text", EditOp{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Text: "Step one"}}, Content: " and more", ContentFormat: "text"}, " and more"},
+		{"a block of its own", EditOp{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Handle: stepOne}}, Content: " Own line"}, "Own line\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, api := writable(t, true)
+			if _, err := svc.Edit(context.Background(), EditRequest{Document: fixtureID, Mode: "direct", Ops: []EditOp{tc.op}}); err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for _, r := range api.batches[0].Requests {
+				var m struct {
+					InsertText *struct{ Text string } `json:"insertText"`
+				}
+				if json.Unmarshal(r, &m) == nil && m.InsertText != nil {
+					got = m.InsertText.Text
+					break
+				}
+			}
+			if got != tc.want {
+				t.Errorf("insertText sent %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

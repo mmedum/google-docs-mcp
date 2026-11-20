@@ -3,6 +3,7 @@ package markdown
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -267,4 +268,43 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func TestKeepEdgeSpaces(t *testing.T) {
+	for _, tc := range []struct {
+		name, src string
+		want      []string // each block's text
+	}{
+		{"leading space", " and more", []string{" and more"}},
+		{"trailing space after bold", "**bold** ", []string{"bold "}},
+		{"both, two paragraphs", " one\n\ntwo\t", []string{" one", "two\t"}},
+		{"only spaces", "   ", nil},
+		{"a list item keeps Markdown's rules", "- item ", []string{"item"}},
+		{"none", "plain", []string{"plain"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := Parse(tc.src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := fmt.Sprint(f.Blocks)
+			got := f.KeepEdgeSpaces(tc.src)
+			var texts []string
+			for _, b := range got.Blocks {
+				texts = append(texts, b.Text())
+			}
+			if !slices.Equal(texts, tc.want) {
+				t.Errorf("KeepEdgeSpaces(%q) = %q, want %q", tc.src, texts, tc.want)
+			}
+			if fmt.Sprint(f.Blocks) != before {
+				t.Errorf("KeepEdgeSpaces changed the fragment it was given")
+			}
+		})
+	}
+	// The added text carries no style, so a plain paragraph stays one a
+	// minimal diff can take.
+	f, _ := Parse(" and more")
+	if text, ok := f.KeepEdgeSpaces(" and more").SingleParagraph(); !ok || text != " and more" {
+		t.Errorf("SingleParagraph = %q, %t; want \" and more\", true", text, ok)
+	}
 }

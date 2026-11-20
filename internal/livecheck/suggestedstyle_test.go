@@ -106,4 +106,14 @@ func TestStyleOnlySuggestionIsVisible(t *testing.T) {
 	if len(plainIDs) != 1 {
 		t.Errorf("want one suggestion for text in a plain paragraph, got %d:\n%s", len(plainIDs), shown(plain, 400))
 	}
+
+	// Content placed inside a paragraph keeps its leading space, which
+	// Markdown would drop.
+	d.ok("insert text after a word", "edit_document", map[string]any{
+		"document": doc, "mode": "direct", "ops": []any{
+			map[string]any{"op": "insert", "location": map[string]any{"at": "after", "of": map[string]any{"text": "sentence two"}},
+				"content": " and more"}}})
+	if spaced := d.ok("read the text after the word", "read_document", map[string]any{"document": doc, "heading": "Style-only suggestion"}); !strings.Contains(spaced, "sentence two and more here.") {
+		t.Errorf("the inserted text lost its leading space:\n%s", shown(spaced, 400))
+	}
 }

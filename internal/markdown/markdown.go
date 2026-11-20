@@ -11,6 +11,7 @@ import (
 	"html"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -153,6 +154,30 @@ func (f *Fragment) SingleParagraph() (string, bool) {
 		}
 	}
 	return f.Blocks[0].Text(), true
+}
+
+// KeepEdgeSpaces is f with the spaces and tabs src starts and ends with
+// put back as unstyled text at the start of its first paragraph and the
+// end of its last, which Markdown drops. Content placed inside a
+// paragraph needs them, or " and more" lands as "and more".
+func (f *Fragment) KeepEdgeSpaces(src string) *Fragment {
+	lead := src[:len(src)-len(strings.TrimLeft(src, " \t"))]
+	trail := src[len(strings.TrimRight(src, " \t")):]
+	if len(f.Blocks) == 0 || lead == "" && trail == "" || strings.TrimSpace(src) == "" {
+		return f
+	}
+	out := &Fragment{Blocks: slices.Clone(f.Blocks)}
+	if first := out.Blocks[0]; lead != "" && first.Kind == KindParagraph {
+		b := *first
+		b.Inlines = append([]Inline{{Text: lead}}, b.Inlines...)
+		out.Blocks[0] = &b
+	}
+	if last := out.Blocks[len(out.Blocks)-1]; trail != "" && last.Kind == KindParagraph {
+		b := *last
+		b.Inlines = append(slices.Clone(b.Inlines), Inline{Text: trail})
+		out.Blocks[len(out.Blocks)-1] = &b
+	}
+	return out
 }
 
 // Plain wraps verbatim text as a fragment: one paragraph per line, no

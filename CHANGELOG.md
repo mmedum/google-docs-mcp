@@ -24,6 +24,7 @@ diff in CI flags them.
 
 ### Fixed
 
+- Content inserted inside a paragraph keeps its leading and trailing spaces, so `" and more"` after a word no longer lands joined to it.
 - Suggested text in a paragraph with no style no longer adds a second `format` suggestion that changes nothing.
 - `list_suggestions` lists a suggested table row or column once, as `structure` at its first cell, rather than as an insert of no text (#109).
 - `export_document` on a Word file (.docx) refuses up front, saying to save it as a Google Doc, rather than failing at Drive's converter.

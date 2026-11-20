@@ -1140,7 +1140,9 @@ sees until later, and the person finds the damage after the write. A
 refusal costs one more call, with the reason in hand. Every construct
 has a test. Text read and written back is unchanged, which a randomized
 test holds, because a read escapes exactly the characters that markdown
-would take as markup.
+would take as markup. Content placed inside a paragraph keeps the
+spaces and tabs it starts and ends with, which markdown drops, so text
+added after a word stays apart from it.
 
 Rejected: a guarantee of WYSIWYG fidelity, which no conversion between
 the two formats can keep; a converter that drops what it cannot express

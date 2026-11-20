@@ -45,7 +45,8 @@ package gapi
 //
 //   - A suggested insertion in a table cell is the same as in the body.
 //     A suggested row carries its id on the row, every cell of it and
-//     every cell's newline (TestRawSuggestedTableInsertions).
+//     every cell's newline; a suggested column on its cells and their
+//     newlines, and on no row (TestRawSuggestedTableInsertions).
 //   - A reset over inserted text joins the insertion's id unless the
 //     text fills its paragraph. Then Google extends the reset to the
 //     paragraph mark, outside the insertion, and files it under a second
@@ -664,7 +665,8 @@ func TestRawSuggestedStyleKindControls(t *testing.T) {
 
 // TestRawSuggestedTableInsertions asks what a suggested insertion looks
 // like inside a table (#109): text inserted into a cell, the same text
-// with the planner's reset after it, and a row inserted below the first.
+// with the planner's reset after it, a row inserted below the first and
+// a column right of the first.
 // Each case gets a fresh document holding a direct 2×2 table, and the
 // table is logged as Google returns it, suggestion ids included.
 func TestRawSuggestedTableInsertions(t *testing.T) {
@@ -684,6 +686,11 @@ func TestRawSuggestedTableInsertions(t *testing.T) {
 			return []json.RawMessage{marshal(t, map[string]any{"insertTableRow": map[string]any{
 				"tableCellLocation": map[string]any{"tableStartLocation": map[string]any{"index": table}, "rowIndex": 0, "columnIndex": 0},
 				"insertBelow":       true}})}
+		}},
+		{"a column right of the first", func(table, _ int) []json.RawMessage {
+			return []json.RawMessage{marshal(t, map[string]any{"insertTableColumn": map[string]any{
+				"tableCellLocation": map[string]any{"tableStartLocation": map[string]any{"index": table}, "rowIndex": 0, "columnIndex": 0},
+				"insertRight":       true}})}
 		}},
 	} {
 		id := probeDoc(t, c, ctx, tc.name, "google-docs-mcp suggested-table probe (safe to delete)",

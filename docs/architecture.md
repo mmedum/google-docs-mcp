@@ -1009,7 +1009,8 @@ restyling; reading the style, which reports every inherited property;
 dropping an insertion's own entry, which hides the bold of text inserted
 after bold text.
 A suggested row carries its id on the row, its cells and their
-newlines, and is listed once as `structure` at its first cell.
+newlines, and a suggested column on its cells and their newlines. Each
+is listed once as `structure` at its first cell.
 
 Cost: inserted text that fills its whole paragraph, as in an empty
 table cell, and is then reset gets a second suggestion: Google extends

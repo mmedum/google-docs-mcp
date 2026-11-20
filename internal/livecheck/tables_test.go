@@ -37,14 +37,19 @@ func liveTables(t *testing.T, d *driver, doc string) {
 	// A suggested row carries its id on the row, its cells and their
 	// newlines (TestRawSuggestedTableInsertions), and lists once as
 	// structure. It is rejected so the row numbers below hold.
-	d.ok("suggested row", "edit_table", map[string]any{"document": doc, "mode": "suggest", "ops": []any{
+	// The id comes from the write rather than the listing, so the row is
+	// rejected even when the listing is wrong.
+	wrote := d.ok("suggested row", "edit_table", map[string]any{"document": doc, "mode": "suggest", "ops": []any{
 		map[string]any{"op": "insert_rows", "table": tbl, "row": 2, "count": 1}}})
-	rowLine := regexp.MustCompile(`(suggest\.\S+) \[` + regexp.QuoteMeta(tbl) + `:r\d+c1\] structure`)
-	if m := rowLine.FindStringSubmatch(d.ok("list the suggested row", "list_suggestions", map[string]any{"document": doc})); m == nil {
-		t.Error("the suggested row is not listed once as structure at its first cell")
-	} else {
-		d.ok("reject the suggested row", "review_suggestion", map[string]any{"document": doc, "action": "reject", "ids": []any{m[1]}})
+	row := first(regexp.MustCompile(`suggestion ids: (suggest\.\S+)`), wrote)
+	if row == "" {
+		t.Fatalf("the suggested row returned no suggestion id:\n%s", shown(wrote, 400))
 	}
+	rowLine := regexp.MustCompile(regexp.QuoteMeta(row) + ` \[` + regexp.QuoteMeta(tbl) + `:r\d+c1\] structure`)
+	if listed := d.ok("list the suggested row", "list_suggestions", map[string]any{"document": doc}); !rowLine.MatchString(listed) {
+		t.Errorf("the suggested row is not listed once as structure at its first cell:\n%s", shown(listed, 400))
+	}
+	d.ok("reject the suggested row", "review_suggestion", map[string]any{"document": doc, "action": "reject", "ids": []any{row}})
 
 	d.ok("merge cells", "edit_table", map[string]any{"document": doc, "mode": "direct", "ops": []any{
 		map[string]any{"op": "merge_cells", "table": tbl, "from_cell": "r3c1", "to_cell": "r3c3"}}})

@@ -494,7 +494,7 @@ func TestConfigDocProblems(t *testing.T) {
 		}
 	}
 	if defaulted < 6 {
-		t.Fatalf("config.Vars carries %d defaults, want at least 6; the default check is reading nothing", defaulted)
+		t.Fatalf("config.Vars carries %d literal defaults, fewer than the 6 this test was written against; the default check reads less than it did", defaulted)
 	}
 	if got := configDocProblems(config.Vars(), doc); len(got) != 0 {
 		t.Errorf("the committed page: %q", got)
@@ -522,7 +522,11 @@ func TestConfigDocProblems(t *testing.T) {
 		{"a default the code changed", "| `GDOCS_HTTP_TIMEOUT` | `60s` |", "| `GDOCS_HTTP_TIMEOUT` | `30s` |",
 			[]string{"docs/configuration.md gives GDOCS_HTTP_TIMEOUT a default without `60s`, the code's"}},
 		{"a defaulted variable with no table row", "| `GDOCS_LOG_FORMAT` | `text` | `text` or `json`. |", "`GDOCS_LOG_FORMAT` is `text` or `json`.",
-			[]string{"docs/configuration.md has no table row for GDOCS_LOG_FORMAT to give its default `text`"}},
+			[]string{"docs/configuration.md has no table row, in the form | `NAME` | default | meaning |, for GDOCS_LOG_FORMAT to give its default `text`"}},
+		{"an old default stated first", "| `GDOCS_HTTP_TIMEOUT` | `60s` |", "| `GDOCS_HTTP_TIMEOUT` | `30s` (was `60s`) |",
+			[]string{"docs/configuration.md gives GDOCS_HTTP_TIMEOUT a default without `60s`, the code's"}},
+		{"a second row for one setting", "| `GDOCS_LOG_FORMAT` | `text` |", "| `GDOCS_LOG_FORMAT` | `text` | again |\n| `GDOCS_LOG_FORMAT` | `text` |",
+			[]string{"docs/configuration.md has two table rows for GDOCS_LOG_FORMAT; give each setting one"}},
 		{"the profile rule in other words", "- and _, starting", "`-` and `_`, starting",
 			[]string{`docs/configuration.md does not say a profile name is "up to 64 characters from a to z, ` +
 				`0 to 9, - and _, starting with a letter or digit"`}},

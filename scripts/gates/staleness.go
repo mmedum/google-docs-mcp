@@ -196,10 +196,13 @@ func configDocProblems(vars []config.Var, text string) []string {
 // later, such as the write mode, is prose the page explains.
 func configDefaultProblems(vars []config.Var, documented map[string]bool, text string) []string {
 	cells := map[string]string{}
+	var problems []string
 	for _, m := range settingRow.FindAllStringSubmatch(text, -1) {
+		if _, twice := cells[m[1]]; twice {
+			problems = append(problems, fmt.Sprintf("%s has two table rows for %s; give each setting one", configDocPath, m[1]))
+		}
 		cells[m[1]] = m[2]
 	}
-	var problems []string
 	for _, v := range vars {
 		// One left out of the page is already reported as that.
 		if v.Default == "" || !documented[v.Name] {
@@ -208,13 +211,17 @@ func configDefaultProblems(vars []config.Var, documented map[string]bool, text s
 		want := "`" + v.Default + "`"
 		switch cell, ok := cells[v.Name]; {
 		case !ok:
-			problems = append(problems, fmt.Sprintf("%s has no table row for %s to give its default %s", configDocPath, v.Name, want))
-		case !strings.Contains(cell, want):
+			problems = append(problems, fmt.Sprintf("%s has no table row, in the form | `NAME` | default | meaning |, for %s to give its default %s",
+				configDocPath, v.Name, want))
+		case firstCode.FindString(cell) != want:
 			problems = append(problems, fmt.Sprintf("%s gives %s a default without %s, the code's", configDocPath, v.Name, want))
 		}
 	}
 	return problems
 }
+
+// firstCode is the first code span in a cell: the default it states.
+var firstCode = regexp.MustCompile("`[^`]*`")
 
 // settingRow is a row of the configuration page's table: the variable
 // and its Default cell.

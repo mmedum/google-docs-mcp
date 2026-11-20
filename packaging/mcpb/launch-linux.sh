@@ -25,5 +25,5 @@ esac
 # Never stdout: a line of English there corrupts the JSON-RPC stream
 # before the client's first request completes, and the client reports it
 # as a protocol error rather than as this.
-echo "google-docs-mcp: this bundle carries x86_64 and aarch64 binaries, not $(uname -m)." "Install with: go install github.com/mmedum/google-docs-mcp/v3/cmd/google-docs-mcp@latest" >&2
+echo "google-docs-mcp: this bundle carries x86_64 and aarch64 binaries, not $(uname -m)." "Install with: go install github.com/mmedum/google-docs-mcp/v4/cmd/google-docs-mcp@latest" >&2
 exit 1

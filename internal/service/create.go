@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
-	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v4/internal/mdfile"
+	"github.com/mmedum/google-docs-mcp/v4/internal/plan"
 )
 
 // CreateRequest makes a new document.

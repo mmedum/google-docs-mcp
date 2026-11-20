@@ -38,7 +38,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
 )
 
 // markdownCorpus is synthetic and covers what people put in Markdown

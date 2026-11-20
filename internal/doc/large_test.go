@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
 )
 
 // TestLargeFixtureIsConsistent checks the generator's index bookkeeping:

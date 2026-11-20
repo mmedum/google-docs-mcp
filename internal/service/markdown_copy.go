@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v3/internal/mdfile"
-	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v4/internal/mdfile"
+	"github.com/mmedum/google-docs-mcp/v4/internal/plan"
 )
 
 // No API writes through the editor's live session to a Markdown file,

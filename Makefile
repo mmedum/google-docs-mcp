@@ -6,7 +6,7 @@ BIN      ?= ./google-docs-mcp
 PR_BASE_REF ?= origin/main
 PR_HEAD  ?= HEAD
 VERSION  ?= dev
-PKG       = github.com/mmedum/google-docs-mcp/v3
+PKG       = github.com/mmedum/google-docs-mcp/v4
 LDFLAGS   = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
 COVER_MIN ?= 80
 # The tools at the versions .github/workflows/ci.yml pins, so make check

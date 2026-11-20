@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/markdown"
+	"github.com/mmedum/google-docs-mcp/v4/internal/markdown"
 )
 
 func frag(t *testing.T, src string) *markdown.Fragment {

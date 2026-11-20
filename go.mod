@@ -1,4 +1,4 @@
-module github.com/mmedum/google-docs-mcp/v3
+module github.com/mmedum/google-docs-mcp/v4
 
 go 1.27.4
 

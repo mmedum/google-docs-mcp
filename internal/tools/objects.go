@@ -6,8 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
-	"github.com/mmedum/google-docs-mcp/v3/internal/service"
+	"github.com/mmedum/google-docs-mcp/v4/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v4/internal/service"
 )
 
 // ObjectInput is the insert_object call.

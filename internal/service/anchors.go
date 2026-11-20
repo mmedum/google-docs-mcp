@@ -3,10 +3,10 @@ package service
 import (
 	"context"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-docs-mcp/v3/internal/gdocs"
-	"github.com/mmedum/google-docs-mcp/v3/internal/plan"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-docs-mcp/v4/internal/gdocs"
+	"github.com/mmedum/google-docs-mcp/v4/internal/plan"
 )
 
 // CommentReply is one post in a thread after the head post.

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc"
 )
 
 // Options tune a render.

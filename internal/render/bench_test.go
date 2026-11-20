@@ -3,8 +3,8 @@ package render_test
 import (
 	"testing"
 
-	"github.com/mmedum/google-docs-mcp/v3/internal/doc/doctest"
-	"github.com/mmedum/google-docs-mcp/v3/internal/render"
+	"github.com/mmedum/google-docs-mcp/v4/internal/doc/doctest"
+	"github.com/mmedum/google-docs-mcp/v4/internal/render"
 )
 
 func BenchmarkMarkdownWholeLarge(b *testing.B) {

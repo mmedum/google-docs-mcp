@@ -17,7 +17,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/mmedum/google-docs-mcp/v3/scripts/internal/livecover"
+	"github.com/mmedum/google-docs-mcp/v4/scripts/internal/livecover"
 )
 
 // The docs gate checks references, not claims. Decision IDs, every

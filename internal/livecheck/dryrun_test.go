@@ -27,7 +27,7 @@ func dryRunArgs(doc, table, comment, tab, workingCopy string, suggestions []any)
 	}
 	args["add_comment"] = map[string]any{"document": doc, "dry_run": true, "content": "written by a dry run",
 		"target": map[string]any{"text": "Closing line"}}
-	args["manage_tabs"] = map[string]any{"document": doc, "action": "add", "title": "Tab added by a dry run", "dry_run": true}
+	args["manage_tabs"] = map[string]any{"document": doc, "action": "add", "title": "Tab a dry run would add", "dry_run": true}
 	args["export_document"] = map[string]any{"document": doc, "format": "md", "dry_run": true}
 	args["create_document"] = map[string]any{"title": dryRunCreateTitle, "content": "written by a dry run", "dry_run": true}
 	if workingCopy != "" {

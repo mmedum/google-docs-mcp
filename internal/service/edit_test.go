@@ -1223,24 +1223,32 @@ func listContextString(lc plan.ListContext) string {
 // drops, or " and more" after a word lands joined to it. A block of its
 // own keeps Markdown's rules.
 func TestInlineContentKeepsItsEdgeSpaces(t *testing.T) {
-	var stepOne string
+	var stepOne, blank string
 	for _, b := range doctest.Fixture(t).AllBlocks() {
 		if b.Paragraph != nil && len(b.Paragraph.Runs) > 0 && b.Paragraph.Runs[0].Text == "Step one\n" {
 			stepOne = b.Handle
 		}
+		if blank == "" && b.IsBlankParagraph() {
+			blank = b.Handle
+		}
 	}
-	if stepOne == "" {
-		t.Fatal(`the fixture needs a paragraph "Step one"`)
+	if stepOne == "" || blank == "" {
+		t.Fatal(`the fixture needs a paragraph "Step one" and a blank one`)
 	}
 	for _, tc := range []struct {
 		name string
 		op   EditOp
-		want string // the text insertText sends
+		want string // the text insertText sends, "" for none
 	}{
 		{"after a word", EditOp{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Text: "Step one"}}, Content: " and more"}, " and more"},
 		{"before a word", EditOp{Kind: plan.OpInsert, Location: &Location{At: "before", Of: &Target{Text: "Step one"}}, Content: "**Very** "}, "Very "},
 		{"as text", EditOp{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Text: "Step one"}}, Content: " and more", ContentFormat: "text"}, " and more"},
 		{"a block of its own", EditOp{Kind: plan.OpInsert, Location: &Location{At: "after", Of: &Target{Handle: stepOne}}, Content: " Own line"}, "Own line\n"},
+		{"filling a blank paragraph", EditOp{Kind: plan.OpInsert, Location: &Location{At: "start", Of: &Target{Handle: blank}}, Content: " Filled "}, "Filled"},
+		// The minimal diff of "Step one" against "Step one " is the space.
+		{"replacing text within a paragraph", EditOp{Kind: plan.OpReplace, Target: &Target{Text: "Step one"}, Content: "Step one "}, " "},
+		// A whole paragraph keeps Markdown's rules, so nothing changes.
+		{"replacing a whole paragraph", EditOp{Kind: plan.OpReplace, Target: &Target{Handle: stepOne}, Content: "Step one "}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, api := writable(t, true)
@@ -1248,13 +1256,19 @@ func TestInlineContentKeepsItsEdgeSpaces(t *testing.T) {
 				t.Fatal(err)
 			}
 			var got string
-			for _, r := range api.batches[0].Requests {
-				var m struct {
-					InsertText *struct{ Text string } `json:"insertText"`
-				}
-				if json.Unmarshal(r, &m) == nil && m.InsertText != nil {
-					got = m.InsertText.Text
-					break
+			if len(api.batches) == 0 && tc.want != "" {
+				t.Fatalf("nothing was sent; want insertText %q", tc.want)
+			}
+		requests:
+			for _, b := range api.batches {
+				for _, r := range b.Requests {
+					var m struct {
+						InsertText *struct{ Text string } `json:"insertText"`
+					}
+					if json.Unmarshal(r, &m) == nil && m.InsertText != nil {
+						got = m.InsertText.Text
+						break requests
+					}
 				}
 			}
 			if got != tc.want {

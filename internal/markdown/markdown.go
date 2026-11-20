@@ -11,7 +11,6 @@ import (
 	"html"
 	"net/url"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -156,28 +155,35 @@ func (f *Fragment) SingleParagraph() (string, bool) {
 	return f.Blocks[0].Text(), true
 }
 
-// KeepEdgeSpaces is f with the spaces and tabs src starts and ends with
-// put back as unstyled text at the start of its first paragraph and the
-// end of its last, which Markdown drops. Content placed inside a
-// paragraph needs them, or " and more" lands as "and more".
-func (f *Fragment) KeepEdgeSpaces(src string) *Fragment {
+// ParseInside parses content that lands inside an existing paragraph.
+// Markdown drops the spaces and tabs a paragraph starts and ends with,
+// and takes four of them, or a tab, as a code block, so " and more"
+// after a word would land joined to it. They are cut off before parsing
+// and put back as unstyled text at the edges of the first and last
+// paragraph, unless they sit on a line of their own. Content of spaces
+// alone is one paragraph of them.
+func ParseInside(src string) (*Fragment, error) {
+	src = strings.ReplaceAll(src, "\r\n", "\n")
 	lead := src[:len(src)-len(strings.TrimLeft(src, " \t"))]
 	trail := src[len(strings.TrimRight(src, " \t")):]
-	if len(f.Blocks) == 0 || lead == "" && trail == "" || strings.TrimSpace(src) == "" {
-		return f
+	if len(lead) == len(src) {
+		if strings.Contains(src, "\n") || src == "" {
+			return Parse(src)
+		}
+		return &Fragment{Blocks: []*Block{{Kind: KindParagraph, Inlines: []Inline{{Text: src}}, Line: 1}}}, nil
 	}
-	out := &Fragment{Blocks: slices.Clone(f.Blocks)}
-	if first := out.Blocks[0]; lead != "" && first.Kind == KindParagraph {
-		b := *first
-		b.Inlines = append([]Inline{{Text: lead}}, b.Inlines...)
-		out.Blocks[0] = &b
+	body := src[len(lead) : len(src)-len(trail)]
+	f, err := Parse(body)
+	if err != nil || len(f.Blocks) == 0 {
+		return f, err
 	}
-	if last := out.Blocks[len(out.Blocks)-1]; trail != "" && last.Kind == KindParagraph {
-		b := *last
-		b.Inlines = append(slices.Clone(b.Inlines), Inline{Text: trail})
-		out.Blocks[len(out.Blocks)-1] = &b
+	if first := f.Blocks[0]; lead != "" && first.Kind == KindParagraph && !strings.HasPrefix(body, "\n") {
+		first.Inlines = append([]Inline{{Text: lead}}, first.Inlines...)
 	}
-	return out
+	if last := f.Blocks[len(f.Blocks)-1]; trail != "" && last.Kind == KindParagraph && !strings.HasSuffix(body, "\n") {
+		last.Inlines = append(last.Inlines, Inline{Text: trail})
+	}
+	return f, nil
 }
 
 // Plain wraps verbatim text as a fragment: one paragraph per line, no

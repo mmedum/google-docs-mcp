@@ -28,7 +28,7 @@ import (
 // which replaces them wherever they appear (see Names).
 //
 // A person is redacted to the end of the line, and everything after the
-// name goes with it, except after the server's own phrases (notAName) — a comment's quote and body, a suggestion's diff, a
+// name goes with it — a comment's quote and body, a suggestion's diff, a
 // revision's `(kept)`. That is a real cost, paid deliberately: a display
 // name has no reliable terminator. Directory names carry parentheses
 // ("Ann Petersen (Acme Corp)"), so stopping at the first `(` to save a
@@ -64,32 +64,25 @@ var (
 	byPerson   = regexp.MustCompile(`(?m) by .*$`)
 
 	// search_documents' continuation token: opaque, long, and nothing a
-	// reader of a transcript needs.
-	pageToken = regexp.MustCompile(`(page_token )[^\s)]+`)
+	// reader of a transcript needs. search.go ends the line with the ")"
+	// after it, so the match runs to that one, whatever the token holds.
+	pageToken = regexp.MustCompile(`(?m)(page_token ).*\)$`)
 )
 
-// notAName are the words that follow " by " in the server's own phrases,
-// "targeting by handle" or "fixed by the section_break", where no person
-// is named. Matched lowercase and whole, so "The Ann" is masked; a
-// display name that starts with one of these lowercase words would show,
-// a cost taken for transcripts that read correctly.
-var notAName = map[string]bool{"the": true, "its": true, "a": true, "an": true, "handle": true,
-	"heading": true, "heading_id": true, "name": true, "id": true, "position": true, "text": true}
+// serverPhrases are the whole rest of a line after " by " in the
+// server's own messages, where no person is named (internal/service
+// edit.go's handle warning, internal/tools layout.go's section refusal).
+// Only an exact match is kept: the same words in document text, or a
+// name that begins like one, are masked as any other.
+var serverPhrases = map[string]bool{"handle": true, "the section_break that made the section": true}
 
-// maskBy masks " by " and the rest of the line, unless the next word is
-// one of notAName; then it keeps that phrase and looks again further on,
-// so a person later on the same line is still masked.
+// maskBy masks " by " and the rest of the line, unless that rest is one
+// of serverPhrases.
 func maskBy(s string) string {
-	rest := s[len(" by "):]
-	word := rest[:len(rest)-len(strings.TrimLeft(rest, "abcdefghijklmnopqrstuvwxyz_"))]
-	if !notAName[word] {
-		return " by <person>"
+	if serverPhrases[s[len(" by "):]] {
+		return s
 	}
-	tail := rest[len(word):]
-	if i := strings.Index(tail, " by "); i >= 0 {
-		return " by " + word + tail[:i] + maskBy(tail[i:])
-	}
-	return s
+	return " by <person>"
 }
 
 // Transcript applies every rule above. See the block comment on the
@@ -101,7 +94,7 @@ func Transcript(s string) string {
 	s = gdocs.ReplaceAllString(s, "gdocs://<scratch>")
 	s = revAny.ReplaceAllString(s, "${1}<rev>")
 	s = Address.ReplaceAllString(s, "<address>")
-	s = pageToken.ReplaceAllString(s, "${1}<token>")
+	s = pageToken.ReplaceAllString(s, "${1}<token>)")
 	s = personLine.ReplaceAllString(s, "${1}<person>")
 	return byPerson.ReplaceAllStringFunc(s, maskBy)
 }
@@ -160,6 +153,10 @@ func transcribe(v any) any {
 		}
 	case map[string]any:
 		for k := range x {
+			if _, isString := x[k].(string); isString && k == "next_page_token" {
+				x[k] = "<token>"
+				continue
+			}
 			x[k] = transcribe(x[k])
 		}
 	}

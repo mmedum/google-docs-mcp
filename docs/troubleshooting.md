@@ -209,13 +209,24 @@ The server and its subcommands refuse to start. The flag
 
 **Cause:** `GDOCS_REQUIRE_PROMPT` is set to anything but `false`, or the
 flag is in the client's arguments. The server asks the person nothing,
-and the client approves each call (D-52, D-53). Ignoring the setting
+and the client approves each call (D-52, D-96). Ignoring the setting
 would quietly allow what it was set to stop.
 
 **Fix (resolves it):** unset it, and take the flag out of the arguments.
 For a client that runs with nobody watching, leave
 `GDOCS_ENABLE_DESTRUCTIVE` off, and list the writes you want to approve
 under the client's ask rules, as the README shows.
+
+## `flag provided but not defined: -preview`
+
+The server and its subcommands refuse to start.
+
+**Cause:** `--preview` is in the client's arguments. It is not a flag:
+the features it switched are generally available, so it decided nothing
+(D-96).
+
+**Fix (resolves it):** take `--preview` out of the arguments and restart
+the client.
 
 ## `warning: keyring unavailable (…); refresh token saved in plaintext at … (mode 0600)`
 

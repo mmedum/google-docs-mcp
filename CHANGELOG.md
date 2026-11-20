@@ -12,6 +12,11 @@ diff in CI flags them.
 
 - `dry_run` on `create_document`, `reply_comment`, `manage_tabs` and `export_document`: each checks the call and sends, creates and writes nothing (#105).
 
+### Removed
+
+- **Breaking:** the `--preview` flag, and `GDOCS_PREVIEW`, which is no longer read. Remove `--preview` from a client's arguments, or the server stops at start.
+- **Breaking:** `status --json`'s `settings.preview`, which always read true; `schema_version` is 2 (#108).
+
 ### Fixed
 
 - `export_document` on a Word file (.docx) refuses up front, saying to save it as a Google Doc, rather than failing at Drive's converter.

@@ -170,7 +170,7 @@ func TestTextStillNamesWhatItAlwaysDid(t *testing.T) {
 	r.writeText(&buf)
 	for _, want := range []string{
 		"profile:", "config dir:", "account:", "client secret:", "token store:",
-		"scopes:", "preview:", "write modes:", "read-only:", "destructive:",
+		"scopes:", "write modes:", "read-only:", "destructive:",
 		"export dir:", "http timeout:",
 	} {
 		if !strings.Contains(buf.String(), want) {

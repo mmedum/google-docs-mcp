@@ -14,7 +14,7 @@ import (
 // statusSchemaVersion is the version of the JSON object `status --json`
 // prints. A caller may branch on it; it changes only when a field is
 // removed or its meaning changes, never when one is added.
-const statusSchemaVersion = 1
+const statusSchemaVersion = 2
 
 // statusReport is everything `status` knows, collected once and then
 // rendered either as the lines a person reads or as the object a script
@@ -79,11 +79,6 @@ type statusScopes struct {
 // Durations are Go duration strings so a caller compares them rather
 // than parsing prose.
 type statusSettings struct {
-	// Preview is the retired GDOCS_PREVIEW. The features it gated are
-	// generally available, so it reads true; whether they reach a given
-	// document is get_document's comments_view. It stays until the
-	// schema version next changes (#108).
-	Preview          bool     `json:"preview"`
 	WriteModes       []string `json:"write_modes"`
 	DefaultWriteMode string   `json:"default_write_mode"`
 	ReadOnly         bool     `json:"read_only"`
@@ -111,7 +106,6 @@ func newStatusReport(p *profile) statusReport {
 		},
 		Scopes: statusScopes{Granted: orEmpty(p.user.Scopes)},
 		Settings: statusSettings{
-			Preview:          true,
 			WriteModes:       modes,
 			DefaultWriteMode: string(cfg.DefaultWriteMode),
 			ReadOnly:         cfg.ReadOnly,
@@ -156,7 +150,6 @@ func (r statusReport) writeText(w io.Writer) {
 	if len(r.Scopes.Granted) > 0 {
 		outf(w, "scopes:         %s\n", strings.Join(r.Scopes.Granted, " "))
 	}
-	outf(w, "preview:        %t\n", r.Settings.Preview)
 	outf(w, "write modes:    %s (default %s)\n",
 		strings.Join(r.Settings.WriteModes, "/"), r.Settings.DefaultWriteMode)
 	outf(w, "read-only:      %t\n", r.Settings.ReadOnly)

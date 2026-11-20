@@ -66,11 +66,7 @@ type ObjectInfo struct {
 // Capabilities tell the model what this server can do with the document.
 type Capabilities struct {
 	// CommentsView says Google answered with comments included, so
-	// suggestions and pinned comments work here. Preview is the same
-	// value under its deprecated name, after the GDOCS_PREVIEW setting.
-	// Dropping it removes an output field, so it goes at the next major
-	// version (#108).
-	Preview          bool     `json:"preview"`
+	// suggestions and pinned comments work here.
 	CommentsView     bool     `json:"comments_view"`
 	WriteModes       []string `json:"write_modes"`
 	DefaultWriteMode string   `json:"default_write_mode"`
@@ -116,7 +112,7 @@ type Info struct {
 }
 
 func (s *Service) capabilities(f *Fetched) Capabilities {
-	c := Capabilities{Preview: f.CommentsView, CommentsView: f.CommentsView, DefaultWriteMode: string(s.opts.DefaultWriteMode), ReadOnly: s.opts.ReadOnly, WriteModes: []string{}}
+	c := Capabilities{CommentsView: f.CommentsView, DefaultWriteMode: string(s.opts.DefaultWriteMode), ReadOnly: s.opts.ReadOnly, WriteModes: []string{}}
 	for _, m := range config.WriteModes() {
 		if m == config.WriteSuggest && !f.canSuggest() {
 			continue

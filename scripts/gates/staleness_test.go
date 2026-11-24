@@ -318,13 +318,15 @@ func TestTheChangelogRuleNeedsAGitCheckout(t *testing.T) {
 		!strings.HasPrefix(err.Error(), "could not run: the CHANGELOG rule: git -C "+dir+" tag") {
 		t.Errorf("outside git: %v; want a git tag failure that could not run", err)
 	}
-	// A configuration git diff cannot read, and git tag does not.
+	// A configuration git log and diff cannot read, and git tag does not.
+	// The rule reads each commit since the tag, so one is made first.
 	dir = stalenessRepo(t)
+	stalenessGit(t, dir, "commit", "-q", "--allow-empty", "-m", "after the release")
 	stalenessGit(t, dir, "config", "diff.renames", "bogus")
 	_, err = checkChangelog(dir)
 	if !errors.As(err, new(couldNotRun)) || err == nil ||
-		!strings.HasPrefix(err.Error(), "could not run: the CHANGELOG rule: git -C "+dir+" diff v0.9.0..HEAD") {
-		t.Errorf("a diff git cannot make: %v; want a git diff failure that could not run", err)
+		!strings.HasPrefix(err.Error(), "could not run: the CHANGELOG rule: git -C "+dir+" log ") {
+		t.Errorf("a commit git cannot read: %v; want a git log failure that could not run", err)
 	}
 }
 

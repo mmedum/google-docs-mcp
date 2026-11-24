@@ -468,7 +468,7 @@ func TestParityReadsWhatRuns(t *testing.T) {
 		{"a step the workflow reader does not read", []docsEdit{
 			replace(fxCI, stale, "      - {name: staleness, run: go run ./scripts/gates staleness ./google-docs-mcp}\n"),
 		}, nil, []string{
-			".github/workflows/ci.yml:152: an item of steps: is not a block mapping; write it one key a line",
+			".github/workflows/ci.yml:154: an item of steps: is not a block mapping; write it one key a line",
 			notInCI,
 		}},
 		{"a hook the reader does not read", []docsEdit{
@@ -513,7 +513,7 @@ func TestParityHoldsAGateCallsArguments(t *testing.T) {
 		{"a binary other than the one the gate defaults to", []docsEdit{
 			replace(fxMakefile, "\t@$(GO) run ./scripts/gates smoke $(BIN)\n", "\t@$(GO) run ./scripts/gates smoke ./old/google-docs-mcp\n"),
 		}, nil, []string{
-			".github/workflows/ci.yml:150 calls the smoke gate with `./google-docs-mcp` and `make check` never does",
+			".github/workflows/ci.yml:152 calls the smoke gate with `./google-docs-mcp` and `make check` never does",
 			"`make smoke` calls the smoke gate with `./old/google-docs-mcp` and ci.yml never does",
 		}},
 		{"a gate call whose output is redirected", []docsEdit{
@@ -523,7 +523,7 @@ func TestParityHoldsAGateCallsArguments(t *testing.T) {
 		{"a bare binary name in CI, which the PATH holds", []docsEdit{
 			replace(fxCI, "run: go run ./scripts/gates smoke ./google-docs-mcp\n", "run: go run ./scripts/gates smoke google-docs-mcp\n"),
 		}, nil, []string{
-			".github/workflows/ci.yml:150 calls the smoke gate with `google-docs-mcp` and `make check` never does",
+			".github/workflows/ci.yml:152 calls the smoke gate with `google-docs-mcp` and `make check` never does",
 			"`make smoke` calls the smoke gate with `./google-docs-mcp` and ci.yml never does",
 		}},
 		{"the binary's path written another way", []docsEdit{
@@ -535,7 +535,7 @@ func TestParityHoldsAGateCallsArguments(t *testing.T) {
 		{"an argument CI gives a gate that make check does not", []docsEdit{
 			replace(fxCI, "run: go run ./scripts/gates leaks\n", "run: go run ./scripts/gates leaks history\n"),
 		}, nil, []string{
-			".github/workflows/ci.yml:154 calls the leaks gate with `history` and `make check` never does",
+			".github/workflows/ci.yml:156 calls the leaks gate with `history` and `make check` never does",
 			"`make leaks` calls the leaks gate with no arguments and ci.yml never does",
 		}},
 	})

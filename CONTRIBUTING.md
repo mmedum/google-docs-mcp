@@ -299,6 +299,22 @@ Every user-visible change gets an entry under `## [Unreleased]` in
 `CHANGELOG.md`, in the same pull request that makes the change. Leave
 out changes only contributors see, unless they must act on them.
 
+On a pull request, the `changelog` gate wants at least one entry more
+under `[Unreleased]` than the merge-base holds when the pull request
+changes what the binary is built from, the bundle's manifest or
+launcher, `.goreleaser.yaml`, go.mod's lines other than `require` and
+`tool`, or the MCP SDK's version. A bump of any other module needs none;
+one that fixes an advisory is found at release time (`docs/release.md`).
+
+A change nobody using the server can see, such as a refactor, leaves the
+CHANGELOG as it is and ends its newest commit's message with a footer
+that says why: `Changelog: none, the text is unchanged line for line`.
+Only the newest commit's footer counts, since it ends the squashed
+commit's message, so put it there, and split a user-visible change into
+its own pull request. `make staleness` accepts the same footer. It
+waives nothing when the CHANGELOG changed, when go.mod changed outside
+its require lines, or when the MCP SDK moved.
+
 - **Sections** are the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   set and nothing else: Added, Changed, Deprecated, Removed, Fixed and
   Security, in that order.

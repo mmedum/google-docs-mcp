@@ -8,6 +8,10 @@ diff in CI flags them.
 
 ## [Unreleased]
 
+### Changed
+
+- For contributors: a pull request that changes what ships adds a CHANGELOG entry, or a `Changelog: none` footer; the `changelog` gate checks it.
+
 ## [4.0.0] - 2026-11-20
 
 ### Added

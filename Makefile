@@ -2,7 +2,7 @@
 
 GO       ?= go
 BIN      ?= ./google-docs-mcp
-# What schema-ack measures: pull-request CI sets both.
+# What changelog and schema-ack measure: pull-request CI sets both.
 PR_BASE_REF ?= origin/main
 PR_HEAD  ?= HEAD
 VERSION  ?= dev
@@ -90,6 +90,10 @@ schemas: build ## Dump tool schemas
 .PHONY: schema-diff
 schema-diff: build ## Diff tool schemas against the last tag
 	@$(GO) run ./scripts/gates schema-diff $(BIN)
+
+.PHONY: changelog
+changelog: ## Check a change to what users get adds an entry under [Unreleased] since the merge-base
+	@$(GO) run ./scripts/gates changelog $(PR_BASE_REF) $(PR_HEAD)
 
 .PHONY: schema-ack
 schema-ack: ## Check every item changed since the merge-base is named in a SCHEMA-CHANGE: footer

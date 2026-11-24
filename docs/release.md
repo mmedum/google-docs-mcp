@@ -26,7 +26,7 @@ the owner's explicit go.
   Security.
 
   ```bash
-  git worktree add ../google-docs-mcp-prev "$(git describe --tags --abbrev=0)"
+  git worktree add ../google-docs-mcp-prev "$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*')"
   make -C ../google-docs-mcp-prev vuln
   git worktree remove ../google-docs-mcp-prev
   ```

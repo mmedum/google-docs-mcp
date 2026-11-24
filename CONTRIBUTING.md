@@ -109,10 +109,7 @@ These are worth knowing before they fail on you:
   and is a release step.
 - **`make staleness`** holds the README's tool table, scopes and
   permission rules to the binary, and `docs/configuration.md` to every
-  setting the code reads (D-69). It also wants a CHANGELOG entry when
-  what the binary is built from, the bundle's manifest or its launcher
-  changed since the newest release tag HEAD reaches, the one the schema
-  diff builds.
+  setting the code reads (D-69).
 - **`make classes`** holds every error class the code emits to the
   closed vocabulary in `internal/service` (D-60).
 - **`make transcript`** refuses a live driver or eval line that does not
@@ -311,9 +308,9 @@ CHANGELOG as it is and ends its newest commit's message with a footer
 that says why: `Changelog: none, the text is unchanged line for line`.
 Only the newest commit's footer counts, since it ends the squashed
 commit's message, so put it there, and split a user-visible change into
-its own pull request. `make staleness` accepts the same footer. It
-waives nothing when the CHANGELOG changed, when go.mod changed outside
-its require lines, or when the MCP SDK moved.
+its own pull request. The footer waives nothing when the CHANGELOG
+changed, when go.mod changed outside its require lines, or when the MCP
+SDK moved.
 
 - **Sections** are the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   set and nothing else: Added, Changed, Deprecated, Removed, Fixed and

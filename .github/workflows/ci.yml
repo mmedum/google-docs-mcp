@@ -132,6 +132,8 @@ jobs:
           go-version-file: go.mod
       - name: schema change acknowledged
         run: go run ./scripts/gates schema-ack "$PR_BASE_REF" "$PR_HEAD"
+      - name: CHANGELOG entry
+        run: go run ./scripts/gates changelog "$PR_BASE_REF" "$PR_HEAD"
 
   smoke:
     runs-on: ubuntu-latest

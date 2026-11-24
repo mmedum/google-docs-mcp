@@ -19,6 +19,17 @@ the owner's explicit go.
   response shape, with `GDOCS_ENABLE_DESTRUCTIVE=true` when the release
   touches the delete tools, and its transcript was read (D-83). The
   evals have run if the release changes what a model reads (D-84).
+- Run `govulncheck` on the previous tag. A dependency bump other than
+  the MCP SDK carries no CHANGELOG entry of its own. For each advisory
+  reported there and not at `HEAD`, find the change that cleared it.
+  When that change is such a bump, the advisory gets its entry under
+  Security.
+
+  ```bash
+  git worktree add ../google-docs-mcp-prev "$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*')"
+  make -C ../google-docs-mcp-prev vuln
+  git worktree remove ../google-docs-mcp-prev
+  ```
 - `/simplify`, `/code-review medium` and `/security-review` have run
   since the previous tag.
 - `make api-diff` and `make schema-refetch`, which reach the network and

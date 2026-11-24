@@ -67,6 +67,10 @@ func init() {
 			run: releaseNotes, args: "VERSION [CHANGELOG]", runs: inRelease,
 			doc: "one version's CHANGELOG section, which is the release note",
 		},
+		"changelog": {
+			run: changelogGate, args: "BASE HEAD", runs: inPR,
+			doc: "a change to what users get adds an entry under [Unreleased]; a release cut, a bump of required modules other than the MCP SDK, and a Changelog: none footer need none",
+		},
 		"schema-ack": {
 			run: schemaAck, args: "BASE HEAD", runs: inPR,
 			doc: "every item changed since the merge-base is named in a SCHEMA-CHANGE: or BREAKING CHANGE: footer",

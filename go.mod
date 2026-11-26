@@ -5,7 +5,7 @@ go 1.27.4
 require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/sergi/go-diff v1.4.0
+	github.com/sergi/go-diff v1.4.5
 	github.com/yuin/goldmark v1.8.7
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/oauth2 v0.38.0
